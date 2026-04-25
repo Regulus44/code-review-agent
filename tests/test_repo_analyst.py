@@ -99,6 +99,11 @@ def test_repo_analyst_prompt_contains_json_constraints() -> None:
     assert "next_steps" in custom_prompt
 
 
+def test_repo_analyst_request_default_max_iterations() -> None:
+    request = RepoAnalystRequest(workspace_root="D:/Develop/code-review-agent")
+    assert request.max_iterations == 100
+
+
 def test_repo_analyst_parser_accepts_valid_json() -> None:
     run_result = AgentRunResult(
         status="completed",
@@ -115,6 +120,49 @@ def test_repo_analyst_parser_accepts_valid_json() -> None:
 
     assert result.summary == "Repo summary"
     assert result.modules[0].name == "core"
+
+
+def test_repo_analyst_parser_accepts_json_markdown_fence() -> None:
+    run_result = AgentRunResult(
+        status="completed",
+        final_message=assistant_message(
+            content=(
+                "Now I have all the evidence needed.\n\n"
+                "```json\n"
+                '{"summary":"Repo summary","modules":[{"name":"core","description":"Core logic"}],'
+                '"architecture":["API -> runtime -> agent"],'
+                '"risks":["Missing persistence"],'
+                '"next_steps":["Add observability"]}'
+                "\n```"
+            ),
+        ),
+    )
+
+    result = parse_repo_analyst_report(run_result)
+
+    assert result.summary == "Repo summary"
+    assert result.modules[0].name == "core"
+
+
+def test_repo_analyst_parser_accepts_embedded_json_object() -> None:
+    run_result = AgentRunResult(
+        status="completed",
+        final_message=assistant_message(
+            content=(
+                "analysis done. "
+                '{"summary":"Repo summary","modules":[{"name":"core","description":"Core logic"}],'
+                '"architecture":["API -> runtime -> agent"],'
+                '"risks":["Missing persistence"],'
+                '"next_steps":["Add observability"]}'
+                " trailing text"
+            ),
+        ),
+    )
+
+    result = parse_repo_analyst_report(run_result)
+
+    assert result.summary == "Repo summary"
+    assert result.modules[0].description == "Core logic"
 
 
 def test_repo_analyst_parser_rejects_invalid_json() -> None:
@@ -164,14 +212,14 @@ async def test_repo_analyst_service_returns_structured_report(tmp_path: Path) ->
     )
     service = RepoAnalystService(runtime)
 
-    run = service.create_run(
+    run = await service.create_run(
         RepoAnalystRequest(
             workspace_root=str(tmp_path),
             question="Explain this repository",
         ),
     )
     result = await service.execute_run(run.id)
-    events = service.get_events(run.id)
+    events = await service.get_events(run.id)
 
     assert result.status == "completed"
     assert result.report is not None
@@ -189,9 +237,29 @@ async def test_repo_analyst_service_marks_invalid_report(tmp_path: Path) -> None
     )
     service = RepoAnalystService(runtime)
 
-    run = service.create_run(RepoAnalystRequest(workspace_root=str(tmp_path)))
+    run = await service.create_run(RepoAnalystRequest(workspace_root=str(tmp_path)))
     result = await service.execute_run(run.id)
 
     assert result.status == "completed"
     assert result.report is None
-    assert result.failure_reason == "invalid_repo_analyst_report"
+    assert result.failure_reason == "invalid_repo_analyst_report_json"
+    assert result.parse_diagnostics is not None
+    assert result.parse_diagnostics.code == "invalid_json"
+
+
+@pytest.mark.anyio
+async def test_repo_analyst_service_marks_schema_mismatch(tmp_path: Path) -> None:
+    runtime = AgentRuntime(
+        model_factory=lambda: FakeModel([make_response(content='{"summary":"only summary"}')]),
+        tool_registry_factory=build_registry,
+    )
+    service = RepoAnalystService(runtime)
+
+    run = await service.create_run(RepoAnalystRequest(workspace_root=str(tmp_path)))
+    result = await service.execute_run(run.id)
+
+    assert result.status == "completed"
+    assert result.report is None
+    assert result.failure_reason == "invalid_repo_analyst_report_schema"
+    assert result.parse_diagnostics is not None
+    assert result.parse_diagnostics.code == "schema_validation_failed"

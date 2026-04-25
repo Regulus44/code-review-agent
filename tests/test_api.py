@@ -12,7 +12,7 @@ TestClient = pytest.importorskip("fastapi.testclient").TestClient
 from code_review_agent.api import create_app
 from code_review_agent.messages import ToolCall, assistant_message
 from code_review_agent.models import ChatResponse, ChatModel
-from code_review_agent.runtime import AgentRuntime, CreateRunRequest
+from code_review_agent.runtime import AgentRuntime
 from code_review_agent.tools import Tool, ToolExecutionResult, ToolRegistry
 
 
@@ -91,8 +91,14 @@ def build_runtime() -> AgentRuntime:
     )
 
 
+def build_client(*, runtime: AgentRuntime | None = None, api_key: str | None = None) -> TestClient:
+    app = create_app(runtime=runtime or build_runtime())
+    app.state.api_key = api_key
+    return TestClient(app)
+
+
 def test_health_endpoint() -> None:
-    client = TestClient(create_app(runtime=build_runtime()))
+    client = build_client()
 
     response = client.get("/health")
 
@@ -101,7 +107,7 @@ def test_health_endpoint() -> None:
 
 
 def test_index_page_serves_frontend_html() -> None:
-    client = TestClient(create_app(runtime=build_runtime()))
+    client = build_client()
 
     response = client.get("/")
 
@@ -112,7 +118,7 @@ def test_index_page_serves_frontend_html() -> None:
 
 
 def test_run_endpoints_execute_and_return_events(tmp_path: Path) -> None:
-    client = TestClient(create_app(runtime=build_runtime()))
+    client = build_client()
 
     create_response = client.post(
         "/runs",
@@ -145,7 +151,7 @@ def test_run_endpoints_execute_and_return_events(tmp_path: Path) -> None:
 
 
 def test_run_endpoints_return_404_for_missing_run() -> None:
-    client = TestClient(create_app(runtime=build_runtime()))
+    client = build_client()
 
     get_response = client.get("/runs/missing")
     events_response = client.get("/runs/missing/events")
@@ -177,7 +183,7 @@ def test_repo_analyst_run_endpoints(tmp_path: Path) -> None:
         ),
         tool_registry_factory=build_registry,
     )
-    client = TestClient(create_app(runtime=runtime))
+    client = build_client(runtime=runtime)
 
     create_response = client.post(
         "/repo-analyst/runs",
@@ -208,7 +214,7 @@ def test_repo_analyst_run_endpoints(tmp_path: Path) -> None:
 
 
 def test_repo_analyst_endpoints_return_404_for_missing_run() -> None:
-    client = TestClient(create_app(runtime=build_runtime()))
+    client = build_client()
 
     get_response = client.get("/repo-analyst/runs/missing")
     events_response = client.get("/repo-analyst/runs/missing/events")
@@ -217,17 +223,125 @@ def test_repo_analyst_endpoints_return_404_for_missing_run() -> None:
     assert events_response.status_code == 404
 
 
-def test_repo_analyst_list_filters_out_generic_runs(tmp_path: Path) -> None:
-    runtime = build_runtime()
-    runtime.create_run(
-        CreateRunRequest(
-            user_input="generic run",
-            workspace_root=str(tmp_path),
-        ),
+def test_repo_analyst_invalid_report_returns_parse_diagnostics(tmp_path: Path) -> None:
+    runtime = AgentRuntime(
+        model_factory=lambda: FakeModel([make_response(content="not-json")]),
+        tool_registry_factory=build_registry,
     )
-    client = TestClient(create_app(runtime=runtime))
+    client = build_client(runtime=runtime)
+
+    create_response = client.post(
+        "/repo-analyst/runs",
+        json={
+            "workspace_root": str(tmp_path),
+            "question": "Analyze this repository",
+        },
+    )
+    run_id = create_response.json()["id"]
+
+    get_response = client.get(f"/repo-analyst/runs/{run_id}")
+
+    assert create_response.status_code == 202
+    assert get_response.status_code == 200
+    assert get_response.json()["failure_reason"] == "invalid_repo_analyst_report_json"
+    assert get_response.json()["parse_diagnostics"]["code"] == "invalid_json"
+
+
+def test_repo_analyst_list_filters_out_generic_runs(tmp_path: Path) -> None:
+    client = build_client()
+    create_generic = client.post(
+        "/runs",
+        json={
+            "user_input": "generic run",
+            "workspace_root": str(tmp_path),
+        },
+    )
 
     response = client.get("/repo-analyst/runs")
 
+    assert create_generic.status_code == 202
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_api_key_allows_local_requests_without_header(tmp_path: Path) -> None:
+    client = build_client(api_key="secret-key")
+
+    response = client.post(
+        "/runs",
+        json={
+            "user_input": "Inspect this repo.",
+            "workspace_root": str(tmp_path),
+        },
+    )
+
+    assert response.status_code == 202
+
+
+def test_api_key_blocks_remote_request_without_key(tmp_path: Path) -> None:
+    client = build_client(api_key="secret-key")
+
+    response = client.post(
+        "/runs",
+        headers={"x-forwarded-for": "8.8.8.8"},
+        json={
+            "user_input": "Inspect this repo.",
+            "workspace_root": str(tmp_path),
+        },
+    )
+
+    assert response.status_code == 401
+
+
+def test_api_key_blocks_remote_request_with_wrong_key(tmp_path: Path) -> None:
+    client = build_client(api_key="secret-key")
+
+    response = client.post(
+        "/runs",
+        headers={"x-forwarded-for": "8.8.8.8", "x-api-key": "wrong-key"},
+        json={
+            "user_input": "Inspect this repo.",
+            "workspace_root": str(tmp_path),
+        },
+    )
+
+    assert response.status_code == 401
+
+
+def test_api_key_accepts_remote_request_with_valid_key(tmp_path: Path) -> None:
+    client = build_client(api_key="secret-key")
+
+    response = client.post(
+        "/runs",
+        headers={"x-forwarded-for": "8.8.8.8", "x-api-key": "secret-key"},
+        json={
+            "user_input": "Inspect this repo.",
+            "workspace_root": str(tmp_path),
+        },
+    )
+
+    assert response.status_code == 202
+
+
+def test_workspace_root_outside_allowlist_returns_400(tmp_path: Path) -> None:
+    allowed_root = tmp_path / "allowed"
+    outside_root = tmp_path / "outside"
+    allowed_root.mkdir()
+    outside_root.mkdir()
+
+    runtime = AgentRuntime(
+        model_factory=lambda: FakeModel([make_response(content="Done")]),
+        tool_registry_factory=build_registry,
+        allowed_workspace_root=allowed_root,
+    )
+    client = build_client(runtime=runtime)
+
+    response = client.post(
+        "/runs",
+        json={
+            "user_input": "Inspect this repo.",
+            "workspace_root": str(outside_root),
+        },
+    )
+
+    assert response.status_code == 400

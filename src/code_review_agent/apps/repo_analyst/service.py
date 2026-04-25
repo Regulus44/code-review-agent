@@ -6,7 +6,11 @@ from code_review_agent.runtime import AgentRuntime, CreateRunRequest, RunEvent, 
 
 from .parser import RepoAnalystParseError, parse_repo_analyst_report
 from .prompt import DEFAULT_REPO_ANALYST_QUESTION, build_repo_analyst_prompt
-from .types import RepoAnalystRequest, RepoAnalystRunResult
+from .types import (
+    RepoAnalystParseDiagnostics,
+    RepoAnalystRequest,
+    RepoAnalystRunResult,
+)
 
 APP_NAME = "repo_analyst"
 
@@ -17,10 +21,10 @@ class RepoAnalystService:
     def __init__(self, runtime: AgentRuntime) -> None:
         self.runtime = runtime
 
-    def create_run(self, request: RepoAnalystRequest):
+    async def create_run(self, request: RepoAnalystRequest):
         """Create a new repository analyst run."""
         question = request.question.strip() if request.question and request.question.strip() else DEFAULT_REPO_ANALYST_QUESTION
-        return self.runtime.create_run(
+        return await self.runtime.create_run(
             CreateRunRequest(
                 user_input=question,
                 workspace_root=request.workspace_root,
@@ -37,22 +41,23 @@ class RepoAnalystService:
         run = await self.runtime.execute_run(run_id)
         return self._to_app_result(run)
 
-    def get_run(self, run_id: str) -> RepoAnalystRunResult:
+    async def get_run(self, run_id: str) -> RepoAnalystRunResult:
         """Get one app-specific run result."""
-        run = self.runtime.get_run(run_id)
+        run = await self.runtime.get_run(run_id)
         if run.app_name != APP_NAME:
             raise RunNotFoundError(run_id)
         return self._to_app_result(run)
 
-    def get_events(self, run_id: str) -> list[RunEvent]:
+    async def get_events(self, run_id: str) -> list[RunEvent]:
         """Return the underlying runtime events."""
-        return self.runtime.get_events(run_id)
+        return await self.runtime.get_events(run_id)
 
-    def list_runs(self) -> list[RepoAnalystRunResult]:
+    async def list_runs(self) -> list[RepoAnalystRunResult]:
         """List all repo analyst runs in app-specific shape."""
+        runs = await self.runtime.list_runs()
         return [
             self._to_app_result(run)
-            for run in self.runtime.list_runs()
+            for run in runs
             if run.app_name == APP_NAME
         ]
 
@@ -60,14 +65,24 @@ class RepoAnalystService:
         question = run.user_input
         report = None
         failure_reason = run.failure_reason
+        parse_diagnostics: RepoAnalystParseDiagnostics | None = None
 
         if run.result is not None and run.status in {"completed", "max_iterations"}:
             try:
                 report = parse_repo_analyst_report(run.result)
-            except RepoAnalystParseError:
+            except RepoAnalystParseError as exc:
                 report = None
+                parse_diagnostics = RepoAnalystParseDiagnostics(
+                    code=exc.code,
+                    message=exc.message,
+                )
                 if run.status == "completed":
-                    failure_reason = "invalid_repo_analyst_report"
+                    if exc.code == "invalid_json":
+                        failure_reason = "invalid_repo_analyst_report_json"
+                    elif exc.code == "schema_validation_failed":
+                        failure_reason = "invalid_repo_analyst_report_schema"
+                    else:
+                        failure_reason = "invalid_repo_analyst_report"
 
         return RepoAnalystRunResult(
             id=run.id,
@@ -80,4 +95,5 @@ class RepoAnalystService:
             report=report,
             result=run.result,
             failure_reason=failure_reason,
+            parse_diagnostics=parse_diagnostics,
         )

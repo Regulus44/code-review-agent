@@ -966,3 +966,429 @@
   - 还需要完成本轮 base / `dl` 双环境复测
 - 后续建议：
   - 根目录配置稳定后，下一步优先接真实 DeepSeek key 做一次端到端 repo analyst 运行验证
+
+## 2026-04-25 - Repo Analyst 输出失败修复（invalid_repo_analyst_report）
+
+### 步骤 44：复现并定位失败原因
+- 输入背景：
+  - 用户第一次运行使用默认迭代上限，结果 `max_iterations_reached`
+  - 第二次将迭代上限调到 100，任务完成但 `failure_reason=invalid_repo_analyst_report`
+  - 用户提供了根目录 `test2_result.txt` 作为原始模型输出
+- 运行命令：
+  - `Get-Content test2_result.txt`
+  - `Get-Content src\code_review_agent\apps\repo_analyst\parser.py`
+  - `Get-Content src\code_review_agent\apps\repo_analyst\types.py`
+  - `Get-Content src\code_review_agent\apps\repo_analyst\prompt.py`
+- 观察结果：
+  - 原始输出不是“纯 JSON 全文”，而是“前置说明文本 + ```json 代码块 + JSON 内容”
+  - 现有 parser 只做 `json.loads(raw_text)`，要求全文必须是 JSON
+- 问题判断：
+  - 失败不是“分析内容错误”，而是“格式不满足 parser 的严格输入假设”
+  - 这是模型常见行为：即使 prompt 要求“只输出 JSON”，也可能附带解释文本或 markdown fence
+- 下一步：
+  - 改成更稳健解析，保留 schema 严格校验不变
+
+### 步骤 45：实现更稳健解析
+- 修改文件：
+  - `src/code_review_agent/apps/repo_analyst/parser.py`
+- 具体改动：
+  - 新增 `_candidate_json_texts(raw_text)`，按顺序生成候选 JSON 文本：
+    - 全文原文
+    - markdown ```json ... ``` 代码块内容
+    - 自由文本中提取的首个平衡 `{...}` JSON 对象
+  - 新增 `_extract_first_json_object(text)`，基于括号深度 + 字符串状态机提取首个完整 JSON 对象
+  - `parse_repo_analyst_report` 改为遍历候选并依次 `json.loads`，任一成功即进入 schema 校验
+  - 若全部失败，仍抛 `RepoAnalystParseError("repo analyst output is not valid JSON")`
+  - schema 校验继续使用 `RepoAnalystReport.model_validate(...)`，字段严格性不降低
+- 为什么这样改：
+  - 要提高容错，解决“有实质分析结果但包装格式不纯”导致的误判失败
+  - 同时保持输出结构约束，避免放宽到“任意文本都算成功”
+- 这次修改想解决的问题：
+  - 修复真实运行中频繁出现的 `invalid_repo_analyst_report` 误判
+
+### 步骤 46：补充回归测试
+- 修改文件：
+  - `tests/test_repo_analyst.py`
+- 具体改动：
+  - 新增 `test_repo_analyst_parser_accepts_json_markdown_fence`
+    - 覆盖“前置说明 + ```json 代码块”场景（对应本次真实失败）
+  - 新增 `test_repo_analyst_parser_accepts_embedded_json_object`
+    - 覆盖“前后有普通文本，正文中嵌入 JSON 对象”场景
+- 为什么这样改：
+  - 防止后续重构把这次修复回退掉
+  - 把用户真实故障场景固化成自动化回归测试
+
+### 步骤 47：测试与验证
+- 运行命令：
+  - `$env:PYTHONPATH='src'; python -m pytest tests\test_repo_analyst.py`
+  - `$env:PYTHONPATH='src'; conda run -n dl python -m pytest tests\test_repo_analyst.py`
+  - `$env:PYTHONPATH='src'; python -m pytest`
+  - `$env:PYTHONPATH='src'; conda run -n dl python -m pytest`
+- 观察结果：
+  - repo analyst 专项测试：
+    - base：`8 passed`
+    - dl：`8 passed`
+  - 全量测试：
+    - base：`54 passed, 1 skipped`
+    - dl：`61 passed`
+- 问题判断：
+  - 修复已生效，且未引入回归
+
+### 方案调整记录
+- 原方案：
+  - parser 只接受“完整字符串即 JSON”的单一路径解析
+- 为什么放弃或修改：
+  - 真实模型输出常混入前置语句或 markdown fence，单一路径会造成误判失败
+- 新方案与原方案区别：
+  - 新方案是“多候选 JSON 提取 + 严格 schema 校验”
+  - 提高了解析鲁棒性，但不放宽最终结构要求
+- 对后续实现影响：
+  - Repo Analyst 对真实 LLM 输出更稳定
+  - 仍能保持结构化报告的质量门槛
+
+## 当前状态（本次故障修复后）
+- 已完成：
+  - `invalid_repo_analyst_report` 关键触发路径定位
+  - parser 稳健解析改造
+  - 真实故障场景回归测试
+  - base 与 dl 双环境全量回归通过
+- 遗留问题：
+  - 如果模型输出“语法正确但字段语义很弱”，仍可能通过（这是 schema 层以外的问题）
+- 后续建议：
+  - 可选增加“报告质量校验器”（如 summary 长度、modules 最小项数、architecture 关键词命中）
+
+### 步骤 48：用用户真实输出文件做回放验证
+- 运行命令：
+  - `Get-Content test2_result.txt`
+  - `Select-String -Path test2_result.txt -Pattern '"summary"|"modules"|"architecture"|"risks"|"next_steps"'`
+  - `@'...python script...'@ | python -`（使用 `parse_repo_analyst_report` 直接回放文件内容）
+- 观察结果：
+  - `test2_result.txt` 确实包含“前置说明 + ```json 代码块”
+  - 但 JSON 体本身语法不合法（缺少标准 key/value 引号与冒号结构），不是纯包装问题
+  - 回放结果：`PARSE_FAIL / repo analyst output is not valid JSON`
+- 调试中的额外现象：
+  - 使用 `conda run -n dl python -c` 传入多行脚本时触发 Conda 限制：`arguments contain newlines`
+  - 该问题属于 conda 命令参数限制，不是项目代码问题；改用 `python -` 管道方式即可
+- 问题判断：
+  - 本次 parser 修复已解决“文本前后包裹导致解析失败”问题
+  - 对“JSON 语法本身错误”的输出，当前仍按失败处理（这是设计上的安全边界）
+- 接下来准备怎么改：
+  - 当前版本保持严格 JSON 语法要求不变
+  - 若后续需要提升容错，可增加可选 JSON 修复链路（例如二次模型修复或受控规则修复）
+
+## 2026-04-25 - 默认最大迭代次数调整（8 -> 100）
+
+### 步骤 49：问题确认与影响面检查
+- 用户反馈：
+  - Web 默认最大迭代是 8，Repo Analyst 在多次工具调用场景下很容易触发 `max_iterations_reached`
+- 运行命令：
+  - `Get-Content src\code_review_agent\web\index.html`
+  - `Get-Content src\code_review_agent\apps\repo_analyst\types.py`
+  - `Get-Content src\code_review_agent\apps\repo_analyst\service.py`
+  - `Get-Content src\code_review_agent\runtime\service.py`
+- 观察结果：
+  - 前端 `maxIterations` 输入框是空值 + `placeholder="8"`
+  - 后端 `RepoAnalystRequest.max_iterations` 默认是 `None`
+  - runtime 默认 `default_max_iterations=8`，当请求未传值时会回落到 8
+- 问题判断：
+  - 只改前端展示不够，API 直接调用时仍可能回落到 8
+- 下一步：
+  - 同时修改前端默认值和 RepoAnalystRequest 默认值
+
+### 步骤 50：实施修改
+- 修改文件：
+  - `src/code_review_agent/web/index.html`
+  - `src/code_review_agent/apps/repo_analyst/types.py`
+  - `tests/test_repo_analyst.py`
+- 具体改动：
+  - 前端 `maxIterations` 输入框改为 `value="100"`，并将占位符改为 `placeholder="100"`
+  - `RepoAnalystRequest.max_iterations` 从 `int | None = None` 改为 `int = 100`
+  - 新增测试 `test_repo_analyst_request_default_max_iterations`，校验默认值确实是 100
+- 为什么这样改：
+  - 保证 Web 页面默认行为合理
+  - 保证 API 调用（即便没传 max_iterations）也能得到一致默认值 100
+- 这次修改想解决的问题：
+  - 避免常规 Repo 分析任务因默认迭代次数过小被提前中断
+
+### 步骤 51：测试与验证
+- 运行命令：
+  - `$env:PYTHONPATH='src'; python -m pytest tests\test_repo_analyst.py`
+  - `$env:PYTHONPATH='src'; conda run -n dl python -m pytest tests\test_repo_analyst.py`
+- 观察结果：
+  - base：`9 passed`
+  - dl：`9 passed`
+- 问题判断：
+  - 默认值调整生效，且未破坏 repo analyst 相关功能
+
+## 当前状态（默认迭代次数调整后）
+- 已完成：
+  - Web 默认 max iterations = 100
+  - RepoAnalystRequest 默认 max_iterations = 100
+  - 对应自动化测试补齐并通过
+- 遗留问题：
+  - runtime 通用默认仍是 8（这是通用 `/runs` 的默认，不影响 repo-analyst 专用路径）
+- 后续建议：
+  - 如果你希望全系统统一，也可以把 runtime 通用默认一起改成 100
+
+## 2026-04-25 - 前端页面乱码与结构错位修复
+
+### 步骤 52：问题定位
+- 用户现象：
+  - 页面打开后中文乱码
+  - `textarea` 中出现 `<label>...<input ...>` 这类原始 HTML 片段
+- 运行命令：
+  - `Get-Content src\code_review_agent\web\index.html`
+  - `Select-String -Path src\code_review_agent\web\index.html -Pattern '<textarea|</textarea>|maxIterations|placeholder=' -Context 2,2`
+- 观察结果：
+  - 文件内容已经出现明显编码污染（文本变成乱码）
+  - 表单区域有结构破损迹象，浏览器会把后续标签当普通文本显示在输入区
+- 问题判断：
+  - 这是 `index.html` 文件本身损坏，不是 API 或浏览器缓存问题
+  - 根因是之前对 HTML 的批量替换/写回过程中发生编码与内容污染
+
+### 步骤 53：修复策略与实施
+- 原方案：
+  - 在损坏文件上局部打补丁
+- 为什么放弃：
+  - 损坏范围覆盖文案与多个标签，局部补丁风险高且容易留下隐藏问题
+- 新方案：
+  - 直接重建 `src/code_review_agent/web/index.html` 为干净版本
+  - 保留原有功能：
+    - 创建 repo analyst run
+    - 列表与详情加载
+    - 事件展示
+    - 自动轮询
+    - 默认 `maxIterations=100`
+- 修改文件：
+  - `src/code_review_agent/web/index.html`
+- 这次修改想解决的问题：
+  - 恢复页面可用性
+  - 清除编码污染和标签结构错误
+  - 保证默认最大迭代仍是 100
+
+### 步骤 54：验证
+- 运行命令：
+  - `Select-String -Path src\code_review_agent\web\index.html -Pattern '<textarea|</textarea>|<label>|</label>|maxIterations|formStatus'`
+  - `Invoke-WebRequest http://127.0.0.1:8000/ | Select-Object -ExpandProperty Content`
+  - `$env:PYTHONPATH='src'; conda run -n dl python -m pytest tests\test_api.py`
+- 观察结果：
+  - HTML 关键结构恢复正常（`textarea`、`label`、`div` 都正确闭合）
+  - `/` 返回干净页面源码
+  - API 路由测试通过：`7 passed`
+- 结论：
+  - 本次页面异常已修复
+
+## 当前状态（前端修复后）
+- 已完成：
+  - 页面乱码与结构错位修复
+  - 前端默认最大迭代保持 100
+  - API 相关回归测试通过
+- 遗留问题：
+  - 无直接阻塞项
+- 后续建议：
+  - 若需要保留中文界面文案，建议后续单独做一轮 UTF-8 文案回填并加静态检查，避免再次出现编码污染
+
+## 2026-04-25 - 页面语言切换（默认中文）
+
+### 步骤 55：需求变更与中断恢复
+- 用户新要求：
+  - 页面保留中英文切换
+  - 默认语言必须是中文，不要默认英文
+- 过程说明：
+  - 在重构 `index.html` 过程中用户中断并追加新要求
+  - 处理策略改为“先恢复文件，再按默认中文实现双语切换”
+
+### 步骤 56：实施改动
+- 修改文件：
+  - `src/code_review_agent/web/index.html`
+- 具体改动：
+  - 重建页面文件，修复并保留完整功能链路
+  - 新增语言切换控件 `#langSelect`（中文/EN）
+  - 新增前端 i18n 字典（`zh`、`en`）
+  - 新增 `t(key)` 与 `applyStaticTranslations()`，让静态文案和动态渲染文案统一可切换
+  - 状态文案、按钮文案、详情标题、空状态、错误前缀全部接入翻译
+  - 默认语言设置为中文：`state.lang = localStorage.getItem("ui_lang") || "zh"`
+  - 语言切换后会刷新健康状态、任务列表和详情展示
+  - 保持默认最大迭代输入值为 `100`
+- 为什么这样改：
+  - 满足“默认中文 + 可切换英文”的双目标
+  - 避免只翻译静态文本导致动态区仍是单语
+- 这次修改想解决的问题：
+  - 页面语言能力从单语升级为双语，并明确默认中文
+
+### 步骤 57：验证
+- 运行命令：
+  - `Select-String -Path src\code_review_agent\web\index.html -Pattern 'localStorage.getItem\("ui_lang"\) \|\| "zh"|id="langSelect"|option value="zh"|option value="en"|langSelect.addEventListener'`
+  - `Invoke-WebRequest http://127.0.0.1:8000/ | Select-Object -ExpandProperty Content`
+  - `$env:PYTHONPATH='src'; conda run -n dl python -m pytest tests\test_api.py`
+- 观察结果：
+  - 默认语言逻辑和切换控件均存在
+  - `/` 返回页面源码为最新版本
+  - API 路由测试通过：`7 passed`
+- 结论：
+  - 页面已恢复且默认中文生效，语言切换功能可用
+
+## 当前状态（语言切换阶段）
+- 已完成：
+  - 默认中文
+  - 中英文切换
+  - 默认 max iterations=100 保留
+  - API 相关回归通过
+- 遗留问题：
+  - 无阻塞项
+
+## 2026-04-25 - 基础硬化实现（SQLite + API Key + 运行控制）
+
+### 步骤 58：实施前核对与实现边界确认
+- 运行命令：
+  - `Get-ChildItem src/code_review_agent -Recurse`
+  - `Get-Content src/code_review_agent/runtime/store.py`
+  - `Get-Content src/code_review_agent/runtime/service.py`
+  - `Get-Content src/code_review_agent/api/routes.py`
+  - `Get-Content src/code_review_agent/tools/file_tools.py`
+  - `Get-Content src/code_review_agent/models/openai_compat.py`
+  - `Get-Content src/code_review_agent/storage/__init__.py`
+  - `Get-Content src/code_review_agent/observability/__init__.py`
+- 观察结果：
+  - 运行存储仍是 InMemory，`storage`/`observability` 仍是占位
+  - API 无认证，无 workspace 根目录约束
+  - runtime 无并发限制和超时控制
+- 判断：
+  - 风险扫描结果与现状基本一致，可直接进入硬化实现
+
+### 步骤 59：存储层改造（RunStore 抽象 + SQLite）
+- 修改文件：
+  - `src/code_review_agent/runtime/store.py`
+  - `src/code_review_agent/storage/sqlite_store.py`（新增）
+  - `src/code_review_agent/storage/__init__.py`
+- 具体改动：
+  - 新增 `RunStore` 抽象接口（create/get/list/get_events/append/update_status/attach_result/aclose）
+  - `InMemoryRunStore` 改为实现异步接口，保留测试/回退用途
+  - 新增 `SqliteRunStore`：
+    - 使用 SQLAlchemy + aiosqlite
+    - 建表 `runs`、`run_events`
+    - 支持事件追加、状态更新、结果序列化持久化
+    - 支持重启后读取历史 run 与 events
+- 为什么这样改：
+  - 解决服务重启丢失历史运行数据的问题
+  - 让 runtime 可以切换存储实现而不改上层业务代码
+
+### 步骤 60：runtime 硬化（超时/并发/allowlist/日志）
+- 修改文件：
+  - `src/code_review_agent/runtime/service.py`
+  - `src/code_review_agent/runtime/__init__.py`
+  - `src/code_review_agent/settings.py`
+- 具体改动：
+  - `AgentRuntime` 接入异步 store 调用
+  - 新增 `WorkspaceValidationError`：创建 run 时校验 `workspace_root`
+    - 必须存在
+    - 必须是目录
+    - 若配置了 `allowed_workspace_root`，必须在该根目录下
+  - 新增运行控制：
+    - `run_timeout_seconds`（默认 300）
+    - `max_concurrent_runs`（默认 4）
+    - 并发超限时直接失败并写入 `concurrency_limit_exceeded`
+    - 超时时失败并写入 `run_timeout`
+  - 新增最小结构化日志：`run_id/status/latency_ms/token_usage/failure_reason`
+  - 默认 runtime 现在优先使用 SQLite store（缺少 aiosqlite 时回退 InMemory 并告警）
+- 为什么这样改：
+  - 让 runtime 从“可演示”过渡到“可持续运行”的最小基线
+
+### 步骤 61：API 安全基线与错误映射
+- 修改文件：
+  - `src/code_review_agent/api/routes.py`
+  - `src/code_review_agent/api/app.py`
+- 具体改动：
+  - `/runs*` 与 `/repo-analyst*` 增加 API key 校验（`X-API-Key`）
+  - `/` 与 `/health` 保持开放
+  - 本机回环来源（`127.0.0.1` / `localhost` / `::1` / `testclient`）放行
+  - 非本机请求在配置 `API_KEY` 时必须携带正确 key
+  - `workspace_root` 校验失败统一返回 400
+  - 添加 app shutdown 事件，释放 runtime store 资源
+- 为什么这样改：
+  - 落地最小可用认证与权限边界，降低文件系统操作暴露风险
+
+### 步骤 62：Repo Analyst 严格解析诊断增强
+- 修改文件：
+  - `src/code_review_agent/apps/repo_analyst/parser.py`
+  - `src/code_review_agent/apps/repo_analyst/types.py`
+  - `src/code_review_agent/apps/repo_analyst/service.py`
+  - `src/code_review_agent/apps/repo_analyst/__init__.py`
+  - `src/code_review_agent/web/index.html`
+- 具体改动：
+  - `RepoAnalystParseError` 增加 `code/message`
+    - `missing_final_content`
+    - `invalid_json`
+    - `schema_validation_failed`
+  - `RepoAnalystRunResult` 增加 `parse_diagnostics`
+  - 失败原因细分：
+    - `invalid_repo_analyst_report_json`
+    - `invalid_repo_analyst_report_schema`
+  - 前端结果页新增“解析诊断”展示区（显示 code/message）
+- 为什么这样改：
+  - 保持严格 JSON + schema，不做自动修复
+  - 让失败可诊断，不再只有一个泛化错误码
+
+### 步骤 63：配置与文档同步
+- 修改文件：
+  - `.env.example`
+  - `README.md`
+- 具体改动：
+  - 新增环境变量说明：`API_KEY`、`RUN_TIMEOUT_SECONDS`、`MAX_CONCURRENT_RUNS`
+  - README 更新为当前实际行为（认证规则、workspace 约束、Repo Analyst 调用示例）
+- 为什么这样改：
+  - 避免运行行为和文档不一致
+
+### 步骤 64：测试补齐与调试过程
+- 修改文件：
+  - `tests/test_runtime.py`
+  - `tests/test_api.py`
+  - `tests/test_repo_analyst.py`
+  - `tests/test_sqlite_store.py`（新增）
+- 新增/调整测试覆盖：
+  - SQLite store 全路径 + 重启持久化验证
+  - API key：本机放行、远端无 key 拦截、错 key 拦截、对 key 放行
+  - workspace allowlist 越界拦截
+  - runtime 超时失败与并发超限失败
+  - repo analyst 解析诊断字段
+- 调试记录：
+  - 第一次运行（base）命令：
+    - `$env:PYTHONPATH='src'; python -m pytest tests/test_runtime.py tests/test_repo_analyst.py tests/test_api.py tests/test_sqlite_store.py`
+  - 现象：
+    - `ModuleNotFoundError: No module named 'aiosqlite'`（base 环境）
+  - 原因判断：
+    - base 环境缺少 `aiosqlite`，而 SQLite store 使用 async sqlite 驱动
+  - 处理：
+    - `tests/test_sqlite_store.py` 增加 `pytest.importorskip("aiosqlite")`
+    - `build_default_runtime()` 增加缺依赖时回退 InMemory 的兼容逻辑
+  - 第二次运行（dl）现象：
+    - `test_sqlite_store_lists_runs_in_reverse_creation_order` 顺序不稳定
+  - 原因判断：
+    - 两条 run 的 `created_at` 太接近，只有单字段排序时结果不稳定
+  - 处理：
+    - SQLite 列表排序改为 `created_at desc, id desc`
+
+### 步骤 65：最终验证
+- 运行命令：
+  - `$env:PYTHONPATH='src'; python -m pytest`
+  - `$env:PYTHONPATH='src'; conda run -n dl python -m pytest`
+- 结果：
+  - base：`58 passed, 2 skipped`
+  - dl：`72 passed`
+- 结论：
+  - 本阶段计划内容已落地并通过回归
+
+## 当前状态（基础硬化阶段）
+- 已完成：
+  - SQLite 持久化 store（默认接入）
+  - API key 认证基线
+  - workspace allowlist 约束
+  - 运行超时与并发限流
+  - repo analyst 严格解析诊断增强
+  - 最小结构化运行日志
+  - 对应测试覆盖
+- 遗留问题：
+  - FastAPI `on_event` 存在 deprecation warning（建议后续换 lifespan）
+  - 仍未实现 shell 工具/高级沙箱/OTel
+- 后续建议：
+  - 下一步优先做 lifecycle 迁移（lifespan）和 observability 模块落地

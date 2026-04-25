@@ -35,6 +35,9 @@ class Settings:
     default_model: str = "deepseek-chat"
     runtime_workspace_root: str = "D:\\Develop"
     database_url: str = "sqlite:///./runtime.db"
+    api_key: str | None = None
+    run_timeout_seconds: int = 300
+    max_concurrent_runs: int = 4
 
 
 @lru_cache(maxsize=1)
@@ -47,4 +50,7 @@ def get_settings() -> Settings:
         default_model=os.getenv("DEFAULT_MODEL", "deepseek-chat"),
         runtime_workspace_root=os.getenv("RUNTIME_WORKSPACE_ROOT", "D:\\Develop"),
         database_url=os.getenv("DATABASE_URL", "sqlite:///./runtime.db"),
+        api_key=os.getenv("API_KEY") or None,
+        run_timeout_seconds=int(os.getenv("RUN_TIMEOUT_SECONDS", "300")),
+        max_concurrent_runs=int(os.getenv("MAX_CONCURRENT_RUNS", "4")),
     )

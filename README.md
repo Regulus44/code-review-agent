@@ -1,48 +1,17 @@
 # Code Review Agent
 
-A code review agent with a small runtime for repository analysis.
+A repository analysis and code review agent runtime.
 
-The goal of this project is to demonstrate a runtime system around agents, not
-just a single prompt loop. The runtime will organize:
+## What It Includes
 
-- model providers
-- tool registration and execution
-- sandboxed filesystem and command access
-- agent harness loops
-- run lifecycle management
-- observable event streams
-- service APIs
-- repository analysis and code review workflows
+- Provider-neutral model interface with DeepSeek as default.
+- Tool registry and built-in repository file tools.
+- ReAct-style agent loop with tool-calling.
+- Runtime run lifecycle and event tracking.
+- FastAPI service and built-in web UI.
+- Repo Analyst app that returns structured JSON reports.
 
-## Planned Scope
-
-- DeepSeek-first model adapter with an OpenAI-compatible provider interface.
-- Tool registry with built-in repository tools.
-- Safe execution policies for file and shell tools.
-- ReAct-style harness with structured final reports.
-- FastAPI service for creating and inspecting runs.
-- SQLite-backed run and event storage.
-- Optional web UI for run timelines and reports.
-
-## Repo Analyst App
-
-The project now includes a dedicated repository analyst app on top of the
-generic runtime. It is designed to answer questions such as:
-
-- what the repository does
-- how the modules are organized
-- what the key architecture looks like
-- what the main risks and next steps are
-
-The app returns a structured JSON report with these top-level fields:
-
-- `summary`
-- `modules`
-- `architecture`
-- `risks`
-- `next_steps`
-
-### Run the API
+## Run the API
 
 Use the `dl` environment:
 
@@ -52,33 +21,46 @@ cd D:\Develop\code-review-agent
 uvicorn code_review_agent.api.app:create_app --factory --reload
 ```
 
-Before starting the API, fill in the root `.env` file:
-
-```env
-DEEPSEEK_API_KEY=your_deepseek_key
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEFAULT_MODEL=deepseek-chat
-```
-
-The application now loads `.env` automatically at startup.
-
-You can prepare it from the root `.env.example`:
+Prepare `.env` from `.env.example`:
 
 ```bash
 copy .env.example .env
 ```
 
-### Create a Repo Analyst Run
+Recommended `.env` values:
+
+```env
+DEEPSEEK_API_KEY=your_deepseek_key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEFAULT_MODEL=deepseek-chat
+API_KEY=optional_api_key_for_remote_calls
+RUNTIME_WORKSPACE_ROOT=D:\Develop
+DATABASE_URL=sqlite:///./runtime.db
+RUN_TIMEOUT_SECONDS=300
+MAX_CONCURRENT_RUNS=4
+```
+
+## API Notes
+
+- `/` and `/health` are always public.
+- If `API_KEY` is set, non-local requests must send `X-API-Key`.
+- Local loopback requests (`127.0.0.1`, `localhost`) are allowed without `X-API-Key`.
+- Run creation validates `workspace_root` under `RUNTIME_WORKSPACE_ROOT`.
+
+## Repo Analyst Example
+
+Create a run:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/repo-analyst/runs \
   -H "Content-Type: application/json" \
-  -d "{\"workspace_root\":\"D:/Develop/code-review-agent\",\"question\":\"分析这个仓库的主要功能和架构\"}"
+  -H "X-API-Key: your_api_key_if_required" \
+  -d "{\"workspace_root\":\"D:/Develop/code-review-agent\",\"question\":\"Analyze this repository\"}"
 ```
 
-### Check the Result
+Check result and events:
 
 ```bash
-curl http://127.0.0.1:8000/repo-analyst/runs/<run_id>
-curl http://127.0.0.1:8000/repo-analyst/runs/<run_id>/events
+curl -H "X-API-Key: your_api_key_if_required" http://127.0.0.1:8000/repo-analyst/runs/<run_id>
+curl -H "X-API-Key: your_api_key_if_required" http://127.0.0.1:8000/repo-analyst/runs/<run_id>/events
 ```

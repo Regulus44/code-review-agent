@@ -36,7 +36,7 @@ class RepoAnalystRequest(BaseModel):
 
     workspace_root: str
     question: str | None = None
-    max_iterations: int | None = None
+    max_iterations: int = 100
     temperature: float | None = None
     max_tokens: int | None = None
 
@@ -56,6 +56,16 @@ class RepoAnalystRunResult(BaseModel):
     report: RepoAnalystReport | None = None
     result: AgentRunResult | None = None
     failure_reason: str | None = None
+    parse_diagnostics: "RepoAnalystParseDiagnostics | None" = None
+
+
+class RepoAnalystParseDiagnostics(BaseModel):
+    """Minimal diagnostics for strict repo analyst parsing failures."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    message: str
 
 
 class RepoAnalystRunView(BaseModel):

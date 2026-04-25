@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import anyio
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
 from code_review_agent.messages import ToolCall, assistant_message
 from code_review_agent.models import ChatResponse, ChatModel, ModelUsage
-from code_review_agent.runtime import AgentRuntime, CreateRunRequest
-from code_review_agent.tools import Tool, ToolExecutionError, ToolExecutionResult, ToolRegistry
+from code_review_agent.runtime import AgentRuntime, CreateRunRequest, WorkspaceValidationError
+from code_review_agent.tools import Tool, ToolExecutionResult, ToolRegistry
 
 
 @pytest.fixture
@@ -58,6 +59,21 @@ class FakeModel(ChatModel):
         return current
 
 
+class SlowModel(ChatModel):
+    """Model that sleeps before returning a response."""
+
+    provider = "fake"
+    model_name = "slow-model"
+
+    def __init__(self, delay_seconds: float, content: str = "Done") -> None:
+        self.delay_seconds = delay_seconds
+        self.content = content
+
+    async def complete(self, request):
+        await anyio.sleep(self.delay_seconds)
+        return make_response(content=self.content)
+
+
 def make_response(
     *,
     content: str | None = None,
@@ -103,14 +119,14 @@ async def test_runtime_create_and_execute_run(tmp_path: Path) -> None:
         tool_registry_factory=build_registry,
     )
 
-    run = runtime.create_run(
+    run = await runtime.create_run(
         CreateRunRequest(
             user_input="Inspect this repo.",
             workspace_root=str(tmp_path),
         ),
     )
     executed = await runtime.execute_run(run.id)
-    events = runtime.get_events(run.id)
+    events = await runtime.get_events(run.id)
 
     assert run.status == "queued"
     assert executed.status == "completed"
@@ -128,23 +144,25 @@ async def test_runtime_create_and_execute_run(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_runtime_marks_failed_when_workspace_is_invalid(tmp_path: Path) -> None:
+async def test_runtime_rejects_workspace_outside_allowed_root(tmp_path: Path) -> None:
+    allowed_root = tmp_path / "allowed"
+    disallowed_root = tmp_path / "outside"
+    allowed_root.mkdir()
+    disallowed_root.mkdir()
+
     runtime = AgentRuntime(
         model_factory=lambda: FakeModel([make_response(content="unused")]),
         tool_registry_factory=build_registry,
+        allowed_workspace_root=allowed_root,
     )
 
-    run = runtime.create_run(
-        CreateRunRequest(
-            user_input="Inspect this repo.",
-            workspace_root=str(tmp_path / "missing"),
-        ),
-    )
-    executed = await runtime.execute_run(run.id)
-
-    assert executed.status == "failed"
-    assert executed.failure_reason is not None
-    assert "workspace_root does not exist" in executed.failure_reason
+    with pytest.raises(WorkspaceValidationError):
+        await runtime.create_run(
+            CreateRunRequest(
+                user_input="Inspect this repo.",
+                workspace_root=str(disallowed_root),
+            ),
+        )
 
 
 @pytest.mark.anyio
@@ -154,14 +172,58 @@ async def test_runtime_lists_runs_in_reverse_creation_order(tmp_path: Path) -> N
         tool_registry_factory=build_registry,
     )
 
-    first = runtime.create_run(
+    first = await runtime.create_run(
         CreateRunRequest(user_input="one", workspace_root=str(tmp_path)),
     )
-    second = runtime.create_run(
+    second = await runtime.create_run(
         CreateRunRequest(user_input="two", workspace_root=str(tmp_path)),
     )
 
-    runs = runtime.list_runs()
+    runs = await runtime.list_runs()
 
     assert [run.id for run in runs] == [second.id, first.id]
 
+
+@pytest.mark.anyio
+async def test_runtime_marks_run_failed_on_timeout(tmp_path: Path) -> None:
+    runtime = AgentRuntime(
+        model_factory=lambda: SlowModel(delay_seconds=0.2),
+        tool_registry_factory=build_registry,
+        run_timeout_seconds=0,
+    )
+    run = await runtime.create_run(
+        CreateRunRequest(
+            user_input="Inspect this repo.",
+            workspace_root=str(tmp_path),
+        ),
+    )
+
+    executed = await runtime.execute_run(run.id)
+    events = await runtime.get_events(run.id)
+
+    assert executed.status == "failed"
+    assert executed.failure_reason == "run_timeout"
+    assert events[-1].data["failure_reason"] == "run_timeout"
+
+
+@pytest.mark.anyio
+async def test_runtime_rejects_when_concurrency_limit_exceeded(tmp_path: Path) -> None:
+    runtime = AgentRuntime(
+        model_factory=lambda: SlowModel(delay_seconds=0.2),
+        tool_registry_factory=build_registry,
+        max_concurrent_runs=1,
+    )
+    run_one = await runtime.create_run(
+        CreateRunRequest(user_input="one", workspace_root=str(tmp_path)),
+    )
+    run_two = await runtime.create_run(
+        CreateRunRequest(user_input="two", workspace_root=str(tmp_path)),
+    )
+
+    task_one = anyio.create_task_group()
+    async with task_one:
+        task_one.start_soon(runtime.execute_run, run_one.id)
+        await anyio.sleep(0.01)
+        second = await runtime.execute_run(run_two.id)
+        assert second.status == "failed"
+        assert second.failure_reason == "concurrency_limit_exceeded"

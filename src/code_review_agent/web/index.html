@@ -57,6 +57,21 @@
         gap: 12px;
       }
 
+      .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .lang-select {
+        width: 90px;
+        padding: 6px 8px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-size: 12px;
+        background: #fff;
+      }
+
       .panel-title {
         font-size: 15px;
         font-weight: 600;
@@ -87,8 +102,7 @@
       }
 
       input,
-      textarea,
-      select {
+      textarea {
         width: 100%;
         padding: 10px 12px;
         border: 1px solid var(--border);
@@ -101,6 +115,12 @@
       textarea {
         resize: vertical;
         min-height: 120px;
+      }
+
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
       }
 
       .inline-grid {
@@ -301,15 +321,21 @@
       <section class="panel">
         <div class="panel-header">
           <div>
-            <div class="panel-title">Repo Analyst</div>
-            <div class="panel-subtitle">提交仓库分析任务</div>
+            <div id="repoAnalystTitle" class="panel-title">Repo Analyst</div>
+            <div id="repoAnalystSubtitle" class="panel-subtitle">提交仓库分析任务</div>
           </div>
-          <span id="healthChip" class="status-chip status-queued">Checking</span>
+          <div class="header-actions">
+            <select id="langSelect" class="lang-select" aria-label="language switch">
+              <option value="zh">中文</option>
+              <option value="en">EN</option>
+            </select>
+            <span id="healthChip" class="status-chip status-queued">检查中</span>
+          </div>
         </div>
         <div class="panel-body">
           <form id="runForm" class="form-grid">
             <label>
-              仓库路径
+              <span id="workspaceRootLabel">仓库路径</span>
               <input
                 id="workspaceRoot"
                 name="workspaceRoot"
@@ -320,31 +346,31 @@
             </label>
 
             <label>
-              分析问题
+              <span id="analysisQuestionLabel">分析问题</span>
               <textarea
                 id="question"
                 name="question"
-                placeholder="留空则使用默认问题：分析这个仓库的主要功能、模块结构、架构设计、风险点和建议的下一步。"
+                placeholder="留空则使用默认仓库分析问题。"
               ></textarea>
             </label>
 
             <div class="inline-grid">
               <label>
-                最大迭代
-                <input id="maxIterations" type="number" min="1" placeholder="8" />
+                <span id="maxIterationsLabel">最大迭代</span>
+                <input id="maxIterations" type="number" min="1" value="100" placeholder="100" />
               </label>
               <label>
-                Temperature
+                <span id="temperatureLabel">温度</span>
                 <input id="temperature" type="number" min="0" max="2" step="0.1" placeholder="默认" />
               </label>
               <label>
-                Max tokens
+                <span id="maxTokensLabel">最大 tokens</span>
                 <input id="maxTokens" type="number" min="1" placeholder="默认" />
               </label>
             </div>
 
             <div class="toolbar">
-              <button type="submit" id="submitButton">创建分析任务</button>
+              <button type="submit" id="submitButton">创建任务</button>
               <button type="button" class="secondary" id="refreshRunsButton">刷新任务列表</button>
             </div>
 
@@ -356,8 +382,8 @@
       <section class="panel">
         <div class="panel-header">
           <div>
-            <div class="panel-title">分析任务</div>
-            <div class="panel-subtitle">点击任务查看报告与事件</div>
+            <div id="runsTitle" class="panel-title">分析任务</div>
+            <div id="runsSubtitle" class="panel-subtitle">点击任务查看报告与事件</div>
           </div>
         </div>
         <div class="panel-body">
@@ -368,7 +394,7 @@
       <section class="panel">
         <div class="panel-header">
           <div>
-            <div class="panel-title">分析结果</div>
+            <div id="resultTitle" class="panel-title">分析结果</div>
             <div id="detailMeta" class="panel-subtitle">尚未选择任务</div>
           </div>
           <div class="toolbar">
@@ -377,8 +403,8 @@
         </div>
         <div class="panel-body">
           <div id="detailView" class="detail-grid">
-            <div class="empty-state">
-              创建或选择一个 Repo Analyst 任务后，这里会显示结构化报告、失败原因和运行事件。
+            <div id="detailEmpty" class="empty-state">
+              创建或选择一个 Repo Analyst 任务后，这里会显示结构化报告、失败原因和执行事件。
             </div>
           </div>
         </div>
@@ -386,10 +412,127 @@
     </main>
 
     <script>
+      const I18N = {
+        zh: {
+          repo_analyst_subtitle: "提交仓库分析任务",
+          health_checking: "检查中",
+          health_ok: "API 正常",
+          health_error: "API 异常",
+          workspace_root: "仓库路径",
+          analysis_question: "分析问题",
+          analysis_question_placeholder: "留空则使用默认仓库分析问题。",
+          max_iterations: "最大迭代",
+          temperature: "温度",
+          max_tokens: "最大 tokens",
+          temperature_placeholder: "默认",
+          max_tokens_placeholder: "默认",
+          create_run: "创建任务",
+          refresh_runs: "刷新任务列表",
+          waiting_form: "等待创建任务。",
+          creating_run: "正在创建任务...",
+          run_created: "任务已创建",
+          runs_title: "分析任务",
+          runs_subtitle: "点击任务查看报告与事件",
+          result_title: "分析结果",
+          no_run_selected: "尚未选择任务",
+          refresh_details: "刷新详情",
+          detail_empty:
+            "创建或选择一个 Repo Analyst 任务后，这里会显示结构化报告、失败原因和执行事件。",
+          no_runs: "还没有任务。",
+          untitled_run: "未命名任务",
+          no_content: "没有内容。",
+          no_events: "暂无事件。",
+          no_module_info: "暂无模块信息。",
+          no_structured_report: "当前没有可解析的结构化报告。",
+          summary: "总结",
+          modules: "模块",
+          architecture: "架构",
+          risks: "风险",
+          next_steps: "下一步",
+          report: "报告",
+          raw_model_output: "原始模型输出",
+          failure_reason: "失败原因",
+          parse_diagnostics: "解析诊断",
+          events: "运行事件",
+          run_info: "任务信息",
+          question: "问题",
+          workspace: "路径",
+          status: "状态",
+          started: "开始",
+          finished: "结束",
+          status_queued: "排队中",
+          status_running: "运行中",
+          status_completed: "已完成",
+          status_failed: "失败",
+          status_max_iterations: "达到最大迭代次数",
+          status_unknown: "未知状态",
+          run_detail_meta_separator: " | ",
+          request_failed: "请求失败",
+        },
+        en: {
+          repo_analyst_subtitle: "Submit repository analysis runs",
+          health_checking: "Checking",
+          health_ok: "API OK",
+          health_error: "API Error",
+          workspace_root: "Workspace root",
+          analysis_question: "Analysis question",
+          analysis_question_placeholder:
+            "Leave empty to use the default repository analysis question.",
+          max_iterations: "Max iterations",
+          temperature: "Temperature",
+          max_tokens: "Max tokens",
+          temperature_placeholder: "default",
+          max_tokens_placeholder: "default",
+          create_run: "Create run",
+          refresh_runs: "Refresh runs",
+          waiting_form: "Waiting for a new run.",
+          creating_run: "Creating run...",
+          run_created: "Run created",
+          runs_title: "Runs",
+          runs_subtitle: "Select a run to inspect report and events",
+          result_title: "Result",
+          no_run_selected: "No run selected",
+          refresh_details: "Refresh details",
+          detail_empty:
+            "Create or select a Repo Analyst run to see structured report, failure reason, and execution events.",
+          no_runs: "No runs yet.",
+          untitled_run: "Untitled run",
+          no_content: "No content.",
+          no_events: "No events.",
+          no_module_info: "No module info.",
+          no_structured_report: "No structured report available.",
+          summary: "Summary",
+          modules: "Modules",
+          architecture: "Architecture",
+          risks: "Risks",
+          next_steps: "Next Steps",
+          report: "Report",
+          raw_model_output: "Raw Model Output",
+          failure_reason: "Failure Reason",
+          parse_diagnostics: "Parse Diagnostics",
+          events: "Events",
+          run_info: "Run Info",
+          question: "Question",
+          workspace: "Workspace",
+          status: "Status",
+          started: "Started",
+          finished: "Finished",
+          status_queued: "Queued",
+          status_running: "Running",
+          status_completed: "Completed",
+          status_failed: "Failed",
+          status_max_iterations: "Max Iterations",
+          status_unknown: "Unknown",
+          run_detail_meta_separator: " | ",
+          request_failed: "Request failed",
+        },
+      };
+
       const state = {
         runs: [],
         selectedRunId: null,
         pollTimer: null,
+        lang: localStorage.getItem("ui_lang") || "zh",
       };
 
       const runForm = document.getElementById("runForm");
@@ -405,6 +548,41 @@
       const healthChip = document.getElementById("healthChip");
       const refreshRunsButton = document.getElementById("refreshRunsButton");
       const refreshDetailButton = document.getElementById("refreshDetailButton");
+      const langSelect = document.getElementById("langSelect");
+
+      function t(key) {
+        const table = I18N[state.lang] || I18N.zh;
+        return table[key] || I18N.zh[key] || key;
+      }
+
+      function applyStaticTranslations() {
+        document.getElementById("repoAnalystSubtitle").textContent = t("repo_analyst_subtitle");
+        document.getElementById("workspaceRootLabel").textContent = t("workspace_root");
+        document.getElementById("analysisQuestionLabel").textContent = t("analysis_question");
+        questionInput.placeholder = t("analysis_question_placeholder");
+        document.getElementById("maxIterationsLabel").textContent = t("max_iterations");
+        document.getElementById("temperatureLabel").textContent = t("temperature");
+        document.getElementById("maxTokensLabel").textContent = t("max_tokens");
+        temperatureInput.placeholder = t("temperature_placeholder");
+        maxTokensInput.placeholder = t("max_tokens_placeholder");
+        document.getElementById("submitButton").textContent = t("create_run");
+        refreshRunsButton.textContent = t("refresh_runs");
+        document.getElementById("runsTitle").textContent = t("runs_title");
+        document.getElementById("runsSubtitle").textContent = t("runs_subtitle");
+        document.getElementById("resultTitle").textContent = t("result_title");
+        refreshDetailButton.textContent = t("refresh_details");
+
+        if (!state.selectedRunId) {
+          detailMeta.textContent = t("no_run_selected");
+          detailView.innerHTML = `<div id="detailEmpty" class="empty-state">${escapeHtml(
+            t("detail_empty"),
+          )}</div>`;
+        }
+
+        if (!formStatus.dataset.customMessage) {
+          formStatus.textContent = t("waiting_form");
+        }
+      }
 
       async function requestJson(url, options = {}) {
         const response = await fetch(url, {
@@ -416,7 +594,7 @@
         });
 
         if (!response.ok) {
-          let message = `Request failed: ${response.status}`;
+          let message = `${t("request_failed")}: ${response.status}`;
           try {
             const payload = await response.json();
             message = payload.detail || JSON.stringify(payload);
@@ -434,8 +612,8 @@
       }
 
       function formatStatus(status) {
-        if (status === "max_iterations") return "Max Iterations";
-        return (status || "unknown").replaceAll("_", " ");
+        if (!status) return t("status_unknown");
+        return t(`status_${status}`) || status;
       }
 
       function escapeHtml(value) {
@@ -447,18 +625,19 @@
       }
 
       function timestampText(value) {
-        if (!value) return "—";
+        if (!value) return "-";
         return new Date(value).toLocaleString();
       }
 
-      function setFormStatus(message, isError = false) {
+      function setFormStatus(message, isError = false, isCustom = true) {
         formStatus.textContent = message;
         formStatus.className = isError ? "status-line error-text" : "status-line";
+        formStatus.dataset.customMessage = isCustom ? "1" : "";
       }
 
       function renderRuns() {
         if (!state.runs.length) {
-          runList.innerHTML = '<div class="empty-state">还没有任务。先创建一个仓库分析任务。</div>';
+          runList.innerHTML = `<div class="empty-state">${escapeHtml(t("no_runs"))}</div>`;
           return;
         }
 
@@ -471,7 +650,7 @@
                   <span class="${statusClass(run.status)}">${escapeHtml(formatStatus(run.status))}</span>
                   <span class="muted">${escapeHtml(run.id.slice(0, 8))}</span>
                 </div>
-                <div class="run-question">${escapeHtml(run.question || run.user_input || "未命名任务")}</div>
+                <div class="run-question">${escapeHtml(run.question || run.user_input || t("untitled_run"))}</div>
                 <div class="run-meta">
                   <span>${escapeHtml(run.workspace_root)}</span>
                   <span>${escapeHtml(timestampText(run.created_at))}</span>
@@ -491,58 +670,70 @@
         });
       }
 
+      function renderBulletList(items) {
+        if (!items || !items.length) {
+          return `<div class="empty-state">${escapeHtml(t("no_content"))}</div>`;
+        }
+        return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+      }
+
       function renderDetail(run, events) {
-        detailMeta.textContent = `${run.id.slice(0, 8)} · ${formatStatus(run.status)} · ${timestampText(run.created_at)}`;
+        detailMeta.textContent = `${run.id.slice(0, 8)}${t("run_detail_meta_separator")}${formatStatus(
+          run.status,
+        )}${t("run_detail_meta_separator")}${timestampText(run.created_at)}`;
         const report = run.report;
         const failureReason = run.failure_reason;
+        const parseDiagnostics = run.parse_diagnostics;
 
         const reportHtml = report
           ? `
             <div class="detail-section">
-              <h3>总结</h3>
+              <h3>${escapeHtml(t("summary"))}</h3>
               <div class="detail-content">${escapeHtml(report.summary)}</div>
             </div>
             <div class="detail-section">
-              <h3>模块</h3>
+              <h3>${escapeHtml(t("modules"))}</h3>
               <div class="detail-content">
                 <div class="module-list">
-                  ${report.modules
-                    .map(
-                      (item) => `
+                  ${
+                    report.modules
+                      .map(
+                        (item) => `
                         <div class="module-item">
                           <div class="module-name">${escapeHtml(item.name)}</div>
                           <div>${escapeHtml(item.description)}</div>
                         </div>
                       `,
-                    )
-                    .join("") || '<div class="empty-state">没有模块信息。</div>'}
+                      )
+                      .join("") || `<div class="empty-state">${escapeHtml(t("no_module_info"))}</div>`
+                  }
                 </div>
               </div>
             </div>
             <div class="detail-section">
-              <h3>架构</h3>
+              <h3>${escapeHtml(t("architecture"))}</h3>
               <div class="detail-content">${renderBulletList(report.architecture)}</div>
             </div>
             <div class="detail-section">
-              <h3>风险</h3>
+              <h3>${escapeHtml(t("risks"))}</h3>
               <div class="detail-content">${renderBulletList(report.risks)}</div>
             </div>
             <div class="detail-section">
-              <h3>下一步</h3>
+              <h3>${escapeHtml(t("next_steps"))}</h3>
               <div class="detail-content">${renderBulletList(report.next_steps)}</div>
             </div>
           `
           : `
             <div class="detail-section">
-              <h3>报告</h3>
-              <div class="detail-content empty-state">当前没有可解析的结构化报告。</div>
+              <h3>${escapeHtml(t("report"))}</h3>
+              <div class="detail-content empty-state">${escapeHtml(t("no_structured_report"))}</div>
             </div>
           `;
 
         const rawOutputHtml = run.result?.final_message?.content
           ? `
             <div class="detail-section">
-              <h3>原始模型输出</h3>
+              <h3>${escapeHtml(t("raw_model_output"))}</h3>
               <div class="detail-content"><pre>${escapeHtml(run.result.final_message.content)}</pre></div>
             </div>
           `
@@ -551,15 +742,27 @@
         const failureHtml = failureReason
           ? `
             <div class="detail-section">
-              <h3>失败原因</h3>
+              <h3>${escapeHtml(t("failure_reason"))}</h3>
               <div class="detail-content error-text">${escapeHtml(failureReason)}</div>
+            </div>
+          `
+          : "";
+
+        const parseDiagnosticsHtml = parseDiagnostics
+          ? `
+            <div class="detail-section">
+              <h3>${escapeHtml(t("parse_diagnostics"))}</h3>
+              <div class="detail-content">
+                <div><strong>code:</strong> ${escapeHtml(parseDiagnostics.code)}</div>
+                <div><strong>message:</strong> ${escapeHtml(parseDiagnostics.message)}</div>
+              </div>
             </div>
           `
           : "";
 
         const eventHtml = `
           <div class="detail-section">
-            <h3>运行事件</h3>
+            <h3>${escapeHtml(t("events"))}</h3>
             <div class="detail-content">
               <div class="event-list">
                 ${
@@ -575,7 +778,7 @@
                           `,
                         )
                         .join("")
-                    : '<div class="empty-state">当前没有事件。</div>'
+                    : `<div class="empty-state">${escapeHtml(t("no_events"))}</div>`
                 }
               </div>
             </div>
@@ -584,36 +787,33 @@
 
         detailView.innerHTML = `
           <div class="detail-section">
-            <h3>任务信息</h3>
+            <h3>${escapeHtml(t("run_info"))}</h3>
             <div class="detail-content">
-              <div><strong>问题：</strong>${escapeHtml(run.question)}</div>
-              <div><strong>路径：</strong>${escapeHtml(run.workspace_root)}</div>
-              <div><strong>状态：</strong><span class="${statusClass(run.status)}">${escapeHtml(formatStatus(run.status))}</span></div>
-              <div><strong>开始：</strong>${escapeHtml(timestampText(run.started_at))}</div>
-              <div><strong>结束：</strong>${escapeHtml(timestampText(run.finished_at))}</div>
+              <div><strong>${escapeHtml(t("question"))}:</strong> ${escapeHtml(run.question)}</div>
+              <div><strong>${escapeHtml(t("workspace"))}:</strong> ${escapeHtml(run.workspace_root)}</div>
+              <div><strong>${escapeHtml(t("status"))}:</strong> <span class="${statusClass(run.status)}">${escapeHtml(
+          formatStatus(run.status),
+        )}</span></div>
+              <div><strong>${escapeHtml(t("started"))}:</strong> ${escapeHtml(timestampText(run.started_at))}</div>
+              <div><strong>${escapeHtml(t("finished"))}:</strong> ${escapeHtml(timestampText(run.finished_at))}</div>
             </div>
           </div>
           ${failureHtml}
+          ${parseDiagnosticsHtml}
           ${reportHtml}
           ${rawOutputHtml}
           ${eventHtml}
         `;
       }
 
-      function renderBulletList(items) {
-        if (!items || !items.length) {
-          return '<div class="empty-state">没有内容。</div>';
-        }
-        return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
-      }
-
       async function loadHealth() {
+        healthChip.textContent = t("health_checking");
         try {
           await requestJson("/health");
-          healthChip.textContent = "API OK";
+          healthChip.textContent = t("health_ok");
           healthChip.className = "status-chip status-completed";
-        } catch (error) {
-          healthChip.textContent = "API Error";
+        } catch (_error) {
+          healthChip.textContent = t("health_error");
           healthChip.className = "status-chip status-failed";
         }
       }
@@ -667,7 +867,7 @@
 
       runForm.addEventListener("submit", async (event) => {
         event.preventDefault();
-        setFormStatus("正在创建任务...");
+        setFormStatus(t("creating_run"));
 
         const payload = {
           workspace_root: workspaceRootInput.value.trim(),
@@ -691,7 +891,7 @@
             body: JSON.stringify(payload),
           });
           state.selectedRunId = run.id;
-          setFormStatus(`任务已创建：${run.id}`);
+          setFormStatus(`${t("run_created")}: ${run.id}`);
           await loadRuns();
         } catch (error) {
           setFormStatus(error.message, true);
@@ -705,6 +905,20 @@
         }
       });
 
+      langSelect.addEventListener("change", async () => {
+        state.lang = langSelect.value === "en" ? "en" : "zh";
+        localStorage.setItem("ui_lang", state.lang);
+        formStatus.dataset.customMessage = "";
+        applyStaticTranslations();
+        await loadHealth();
+        renderRuns();
+        if (state.selectedRunId) {
+          await loadRunDetail(state.selectedRunId, false);
+        }
+      });
+
+      langSelect.value = state.lang === "en" ? "en" : "zh";
+      applyStaticTranslations();
       loadHealth();
       loadRuns();
     </script>

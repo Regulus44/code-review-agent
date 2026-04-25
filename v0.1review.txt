@@ -1,0 +1,18 @@
+风险：
+存储层仅 InMemory：运行时数据和事件完全驻留在内存中，服务重启即丢失，无 SQLite 持久化实现（storage/__init__.py 为空，pyproject.toml 虽声明了 sqlalchemy/aiosqlite 依赖但未使用）。 
+缺少 shell 命令工具和高级沙箱：当前仅实现了文件读写搜索工具，没有 shell_exec 或代码执行能力，sandbox 包仅包含路径保护，命令执行隔离尚未实现。
+Observability 未实现：observability/__init__.py 为空，缺少日志链路追踪、OpenTelemetry 集成或结构化日志输出。
+窗口环境 ripgrep 兼容性风险：search_text 在 Windows 上可能因系统策略拒绝执行 rg，虽然已实现 Python fallback，但 rg 权限错误可能导致工具执行延迟或不一致。
+模型输出不稳定风险：Repo Analyst 依赖 LLM 返回精确 JSON，虽然 parser 有容错处理，但大模型仍可能输出 schema 不匹配或非法 JSON 导致解析失败（当前标记为 invalid_repo_analyst_report）。
+并发与生产化不足：线程锁（RLock）用于 InMemoryStore，但整个 execute_run 是协程单线程执行，缺少任务队列、超时控制和并发限流。
+API 缺少认证与权限：FastAPI 端点完全开放，无 API key 验证或用户认证机制，暴露文件系统操作风险。
+测试覆盖缺口：observability、storage、session 边界条件、高并发场景、真实 DeepSeek API 集成测试未覆盖。
+同时给出了下一步建议：
+实现 SQLite/数据库持久化存储：用 SQLAlchemy + aiosqlite 替换 InMemoryRunStore，保证数据不因服务重启丢失，支持历史查询和审计。
+增加 shell 工具和沙箱安全策略：实现安全的 shell_exec 工具（带允许命令白名单、超时控制和资源限制），强化 sandbox 层以支持代码执行场景。
+补充 observability 层：实现结构化事件日志、可选的 OpenTelemetry 追踪、Token 用量监控、运行耗时统计和告警。
+增加流式响应支持：OpenAICompatibleModel 中流式（stream=True）当前仅占位未实现，实现后可为 UI 侧实时展示模型输出和工具调用过程。
+生产化加固：添加 API 认证（API Key）、请求速率限制、运行超时熔断（run timeout）、并发执行池管理。
+扩展模型 provider 支持：添加 SiliconFlow、Ollama（本地）、Qwen 和 Azure OpenAI 等额外模型适配器，完善 provider-neutral 接口的生态。
+完善前端 UI：当前单页 HTML 可进一步拆分组件、增加运行创建表单的更多参数（如 temperature/max_tokens 的输入控件）、增加报告的导出/分享功能。
+对接 CI/CD 和代码审查流程：将 Repo Analyst 集成到 GitHub/GitLab Webhook 中，实现提交 PR 时自动触发仓库分析并回写评论。
