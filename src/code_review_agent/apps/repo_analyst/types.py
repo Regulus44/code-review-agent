@@ -1,0 +1,67 @@
+"""Types for the repository analyst app."""
+
+from __future__ import annotations
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from code_review_agent.harness import AgentRunResult
+from code_review_agent.runtime import RunEvent, RunRecord
+
+
+class RepoModule(BaseModel):
+    """One logical module found in the repository."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str
+
+
+class RepoAnalystReport(BaseModel):
+    """Structured output of the repository analyst app."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str
+    modules: list[RepoModule]
+    architecture: list[str]
+    risks: list[str]
+    next_steps: list[str]
+
+
+class RepoAnalystRequest(BaseModel):
+    """API request for repo analyst runs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_root: str
+    question: str | None = None
+    max_iterations: int | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
+
+
+class RepoAnalystRunResult(BaseModel):
+    """App-level result returned by the repo analyst service."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    status: str
+    workspace_root: str
+    question: str
+    created_at: RunRecord.model_fields["created_at"].annotation
+    started_at: RunRecord.model_fields["started_at"].annotation = None
+    finished_at: RunRecord.model_fields["finished_at"].annotation = None
+    report: RepoAnalystReport | None = None
+    result: AgentRunResult | None = None
+    failure_reason: str | None = None
+
+
+class RepoAnalystRunView(BaseModel):
+    """App-level run view with events."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    run: RepoAnalystRunResult
+    events: list[RunEvent] = Field(default_factory=list)

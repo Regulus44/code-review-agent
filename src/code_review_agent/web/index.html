@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Code Review Agent</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f7fb;
+        --panel: #ffffff;
+        --panel-muted: #f1f4f8;
+        --border: #d7dee8;
+        --text: #18212f;
+        --muted: #5c6b80;
+        --accent: #0f62fe;
+        --accent-strong: #0043ce;
+        --success: #198038;
+        --warning: #d97706;
+        --danger: #c81e1e;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        color: var(--text);
+        background: var(--bg);
+      }
+
+      .page {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 360px minmax(280px, 360px) minmax(420px, 1fr);
+        gap: 16px;
+        padding: 16px;
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+
+      .panel-header {
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .panel-title {
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .panel-subtitle {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 2px;
+      }
+
+      .panel-body {
+        padding: 16px;
+        overflow: auto;
+        min-height: 0;
+      }
+
+      .form-grid {
+        display: grid;
+        gap: 14px;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      input,
+      textarea,
+      select {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font: inherit;
+        color: inherit;
+        background: #fff;
+      }
+
+      textarea {
+        resize: vertical;
+        min-height: 120px;
+      }
+
+      .inline-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      button {
+        border: 1px solid var(--accent);
+        background: var(--accent);
+        color: #fff;
+        padding: 10px 14px;
+        border-radius: 6px;
+        font: inherit;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: var(--accent-strong);
+        border-color: var(--accent-strong);
+      }
+
+      button.secondary {
+        background: #fff;
+        color: var(--text);
+        border-color: var(--border);
+      }
+
+      .status-line {
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .status-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        border: 1px solid var(--border);
+      }
+
+      .status-queued,
+      .status-running {
+        color: var(--warning);
+        background: #fff7ed;
+        border-color: #fed7aa;
+      }
+
+      .status-completed {
+        color: var(--success);
+        background: #ecfdf3;
+        border-color: #a7f3d0;
+      }
+
+      .status-failed,
+      .status-max_iterations {
+        color: var(--danger);
+        background: #fef2f2;
+        border-color: #fecaca;
+      }
+
+      .run-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .run-item {
+        border: 1px solid var(--border);
+        background: var(--panel-muted);
+        border-radius: 6px;
+        padding: 12px;
+        display: grid;
+        gap: 8px;
+        cursor: pointer;
+      }
+
+      .run-item.active {
+        border-color: var(--accent);
+        background: #eef4ff;
+      }
+
+      .run-question {
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .run-meta {
+        font-size: 12px;
+        color: var(--muted);
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .detail-grid {
+        display: grid;
+        gap: 14px;
+      }
+
+      .detail-section {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        overflow: hidden;
+      }
+
+      .detail-section h3 {
+        margin: 0;
+        padding: 10px 12px;
+        font-size: 13px;
+        font-weight: 600;
+        background: var(--panel-muted);
+        border-bottom: 1px solid var(--border);
+      }
+
+      .detail-content {
+        padding: 12px;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .detail-content ul {
+        margin: 0;
+        padding-left: 18px;
+      }
+
+      .module-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .module-item {
+        padding: 10px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: #fff;
+      }
+
+      .module-name {
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+
+      .event-list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .event-item {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 10px;
+        background: #fff;
+        font-size: 12px;
+      }
+
+      .event-type {
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
+
+      .empty-state {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .error-text {
+        color: var(--danger);
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      @media (max-width: 1200px) {
+        .page {
+          grid-template-columns: 1fr;
+        }
+
+        .panel {
+          min-height: 320px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Repo Analyst</div>
+            <div class="panel-subtitle">提交仓库分析任务</div>
+          </div>
+          <span id="healthChip" class="status-chip status-queued">Checking</span>
+        </div>
+        <div class="panel-body">
+          <form id="runForm" class="form-grid">
+            <label>
+              仓库路径
+              <input
+                id="workspaceRoot"
+                name="workspaceRoot"
+                type="text"
+                required
+                value="D:/Develop/code-review-agent"
+              />
+            </label>
+
+            <label>
+              分析问题
+              <textarea
+                id="question"
+                name="question"
+                placeholder="留空则使用默认问题：分析这个仓库的主要功能、模块结构、架构设计、风险点和建议的下一步。"
+              ></textarea>
+            </label>
+
+            <div class="inline-grid">
+              <label>
+                最大迭代
+                <input id="maxIterations" type="number" min="1" placeholder="8" />
+              </label>
+              <label>
+                Temperature
+                <input id="temperature" type="number" min="0" max="2" step="0.1" placeholder="默认" />
+              </label>
+              <label>
+                Max tokens
+                <input id="maxTokens" type="number" min="1" placeholder="默认" />
+              </label>
+            </div>
+
+            <div class="toolbar">
+              <button type="submit" id="submitButton">创建分析任务</button>
+              <button type="button" class="secondary" id="refreshRunsButton">刷新任务列表</button>
+            </div>
+
+            <div id="formStatus" class="status-line">等待创建任务。</div>
+          </form>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">分析任务</div>
+            <div class="panel-subtitle">点击任务查看报告与事件</div>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div id="runList" class="run-list"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">分析结果</div>
+            <div id="detailMeta" class="panel-subtitle">尚未选择任务</div>
+          </div>
+          <div class="toolbar">
+            <button type="button" class="secondary" id="refreshDetailButton">刷新详情</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div id="detailView" class="detail-grid">
+            <div class="empty-state">
+              创建或选择一个 Repo Analyst 任务后，这里会显示结构化报告、失败原因和运行事件。
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const state = {
+        runs: [],
+        selectedRunId: null,
+        pollTimer: null,
+      };
+
+      const runForm = document.getElementById("runForm");
+      const workspaceRootInput = document.getElementById("workspaceRoot");
+      const questionInput = document.getElementById("question");
+      const maxIterationsInput = document.getElementById("maxIterations");
+      const temperatureInput = document.getElementById("temperature");
+      const maxTokensInput = document.getElementById("maxTokens");
+      const formStatus = document.getElementById("formStatus");
+      const runList = document.getElementById("runList");
+      const detailView = document.getElementById("detailView");
+      const detailMeta = document.getElementById("detailMeta");
+      const healthChip = document.getElementById("healthChip");
+      const refreshRunsButton = document.getElementById("refreshRunsButton");
+      const refreshDetailButton = document.getElementById("refreshDetailButton");
+
+      async function requestJson(url, options = {}) {
+        const response = await fetch(url, {
+          headers: {
+            "Content-Type": "application/json",
+            ...(options.headers || {}),
+          },
+          ...options,
+        });
+
+        if (!response.ok) {
+          let message = `Request failed: ${response.status}`;
+          try {
+            const payload = await response.json();
+            message = payload.detail || JSON.stringify(payload);
+          } catch (_error) {
+            // Ignore JSON parse failures.
+          }
+          throw new Error(message);
+        }
+
+        return response.json();
+      }
+
+      function statusClass(status) {
+        return `status-chip status-${status || "queued"}`;
+      }
+
+      function formatStatus(status) {
+        if (status === "max_iterations") return "Max Iterations";
+        return (status || "unknown").replaceAll("_", " ");
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;");
+      }
+
+      function timestampText(value) {
+        if (!value) return "—";
+        return new Date(value).toLocaleString();
+      }
+
+      function setFormStatus(message, isError = false) {
+        formStatus.textContent = message;
+        formStatus.className = isError ? "status-line error-text" : "status-line";
+      }
+
+      function renderRuns() {
+        if (!state.runs.length) {
+          runList.innerHTML = '<div class="empty-state">还没有任务。先创建一个仓库分析任务。</div>';
+          return;
+        }
+
+        runList.innerHTML = state.runs
+          .map((run) => {
+            const activeClass = run.id === state.selectedRunId ? " active" : "";
+            return `
+              <button class="run-item${activeClass}" data-run-id="${escapeHtml(run.id)}" type="button">
+                <div class="toolbar">
+                  <span class="${statusClass(run.status)}">${escapeHtml(formatStatus(run.status))}</span>
+                  <span class="muted">${escapeHtml(run.id.slice(0, 8))}</span>
+                </div>
+                <div class="run-question">${escapeHtml(run.question || run.user_input || "未命名任务")}</div>
+                <div class="run-meta">
+                  <span>${escapeHtml(run.workspace_root)}</span>
+                  <span>${escapeHtml(timestampText(run.created_at))}</span>
+                </div>
+              </button>
+            `;
+          })
+          .join("");
+
+        runList.querySelectorAll("[data-run-id]").forEach((element) => {
+          element.addEventListener("click", async () => {
+            const runId = element.getAttribute("data-run-id");
+            state.selectedRunId = runId;
+            renderRuns();
+            await loadRunDetail(runId, true);
+          });
+        });
+      }
+
+      function renderDetail(run, events) {
+        detailMeta.textContent = `${run.id.slice(0, 8)} · ${formatStatus(run.status)} · ${timestampText(run.created_at)}`;
+        const report = run.report;
+        const failureReason = run.failure_reason;
+
+        const reportHtml = report
+          ? `
+            <div class="detail-section">
+              <h3>总结</h3>
+              <div class="detail-content">${escapeHtml(report.summary)}</div>
+            </div>
+            <div class="detail-section">
+              <h3>模块</h3>
+              <div class="detail-content">
+                <div class="module-list">
+                  ${report.modules
+                    .map(
+                      (item) => `
+                        <div class="module-item">
+                          <div class="module-name">${escapeHtml(item.name)}</div>
+                          <div>${escapeHtml(item.description)}</div>
+                        </div>
+                      `,
+                    )
+                    .join("") || '<div class="empty-state">没有模块信息。</div>'}
+                </div>
+              </div>
+            </div>
+            <div class="detail-section">
+              <h3>架构</h3>
+              <div class="detail-content">${renderBulletList(report.architecture)}</div>
+            </div>
+            <div class="detail-section">
+              <h3>风险</h3>
+              <div class="detail-content">${renderBulletList(report.risks)}</div>
+            </div>
+            <div class="detail-section">
+              <h3>下一步</h3>
+              <div class="detail-content">${renderBulletList(report.next_steps)}</div>
+            </div>
+          `
+          : `
+            <div class="detail-section">
+              <h3>报告</h3>
+              <div class="detail-content empty-state">当前没有可解析的结构化报告。</div>
+            </div>
+          `;
+
+        const rawOutputHtml = run.result?.final_message?.content
+          ? `
+            <div class="detail-section">
+              <h3>原始模型输出</h3>
+              <div class="detail-content"><pre>${escapeHtml(run.result.final_message.content)}</pre></div>
+            </div>
+          `
+          : "";
+
+        const failureHtml = failureReason
+          ? `
+            <div class="detail-section">
+              <h3>失败原因</h3>
+              <div class="detail-content error-text">${escapeHtml(failureReason)}</div>
+            </div>
+          `
+          : "";
+
+        const eventHtml = `
+          <div class="detail-section">
+            <h3>运行事件</h3>
+            <div class="detail-content">
+              <div class="event-list">
+                ${
+                  events.length
+                    ? events
+                        .map(
+                          (event) => `
+                            <div class="event-item">
+                              <div class="event-type">${escapeHtml(event.type)}</div>
+                              <div class="muted">${escapeHtml(timestampText(event.timestamp))}</div>
+                              <pre>${escapeHtml(JSON.stringify(event.data, null, 2))}</pre>
+                            </div>
+                          `,
+                        )
+                        .join("")
+                    : '<div class="empty-state">当前没有事件。</div>'
+                }
+              </div>
+            </div>
+          </div>
+        `;
+
+        detailView.innerHTML = `
+          <div class="detail-section">
+            <h3>任务信息</h3>
+            <div class="detail-content">
+              <div><strong>问题：</strong>${escapeHtml(run.question)}</div>
+              <div><strong>路径：</strong>${escapeHtml(run.workspace_root)}</div>
+              <div><strong>状态：</strong><span class="${statusClass(run.status)}">${escapeHtml(formatStatus(run.status))}</span></div>
+              <div><strong>开始：</strong>${escapeHtml(timestampText(run.started_at))}</div>
+              <div><strong>结束：</strong>${escapeHtml(timestampText(run.finished_at))}</div>
+            </div>
+          </div>
+          ${failureHtml}
+          ${reportHtml}
+          ${rawOutputHtml}
+          ${eventHtml}
+        `;
+      }
+
+      function renderBulletList(items) {
+        if (!items || !items.length) {
+          return '<div class="empty-state">没有内容。</div>';
+        }
+        return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+      }
+
+      async function loadHealth() {
+        try {
+          await requestJson("/health");
+          healthChip.textContent = "API OK";
+          healthChip.className = "status-chip status-completed";
+        } catch (error) {
+          healthChip.textContent = "API Error";
+          healthChip.className = "status-chip status-failed";
+        }
+      }
+
+      async function loadRuns() {
+        try {
+          state.runs = await requestJson("/repo-analyst/runs");
+          if (!state.selectedRunId && state.runs.length) {
+            state.selectedRunId = state.runs[0].id;
+          }
+          renderRuns();
+          if (state.selectedRunId) {
+            await loadRunDetail(state.selectedRunId, false);
+          }
+        } catch (error) {
+          runList.innerHTML = `<div class="empty-state error-text">${escapeHtml(error.message)}</div>`;
+        }
+      }
+
+      async function loadRunDetail(runId, resetPoll) {
+        if (!runId) return;
+
+        try {
+          const [run, events] = await Promise.all([
+            requestJson(`/repo-analyst/runs/${runId}`),
+            requestJson(`/repo-analyst/runs/${runId}/events`),
+          ]);
+          renderDetail(run, events);
+          if (resetPoll) {
+            schedulePolling(run);
+          }
+        } catch (error) {
+          detailView.innerHTML = `<div class="empty-state error-text">${escapeHtml(error.message)}</div>`;
+        }
+      }
+
+      function schedulePolling(run) {
+        if (state.pollTimer) {
+          clearTimeout(state.pollTimer);
+          state.pollTimer = null;
+        }
+
+        if (!run || !["queued", "running"].includes(run.status)) {
+          return;
+        }
+
+        state.pollTimer = window.setTimeout(async () => {
+          await loadRuns();
+        }, 2000);
+      }
+
+      runForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        setFormStatus("正在创建任务...");
+
+        const payload = {
+          workspace_root: workspaceRootInput.value.trim(),
+        };
+
+        const question = questionInput.value.trim();
+        if (question) payload.question = question;
+
+        const maxIterations = maxIterationsInput.value.trim();
+        if (maxIterations) payload.max_iterations = Number(maxIterations);
+
+        const temperature = temperatureInput.value.trim();
+        if (temperature) payload.temperature = Number(temperature);
+
+        const maxTokens = maxTokensInput.value.trim();
+        if (maxTokens) payload.max_tokens = Number(maxTokens);
+
+        try {
+          const run = await requestJson("/repo-analyst/runs", {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+          state.selectedRunId = run.id;
+          setFormStatus(`任务已创建：${run.id}`);
+          await loadRuns();
+        } catch (error) {
+          setFormStatus(error.message, true);
+        }
+      });
+
+      refreshRunsButton.addEventListener("click", loadRuns);
+      refreshDetailButton.addEventListener("click", async () => {
+        if (state.selectedRunId) {
+          await loadRunDetail(state.selectedRunId, true);
+        }
+      });
+
+      loadHealth();
+      loadRuns();
+    </script>
+  </body>
+</html>

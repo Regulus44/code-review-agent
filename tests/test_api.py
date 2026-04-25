@@ -1,0 +1,233 @@
+"""Tests for the FastAPI runtime API."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from pydantic import BaseModel, ConfigDict, Field
+
+TestClient = pytest.importorskip("fastapi.testclient").TestClient
+
+from code_review_agent.api import create_app
+from code_review_agent.messages import ToolCall, assistant_message
+from code_review_agent.models import ChatResponse, ChatModel
+from code_review_agent.runtime import AgentRuntime, CreateRunRequest
+from code_review_agent.tools import Tool, ToolExecutionResult, ToolRegistry
+
+
+class EchoArguments(BaseModel):
+    """Arguments for a fake echo tool."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    value: str = Field(min_length=1)
+
+
+class EchoTool(Tool):
+    """Tool that echoes a value."""
+
+    name = "echo"
+    description = "Echo a value."
+    arguments_model = EchoArguments
+
+    async def _execute(self, context, arguments: EchoArguments) -> ToolExecutionResult:
+        return ToolExecutionResult.success(
+            tool_name=self.name,
+            content=f"echo: {arguments.value}",
+        )
+
+
+class FakeModel(ChatModel):
+    """Model with scripted responses for API tests."""
+
+    provider = "fake"
+    model_name = "fake-model"
+
+    def __init__(self, scripted: list[ChatResponse]) -> None:
+        self._scripted = scripted
+
+    async def complete(self, request):
+        return self._scripted.pop(0)
+
+
+def make_response(
+    *,
+    content: str | None = None,
+    tool_calls: list[ToolCall] | None = None,
+    finish_reason: str | None = "stop",
+) -> ChatResponse:
+    """Create a fake chat response."""
+    return ChatResponse(
+        message=assistant_message(content=content, tool_calls=tool_calls or []),
+        provider="fake",
+        model="fake-model",
+        finish_reason=finish_reason,
+    )
+
+
+def build_registry() -> ToolRegistry:
+    """Create a registry for API tests."""
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+    return registry
+
+
+def build_runtime() -> AgentRuntime:
+    """Create a runtime with a deterministic fake model."""
+    return AgentRuntime(
+        model_factory=lambda: FakeModel(
+            [
+                make_response(
+                    tool_calls=[
+                        ToolCall(id="call_1", name="echo", arguments={"value": "hello"}),
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                make_response(content="Done"),
+            ],
+        ),
+        tool_registry_factory=build_registry,
+    )
+
+
+def test_health_endpoint() -> None:
+    client = TestClient(create_app(runtime=build_runtime()))
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_index_page_serves_frontend_html() -> None:
+    client = TestClient(create_app(runtime=build_runtime()))
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "Repo Analyst" in response.text
+    assert "/repo-analyst/runs" in response.text
+
+
+def test_run_endpoints_execute_and_return_events(tmp_path: Path) -> None:
+    client = TestClient(create_app(runtime=build_runtime()))
+
+    create_response = client.post(
+        "/runs",
+        json={
+            "user_input": "Inspect this repo.",
+            "workspace_root": str(tmp_path),
+        },
+    )
+    run_id = create_response.json()["id"]
+
+    get_response = client.get(f"/runs/{run_id}")
+    events_response = client.get(f"/runs/{run_id}/events")
+    list_response = client.get("/runs")
+
+    assert create_response.status_code == 202
+    assert get_response.status_code == 200
+    assert events_response.status_code == 200
+    assert list_response.status_code == 200
+    assert get_response.json()["status"] == "completed"
+    assert get_response.json()["result"]["final_message"]["content"] == "Done"
+    assert [event["type"] for event in events_response.json()] == [
+        "status_change",
+        "status_change",
+        "model_response",
+        "tool_call",
+        "model_response",
+        "status_change",
+    ]
+    assert list_response.json()[0]["id"] == run_id
+
+
+def test_run_endpoints_return_404_for_missing_run() -> None:
+    client = TestClient(create_app(runtime=build_runtime()))
+
+    get_response = client.get("/runs/missing")
+    events_response = client.get("/runs/missing/events")
+
+    assert get_response.status_code == 404
+    assert events_response.status_code == 404
+
+
+def test_repo_analyst_run_endpoints(tmp_path: Path) -> None:
+    runtime = AgentRuntime(
+        model_factory=lambda: FakeModel(
+            [
+                make_response(
+                    tool_calls=[
+                        ToolCall(id="call_1", name="echo", arguments={"value": "hello"}),
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                make_response(
+                    content=(
+                        '{"summary":"A repository analysis tool",'
+                        '"modules":[{"name":"runtime","description":"Runs agents"}],'
+                        '"architecture":["API -> runtime -> agent -> tools"],'
+                        '"risks":["No persistence yet"],'
+                        '"next_steps":["Add report UI"]}'
+                    ),
+                ),
+            ],
+        ),
+        tool_registry_factory=build_registry,
+    )
+    client = TestClient(create_app(runtime=runtime))
+
+    create_response = client.post(
+        "/repo-analyst/runs",
+        json={
+            "workspace_root": str(tmp_path),
+            "question": "Analyze this repository",
+        },
+    )
+    run_id = create_response.json()["id"]
+
+    get_response = client.get(f"/repo-analyst/runs/{run_id}")
+    events_response = client.get(f"/repo-analyst/runs/{run_id}/events")
+
+    assert create_response.status_code == 202
+    assert get_response.status_code == 200
+    assert events_response.status_code == 200
+    assert get_response.json()["status"] == "completed"
+    assert get_response.json()["report"]["summary"] == "A repository analysis tool"
+    assert get_response.json()["report"]["modules"][0]["name"] == "runtime"
+    assert [event["type"] for event in events_response.json()] == [
+        "status_change",
+        "status_change",
+        "model_response",
+        "tool_call",
+        "model_response",
+        "status_change",
+    ]
+
+
+def test_repo_analyst_endpoints_return_404_for_missing_run() -> None:
+    client = TestClient(create_app(runtime=build_runtime()))
+
+    get_response = client.get("/repo-analyst/runs/missing")
+    events_response = client.get("/repo-analyst/runs/missing/events")
+
+    assert get_response.status_code == 404
+    assert events_response.status_code == 404
+
+
+def test_repo_analyst_list_filters_out_generic_runs(tmp_path: Path) -> None:
+    runtime = build_runtime()
+    runtime.create_run(
+        CreateRunRequest(
+            user_input="generic run",
+            workspace_root=str(tmp_path),
+        ),
+    )
+    client = TestClient(create_app(runtime=runtime))
+
+    response = client.get("/repo-analyst/runs")
+
+    assert response.status_code == 200
+    assert response.json() == []
