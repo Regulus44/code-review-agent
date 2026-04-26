@@ -1392,3 +1392,1301 @@
   - 仍未实现 shell 工具/高级沙箱/OTel
 - 后续建议：
   - 下一步优先做 lifecycle 迁移（lifespan）和 observability 模块落地
+
+## Phase 1：run_command + 最小 Allowlist 命令沙箱
+
+### 步骤 66：新增命令沙箱与 allowlist 策略
+- 修改文件：
+  - `src/code_review_agent/sandbox/command.py`
+  - `src/code_review_agent/sandbox/__init__.py`
+- 具体改动：
+  - 新增 `CommandPolicy`、`CommandPolicyError`、`CommandRunResult`。
+  - 新增 `run_allowed_command()`，使用 `asyncio.create_subprocess_exec(..., shell=False)` 执行命令。
+  - 第一版 allowlist 只允许：
+    - `git status`
+    - `git status --short`
+    - `git diff`
+    - `git diff --stat`
+    - `git diff --name-only`
+    - `git log --oneline`
+    - `python -m pytest ...`
+  - 默认拒绝 shell/危险程序和明显 shell 组合符号参数。
+  - `cwd` 复用 `resolve_workspace_path()`，确保命令工作目录不能逃逸 workspace。
+  - 增加超时 kill、stdout/stderr UTF-8 解码、输出截断和结构化执行结果。
+- 修改原因：
+  - 让 Agent 能运行少量代码审查常用命令，同时避免暴露任意 shell。
+- 解决的问题：
+  - 补齐工具层中缺少 `run_command` 的能力，为后续 review/debug 模式打基础。
+
+### 步骤 67：新增 run_command 工具并接入默认 registry
+- 修改文件：
+  - `src/code_review_agent/tools/command_tools.py`
+  - `src/code_review_agent/tools/__init__.py`
+  - `src/code_review_agent/runtime/service.py`
+- 具体改动：
+  - 新增 `RunCommandArguments`：
+    - `program`
+    - `args`
+    - `cwd`
+    - `timeout_seconds`
+    - `max_output_chars`
+  - 新增 `RunCommandTool`，将命令执行结果转换为 `ToolExecutionResult`。
+  - 被策略拦截、启动失败、超时分别返回 `status="error"`。
+  - 命令成功启动后，即使 `exit_code != 0` 也返回 `status="success"`，因为测试失败或 git 非仓库状态属于有效观察结果。
+  - 默认工具注册新增 `RunCommandTool()`。
+- 修改原因：
+  - 保持和现有 `Tool` / `ToolRegistry` / Agent loop 的接口一致，不改 harness 主流程。
+- 解决的问题：
+  - 模型现在可以通过工具 schema 发现并调用 `run_command`。
+
+### 步骤 68：新增测试覆盖
+- 修改文件：
+  - `tests/test_command_sandbox.py`
+  - `tests/test_run_command_tool.py`
+- 具体改动：
+  - 覆盖 allowlist 允许路径：
+    - readonly git 命令
+    - `python -m pytest`
+  - 覆盖拦截路径：
+    - shell 程序
+    - 危险程序
+    - 非 allowlist 子命令
+    - shell 组合符号
+    - `..` 和绝对路径参数
+    - `cwd` 越界
+  - 用 monkeypatch 模拟 subprocess，覆盖超时、启动失败、非 0 退出码和输出截断，不依赖本机真实 git 状态。
+  - 验证默认 registry 已包含 `run_command`。
+- 修改原因：
+  - 命令执行属于高风险工具，需要优先覆盖策略边界和失败路径。
+- 解决的问题：
+  - 降低后续扩展 allowlist 时破坏安全边界的风险。
+
+### 步骤 69：第一次测试与循环导入修复
+- 运行命令：
+  - `$env:PYTHONPATH='src'; conda run -n dl python -m pytest tests/test_command_sandbox.py tests/test_run_command_tool.py tests/test_tool_registry.py`
+- 观察结果：
+  - 测试收集阶段失败：
+    - `ImportError: cannot import name 'CommandPolicyError' from partially initialized module 'code_review_agent.sandbox.command'`
+- 问题判断：
+  - 新增导入链形成循环：
+    - `sandbox.command -> sandbox.path -> tools.base -> tools.__init__ -> command_tools -> sandbox.command`
+- 处理方式：
+  - 修改 `src/code_review_agent/sandbox/path.py`。
+  - 将 `ToolExecutionError` 改为函数内延迟导入，避免模块初始化阶段触发 `tools.__init__`。
+- 方案调整：
+  - 原方案：`path.py` 顶层导入 `ToolExecutionError`。
+  - 调整原因：新增 command tool 后顶层导入触发循环。
+  - 新方案：只在需要抛错时延迟导入异常类型。
+  - 影响：对外行为不变，导入链更稳。
+
+### 步骤 70：第二次测试与 cwd 错误归一
+- 运行命令：
+  - `$env:PYTHONPATH='src'; conda run -n dl python -m pytest tests/test_command_sandbox.py tests/test_run_command_tool.py tests/test_tool_registry.py`
+- 观察结果：
+  - 失败 1 个测试：
+    - `test_run_allowed_command_rejects_cwd_escape`
+    - 实际抛出 `ToolExecutionError`
+    - 测试期望 `CommandPolicyError`
+- 问题判断：
+  - `cwd` 越界来自文件沙箱，但对命令执行器来说应统一表现为命令策略拒绝。
+- 处理方式：
+  - 在 `run_allowed_command()` 内捕获 `ToolExecutionError` 并转换为 `CommandPolicyError`。
+  - 为避免重新引入循环导入，异常类型仍采用函数内导入。
+- 方案调整：
+  - 原方案：直接透传 `resolve_workspace_path()` 的异常。
+  - 调整原因：命令沙箱对调用方应暴露统一的 policy 错误。
+  - 新方案：路径策略失败统一归一为 `CommandPolicyError`。
+
+### 步骤 71：最终验证
+- 运行命令：
+  - `$env:PYTHONPATH='src'; conda run -n dl python -m pytest tests/test_command_sandbox.py tests/test_run_command_tool.py tests/test_tool_registry.py`
+  - `$env:PYTHONPATH='src'; conda run -n dl python -m pytest`
+  - `$env:PYTHONPATH='src'; conda run -n dl python -m pytest tests/test_command_sandbox.py tests/test_run_command_tool.py`
+- 观察结果：
+  - 本阶段相关测试：`27 passed`
+  - 全量回归：`97 passed, 28 warnings`
+  - 清理后相关测试：`20 passed`
+- 问题判断：
+  - warnings 均为既有 FastAPI `on_event` deprecation warning，不是本阶段新增失败。
+- 当前结论：
+  - `run_command` 工具、最小命令沙箱、默认注册和测试覆盖已完成。
+
+## 当前状态（run_command Phase 1）
+- 已完成：
+  - `run_command` 工具。
+  - 最小 allowlist 命令策略。
+  - workspace cwd 限制。
+  - 超时控制。
+  - 输出截断。
+  - 策略错误、启动失败、超时、非 0 退出码的结构化结果。
+  - 默认 runtime registry 接入。
+  - 对应测试覆盖。
+- 遗留问题：
+  - 暂不支持任意 shell 字符串。
+  - 暂不支持 `npm test`。
+  - 暂不做进程树级别 kill。
+  - 暂不做 Docker sandbox。
+- 后续建议：
+  - 下一步可以做 `GET /tools`，让前端/用户能直接查看当前可用工具和 schema。
+  - 如果要开放更多命令，建议先做 policy 配置化，而不是直接扩大硬编码 allowlist。
+
+## Review Mode：让“审查最近改动 + 跑测试”走专用路径
+
+### 步骤 72：问题诊断
+- 用户反馈：
+  - 在前端提问“针对本仓库，审查一下我最近的代码改动，看看有没有问题。检查这个项目的测试是否都能通过。”
+  - 但最终表现仍像默认“分析仓库主要功能、模块结构、架构设计、风险点和建议下一步”。
+- 只读排查：
+  - 检查 `src/code_review_agent/web/index.html`
+  - 检查 `src/code_review_agent/apps/repo_analyst/service.py`
+  - 检查 `src/code_review_agent/apps/repo_analyst/prompt.py`
+  - 读取 `runtime.db` 中最近 run 的 `user_input` 和 `system_prompt`
+  - 读取该 run 的 `run_events`，查看实际工具调用
+- 观察结果：
+  - 前端确实提交了 `question`。
+  - 后端也确实把问题写入了 `RunRecord.user_input` 和 system prompt 的 `Task:`。
+  - 模型实际尝试调用了 `git log`、`git diff` 和 `python -m pytest`。
+  - 多个 git 命令被当前 allowlist 拦截，例如：
+    - `git log --oneline -20`
+    - `git diff HEAD~5 --stat`
+    - `git diff HEAD~3`
+  - `python -m pytest` 相关命令可以执行，并返回成功。
+- 问题判断：
+  - 不是“问题没有传到后端”。
+  - 根因有两个：
+    - Repo Analyst 的输出 schema 固定为 `summary/modules/architecture/risks/next_steps`，会把任意任务拉回 overview 报告形态。
+    - `run_command` 的 git allowlist 太窄，挡住了代码审查需要的 recent diff/log 读取。
+
+### 步骤 73：扩展 readonly git allowlist
+- 修改文件：
+  - `src/code_review_agent/sandbox/command.py`
+  - `tests/test_command_sandbox.py`
+- 具体改动：
+  - 允许 review 常用只读 git 命令：
+    - `git log --oneline -N`
+    - `git log --oneline -n N`
+    - `git diff HEAD~N`
+    - `git diff HEAD~N --stat`
+    - `git diff HEAD~N --name-only`
+    - `git diff HEAD~N -- <pathspec...>`
+  - `N` 限制为 `1..50`。
+  - 保持拒绝：
+    - `git checkout`
+    - `git diff main`
+    - `git diff HEAD~99`
+    - shell/危险程序/绝对路径/`..`
+- 修改原因：
+  - 让 review mode 能读取最近改动，同时继续限制在 readonly git 操作内。
+- 解决的问题：
+  - 模型之前想做 diff 审查但被策略拦截的问题。
+
+### 步骤 74：新增 review mode 的类型、prompt 和解析
+- 修改文件：
+  - `src/code_review_agent/apps/repo_analyst/types.py`
+  - `src/code_review_agent/apps/repo_analyst/prompt.py`
+  - `src/code_review_agent/apps/repo_analyst/parser.py`
+  - `src/code_review_agent/apps/repo_analyst/service.py`
+  - `src/code_review_agent/apps/repo_analyst/__init__.py`
+- 具体改动：
+  - `RepoAnalystRequest` 新增 `mode`：
+    - `overview`
+    - `review`
+  - 新增 review schema：
+    - `RepoReviewReport`
+    - `RepoReviewFinding`
+    - `RepoReviewTestResult`
+  - `RepoAnalystRunResult` 新增：
+    - `mode`
+    - `report_type`
+    - `review_report`
+  - 新增 `DEFAULT_REPO_REVIEW_QUESTION`。
+  - `build_repo_analyst_prompt(..., mode="review")` 改为生成 review 专用 prompt。
+  - review prompt 明确要求：
+    - 优先 `git status --short`
+    - 必要时 `git log --oneline -10`
+    - 查看 `git diff --stat` 和 `git diff`
+    - 读取相关文件
+    - 运行 `python -m pytest`
+    - 最终只输出 review JSON
+  - parser 保留 overview 解析，同时新增 `parse_repo_review_report()`。
+  - service 根据 run 的 system prompt 判断 mode，避免改数据库 schema。
+  - review 解析失败时使用：
+    - `invalid_repo_review_report_json`
+    - `invalid_repo_review_report_schema`
+- 修改原因：
+  - overview 和 review 是两类不同任务，不应共用一个结构化输出 schema。
+- 解决的问题：
+  - 用户提出代码审查问题时，最终报告不再被 overview schema 拉回“仓库总体分析”。
+
+### 步骤 75：前端支持模式选择和 review 报告展示
+- 修改文件：
+  - `src/code_review_agent/web/index.html`
+- 具体改动：
+  - 表单新增“任务模式”下拉框：
+    - 仓库总览
+    - 代码审查
+  - 提交 payload 新增 `mode`。
+  - 中英文翻译表新增 mode 和 review 报告相关文案。
+  - 详情页新增 review 报告渲染：
+    - 测试结果
+    - 改动文件
+    - 审查发现
+    - 风险
+    - 下一步
+  - overview 报告保持原展示方式。
+- 修改原因：
+  - 让用户在 UI 上明确选择任务类型，避免“问题是 review，但结果按 overview 展示”的错配。
+- 解决的问题：
+  - 前端现在能展示 `review_report`，不再只看 `report`。
+
+### 步骤 76：测试与验证
+- 运行命令：
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest tests/test_command_sandbox.py tests/test_repo_analyst.py tests/test_api.py`
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest`
+  - `node -e "... new Function(script) ..."`
+- 观察结果：
+  - 相关测试：`53 passed, 30 warnings`
+  - 全量回归：`112 passed, 30 warnings`
+  - 前端脚本语法检查：`frontend script syntax ok`
+- 问题判断：
+  - warnings 仍是既有 FastAPI `on_event` deprecation warning。
+  - 本阶段没有新增测试失败。
+
+## 当前状态（Review Mode）
+- 已完成：
+  - `mode=overview/review`
+  - review 专用 prompt
+  - review 专用 JSON schema
+  - review 专用 parser
+  - review API 返回字段
+  - 前端模式选择与 review 报告展示
+  - readonly git allowlist 扩展
+- 遗留问题：
+  - mode 目前通过 system prompt 内容判断，未持久化为数据库独立列；短期可用，长期建议把 app 参数结构化存储。
+  - review 仍依赖模型自觉调用工具；后续可以在 service 层做预置 evidence collection，再把证据交给模型。
+  - git allowlist 仍是硬编码；后续建议配置化。
+- 后续建议：
+  - 下一步可做 `GET /tools` 和前端工具列表，让用户知道当前 Agent 实际可用能力。
+  - 再下一步可以实现 `review` 的自动证据采集流程，减少模型在工具选择上的不稳定性。
+
+## 小清理：删除 runtime/service.py 重复本地导入
+
+### 步骤 77：清理 `DeepSeekModel` 重复导入
+- 修改文件：
+  - `src/code_review_agent/runtime/service.py`
+- 具体改动：
+  - 删除 `AgentRuntime.execute_run()` 内部的：
+    - `from code_review_agent.models.deepseek import DeepSeekModel`
+  - 继续使用文件顶部已有的：
+    - `from code_review_agent.models import ChatModel, DeepSeekModel`
+- 修改原因：
+  - 该本地导入与模块顶部导入重复，增加维护噪音。
+  - 当前 `models/__init__.py` 已支持导出 `DeepSeekModel`，无需在函数内部再次导入。
+- 解决的问题：
+  - 回应 review mode 审计报告中指出的冗余导入问题。
+
+### 步骤 78：测试验证
+- 运行命令：
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest tests/test_runtime.py tests/test_api.py`
+- 观察结果：
+  - `20 passed, 30 warnings`
+- 问题判断：
+  - warnings 仍为既有 FastAPI `on_event` deprecation warning。
+  - 删除重复导入没有影响 runtime/API 行为。
+
+## Cancel Step 1：状态与 Runtime 内核
+
+### 步骤 79：扩展 cancelled 状态
+- 修改文件：
+  - `src/code_review_agent/runtime/types.py`
+  - `src/code_review_agent/harness/types.py`
+  - `src/code_review_agent/runtime/store.py`
+  - `src/code_review_agent/storage/sqlite_store.py`
+- 具体改动：
+  - `RunStatus` 新增 `cancelled`。
+  - `AgentRunStatus` 新增 `cancelled`。
+  - InMemory store 和 SQLite store 的 `update_status()` 将 `cancelled` 视为终止态，并写入 `finished_at`。
+- 修改原因：
+  - cancel 不能只作为 failure_reason，必须进入正式生命周期状态。
+- 解决的问题：
+  - 为后续 API、前端和事件流提供统一状态基础。
+
+### 步骤 80：实现 Runtime cancel 内核
+- 修改文件：
+  - `src/code_review_agent/runtime/service.py`
+  - `src/code_review_agent/runtime/__init__.py`
+- 具体改动：
+  - 新增常量：
+    - `TERMINAL_RUN_STATUSES`
+    - `CANCELLED_BY_USER`
+  - 新增异常：
+    - `RunAlreadyTerminalError`
+  - `AgentRuntime` 新增：
+    - `_running_tasks`
+    - `_running_tasks_lock`
+    - `cancel_run(run_id)`
+    - `_register_running_task()`
+    - `_unregister_running_task()`
+    - `_append_lifecycle_event()`
+  - `execute_run()` 开始执行后注册当前 asyncio task。
+  - `execute_run()` 如果发现 run 已是终止态，直接返回，不再执行模型。
+  - `cancel_run()` 行为：
+    - `queued`：写 `run.cancel_requested`，直接更新为 `cancelled`，附加 `AgentRunResult(status="cancelled")`，写 `run.cancelled`。
+    - `running`：写 `run.cancel_requested`，找到当前 task 后调用 `task.cancel()`。
+    - 终止态：抛出 `RunAlreadyTerminalError`。
+  - `execute_run()` 显式捕获 `asyncio.CancelledError`：
+    - 附加 cancelled result
+    - 更新状态为 `cancelled`
+    - 写 `run.cancelled`
+    - 记录 runtime summary
+    - 返回最新 run
+- 修改原因：
+  - 需要支持真正中断正在运行的 run，而不是只改状态。
+- 解决的问题：
+  - queued run 可以取消且不会再执行。
+  - running run 可以通过 task cancellation 中断。
+  - terminal run 有清晰的拒绝语义。
+
+### 步骤 81：补充 Runtime 单元测试
+- 修改文件：
+  - `tests/test_runtime.py`
+- 具体改动：
+  - 新增 `CountingModel`，验证 queued cancel 后不会调用模型。
+  - 新增测试：
+    - queued run cancel 后状态为 `cancelled`，result 为 `cancelled`，再次 execute 不会运行模型。
+    - running run cancel 后 task 被取消，最终状态为 `cancelled`。
+    - completed run 再 cancel 会抛出 `RunAlreadyTerminalError`。
+  - 验证事件：
+    - `run.cancel_requested`
+    - `run.cancelled`
+- 修改原因：
+  - cancel 是生命周期核心能力，必须先用 runtime 测试证明语义正确，再接 API 和前端。
+- 解决的问题：
+  - 防止后续 API 只调用状态更新而没有真正中断 task。
+
+### 步骤 82：测试验证
+- 运行命令：
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest tests/test_runtime.py`
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest`
+- 观察结果：
+  - runtime 单测：`8 passed`
+  - 全量回归：`115 passed, 30 warnings`
+- 问题判断：
+  - warnings 仍为既有 FastAPI `on_event` deprecation warning。
+  - `cancelled` 状态扩展没有破坏现有 API、SQLite store、Repo Analyst 或工具测试。
+
+## 当前状态（Cancel Step 1）
+- 已完成：
+  - `cancelled` 生命周期状态。
+  - queued cancel。
+  - running task cancel。
+  - terminal cancel 拒绝。
+  - cancel lifecycle events。
+  - runtime 单测覆盖。
+- 遗留问题：
+  - API cancel endpoint 尚未实现。
+  - Repo Analyst cancel facade 尚未实现。
+  - `run_command` subprocess cancellation cleanup 尚未实现，这是 Step 2。
+  - 前端 Cancel 按钮尚未实现。
+- 后续建议：
+  - 下一步执行 Step 2：让 `run_allowed_command()` 在 task cancellation 时 kill 子进程并重新抛出 `CancelledError`。
+
+## Cancel Step 2：run_command 子进程取消清理
+
+### 步骤 83：处理 subprocess cancellation
+- 修改文件：
+  - `src/code_review_agent/sandbox/command.py`
+- 具体改动：
+  - 在 `run_allowed_command()` 等待 `process.communicate()` 时新增 `asyncio.CancelledError` 分支。
+  - 当外部 runtime task 被取消时：
+    - 调用 `process.kill()`
+    - 调用 `await process.communicate()` 回收子进程输出/状态
+    - 重新抛出 `CancelledError`
+- 修改原因：
+  - Step 1 已经能取消 running run，但如果取消发生在 `run_command` 执行期间，pytest/git 子进程可能继续运行。
+- 解决的问题：
+  - 防止用户取消 run 后，底层命令进程仍在后台继续跑。
+
+### 步骤 84：补充命令取消测试
+- 修改文件：
+  - `tests/test_command_sandbox.py`
+- 具体改动：
+  - 新增 `test_run_allowed_command_kills_process_when_cancelled`。
+  - 通过 monkeypatch 模拟一个长时间阻塞在 `communicate()` 的子进程。
+  - 创建 `run_allowed_command()` task 后主动 `task.cancel()`。
+  - 断言：
+    - `asyncio.CancelledError` 会继续向上抛出
+    - fake process 的 `kill()` 被调用
+    - fake process 被回收并设置 returncode
+- 修改原因：
+  - cancel 路径不能只靠人工推断，必须验证不会吞掉 cancellation。
+- 解决的问题：
+  - 确保 `run_command` 和 runtime cancel 语义兼容。
+
+### 步骤 85：测试验证
+- 运行命令：
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest tests/test_command_sandbox.py`
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest tests/test_run_command_tool.py tests/test_runtime.py`
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest`
+- 观察结果：
+  - 命令沙箱测试：`24 passed`
+  - run_command + runtime 测试：`14 passed`
+  - 全量回归：`116 passed, 30 warnings`
+- 问题判断：
+  - warnings 仍为既有 FastAPI `on_event` deprecation warning。
+  - Step 2 没有破坏 timeout、tool result 或 runtime cancel 语义。
+
+## 当前状态（Cancel Step 2）
+- 已完成：
+  - `run_command` cancellation cleanup。
+  - 子进程 kill + communicate 回收。
+  - cancellation 继续向上传播。
+  - 对应测试覆盖。
+- 遗留问题：
+  - API cancel endpoint 尚未实现。
+  - Repo Analyst cancel facade 尚未实现。
+  - 前端 Cancel 按钮尚未实现。
+- 后续建议：
+  - 下一步执行 Step 3：补齐 `/runs/{run_id}/cancel` 和 `/repo-analyst/runs/{run_id}/cancel`。
+
+## Cancel Step 3：API + Repo Analyst Service
+
+### 步骤 86：补齐 Repo Analyst cancel facade
+- 修改文件：
+  - `src/code_review_agent/apps/repo_analyst/service.py`
+- 具体改动：
+  - 新增 `RepoAnalystService.cancel_run(run_id)`。
+  - 先通过 runtime 读取 run 并确认 `app_name == "repo_analyst"`。
+  - 如果不是 repo analyst run，抛出 `RunNotFoundError`，避免 repo endpoint 取消通用 run。
+  - 调用 `runtime.cancel_run(run_id)` 后转换为 app 视角的 `RepoAnalystRunResult`。
+- 修改原因：
+  - Repo Analyst API 不能直接暴露通用 runtime cancel，否则 app 边界不清晰。
+- 解决的问题：
+  - 为 `/repo-analyst/runs/{run_id}/cancel` 提供服务层入口。
+
+### 步骤 87：新增 cancel API endpoint
+- 修改文件：
+  - `src/code_review_agent/api/routes.py`
+- 具体改动：
+  - 新增：
+    - `POST /runs/{run_id}/cancel`
+    - `POST /repo-analyst/runs/{run_id}/cancel`
+  - API key 校验沿用已有 `_enforce_api_key()`。
+  - 错误映射：
+    - `RunNotFoundError` -> 404
+    - `RunAlreadyTerminalError` -> 409
+  - 成功时返回最新 run / repo analyst run 结果。
+- 修改原因：
+  - Step 1/2 已完成 runtime cancel 和子进程清理，但用户还无法通过 HTTP 调用。
+- 解决的问题：
+  - 后端入口补齐，外部客户端可以请求取消任务。
+
+### 步骤 88：补充 API 与 Service 测试
+- 修改文件：
+  - `tests/test_api.py`
+  - `tests/test_repo_analyst.py`
+- 具体改动：
+  - API 测试新增：
+    - 通用 queued run cancel 成功。
+    - 通用 cancel 后 events 可查询，并包含 `run.cancel_requested` / `run.cancelled`。
+    - 通用 missing run cancel 返回 404。
+    - 通用 terminal run cancel 返回 409。
+    - 远端请求未带 API key 时 cancel 返回 401。
+    - Repo Analyst queued run cancel 成功。
+    - Repo Analyst cancel 后 events 可查询。
+    - Repo Analyst missing run cancel 返回 404。
+    - Repo Analyst terminal run cancel 返回 409。
+  - Repo Analyst service 测试新增：
+    - `cancel_run()` 可取消 queued repo analyst run。
+    - `cancel_run()` 拒绝非 repo analyst run。
+- 修改原因：
+  - cancel API 涉及权限、生命周期和 app 边界，需要覆盖成功路径和错误映射。
+- 解决的问题：
+  - 确保 HTTP 层不是只改状态，而是调用 runtime/service 的正式 cancel 逻辑。
+
+### 步骤 89：测试验证
+- 运行命令：
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest tests/test_api.py tests/test_repo_analyst.py`
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest`
+- 观察结果：
+  - API + Repo Analyst 测试：`39 passed, 44 warnings`
+  - 全量回归：`125 passed, 44 warnings`
+- 问题判断：
+  - warnings 仍为既有 FastAPI `on_event` deprecation warning。
+  - Step 3 没有破坏现有 API、Repo Analyst、runtime 或工具行为。
+
+## 当前状态（Cancel Step 3）
+- 已完成：
+  - 通用 cancel API。
+  - Repo Analyst cancel API。
+  - Repo Analyst service cancel facade。
+  - 404 / 409 / API key 行为覆盖。
+  - cancel events 可查询。
+- 遗留问题：
+  - 前端 Cancel 按钮尚未实现。
+  - running run 的 HTTP 端到端取消已由 runtime 单测覆盖，API 侧目前主要覆盖 queued/terminal/missing。
+- 后续建议：
+  - 下一步执行 Step 4：前端显示 Cancel 按钮，调用 `/repo-analyst/runs/{run_id}/cancel` 并刷新详情。
+
+## Cancel Step 4：前端 Cancel 按钮与状态展示
+
+### 步骤 90：前端详情区接入取消操作
+- 修改文件：
+  - `src/code_review_agent/web/index.html`
+- 具体改动：
+  - 在详情页工具栏新增 `cancelRunButton`。
+  - 新增 `button.danger` 样式，用于取消任务按钮。
+  - 新增 `canCancelRun()` 与 `updateCancelButton()`：
+    - 只在 run 状态为 `queued` 或 `running` 时显示取消按钮。
+    - 其他状态隐藏取消按钮。
+  - 在 `renderDetail()` 中根据当前 run 状态刷新按钮显隐。
+  - 在详情加载失败或未选择 run 时隐藏取消按钮。
+  - 点击取消按钮后调用：
+    - `POST /repo-analyst/runs/{run_id}/cancel`
+  - 取消成功后调用 `loadRuns()`，重新刷新 run 列表、当前 run 详情和 events。
+  - 取消失败时恢复按钮可点击，并在表单状态区显示失败原因。
+- 修改原因：
+  - Step 3 已补齐后端 cancel API，但前端还不能直接取消任务。
+- 解决的问题：
+  - 用户可以在 Web UI 中取消排队中或运行中的 Repo Analyst run。
+
+### 步骤 91：补齐 cancelled 状态与中英文文案
+- 修改文件：
+  - `src/code_review_agent/web/index.html`
+- 具体改动：
+  - 新增 `.status-cancelled` 样式。
+  - 中英文文案新增：
+    - `cancel_run`
+    - `cancelling_run`
+    - `run_cancelled`
+    - `cancel_failed`
+    - `status_cancelled`
+- 修改原因：
+  - Runtime/API 已经引入 `cancelled` 状态，前端需要正确展示。
+- 解决的问题：
+  - run 列表与详情页能显示“已取消 / Cancelled”，而不是落到未知状态或无样式状态。
+
+### 步骤 92：验证 timeline 与 events 展示
+- 修改文件：
+  - `src/code_review_agent/web/index.html`
+- 具体改动：
+  - 没有新增专门的 cancel event 分支。
+  - 复用现有 timeline/events 渲染逻辑，直接展示后端返回的：
+    - `run.cancel_requested`
+    - `run.cancelled`
+- 修改原因：
+  - timeline 本身按 event 类型通用渲染，取消事件不需要特殊 UI 分支。
+- 解决的问题：
+  - 点击取消后刷新 events，用户能在 timeline 和原始事件里看到取消链路。
+
+### 步骤 93：测试验证
+- 运行命令：
+  - `node -e "const fs=require('fs'); const html=fs.readFileSync('src/code_review_agent/web/index.html','utf8'); const m=html.match(/<script>([\\s\\S]*)<\\/script>/); if(!m) throw new Error('script not found'); new Function(m[1]); console.log('frontend script syntax ok');"`
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest tests/test_api.py tests/test_repo_analyst.py`
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest`
+- 观察结果：
+  - 前端脚本语法检查：`frontend script syntax ok`
+  - API + Repo Analyst 回归：`39 passed, 44 warnings`
+  - 全量回归：`125 passed, 44 warnings`
+- 问题判断：
+  - warnings 仍为既有 FastAPI `on_event` deprecation warning。
+  - 本阶段只改前端文件，没有引入新的后端测试失败。
+
+## 当前状态（Cancel Step 4）
+- 已完成：
+  - 前端 Cancel 按钮。
+  - 仅 `queued/running` 可取消。
+  - 调用 `/repo-analyst/runs/{run_id}/cancel`。
+  - `cancelled` 状态样式与中英文文案。
+  - 点击取消后刷新 run 和 events。
+  - timeline/events 可展示 cancel events。
+  - 前端脚本语法检查与全量测试通过。
+- 遗留问题：
+  - 目前没有浏览器自动化测试覆盖按钮显隐和点击流程。
+  - running run 的真实浏览器取消体验还需要在本地服务启动后手工验证一次。
+- 后续建议：
+  - 下一步可以启动本地服务，在 UI 上创建一个长任务并取消，确认按钮状态和 timeline 展示符合预期。
+
+## Tools Discovery Phase 1：`GET /tools` 只读发现
+
+### 步骤 94：新增工具发现响应模型
+- 修改文件：
+  - `src/code_review_agent/tools/discovery.py`
+  - `src/code_review_agent/tools/__init__.py`
+- 具体改动：
+  - 新增 `ToolDescriptor`，作为 API/UI 可消费的工具元数据：
+    - `name`
+    - `description`
+    - `parameters`
+    - `enabled`
+    - `source`
+    - `category`
+    - `risk_level`
+    - `disabled_reason`
+  - 新增内置工具元数据映射：
+    - `list_files`: `filesystem` / `low`
+    - `read_file`: `filesystem` / `medium`
+    - `search_text`: `search` / `medium`
+    - `run_command`: `command` / `high`
+  - 新增 `describe_tool()` 和 `describe_registry()`。
+  - 从 `tools.__init__` 导出 `ToolDescriptor`、`describe_tool`、`describe_registry`。
+- 修改原因：
+  - `/tools` 不应该只返回裸 schema，还需要告诉前端和用户工具来源、风险等级和启用状态。
+- 解决的问题：
+  - 让工具能力从“只在模型请求里隐式存在”变成“可以通过 API 显式发现”。
+
+### 步骤 95：新增 `GET /tools`
+- 修改文件：
+  - `src/code_review_agent/api/routes.py`
+- 具体改动：
+  - 新增：
+    - `GET /tools`
+  - 路由行为：
+    - 沿用现有 `_enforce_api_key()`。
+    - 从 `request.app.state.runtime.tool_registry_factory()` 创建当前 runtime registry。
+    - 通过 `describe_registry()` 返回工具列表。
+  - 第一版所有当前 registry 中的工具都返回 `enabled=true`。
+- 修改原因：
+  - 本阶段只做只读发现，不引入启停策略，避免影响已有 Agent loop 和 Repo Analyst 行为。
+- 解决的问题：
+  - API 客户端和前端可以查询当前 runtime 实际暴露给模型的工具集合。
+
+### 步骤 96：补充 API 测试
+- 修改文件：
+  - `tests/test_api.py`
+- 具体改动：
+  - 新增测试：
+    - `GET /tools` 返回四个默认内置工具。
+    - 工具 metadata 正确：
+      - `list_files` 为 low/filesystem。
+      - `read_file` 为 medium/filesystem。
+      - `search_text` 为 medium/search。
+      - `run_command` 为 high/command。
+    - API 返回的 `name/description/parameters` 与 `ToolRegistry.get_model_schemas()` 一致。
+    - 远程请求无 API key 时返回 401。
+    - 远程请求带正确 API key 时返回 200。
+- 修改原因：
+  - 工具发现接口会被前端和用户用来判断 runtime 能力，需要保证 schema 和实际模型可见 schema 不分叉。
+- 解决的问题：
+  - 防止后续修改工具 schema 时 `/tools` 和模型调用 schema 不一致。
+
+### 步骤 97：测试与调试记录
+- 运行命令：
+  - `rg "build_default_tool_registry|ToolDiscovery|/tools" -n src tests`
+- 观察结果：
+  - Windows 环境中 `rg.exe` 执行失败：
+    - `Access is denied`
+- 问题判断：
+  - 这是本机 ripgrep 执行权限问题，不是项目测试失败。
+- 接下来处理：
+  - 改用 PowerShell `Get-Content` / `Select-String` 读取和搜索文件。
+
+- 运行命令：
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest tests/test_api.py`
+- 观察结果：
+  - `26 passed, 52 warnings`
+- 问题判断：
+  - `/tools` API 测试通过。
+  - warnings 仍为既有 FastAPI `on_event` deprecation warning。
+
+- 运行命令：
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest`
+- 观察结果：
+  - `129 passed, 52 warnings`
+- 问题判断：
+  - 本阶段没有破坏 runtime、Repo Analyst、工具系统或前端相关测试。
+
+## 当前状态（Tools Discovery Phase 1）
+- 已完成：
+  - `GET /tools`。
+  - 工具只读发现响应模型。
+  - 默认内置工具 metadata。
+  - schema 与 `ToolRegistry.get_model_schemas()` 一致性测试。
+  - API key 行为测试。
+- 遗留问题：
+  - 还没有工具启停策略，当前返回的已注册工具全部是 `enabled=true`。
+  - 前端还没有展示工具列表。
+  - `disabled_reason` 字段已预留，但本阶段不会产生非空值。
+- 后续建议：
+  - 下一步做 `.env` 级别的 `ENABLED_TOOLS` 静态启停。
+  - 再下一步把 Repo Analyst 的 `overview/review` mode 与默认工具集绑定。
+
+## Tools Discovery Phase 2：`.env` 级别 `ENABLED_TOOLS` 静态启停
+
+### 步骤 98：Settings 支持 `ENABLED_TOOLS`
+- 修改文件：
+  - `src/code_review_agent/settings.py`
+  - `tests/test_settings.py`
+- 具体改动：
+  - 新增 `_parse_csv_env()`，解析逗号分隔环境变量。
+  - `Settings` 新增：
+    - `enabled_tools: tuple[str, ...] | None`
+  - `get_settings()` 读取：
+    - `ENABLED_TOOLS`
+  - 语义：
+    - 未设置 `ENABLED_TOOLS`：返回 `None`，表示启用所有内置工具。
+    - 设置为空字符串：返回 `()`，表示不启用任何工具。
+    - 设置逗号分隔列表：返回工具名 tuple。
+  - 测试覆盖：
+    - `.env` 中 `ENABLED_TOOLS=list_files, read_file,run_command` 可解析。
+    - `ENABLED_TOOLS=""` 表示空工具集。
+- 修改原因：
+  - 工具启停应先由后端配置控制，而不是立即暴露前端动态开关。
+- 解决的问题：
+  - 为不同部署环境提供最小可控的工具暴露策略。
+
+### 步骤 99：默认工具 registry 按配置注册工具
+- 修改文件：
+  - `src/code_review_agent/runtime/service.py`
+  - `src/code_review_agent/runtime/__init__.py`
+  - `tests/test_tool_registry.py`
+- 具体改动：
+  - 新增 `BUILTIN_TOOL_FACTORIES`，统一维护内置工具工厂：
+    - `list_files`
+    - `read_file`
+    - `search_text`
+    - `run_command`
+  - 新增 `_resolve_enabled_tool_names()`：
+    - 未配置时返回所有内置工具。
+    - 配置为空时返回空集合。
+    - 配置未知工具名时抛出 `ValueError("unknown enabled tools: ...")`。
+  - `build_default_tool_registry(enabled_tools=None)` 改为只注册启用工具。
+  - `build_default_runtime()` 在启动时解析一次 `enabled_tools`，并用闭包固定本次 runtime 的工具策略。
+  - 导出 `build_default_tool_descriptors()`。
+  - 测试覆盖：
+    - `build_default_tool_registry(("list_files", "read_file"))` 只注册这两个工具。
+    - 环境变量 `ENABLED_TOOLS=list_files,search_text` 会影响默认 registry。
+    - 未知工具名会被拒绝。
+- 修改原因：
+  - disabled 工具不能只在 UI 上标记禁用，还必须从 runtime registry 中移除，避免进入模型可见 schema。
+- 解决的问题：
+  - 模型请求中的 `tools` 列表现在会严格受 `ENABLED_TOOLS` 控制。
+
+### 步骤 100：`/tools` 显示 disabled 工具与原因
+- 修改文件：
+  - `src/code_review_agent/runtime/service.py`
+  - `src/code_review_agent/api/routes.py`
+  - `tests/test_api.py`
+- 具体改动：
+  - `AgentRuntime` 新增 `tool_discovery_factory` 和 `list_tools()`。
+  - 默认 runtime 的 `tool_discovery_factory` 使用 `build_default_tool_descriptors(enabled_tools)`。
+  - `build_default_tool_descriptors()` 返回所有内置工具：
+    - 启用工具：`enabled=true`, `disabled_reason=null`
+    - 禁用工具：`enabled=false`, `disabled_reason="not_in_enabled_tools"`
+  - `/tools` 改为调用 `runtime.list_tools()`，而不是直接描述当前 registry。
+  - 测试覆盖：
+    - 当启用 `list_files/read_file` 时，`search_text/run_command` 仍出现在 `/tools`，但 `enabled=false`。
+    - disabled 工具有 `disabled_reason="not_in_enabled_tools"`。
+- 修改原因：
+  - `GET /tools` 既要反映模型可见工具，也要解释哪些内置工具因配置被关闭。
+- 解决的问题：
+  - UI/用户可以知道工具被禁用，而不是误以为系统没有这个工具能力。
+
+### 步骤 101：验证 disabled 工具不进入模型 schema
+- 修改文件：
+  - `tests/test_runtime.py`
+- 具体改动：
+  - 新增 `RecordingModel`，记录模型请求中的 `request.tools`。
+  - 新增测试：
+    - runtime 使用 `build_default_tool_registry(("list_files",))`。
+    - 执行 run 后断言模型只看到 `list_files` 一个工具。
+  - 新增测试：
+    - `ENABLED_TOOLS=missing_tool` 时，`build_default_runtime()` 直接抛出 `ValueError`。
+- 修改原因：
+  - 本阶段的关键安全语义是 disabled 工具不能被模型调用。
+- 解决的问题：
+  - 用测试证明禁用工具不会出现在 `ChatRequest.tools` 中。
+
+### 步骤 102：补充配置文档
+- 修改文件：
+  - `.env.example`
+  - `README.md`
+- 具体改动：
+  - `.env.example` 新增：
+    - `ENABLED_TOOLS=list_files,read_file,search_text,run_command`
+  - README 的 `.env` 示例新增 `ENABLED_TOOLS`。
+  - README API notes 新增：
+    - 未设置则启用所有内置工具。
+    - 设置逗号分隔列表则只暴露指定工具。
+    - 设置为空则禁用全部工具。
+    - `GET /tools` 可查看 schema、风险等级和启用状态。
+- 修改原因：
+  - 静态启停是运维配置，如果只写代码不写示例，后续使用时容易误配。
+- 解决的问题：
+  - 用户可以直接在 `.env` 中找到工具启停的配置入口。
+
+### 步骤 103：测试验证
+- 运行命令：
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest tests/test_settings.py tests/test_tool_registry.py tests/test_runtime.py tests/test_api.py`
+- 观察结果：
+  - `48 passed, 54 warnings`
+- 问题判断：
+  - 针对性测试通过。
+  - warnings 仍为既有 FastAPI `on_event` deprecation warning。
+
+- 运行命令：
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest`
+- 观察结果：
+  - 第一次全量：`136 passed, 54 warnings`
+  - 补充启动时未知工具校验后再次全量：`137 passed, 54 warnings`
+- 问题判断：
+  - 本阶段没有破坏现有 runtime、Repo Analyst、tools、SQLite 或 API 行为。
+
+## 当前状态（Tools Discovery Phase 2）
+- 已完成：
+  - `.env` / 环境变量 `ENABLED_TOOLS`。
+  - 默认 registry 按启用列表注册工具。
+  - `/tools` 显示所有内置工具及启用状态。
+  - disabled 工具显示 `disabled_reason="not_in_enabled_tools"`。
+  - disabled 工具不会进入模型可见 schema。
+  - 未知工具配置启动时失败。
+  - README 与 `.env.example` 已补充配置说明。
+- 遗留问题：
+  - 工具策略仍是全局静态配置，尚未按 Repo Analyst 的 `overview/review` mode 区分。
+  - 前端还没有展示 `/tools` 列表，也没有工具开关 UI。
+  - 当前没有把每次 run 实际使用的工具集持久化到 `RunRecord`。
+- 后续建议：
+  - 下一步做 Repo Analyst mode 默认工具策略：
+    - `overview` 默认不开 `run_command`
+    - `review` 默认开启 `run_command`
+  - 再之后再考虑前端工具列表和每次 run 的工具覆盖配置。
+
+## Tools Policy Phase 3：按 App/Mode 固化工具策略
+
+### 步骤 104：RunRecord 增加 `tool_names` 快照
+- 修改文件：
+  - `src/code_review_agent/runtime/types.py`
+  - `src/code_review_agent/runtime/service.py`
+- 具体改动：
+  - `RunRecord` 新增：
+    - `tool_names: list[str] | None`
+  - `CreateRunRequest` 新增：
+    - `tool_names: list[str] | None`
+  - `AgentRuntime.create_run()` 创建 run 时解析最终工具列表并写入 `RunRecord.tool_names`。
+  - 未显式传 `tool_names` 时，使用当前 runtime 的 enabled tools 作为本次 run 的快照。
+  - 显式传 `tool_names` 时：
+    - 去重并保持顺序。
+    - 如果包含未知或 disabled 工具，抛出 `WorkspaceValidationError`。
+- 修改原因：
+  - 工具策略不能只依赖运行时当前环境变量，否则历史 run 无法复盘。
+  - 每次 run 需要记录“当时实际允许模型看到哪些工具”。
+- 解决的问题：
+  - 后续修改 `.env` 不会影响已创建 run 的工具解释。
+
+### 步骤 105：执行时按 `tool_names` 过滤 registry
+- 修改文件：
+  - `src/code_review_agent/runtime/service.py`
+  - `tests/test_runtime.py`
+- 具体改动：
+  - 新增 `_filter_tool_registry(registry, tool_names)`。
+  - `AgentRuntime.execute_run()` 创建 registry 后，如果 run 有 `tool_names`，则只保留这些工具。
+  - 新增 `RecordingModel` 测试模型，记录 `ChatRequest.tools`。
+  - 新增测试验证：
+    - `tool_names=["list_files"]` 时，模型只看到 `list_files`。
+    - 尝试创建包含 disabled 工具的 run 会被拒绝。
+- 修改原因：
+  - 只在 `/tools` 显示 disabled 不够，关键是 disabled 工具不能进入模型可见 schema。
+- 解决的问题：
+  - 从执行链路上保证工具权限策略生效。
+
+### 步骤 106：SQLite 持久化 `tool_names`
+- 修改文件：
+  - `src/code_review_agent/storage/sqlite_store.py`
+  - `tests/test_sqlite_store.py`
+- 具体改动：
+  - `runs` 表新增 `tool_names_json`。
+  - `create_run()` 将 `RunRecord.tool_names` 序列化为 JSON。
+  - `_row_to_run_record()` 反序列化回 `tool_names`。
+  - `_ensure_initialized()` 增加轻量迁移：
+    - 如果已有 SQLite 数据库缺少 `tool_names_json` 列，则执行 `ALTER TABLE runs ADD COLUMN tool_names_json TEXT`。
+  - SQLite 测试覆盖 tool_names 持久化读取。
+- 修改原因：
+  - 当前是开发阶段，但 runtime 已经支持 SQLite 历史查询，新增 run 字段不能只支持新库。
+- 解决的问题：
+  - 旧 `runtime.db` 不删除也能自动补列。
+
+### 步骤 107：Repo Analyst 按 mode 生成工具策略
+- 修改文件：
+  - `src/code_review_agent/apps/repo_analyst/service.py`
+  - `src/code_review_agent/apps/repo_analyst/types.py`
+  - `tests/test_repo_analyst.py`
+- 具体改动：
+  - 新增 mode 默认工具集：
+    - `overview`: `list_files`, `read_file`, `search_text`
+    - `review`: `list_files`, `read_file`, `search_text`, `run_command`
+  - `RepoAnalystService.create_run()` 根据 mode 传入 `CreateRunRequest.tool_names`。
+  - 策略会和全局 enabled tools 取交集：
+    - 如果全局禁用了 `run_command`，review mode 也不会拿到 `run_command`。
+  - `RepoAnalystRunResult` 新增 `tool_names`。
+  - 为测试/嵌入场景保留 fallback：
+    - 如果 runtime 使用的是非内置自定义工具，例如测试中的 `echo`，则保留 runtime 当前 enabled 工具，避免专用 app 测试被内置工具策略误伤。
+  - 新增测试：
+    - overview run 的模型请求不包含 `run_command`。
+    - review run 的模型请求包含 `run_command`。
+    - review 会尊重全局 disabled 工具。
+- 修改原因：
+  - 仓库总览默认不应拥有命令执行能力；代码审查模式才需要 `python -m pytest` / git 只读命令。
+- 解决的问题：
+  - 不同 app/mode 的工具权限变得可解释、可复盘、可测试。
+
+### 步骤 108：API 与前端展示本次启用工具
+- 修改文件：
+  - `tests/test_api.py`
+  - `src/code_review_agent/web/index.html`
+- 具体改动：
+  - API 测试新增：
+    - `GET /repo-analyst/runs/{id}` 返回 `tool_names`。
+  - 前端详情页新增：
+    - “本次启用工具 / Enabled Tools”
+  - 如果工具列表为空，显示：
+    - “未启用工具。/ No tools enabled.”
+- 修改原因：
+  - 用户需要在 run 详情中看到这次 Agent 实际拥有的工具权限。
+- 解决的问题：
+  - 从 UI 到 API 都能复盘 mode 工具策略。
+
+### 步骤 109：测试与调试记录
+- 运行命令：
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest tests/test_runtime.py tests/test_repo_analyst.py tests/test_api.py tests/test_sqlite_store.py`
+  - `node -e "const fs=require('fs'); const html=fs.readFileSync('src/code_review_agent/web/index.html','utf8'); const m=html.match(/<script>([\\s\\S]*)<\\/script>/); if(!m) throw new Error('script not found'); new Function(m[1]); console.log('frontend script syntax ok');"`
+- 观察结果：
+  - 相关测试：`61 passed, 56 warnings`
+  - 前端脚本语法检查：`frontend script syntax ok`
+- 问题判断：
+  - mode 工具策略、SQLite 持久化、API 返回和前端脚本均通过验证。
+  - warnings 仍为既有 FastAPI `on_event` deprecation warning。
+
+- 运行命令：
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest`
+- 观察结果：
+  - `142 passed, 56 warnings`
+- 问题判断：
+  - 全量回归通过。
+
+- 运行命令：
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m ruff check src/code_review_agent/runtime/service.py src/code_review_agent/apps/repo_analyst/service.py src/code_review_agent/storage/sqlite_store.py src/code_review_agent/web/index.html tests/test_runtime.py tests/test_repo_analyst.py tests/test_api.py tests/test_sqlite_store.py`
+- 观察结果：
+  - 失败：
+    - `No module named ruff`
+- 问题判断：
+  - 当前 `dl` 环境未安装 ruff，不是代码执行失败。
+- 接下来处理：
+  - 不安装新依赖；以 pytest 和前端脚本语法检查作为本阶段验证。
+
+## 当前状态（Tools Policy Phase 3）
+- 已完成：
+  - `RunRecord.tool_names`。
+  - `CreateRunRequest.tool_names`。
+  - run 创建时写入工具快照。
+  - run 执行时按工具快照过滤 registry。
+  - SQLite 持久化与旧库自动补列。
+  - Repo Analyst overview/review mode 默认工具策略。
+  - `GET /repo-analyst/runs/{id}` 返回本次工具集。
+  - 前端详情页展示本次启用工具。
+- 遗留问题：
+  - 通用 `/runs` 目前使用全局 enabled tools 快照，没有按 app 进一步细分。
+  - 前端仍没有创建 run 时的手动工具开关。
+  - `GET /tools` 还没有在前端形成工具列表面板。
+- 后续建议：
+  - 下一步做前端工具列表展示，读取 `GET /tools`，让用户能看到全局工具状态。
+  - 再下一步做前端 per-run 工具覆盖配置，但需要明确是否允许用户覆盖 mode 默认策略。
+
+## Tools Policy Phase 4：前端工具权限面板与 per-run 覆盖
+
+### 步骤 110：Repo Analyst 请求支持 `enabled_tools`
+- 修改文件：
+  - `src/code_review_agent/apps/repo_analyst/types.py`
+  - `src/code_review_agent/apps/repo_analyst/service.py`
+- 具体改动：
+  - `RepoAnalystRequest` 新增：
+    - `enabled_tools: list[str] | None`
+  - `RepoAnalystService.create_run()` 将 `enabled_tools` 传入工具策略解析。
+  - `_resolve_tool_names()` 支持两种路径：
+    - 未传 `enabled_tools`：继续使用 mode 默认工具策略。
+    - 传入 `enabled_tools`：作为本次 run 的工具覆盖列表。
+  - 覆盖列表会去重并保留顺序。
+- 修改原因：
+  - 前端需要允许用户在创建任务时手动关闭或调整工具权限。
+- 解决的问题：
+  - 工具策略不再只能由 mode 决定，可以按单次 run 覆盖。
+
+### 步骤 111：后端校验 unknown / disabled 工具
+- 修改文件：
+  - `src/code_review_agent/apps/repo_analyst/service.py`
+  - `tests/test_repo_analyst.py`
+  - `tests/test_api.py`
+- 具体改动：
+  - 显式 `enabled_tools` 只允许选择 `source="builtin"` 的工具。
+  - 如果包含未知工具，抛出 `WorkspaceValidationError`：
+    - `enabled_tools include unknown tools: ...`
+  - 如果包含全局 disabled 工具，抛出 `WorkspaceValidationError`：
+    - `enabled_tools include disabled tools: ...`
+  - API 层沿用已有 `WorkspaceValidationError -> HTTP 400` 映射。
+  - 新增测试：
+    - service 拒绝未知工具。
+    - service 拒绝全局禁用工具。
+    - API 拒绝未知工具。
+    - API 拒绝全局禁用工具。
+    - 传入合法 `enabled_tools` 后，`tool_names` 只包含用户选择的工具。
+- 修改原因：
+  - 前端只是便利入口，后端必须是最终权限边界。
+- 解决的问题：
+  - 用户不能通过 payload 绕过全局 `ENABLED_TOOLS` 或调用不存在的工具。
+
+### 步骤 112：前端新增工具权限折叠面板
+- 修改文件：
+  - `src/code_review_agent/web/index.html`
+- 具体改动：
+  - 创建任务表单新增“工具权限 / Tool Permissions”折叠区域。
+  - 前端启动时调用：
+    - `GET /tools`
+  - 面板展示：
+    - 工具名
+    - 描述
+    - 风险等级
+    - 是否启用
+    - disabled reason
+  - 对高风险工具使用红色 `risk-high` 标记。
+  - 全局 disabled 工具 checkbox 不可勾选，并显示禁用原因。
+- 修改原因：
+  - 用户需要在创建 run 前看到当前 runtime 的工具能力和风险等级。
+- 解决的问题：
+  - `/tools` 不再只是 API 能力，前端也能直接呈现工具状态。
+
+### 步骤 113：前端按 mode 自动选择默认工具并提交覆盖
+- 修改文件：
+  - `src/code_review_agent/web/index.html`
+- 具体改动：
+  - 前端维护：
+    - `state.tools`
+    - `state.selectedToolNames`
+  - 默认选择策略：
+    - `overview`: `list_files`, `read_file`, `search_text`
+    - `review`: `list_files`, `read_file`, `search_text`, `run_command`
+  - 默认选择会和 `/tools` 返回的 enabled 状态取交集。
+  - 切换 mode 时重新应用默认选择。
+  - 用户可以手动勾选/取消已启用工具。
+  - 提交时：
+    - 如果 `/tools` 成功加载，则提交 `enabled_tools`。
+    - 如果 `/tools` 加载失败，则不提交 `enabled_tools`，避免误把空数组当成“用户主动禁用全部工具”。
+- 修改原因：
+  - 需要同时满足 mode 默认策略和用户手动关闭工具的需求。
+- 解决的问题：
+  - 用户现在可以创建一个 review run，但手动关闭 `run_command`。
+
+### 步骤 114：测试与调试记录
+- 运行命令：
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest tests/test_repo_analyst.py tests/test_api.py`
+  - `node -e "const fs=require('fs'); const html=fs.readFileSync('src/code_review_agent/web/index.html','utf8'); const m=html.match(/<script>([\\s\\S]*)<\\/script>/); if(!m) throw new Error('script not found'); new Function(m[1]); console.log('frontend script syntax ok');"`
+- 观察结果：
+  - Repo Analyst + API：`54 passed, 62 warnings`
+  - 前端脚本语法检查：`frontend script syntax ok`
+- 问题判断：
+  - 后端校验、API 映射、显式工具覆盖和前端脚本语法都通过。
+  - warnings 仍为既有 FastAPI `on_event` deprecation warning。
+
+- 方案微调：
+  - 原方案：无论 `/tools` 是否加载成功，提交时都发送 `enabled_tools`。
+  - 调整原因：如果 `/tools` 加载失败，`state.selectedToolNames` 为空，可能被误解释为“用户主动禁用全部工具”。
+  - 新方案：只有 `state.tools.length > 0` 时才提交 `enabled_tools`。
+  - 影响：工具列表加载失败时后端继续使用 mode 默认策略，而不是空工具集。
+
+- 运行命令：
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest`
+- 观察结果：
+  - `148 passed, 62 warnings`
+- 问题判断：
+  - 全量回归通过。
+
+## 当前状态（Tools Policy Phase 4）
+- 已完成：
+  - `RepoAnalystRequest.enabled_tools`。
+  - 后端 unknown / disabled 工具校验。
+  - API 400 测试。
+  - per-run 工具覆盖。
+  - 前端工具权限折叠面板。
+  - 前端按 mode 自动勾选默认工具。
+  - 前端提交 `enabled_tools`。
+  - 高风险工具视觉标记。
+  - disabled reason 展示。
+- 遗留问题：
+  - 还没有浏览器自动化测试覆盖 checkbox 交互。
+  - 前端目前只在创建 Repo Analyst run 时支持工具覆盖，通用 `/runs` 还没有对应 UI。
+  - 工具 schema 还没有在面板中展开展示。
+- 后续建议：
+  - 下一步可以用浏览器手工验证：
+    - overview 默认不勾选 `run_command`
+    - review 默认勾选 `run_command`
+    - 手动取消 `run_command` 后创建 review run，详情里的“本次启用工具”不包含 `run_command`
+  - 后续再做工具 schema 展开视图或 per-run 工具选择持久化展示优化。
+
+## Provider Phase 1：Provider 字段与 DeepSeek-only Registry
+
+### 步骤 115：Settings 增加默认 provider
+- 修改文件：
+  - `src/code_review_agent/settings.py`
+  - `.env.example`
+  - `README.md`
+  - `tests/test_settings.py`
+- 具体改动：
+  - `Settings` 新增：
+    - `default_provider: str = "deepseek"`
+  - `get_settings()` 读取：
+    - `DEFAULT_PROVIDER`
+  - `.env.example` 与 README 示例新增：
+    - `DEFAULT_PROVIDER=deepseek`
+  - README 说明当前支持的 provider 仍是 `deepseek`，并且 provider 会按 run 持久化。
+- 修改原因：
+  - 后续要支持多 provider，需要先把“默认模型提供方”从模型名中拆出来。
+- 解决的问题：
+  - `DEFAULT_MODEL` 不再隐含 provider 语义。
+
+### 步骤 116：新增模型 provider registry
+- 修改文件：
+  - `src/code_review_agent/models/registry.py`
+  - `src/code_review_agent/models/__init__.py`
+  - `tests/test_model_registry.py`
+- 具体改动：
+  - 新增 `ModelProviderDescriptor`。
+  - 新增：
+    - `SUPPORTED_PROVIDERS = {"deepseek"}`
+    - `normalize_provider(provider)`
+    - `create_model(provider, model_name)`
+    - `list_model_providers()`
+  - `create_model()` 当前只支持 DeepSeek，但入口已经是 provider-neutral。
+  - `list_model_providers()` 返回 DeepSeek provider 元数据，不泄露 API key。
+  - `models.__init__` 导出 registry 相关函数和类型。
+  - 测试覆盖：
+    - 默认 provider 解析。
+    - provider 大小写归一。
+    - unknown provider 报 `ModelConfigurationError`。
+    - `create_model("deepseek")` 创建 `DeepSeekModel`。
+    - provider descriptor 不泄露 API key。
+- 修改原因：
+  - runtime 不应直接依赖 `DeepSeekModel`，否则后续接 SiliconFlow/OpenRouter 会继续污染 runtime。
+- 解决的问题：
+  - 建立 `runtime -> model registry -> provider-specific model` 的创建路径。
+
+### 步骤 117：RunRecord / CreateRunRequest 增加 provider 快照
+- 修改文件：
+  - `src/code_review_agent/runtime/types.py`
+  - `src/code_review_agent/runtime/service.py`
+  - `tests/test_runtime.py`
+- 具体改动：
+  - `RunRecord` 新增：
+    - `provider: str | None`
+  - `CreateRunRequest` 新增：
+    - `provider: str | None`
+  - `AgentRuntime.create_run()` 创建 run 时解析并写入 provider：
+    - 未传 provider 时使用 runtime 默认 provider。
+    - 传 unknown provider 时抛出 `WorkspaceValidationError`。
+  - `AgentRuntime.execute_run()` 改为通过 `_create_model(run.provider, run.model)` 创建模型。
+  - 默认 runtime 使用：
+    - `model_factory=create_model`
+  - 为兼容现有测试和嵌入用法，`AgentRuntime._create_model()` 保留 no-arg `model_factory` fallback。
+  - 测试覆盖：
+    - 默认 run provider 为 `deepseek`。
+    - 显式 provider/model 会写入 run。
+    - unknown provider 会被拒绝。
+- 修改原因：
+  - provider 必须成为 run 生命周期的一部分，而不是执行阶段临时推断。
+- 解决的问题：
+  - 历史 run 可复盘当时使用的 provider。
+
+### 步骤 118：SQLite 持久化 provider
+- 修改文件：
+  - `src/code_review_agent/storage/sqlite_store.py`
+  - `tests/test_sqlite_store.py`
+- 具体改动：
+  - `runs` 表新增 nullable `provider` 列。
+  - `_ensure_run_columns()` 自动迁移旧 SQLite 数据库：
+    - 如果缺少 `provider` 列，执行 `ALTER TABLE runs ADD COLUMN provider VARCHAR`。
+  - `create_run()` 写入 provider。
+  - `_row_to_run_record()` 读取 provider。
+  - SQLite 测试覆盖 provider/model/tool_names 一并持久化。
+- 修改原因：
+  - 当前系统已经使用 SQLite 保存历史 run，provider 字段也必须持久化。
+- 解决的问题：
+  - 服务重启后仍能查询 run 使用的 provider。
+
+### 步骤 119：Repo Analyst 和前端贯通 provider
+- 修改文件：
+  - `src/code_review_agent/apps/repo_analyst/types.py`
+  - `src/code_review_agent/apps/repo_analyst/service.py`
+  - `src/code_review_agent/api/routes.py`
+  - `src/code_review_agent/web/index.html`
+  - `tests/test_repo_analyst.py`
+  - `tests/test_api.py`
+- 具体改动：
+  - `RepoAnalystRequest` 新增：
+    - `provider`
+  - `RepoAnalystRunResult` 新增：
+    - `provider`
+    - `model`
+  - `RepoAnalystService.create_run()` 将 provider 传给 `CreateRunRequest`。
+  - `_to_app_result()` 返回 run 的 provider/model。
+  - `/debug/runtime-config` 增加 `default_provider`。
+  - 前端新增 provider 下拉框：
+    - 当前只有 `DeepSeek`
+  - 前端创建 run 时提交：
+    - `provider`
+    - `model`
+  - 前端详情页显示：
+    - `Provider / model`
+  - API 测试覆盖：
+    - debug config 返回 `default_provider`。
+    - repo analyst run 返回 provider/model。
+    - unknown provider 返回 400。
+- 修改原因：
+  - 即使 Phase 1 只支持 DeepSeek，也要把 API/UI 的形状提前调整成 provider-aware。
+- 解决的问题：
+  - 后续添加 SiliconFlow 时，不需要再重塑 run 请求和前端 payload。
+
+### 步骤 120：测试与调试记录
+- 运行命令：
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest tests/test_model_registry.py tests/test_settings.py tests/test_runtime.py tests/test_sqlite_store.py tests/test_repo_analyst.py tests/test_api.py`
+  - `node -e "const fs=require('fs'); const html=fs.readFileSync('src/code_review_agent/web/index.html','utf8'); const m=html.match(/<script>([\\s\\S]*)<\\/script>/); if(!m) throw new Error('script not found'); new Function(m[1]); console.log('frontend script syntax ok');"`
+- 观察结果：
+  - 前端脚本语法检查：`frontend script syntax ok`
+  - 相关测试第一次运行失败 1 个：
+    - `test_runtime_rejects_unknown_provider`
+    - 失败原因：补测试时把 `unknown enabled tools` 的断言误放进了 unknown provider 测试，导致断言依赖的环境变量上下文不成立。
+- 问题判断：
+  - 这是测试代码组织错误，不是 runtime/provider 行为错误。
+- 处理方式：
+  - 将 `build_default_runtime()` 对 unknown enabled tool 的断言移回 `test_default_runtime_rejects_unknown_enabled_tool()`。
+
+- 运行命令：
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest tests/test_model_registry.py tests/test_settings.py tests/test_runtime.py tests/test_sqlite_store.py tests/test_repo_analyst.py tests/test_api.py`
+- 观察结果：
+  - `76 passed, 64 warnings`
+- 问题判断：
+  - provider registry、持久化、API/Repo Analyst 和前端脚本相关验证通过。
+
+- 运行命令：
+  - `$env:PYTHONPATH='src'; D:\Anaconda\envs\dl\python.exe -m pytest`
+- 观察结果：
+  - `155 passed, 64 warnings`
+- 问题判断：
+  - 全量回归通过。
+  - warnings 仍为既有 FastAPI `on_event` deprecation warning。
+
+## 当前状态（Provider Phase 1）
+- 已完成：
+  - `DEFAULT_PROVIDER`。
+  - `models/registry.py`。
+  - DeepSeek-only provider registry。
+  - `CreateRunRequest.provider`。
+  - `RunRecord.provider`。
+  - SQLite provider 持久化与旧库补列。
+  - `RepoAnalystRequest.provider`。
+  - `RepoAnalystRunResult.provider/model`。
+  - 前端 provider 下拉框与详情展示。
+  - unknown provider 400。
+- 遗留问题：
+  - 真实可用 provider 仍只有 DeepSeek。
+  - 还没有 `GET /models/providers`。
+  - 前端 provider/model 还不是动态联动，只是先固定 DeepSeek。
+- 后续建议：
+  - 下一步做 Provider Phase 2：新增 `SiliconFlowModel`，复用 OpenAI-compatible adapter。
+  - 再下一步做 `GET /models/providers` 和前端动态 provider/model 列表。

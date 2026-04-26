@@ -116,7 +116,7 @@ class InMemoryRunStore(RunStore):
             run.status = status
             if status == "running" and run.started_at is None:
                 run.started_at = utc_now()
-            if status in {"completed", "failed", "max_iterations"}:
+            if status in {"completed", "failed", "max_iterations", "cancelled"}:
                 run.finished_at = utc_now()
             if failure_reason is not None:
                 run.failure_reason = failure_reason

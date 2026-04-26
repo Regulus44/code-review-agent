@@ -8,6 +8,18 @@ import os
 from pathlib import Path
 
 
+def _normalize_env_value(raw_value: str) -> str:
+    """Normalize one `.env` value string.
+
+    - Trim surrounding whitespace
+    - Remove matching wrapper quotes (single or double)
+    """
+    value = raw_value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
 def _load_dotenv() -> None:
     """Load a root-level .env file into os.environ without overriding existing vars."""
     env_path = Path(".env")
@@ -23,7 +35,18 @@ def _load_dotenv() -> None:
         key = key.strip()
         if not key or key in os.environ:
             continue
-        os.environ[key] = value.strip()
+        os.environ[key] = _normalize_env_value(value)
+
+
+def _parse_csv_env(raw_value: str | None) -> tuple[str, ...] | None:
+    """Parse a comma-separated env value.
+
+    `None` means the setting was not configured. An empty configured value means
+    the user intentionally selected an empty list.
+    """
+    if raw_value is None:
+        return None
+    return tuple(item.strip() for item in raw_value.split(",") if item.strip())
 
 
 @dataclass(frozen=True)
@@ -32,12 +55,14 @@ class Settings:
 
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
+    default_provider: str = "deepseek"
     default_model: str = "deepseek-chat"
     runtime_workspace_root: str = "D:\\Develop"
     database_url: str = "sqlite:///./runtime.db"
     api_key: str | None = None
     run_timeout_seconds: int = 300
     max_concurrent_runs: int = 4
+    enabled_tools: tuple[str, ...] | None = None
 
 
 @lru_cache(maxsize=1)
@@ -47,10 +72,12 @@ def get_settings() -> Settings:
     return Settings(
         deepseek_api_key=os.getenv("DEEPSEEK_API_KEY") or None,
         deepseek_base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+        default_provider=os.getenv("DEFAULT_PROVIDER", "deepseek"),
         default_model=os.getenv("DEFAULT_MODEL", "deepseek-chat"),
         runtime_workspace_root=os.getenv("RUNTIME_WORKSPACE_ROOT", "D:\\Develop"),
         database_url=os.getenv("DATABASE_URL", "sqlite:///./runtime.db"),
         api_key=os.getenv("API_KEY") or None,
         run_timeout_seconds=int(os.getenv("RUN_TIMEOUT_SECONDS", "300")),
         max_concurrent_runs=int(os.getenv("MAX_CONCURRENT_RUNS", "4")),
+        enabled_tools=_parse_csv_env(os.getenv("ENABLED_TOOLS")),
     )

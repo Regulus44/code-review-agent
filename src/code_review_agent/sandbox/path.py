@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from code_review_agent.tools.base import ToolExecutionError
-
 
 def resolve_workspace_path(workspace_root: Path, relative_path: str) -> Path:
     """Resolve a relative path inside the workspace root.
@@ -18,6 +16,8 @@ def resolve_workspace_path(workspace_root: Path, relative_path: str) -> Path:
 
     candidate = Path(relative_path or ".")
     if candidate.is_absolute():
+        from code_review_agent.tools.base import ToolExecutionError
+
         raise ToolExecutionError("absolute paths are not allowed")
 
     resolved_root = workspace_root.resolve()
@@ -26,7 +26,8 @@ def resolve_workspace_path(workspace_root: Path, relative_path: str) -> Path:
     try:
         resolved_path.relative_to(resolved_root)
     except ValueError as exc:
+        from code_review_agent.tools.base import ToolExecutionError
+
         raise ToolExecutionError("path escapes the workspace root") from exc
 
     return resolved_path
-

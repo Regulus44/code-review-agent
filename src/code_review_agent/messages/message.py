@@ -59,6 +59,7 @@ class Message(BaseModel):
 
     role: Role
     content: str | None = None
+    reasoning_content: str | None = None
     name: str | None = None
     tool_call_id: str | None = None
     tool_calls: list[ToolCall] = Field(default_factory=list)
@@ -99,6 +100,7 @@ def user_message(content: str, name: str | None = None) -> Message:
 
 def assistant_message(
     content: str | None = None,
+    reasoning_content: str | None = None,
     tool_calls: list[ToolCall] | None = None,
     raw: dict[str, Any] | None = None,
 ) -> Message:
@@ -106,6 +108,7 @@ def assistant_message(
     return Message(
         role=Role.ASSISTANT,
         content=content,
+        reasoning_content=reasoning_content,
         tool_calls=tool_calls or [],
         raw=raw,
     )
@@ -119,4 +122,3 @@ def tool_message(result: ToolResult) -> Message:
         name=result.name,
         tool_call_id=result.tool_call_id,
     )
-

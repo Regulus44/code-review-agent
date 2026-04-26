@@ -39,6 +39,7 @@ class OpenAIChatFormatter:
 
         return assistant_message(
             content=payload.get("content"),
+            reasoning_content=payload.get("reasoning_content"),
             tool_calls=self.parse_tool_calls(payload),
             raw=payload,
         )
@@ -103,5 +104,8 @@ class OpenAIChatFormatter:
                 }
                 for tool_call in message.tool_calls
             ]
+
+        if message.reasoning_content is not None:
+            formatted["reasoning_content"] = message.reasoning_content
 
         return formatted

@@ -32,12 +32,14 @@ Recommended `.env` values:
 ```env
 DEEPSEEK_API_KEY=your_deepseek_key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEFAULT_PROVIDER=deepseek
 DEFAULT_MODEL=deepseek-chat
 API_KEY=optional_api_key_for_remote_calls
 RUNTIME_WORKSPACE_ROOT=D:\Develop
 DATABASE_URL=sqlite:///./runtime.db
 RUN_TIMEOUT_SECONDS=300
 MAX_CONCURRENT_RUNS=4
+ENABLED_TOOLS=list_files,read_file,search_text,run_command
 ```
 
 ## API Notes
@@ -46,6 +48,9 @@ MAX_CONCURRENT_RUNS=4
 - If `API_KEY` is set, non-local requests must send `X-API-Key`.
 - Local loopback requests (`127.0.0.1`, `localhost`) are allowed without `X-API-Key`.
 - Run creation validates `workspace_root` under `RUNTIME_WORKSPACE_ROOT`.
+- `DEFAULT_PROVIDER` currently supports `deepseek`. Provider selection is stored per run so future provider additions can be audited.
+- `ENABLED_TOOLS` is optional. Leave it unset to enable all built-in tools, set a comma-separated list to expose only those tools, or set it empty to disable all tools.
+- `GET /tools` lists each built-in tool, its schema, risk level, and whether it is currently enabled.
 
 ## Repo Analyst Example
 

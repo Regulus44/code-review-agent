@@ -72,6 +72,15 @@
         background: #fff;
       }
 
+      .model-select {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-size: 13px;
+        background: #fff;
+      }
+
       .panel-title {
         font-size: 15px;
         font-weight: 600;
@@ -150,6 +159,17 @@
         border-color: var(--border);
       }
 
+      button.danger {
+        background: #fff;
+        color: var(--danger);
+        border-color: #fecaca;
+      }
+
+      button.danger:hover {
+        background: #fef2f2;
+        border-color: var(--danger);
+      }
+
       .status-line {
         font-size: 13px;
         color: var(--muted);
@@ -184,6 +204,12 @@
         color: var(--danger);
         background: #fef2f2;
         border-color: #fecaca;
+      }
+
+      .status-cancelled {
+        color: var(--muted);
+        background: #f3f4f6;
+        border-color: #d1d5db;
       }
 
       .run-list {
@@ -265,6 +291,77 @@
       .module-name {
         font-weight: 600;
         margin-bottom: 4px;
+      }
+
+      .tool-permissions {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: #fff;
+      }
+
+      .tool-permissions summary {
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 10px 12px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .tool-permissions-panel {
+        border-top: 1px solid var(--border);
+        display: grid;
+        gap: 8px;
+        padding: 10px;
+      }
+
+      .tool-row {
+        align-items: start;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        display: grid;
+        gap: 8px;
+        grid-template-columns: auto 1fr;
+        padding: 10px;
+      }
+
+      .tool-row input[type="checkbox"] {
+        margin-top: 3px;
+        width: auto;
+      }
+
+      .tool-title {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+        font-weight: 600;
+      }
+
+      .risk-chip {
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        font-size: 11px;
+        padding: 2px 6px;
+      }
+
+      .risk-low {
+        color: var(--success);
+        background: #ecfdf3;
+        border-color: #a7f3d0;
+      }
+
+      .risk-medium {
+        color: var(--warning);
+        background: #fff7ed;
+        border-color: #fed7aa;
+      }
+
+      .risk-high {
+        color: var(--danger);
+        background: #fef2f2;
+        border-color: #fecaca;
       }
 
       .event-list {
@@ -369,6 +466,39 @@
               </label>
             </div>
 
+            <label>
+              <span id="modeSelectLabel">任务模式</span>
+              <select id="modeSelect" class="model-select">
+                <option value="overview" selected>仓库总览</option>
+                <option value="review">代码审查</option>
+              </select>
+            </label>
+
+            <label>
+              <span id="providerSelectLabel">选择 Provider</span>
+              <select id="providerSelect" class="model-select">
+                <option value="deepseek" selected>DeepSeek</option>
+              </select>
+            </label>
+
+            <label>
+              <span id="modelSelectLabel">选择模型</span>
+              <select id="modelSelect" class="model-select">
+                <option value="deepseek-v4-pro" selected>DeepSeek V4 Pro (推荐)</option>
+                <option value="deepseek-v4-flash">DeepSeek V4 Flash (快速)</option>
+              </select>
+            </label>
+
+            <details class="tool-permissions" open>
+              <summary>
+                <span id="toolPermissionsLabel">工具权限</span>
+                <span id="toolPermissionsHint" class="muted">按任务模式自动选择</span>
+              </summary>
+              <div id="toolPermissionsPanel" class="tool-permissions-panel">
+                <div class="empty-state">正在加载工具列表...</div>
+              </div>
+            </details>
+
             <div class="toolbar">
               <button type="submit" id="submitButton">创建任务</button>
               <button type="button" class="secondary" id="refreshRunsButton">刷新任务列表</button>
@@ -398,6 +528,7 @@
             <div id="detailMeta" class="panel-subtitle">尚未选择任务</div>
           </div>
           <div class="toolbar">
+            <button type="button" class="danger" id="cancelRunButton" hidden>取消任务</button>
             <button type="button" class="secondary" id="refreshDetailButton">刷新详情</button>
           </div>
         </div>
@@ -426,11 +557,31 @@
           max_tokens: "最大 tokens",
           temperature_placeholder: "默认",
           max_tokens_placeholder: "默认",
+          mode_select: "任务模式",
+          mode_overview: "仓库总览",
+          mode_review: "代码审查",
+          provider_select: "选择 Provider",
+          model_select: "选择模型",
+          model_v4_pro: "DeepSeek V4 Pro (推荐)",
+          model_v4_flash: "DeepSeek V4 Flash (快速)",
+          tool_permissions: "工具权限",
+          tool_permissions_hint: "按任务模式自动选择",
+          loading_tools: "正在加载工具列表...",
+          tool_load_failed: "工具列表加载失败",
+          disabled_reason: "禁用原因",
+          tool_disabled: "已禁用",
+          risk_low: "低风险",
+          risk_medium: "中风险",
+          risk_high: "高风险",
           create_run: "创建任务",
           refresh_runs: "刷新任务列表",
           waiting_form: "等待创建任务。",
           creating_run: "正在创建任务...",
           run_created: "任务已创建",
+          cancel_run: "取消任务",
+          cancelling_run: "正在取消任务...",
+          run_cancelled: "任务已取消",
+          cancel_failed: "取消失败",
           runs_title: "分析任务",
           runs_subtitle: "点击任务查看报告与事件",
           result_title: "分析结果",
@@ -442,6 +593,7 @@
           untitled_run: "未命名任务",
           no_content: "没有内容。",
           no_events: "暂无事件。",
+          no_tools: "未启用工具。",
           no_module_info: "暂无模块信息。",
           no_structured_report: "当前没有可解析的结构化报告。",
           summary: "总结",
@@ -449,13 +601,34 @@
           architecture: "架构",
           risks: "风险",
           next_steps: "下一步",
+          changed_files: "改动文件",
+          test_result: "测试结果",
+          findings: "审查发现",
+          no_findings: "没有明确问题。",
+          command: "命令",
+          exit_code: "退出码",
+          severity: "严重级别",
+          file: "文件",
+          line: "行号",
+          suggestion: "建议",
           report: "报告",
           raw_model_output: "原始模型输出",
           failure_reason: "失败原因",
           parse_diagnostics: "解析诊断",
+          diagnostics: "运行诊断",
+          timeline: "执行时间线",
+          total_duration: "总耗时",
+          model_calls: "模型调用",
+          tool_calls: "工具调用",
+          event_count: "事件数量",
+          token_usage: "Token 用量",
+          slowest_steps: "最慢步骤",
+          no_diagnostics: "暂无运行诊断。",
           events: "运行事件",
           run_info: "任务信息",
           question: "问题",
+          provider: "Provider",
+          enabled_tools: "本次启用工具",
           workspace: "路径",
           status: "状态",
           started: "开始",
@@ -464,6 +637,7 @@
           status_running: "运行中",
           status_completed: "已完成",
           status_failed: "失败",
+          status_cancelled: "已取消",
           status_max_iterations: "达到最大迭代次数",
           status_unknown: "未知状态",
           run_detail_meta_separator: " | ",
@@ -483,11 +657,31 @@
           max_tokens: "Max tokens",
           temperature_placeholder: "default",
           max_tokens_placeholder: "default",
+          mode_select: "Task mode",
+          mode_overview: "Repository Overview",
+          mode_review: "Code Review",
+          provider_select: "Select Provider",
+          model_select: "Select Model",
+          model_v4_pro: "DeepSeek V4 Pro (Recommended)",
+          model_v4_flash: "DeepSeek V4 Flash (Fast)",
+          tool_permissions: "Tool Permissions",
+          tool_permissions_hint: "Auto-selected by task mode",
+          loading_tools: "Loading tools...",
+          tool_load_failed: "Failed to load tools",
+          disabled_reason: "Disabled reason",
+          tool_disabled: "Disabled",
+          risk_low: "Low Risk",
+          risk_medium: "Medium Risk",
+          risk_high: "High Risk",
           create_run: "Create run",
           refresh_runs: "Refresh runs",
           waiting_form: "Waiting for a new run.",
           creating_run: "Creating run...",
           run_created: "Run created",
+          cancel_run: "Cancel run",
+          cancelling_run: "Cancelling run...",
+          run_cancelled: "Run cancelled",
+          cancel_failed: "Cancel failed",
           runs_title: "Runs",
           runs_subtitle: "Select a run to inspect report and events",
           result_title: "Result",
@@ -499,6 +693,7 @@
           untitled_run: "Untitled run",
           no_content: "No content.",
           no_events: "No events.",
+          no_tools: "No tools enabled.",
           no_module_info: "No module info.",
           no_structured_report: "No structured report available.",
           summary: "Summary",
@@ -506,13 +701,34 @@
           architecture: "Architecture",
           risks: "Risks",
           next_steps: "Next Steps",
+          changed_files: "Changed Files",
+          test_result: "Test Result",
+          findings: "Findings",
+          no_findings: "No concrete findings.",
+          command: "Command",
+          exit_code: "Exit Code",
+          severity: "Severity",
+          file: "File",
+          line: "Line",
+          suggestion: "Suggestion",
           report: "Report",
           raw_model_output: "Raw Model Output",
           failure_reason: "Failure Reason",
           parse_diagnostics: "Parse Diagnostics",
+          diagnostics: "Diagnostics",
+          timeline: "Execution Timeline",
+          total_duration: "Total Duration",
+          model_calls: "Model Calls",
+          tool_calls: "Tool Calls",
+          event_count: "Event Count",
+          token_usage: "Token Usage",
+          slowest_steps: "Slowest Steps",
+          no_diagnostics: "No diagnostics available.",
           events: "Events",
           run_info: "Run Info",
           question: "Question",
+          provider: "Provider",
+          enabled_tools: "Enabled Tools",
           workspace: "Workspace",
           status: "Status",
           started: "Started",
@@ -521,6 +737,7 @@
           status_running: "Running",
           status_completed: "Completed",
           status_failed: "Failed",
+          status_cancelled: "Cancelled",
           status_max_iterations: "Max Iterations",
           status_unknown: "Unknown",
           run_detail_meta_separator: " | ",
@@ -530,6 +747,8 @@
 
       const state = {
         runs: [],
+        tools: [],
+        selectedToolNames: [],
         selectedRunId: null,
         pollTimer: null,
         lang: localStorage.getItem("ui_lang") || "zh",
@@ -541,6 +760,10 @@
       const maxIterationsInput = document.getElementById("maxIterations");
       const temperatureInput = document.getElementById("temperature");
       const maxTokensInput = document.getElementById("maxTokens");
+      const modeSelect = document.getElementById("modeSelect");
+      const providerSelect = document.getElementById("providerSelect");
+      const modelSelect = document.getElementById("modelSelect");
+      const toolPermissionsPanel = document.getElementById("toolPermissionsPanel");
       const formStatus = document.getElementById("formStatus");
       const runList = document.getElementById("runList");
       const detailView = document.getElementById("detailView");
@@ -548,6 +771,7 @@
       const healthChip = document.getElementById("healthChip");
       const refreshRunsButton = document.getElementById("refreshRunsButton");
       const refreshDetailButton = document.getElementById("refreshDetailButton");
+      const cancelRunButton = document.getElementById("cancelRunButton");
       const langSelect = document.getElementById("langSelect");
 
       function t(key) {
@@ -565,15 +789,24 @@
         document.getElementById("maxTokensLabel").textContent = t("max_tokens");
         temperatureInput.placeholder = t("temperature_placeholder");
         maxTokensInput.placeholder = t("max_tokens_placeholder");
+        document.getElementById("modeSelectLabel").textContent = t("mode_select");
+        modeSelect.options[0].textContent = t("mode_overview");
+        modeSelect.options[1].textContent = t("mode_review");
+        document.getElementById("providerSelectLabel").textContent = t("provider_select");
+        document.getElementById("modelSelectLabel").textContent = t("model_select");
+        document.getElementById("toolPermissionsLabel").textContent = t("tool_permissions");
+        document.getElementById("toolPermissionsHint").textContent = t("tool_permissions_hint");
         document.getElementById("submitButton").textContent = t("create_run");
         refreshRunsButton.textContent = t("refresh_runs");
         document.getElementById("runsTitle").textContent = t("runs_title");
         document.getElementById("runsSubtitle").textContent = t("runs_subtitle");
         document.getElementById("resultTitle").textContent = t("result_title");
         refreshDetailButton.textContent = t("refresh_details");
+        cancelRunButton.textContent = t("cancel_run");
 
         if (!state.selectedRunId) {
           detailMeta.textContent = t("no_run_selected");
+          updateCancelButton(null);
           detailView.innerHTML = `<div id="detailEmpty" class="empty-state">${escapeHtml(
             t("detail_empty"),
           )}</div>`;
@@ -582,6 +815,7 @@
         if (!formStatus.dataset.customMessage) {
           formStatus.textContent = t("waiting_form");
         }
+        renderToolPermissions();
       }
 
       async function requestJson(url, options = {}) {
@@ -616,6 +850,15 @@
         return t(`status_${status}`) || status;
       }
 
+      function canCancelRun(run) {
+        return Boolean(run && ["queued", "running"].includes(run.status));
+      }
+
+      function updateCancelButton(run) {
+        cancelRunButton.hidden = !canCancelRun(run);
+        cancelRunButton.disabled = false;
+      }
+
       function escapeHtml(value) {
         return String(value)
           .replaceAll("&", "&amp;")
@@ -627,6 +870,90 @@
       function timestampText(value) {
         if (!value) return "-";
         return new Date(value).toLocaleString();
+      }
+
+      function durationText(value) {
+        if (value === null || value === undefined) return "-";
+        return `${value} ms`;
+      }
+
+      function eventTypeText(event) {
+        return event.event_type || event.type || "unknown";
+      }
+
+      function defaultToolNamesForMode(mode) {
+        const defaults =
+          mode === "review"
+            ? ["list_files", "read_file", "search_text", "run_command"]
+            : ["list_files", "read_file", "search_text"];
+        const enabledTools = new Set(state.tools.filter((tool) => tool.enabled).map((tool) => tool.name));
+        return defaults.filter((name) => enabledTools.has(name));
+      }
+
+      function resetToolSelectionForMode() {
+        state.selectedToolNames = defaultToolNamesForMode(modeSelect.value);
+        renderToolPermissions();
+      }
+
+      function riskText(riskLevel) {
+        return t(`risk_${riskLevel}`) || riskLevel;
+      }
+
+      function renderToolPermissions() {
+        if (!toolPermissionsPanel) return;
+        if (!state.tools.length) {
+          toolPermissionsPanel.innerHTML = `<div class="empty-state">${escapeHtml(t("loading_tools"))}</div>`;
+          return;
+        }
+
+        const selected = new Set(state.selectedToolNames);
+        toolPermissionsPanel.innerHTML = state.tools
+          .map((tool) => {
+            const checked = selected.has(tool.name) && tool.enabled ? "checked" : "";
+            const disabled = tool.enabled ? "" : "disabled";
+            const disabledText = tool.enabled
+              ? ""
+              : `<div class="muted">${escapeHtml(t("disabled_reason"))}: ${escapeHtml(
+                  tool.disabled_reason || t("tool_disabled"),
+                )}</div>`;
+            return `
+              <label class="tool-row">
+                <input type="checkbox" data-tool-name="${escapeHtml(tool.name)}" ${checked} ${disabled} />
+                <span>
+                  <span class="tool-title">
+                    <span>${escapeHtml(tool.name)}</span>
+                    <span class="risk-chip risk-${escapeHtml(tool.risk_level)}">${escapeHtml(
+                      riskText(tool.risk_level),
+                    )}</span>
+                    ${tool.enabled ? "" : `<span class="status-chip status-cancelled">${escapeHtml(t("tool_disabled"))}</span>`}
+                  </span>
+                  <span class="muted">${escapeHtml(tool.description)}</span>
+                  ${disabledText}
+                </span>
+              </label>
+            `;
+          })
+          .join("");
+
+        toolPermissionsPanel.querySelectorAll("[data-tool-name]").forEach((element) => {
+          element.addEventListener("change", () => {
+            const enabledSelection = Array.from(
+              toolPermissionsPanel.querySelectorAll("[data-tool-name]:checked"),
+            ).map((item) => item.getAttribute("data-tool-name"));
+            state.selectedToolNames = enabledSelection.filter(Boolean);
+          });
+        });
+      }
+
+      async function loadTools() {
+        try {
+          state.tools = await requestJson("/tools");
+          resetToolSelectionForMode();
+        } catch (error) {
+          toolPermissionsPanel.innerHTML = `<div class="empty-state error-text">${escapeHtml(
+            `${t("tool_load_failed")}: ${error.message}`,
+          )}</div>`;
+        }
       }
 
       function setFormStatus(message, isError = false, isCustom = true) {
@@ -677,53 +1004,119 @@
         return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
       }
 
+      function toolNamesText(toolNames) {
+        if (!toolNames || !toolNames.length) return t("no_tools");
+        return toolNames.join(", ");
+      }
+
+      function renderOverviewReport(report) {
+        return `
+          <div class="detail-section">
+            <h3>${escapeHtml(t("summary"))}</h3>
+            <div class="detail-content">${escapeHtml(report.summary)}</div>
+          </div>
+          <div class="detail-section">
+            <h3>${escapeHtml(t("modules"))}</h3>
+            <div class="detail-content">
+              <div class="module-list">
+                ${
+                  report.modules
+                    .map(
+                      (item) => `
+                      <div class="module-item">
+                        <div class="module-name">${escapeHtml(item.name)}</div>
+                        <div>${escapeHtml(item.description)}</div>
+                      </div>
+                    `,
+                    )
+                    .join("") || `<div class="empty-state">${escapeHtml(t("no_module_info"))}</div>`
+                }
+              </div>
+            </div>
+          </div>
+          <div class="detail-section">
+            <h3>${escapeHtml(t("architecture"))}</h3>
+            <div class="detail-content">${renderBulletList(report.architecture)}</div>
+          </div>
+          <div class="detail-section">
+            <h3>${escapeHtml(t("risks"))}</h3>
+            <div class="detail-content">${renderBulletList(report.risks)}</div>
+          </div>
+          <div class="detail-section">
+            <h3>${escapeHtml(t("next_steps"))}</h3>
+            <div class="detail-content">${renderBulletList(report.next_steps)}</div>
+          </div>
+        `;
+      }
+
+      function renderReviewReport(report) {
+        const testResult = report.test_result || {};
+        const findingsHtml = report.findings?.length
+          ? report.findings
+              .map(
+                (item) => `
+                <div class="module-item">
+                  <div class="module-name">${escapeHtml(item.title)}</div>
+                  <div><strong>${escapeHtml(t("severity"))}:</strong> ${escapeHtml(item.severity)}</div>
+                  <div><strong>${escapeHtml(t("file"))}:</strong> ${escapeHtml(item.file || t("no_content"))}</div>
+                  <div><strong>${escapeHtml(t("line"))}:</strong> ${escapeHtml(item.line ? String(item.line) : t("no_content"))}</div>
+                  <div>${escapeHtml(item.description)}</div>
+                  <div><strong>${escapeHtml(t("suggestion"))}:</strong> ${escapeHtml(item.suggestion)}</div>
+                </div>
+              `,
+              )
+              .join("")
+          : `<div class="empty-state">${escapeHtml(t("no_findings"))}</div>`;
+
+        return `
+          <div class="detail-section">
+            <h3>${escapeHtml(t("summary"))}</h3>
+            <div class="detail-content">${escapeHtml(report.summary)}</div>
+          </div>
+          <div class="detail-section">
+            <h3>${escapeHtml(t("test_result"))}</h3>
+            <div class="detail-content">
+              <div><strong>${escapeHtml(t("status"))}:</strong> ${escapeHtml(testResult.status || t("status_unknown"))}</div>
+              <div><strong>${escapeHtml(t("command"))}:</strong> ${escapeHtml(testResult.command || t("no_content"))}</div>
+              <div><strong>${escapeHtml(t("exit_code"))}:</strong> ${escapeHtml(testResult.exit_code === null || testResult.exit_code === undefined ? t("no_content") : String(testResult.exit_code))}</div>
+              <div>${escapeHtml(testResult.summary || "")}</div>
+            </div>
+          </div>
+          <div class="detail-section">
+            <h3>${escapeHtml(t("changed_files"))}</h3>
+            <div class="detail-content">${renderBulletList(report.changed_files)}</div>
+          </div>
+          <div class="detail-section">
+            <h3>${escapeHtml(t("findings"))}</h3>
+            <div class="detail-content"><div class="module-list">${findingsHtml}</div></div>
+          </div>
+          <div class="detail-section">
+            <h3>${escapeHtml(t("risks"))}</h3>
+            <div class="detail-content">${renderBulletList(report.risks)}</div>
+          </div>
+          <div class="detail-section">
+            <h3>${escapeHtml(t("next_steps"))}</h3>
+            <div class="detail-content">${renderBulletList(report.next_steps)}</div>
+          </div>
+        `;
+      }
+
       function renderDetail(run, events) {
+        updateCancelButton(run);
         detailMeta.textContent = `${run.id.slice(0, 8)}${t("run_detail_meta_separator")}${formatStatus(
           run.status,
         )}${t("run_detail_meta_separator")}${timestampText(run.created_at)}`;
         const report = run.report;
+        const reviewReport = run.review_report;
         const failureReason = run.failure_reason;
         const parseDiagnostics = run.parse_diagnostics;
+        const diagnostics = run.diagnostics;
 
-        const reportHtml = report
-          ? `
-            <div class="detail-section">
-              <h3>${escapeHtml(t("summary"))}</h3>
-              <div class="detail-content">${escapeHtml(report.summary)}</div>
-            </div>
-            <div class="detail-section">
-              <h3>${escapeHtml(t("modules"))}</h3>
-              <div class="detail-content">
-                <div class="module-list">
-                  ${
-                    report.modules
-                      .map(
-                        (item) => `
-                        <div class="module-item">
-                          <div class="module-name">${escapeHtml(item.name)}</div>
-                          <div>${escapeHtml(item.description)}</div>
-                        </div>
-                      `,
-                      )
-                      .join("") || `<div class="empty-state">${escapeHtml(t("no_module_info"))}</div>`
-                  }
-                </div>
-              </div>
-            </div>
-            <div class="detail-section">
-              <h3>${escapeHtml(t("architecture"))}</h3>
-              <div class="detail-content">${renderBulletList(report.architecture)}</div>
-            </div>
-            <div class="detail-section">
-              <h3>${escapeHtml(t("risks"))}</h3>
-              <div class="detail-content">${renderBulletList(report.risks)}</div>
-            </div>
-            <div class="detail-section">
-              <h3>${escapeHtml(t("next_steps"))}</h3>
-              <div class="detail-content">${renderBulletList(report.next_steps)}</div>
-            </div>
-          `
-          : `
+        const reportHtml = reviewReport
+          ? renderReviewReport(reviewReport)
+          : report
+            ? renderOverviewReport(report)
+            : `
             <div class="detail-section">
               <h3>${escapeHtml(t("report"))}</h3>
               <div class="detail-content empty-state">${escapeHtml(t("no_structured_report"))}</div>
@@ -760,6 +1153,70 @@
           `
           : "";
 
+        const diagnosticsHtml = diagnostics
+          ? `
+            <div class="detail-section">
+              <h3>${escapeHtml(t("diagnostics"))}</h3>
+              <div class="detail-content">
+                <div><strong>${escapeHtml(t("total_duration"))}:</strong> ${escapeHtml(durationText(diagnostics.total_duration_ms))}</div>
+                <div><strong>${escapeHtml(t("model_calls"))}:</strong> ${escapeHtml(String(diagnostics.model_call_count ?? 0))}</div>
+                <div><strong>${escapeHtml(t("tool_calls"))}:</strong> ${escapeHtml(String(diagnostics.tool_call_count ?? 0))}</div>
+                <div><strong>${escapeHtml(t("event_count"))}:</strong> ${escapeHtml(String(diagnostics.event_count ?? 0))}</div>
+                <div><strong>${escapeHtml(t("token_usage"))}:</strong> ${escapeHtml(
+                  diagnostics.token_usage ? JSON.stringify(diagnostics.token_usage) : t("no_content"),
+                )}</div>
+                <div><strong>${escapeHtml(t("slowest_steps"))}:</strong></div>
+                ${
+                  diagnostics.slowest_steps && diagnostics.slowest_steps.length
+                    ? `<ul>${diagnostics.slowest_steps
+                        .map(
+                          (item) =>
+                            `<li>${escapeHtml(item.label || item.event_type)} (${escapeHtml(
+                              String(item.duration_ms),
+                            )} ms)</li>`,
+                        )
+                        .join("")}</ul>`
+                    : `<div class="empty-state">${escapeHtml(t("no_content"))}</div>`
+                }
+              </div>
+            </div>
+          `
+          : `
+            <div class="detail-section">
+              <h3>${escapeHtml(t("diagnostics"))}</h3>
+              <div class="detail-content empty-state">${escapeHtml(t("no_diagnostics"))}</div>
+            </div>
+          `;
+
+        const timelineHtml = `
+          <div class="detail-section">
+            <h3>${escapeHtml(t("timeline"))}</h3>
+            <div class="detail-content">
+              <div class="event-list">
+                ${
+                  events.length
+                    ? events
+                        .map(
+                          (event) => `
+                            <div class="event-item">
+                              <div class="event-type">${escapeHtml(eventTypeText(event))}</div>
+                              <div class="muted">
+                                ${escapeHtml(timestampText(event.timestamp))}
+                                ${event.duration_ms !== null && event.duration_ms !== undefined
+                                  ? ` | ${escapeHtml(durationText(event.duration_ms))}`
+                                  : ""}
+                              </div>
+                            </div>
+                          `,
+                        )
+                        .join("")
+                    : `<div class="empty-state">${escapeHtml(t("no_events"))}</div>`
+                }
+              </div>
+            </div>
+          </div>
+        `;
+
         const eventHtml = `
           <div class="detail-section">
             <h3>${escapeHtml(t("events"))}</h3>
@@ -771,9 +1228,23 @@
                         .map(
                           (event) => `
                             <div class="event-item">
-                              <div class="event-type">${escapeHtml(event.type)}</div>
+                              <div class="event-type">${escapeHtml(eventTypeText(event))}</div>
                               <div class="muted">${escapeHtml(timestampText(event.timestamp))}</div>
-                              <pre>${escapeHtml(JSON.stringify(event.data, null, 2))}</pre>
+                              <pre>${escapeHtml(
+                                JSON.stringify(
+                                  {
+                                    status: event.status,
+                                    duration_ms: event.duration_ms,
+                                    failure_reason: event.failure_reason,
+                                    payload: event.payload || event.data,
+                                    trace_id: event.trace_id,
+                                    span_id: event.span_id,
+                                    parent_span_id: event.parent_span_id,
+                                  },
+                                  null,
+                                  2,
+                                ),
+                              )}</pre>
                             </div>
                           `,
                         )
@@ -790,6 +1261,9 @@
             <h3>${escapeHtml(t("run_info"))}</h3>
             <div class="detail-content">
               <div><strong>${escapeHtml(t("question"))}:</strong> ${escapeHtml(run.question)}</div>
+              <div><strong>${escapeHtml(t("mode_select"))}:</strong> ${escapeHtml(run.mode || run.report_type || "overview")}</div>
+              <div><strong>${escapeHtml(t("provider"))}:</strong> ${escapeHtml(run.provider || "deepseek")}${run.model ? ` / ${escapeHtml(run.model)}` : ""}</div>
+              <div><strong>${escapeHtml(t("enabled_tools"))}:</strong> ${escapeHtml(toolNamesText(run.tool_names))}</div>
               <div><strong>${escapeHtml(t("workspace"))}:</strong> ${escapeHtml(run.workspace_root)}</div>
               <div><strong>${escapeHtml(t("status"))}:</strong> <span class="${statusClass(run.status)}">${escapeHtml(
           formatStatus(run.status),
@@ -800,8 +1274,10 @@
           </div>
           ${failureHtml}
           ${parseDiagnosticsHtml}
+          ${diagnosticsHtml}
           ${reportHtml}
           ${rawOutputHtml}
+          ${timelineHtml}
           ${eventHtml}
         `;
       }
@@ -841,11 +1317,17 @@
             requestJson(`/repo-analyst/runs/${runId}`),
             requestJson(`/repo-analyst/runs/${runId}/events`),
           ]);
+          const runIndex = state.runs.findIndex((r) => r.id === run.id);
+          if (runIndex !== -1) {
+            state.runs[runIndex] = run;
+          }
+          renderRuns();
           renderDetail(run, events);
           if (resetPoll) {
             schedulePolling(run);
           }
         } catch (error) {
+          updateCancelButton(null);
           detailView.innerHTML = `<div class="empty-state error-text">${escapeHtml(error.message)}</div>`;
         }
       }
@@ -871,6 +1353,7 @@
 
         const payload = {
           workspace_root: workspaceRootInput.value.trim(),
+          mode: modeSelect.value,
         };
 
         const question = questionInput.value.trim();
@@ -884,6 +1367,15 @@
 
         const maxTokens = maxTokensInput.value.trim();
         if (maxTokens) payload.max_tokens = Number(maxTokens);
+
+        const model = modelSelect.value;
+        const provider = providerSelect.value;
+        if (provider) payload.provider = provider;
+        if (model) payload.model = model;
+
+        if (state.tools.length) {
+          payload.enabled_tools = state.selectedToolNames.slice();
+        }
 
         try {
           const run = await requestJson("/repo-analyst/runs", {
@@ -899,9 +1391,28 @@
       });
 
       refreshRunsButton.addEventListener("click", loadRuns);
+      modeSelect.addEventListener("change", resetToolSelectionForMode);
       refreshDetailButton.addEventListener("click", async () => {
         if (state.selectedRunId) {
           await loadRunDetail(state.selectedRunId, true);
+        }
+      });
+
+      cancelRunButton.addEventListener("click", async () => {
+        if (!state.selectedRunId) return;
+
+        cancelRunButton.disabled = true;
+        setFormStatus(t("cancelling_run"));
+
+        try {
+          await requestJson(`/repo-analyst/runs/${state.selectedRunId}/cancel`, {
+            method: "POST",
+          });
+          setFormStatus(t("run_cancelled"));
+          await loadRuns();
+        } catch (error) {
+          setFormStatus(`${t("cancel_failed")}: ${error.message}`, true);
+          cancelRunButton.disabled = false;
         }
       });
 
@@ -920,6 +1431,7 @@
       langSelect.value = state.lang === "en" ? "en" : "zh";
       applyStaticTranslations();
       loadHealth();
+      loadTools();
       loadRuns();
     </script>
   </body>

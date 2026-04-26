@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from code_review_agent.messages import (
     Message,
@@ -74,6 +76,10 @@ def _add_optional_int(current: int | None, new_value: int | None) -> int | None:
     return current + new_value
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 class Agent:
     """Minimal agent loop that combines model and tools."""
 
@@ -120,6 +126,9 @@ class Agent:
         usage = _UsageAccumulator()
 
         for _ in range(self.max_iterations):
+            next_iteration = iterations + 1
+            model_started_at = _utc_now()
+            model_started_perf = time.perf_counter()
             try:
                 response = await self.model.complete(
                     ChatRequest(
@@ -131,6 +140,8 @@ class Agent:
                         max_tokens=self.max_tokens,
                     ),
                 )
+                model_finished_at = _utc_now()
+                model_duration_ms = int((time.perf_counter() - model_started_perf) * 1000)
             except ModelError as exc:
                 return AgentRunResult(
                     status="failed",
@@ -157,6 +168,16 @@ class Agent:
                     if response.usage
                     else None,
                     finish_reason=response.finish_reason,
+                    iteration=iterations,
+                    started_at=model_started_at,
+                    finished_at=model_finished_at,
+                    duration_ms=model_duration_ms,
+                    metadata={
+                        "provider": response.provider,
+                        "model": response.model,
+                        "requested_model": self.model.model_name,
+                        "returned_model": response.model,
+                    },
                 ),
             )
 
@@ -180,7 +201,11 @@ class Agent:
                 )
 
             for tool_call in response.tool_calls:
+                tool_started_at = _utc_now()
+                tool_started_perf = time.perf_counter()
                 tool_result = await self.tool_registry.invoke(tool_call, tool_context)
+                tool_finished_at = _utc_now()
+                tool_duration_ms = int((time.perf_counter() - tool_started_perf) * 1000)
                 self.session.append(tool_message(tool_result.to_message_result(tool_call.id)))
 
                 step_index += 1
@@ -191,6 +216,11 @@ class Agent:
                         tool_call=tool_call.model_copy(deep=True),
                         tool_result_status=tool_result.status,
                         tool_result_content=tool_result.content,
+                        iteration=iterations,
+                        started_at=tool_started_at,
+                        finished_at=tool_finished_at,
+                        duration_ms=tool_duration_ms,
+                        metadata={"tool_name": tool_call.name},
                     ),
                 )
 
@@ -225,4 +255,3 @@ class Agent:
             usage=usage.model_copy(deep=True) if usage else None,
             failure_reason=failure_reason,
         )
-

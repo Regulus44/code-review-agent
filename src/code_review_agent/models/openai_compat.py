@@ -4,7 +4,8 @@ from typing import Any
 
 import httpx
 
-from code_review_agent.formatters import MessageFormatter, OpenAIChatFormatter
+from code_review_agent.formatters.base import MessageFormatter
+from code_review_agent.formatters.openai_tools import OpenAIChatFormatter
 
 from .base import (
     ChatModel,
@@ -139,4 +140,3 @@ class OpenAICompatibleModel(ChatModel):
             completion_tokens=usage.get("completion_tokens"),
             total_tokens=usage.get("total_tokens"),
         )
-

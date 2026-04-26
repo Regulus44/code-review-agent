@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
@@ -12,9 +13,12 @@ from code_review_agent.apps.repo_analyst import RepoAnalystRequest, RepoAnalystS
 from code_review_agent.runtime import (
     AgentRuntime,
     CreateRunRequest,
+    RunAlreadyTerminalError,
     RunNotFoundError,
     WorkspaceValidationError,
 )
+from code_review_agent.settings import get_settings
+from code_review_agent.tools import ToolDescriptor
 
 router = APIRouter()
 UI_INDEX_PATH = Path(__file__).resolve().parent.parent / "web" / "index.html"
@@ -69,6 +73,21 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@router.get("/debug/runtime-config")
+async def debug_runtime_config(request: Request):
+    """Return non-sensitive runtime configuration for local debugging."""
+    _enforce_api_key(request)
+    settings = get_settings()
+    return {
+        "default_provider": settings.default_provider,
+        "default_model": settings.default_model,
+        "deepseek_base_url": settings.deepseek_base_url,
+        "runtime_workspace_root": settings.runtime_workspace_root,
+        "pid": os.getpid(),
+        "cwd": str(Path.cwd()),
+    }
+
+
 @router.get("/", include_in_schema=False)
 async def index() -> FileResponse:
     """Serve the built-in repo analyst UI."""
@@ -81,6 +100,14 @@ async def list_runs(request: Request):
     _enforce_api_key(request)
     runtime = get_runtime(request)
     return await runtime.list_runs()
+
+
+@router.get("/tools", response_model=list[ToolDescriptor])
+async def list_tools(request: Request) -> list[ToolDescriptor]:
+    """List tools exposed by the current runtime registry."""
+    _enforce_api_key(request)
+    runtime = get_runtime(request)
+    return runtime.list_tools()
 
 
 @router.post("/runs", status_code=status.HTTP_202_ACCEPTED)
@@ -121,6 +148,19 @@ async def get_run_events(run_id: str, request: Request):
         return await runtime.get_events(run_id)
     except RunNotFoundError as exc:
         raise HTTPException(status_code=404, detail="run not found") from exc
+
+
+@router.post("/runs/{run_id}/cancel")
+async def cancel_run(run_id: str, request: Request):
+    """Cancel one generic runtime run."""
+    _enforce_api_key(request)
+    runtime = get_runtime(request)
+    try:
+        return await runtime.cancel_run(run_id)
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="run not found") from exc
+    except RunAlreadyTerminalError as exc:
+        raise HTTPException(status_code=409, detail="run is already terminal") from exc
 
 
 @router.post("/repo-analyst/runs", status_code=status.HTTP_202_ACCEPTED)
@@ -169,3 +209,16 @@ async def get_repo_analyst_run_events(run_id: str, request: Request):
         return await service.get_events(run_id)
     except RunNotFoundError as exc:
         raise HTTPException(status_code=404, detail="run not found") from exc
+
+
+@router.post("/repo-analyst/runs/{run_id}/cancel")
+async def cancel_repo_analyst_run(run_id: str, request: Request):
+    """Cancel one repo analyst run."""
+    _enforce_api_key(request)
+    service = get_repo_analyst_service(request)
+    try:
+        return await service.cancel_run(run_id)
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="run not found") from exc
+    except RunAlreadyTerminalError as exc:
+        raise HTTPException(status_code=409, detail="run is already terminal") from exc

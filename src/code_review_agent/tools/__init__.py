@@ -9,12 +9,15 @@ from .base import (
     ToolExecutionResult,
     ToolNotFoundError,
 )
+from .command_tools import RunCommandTool
+from .discovery import ToolDescriptor, describe_registry, describe_tool
 from .file_tools import ListFilesTool, ReadFileTool, SearchTextTool
 from .registry import ToolRegistry
 
 __all__ = [
     "ListFilesTool",
     "ReadFileTool",
+    "RunCommandTool",
     "SearchTextTool",
     "Tool",
     "ToolArgumentsError",
@@ -24,5 +27,7 @@ __all__ = [
     "ToolExecutionResult",
     "ToolNotFoundError",
     "ToolRegistry",
+    "ToolDescriptor",
+    "describe_registry",
+    "describe_tool",
 ]
-

@@ -7,7 +7,7 @@ import re
 
 from code_review_agent.harness import AgentRunResult
 
-from .types import RepoAnalystReport
+from .types import RepoAnalystReport, RepoReviewReport
 
 
 class RepoAnalystParseError(ValueError):
@@ -83,8 +83,8 @@ def _candidate_json_texts(raw_text: str) -> list[str]:
     return deduped
 
 
-def parse_repo_analyst_report(result: AgentRunResult) -> RepoAnalystReport:
-    """Parse and validate the final assistant output as a structured report."""
+def _load_json_payload(result: AgentRunResult, report_label: str) -> object:
+    """Parse the final assistant output into a JSON payload."""
     if result.final_message is None or not result.final_message.content:
         raise RepoAnalystParseError(
             "missing_final_content",
@@ -104,8 +104,15 @@ def parse_repo_analyst_report(result: AgentRunResult) -> RepoAnalystReport:
     if payload is None:
         raise RepoAnalystParseError(
             "invalid_json",
-            "repo analyst output is not valid JSON",
+            f"{report_label} output is not valid JSON",
         ) from parse_error
+
+    return payload
+
+
+def parse_repo_analyst_report(result: AgentRunResult) -> RepoAnalystReport:
+    """Parse and validate the final assistant output as an overview report."""
+    payload = _load_json_payload(result, "repo analyst")
 
     try:
         return RepoAnalystReport.model_validate(payload)
@@ -113,4 +120,17 @@ def parse_repo_analyst_report(result: AgentRunResult) -> RepoAnalystReport:
         raise RepoAnalystParseError(
             "schema_validation_failed",
             "repo analyst report schema validation failed",
+        ) from exc
+
+
+def parse_repo_review_report(result: AgentRunResult) -> RepoReviewReport:
+    """Parse and validate the final assistant output as a review report."""
+    payload = _load_json_payload(result, "repo review")
+
+    try:
+        return RepoReviewReport.model_validate(payload)
+    except Exception as exc:
+        raise RepoAnalystParseError(
+            "schema_validation_failed",
+            "repo review report schema validation failed",
         ) from exc

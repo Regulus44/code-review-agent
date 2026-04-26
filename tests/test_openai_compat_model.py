@@ -89,6 +89,70 @@ async def test_openai_compatible_model_builds_request_and_parses_response() -> N
 
 
 @pytest.mark.anyio
+async def test_openai_compatible_model_preserves_reasoning_content() -> None:
+    observed_payload = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal observed_payload
+        observed_payload = json.loads(request.content.decode("utf-8"))
+        if len(observed_payload["messages"]) == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "id": "chatcmpl-think-1",
+                    "model": "deepseek-v4-pro",
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "Need tools.",
+                                "reasoning_content": "hidden-thought",
+                            },
+                            "finish_reason": "stop",
+                        },
+                    ],
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "id": "chatcmpl-think-2",
+                "model": "deepseek-v4-pro",
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "Done.",
+                        },
+                        "finish_reason": "stop",
+                    },
+                ],
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    model = OpenAICompatibleModel(
+        api_key="test-key",
+        base_url="https://api.deepseek.com",
+        model_name="deepseek-v4-pro",
+        provider="deepseek",
+        client=client,
+    )
+
+    first_response = await model.complete(
+        ChatRequest(messages=[user_message("Inspect repo")]),
+    )
+    assert first_response.message.reasoning_content == "hidden-thought"
+
+    await model.complete(
+        ChatRequest(messages=[user_message("Inspect repo"), first_response.message]),
+    )
+    await client.aclose()
+
+    assert observed_payload["messages"][-1]["reasoning_content"] == "hidden-thought"
+
+
+@pytest.mark.anyio
 async def test_openai_compatible_model_maps_http_errors() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, json={"error": {"message": "bad key"}})

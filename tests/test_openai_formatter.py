@@ -79,6 +79,23 @@ def test_parse_text_assistant_message() -> None:
     assert message.tool_calls == []
 
 
+def test_parse_and_format_reasoning_content_roundtrip() -> None:
+    formatter = OpenAIChatFormatter()
+
+    parsed = formatter.parse_assistant_message(
+        {
+            "role": "assistant",
+            "content": "Final answer",
+            "reasoning_content": "internal reasoning",
+        },
+    )
+    formatted = formatter.format_messages([parsed])[0]
+
+    assert parsed.reasoning_content == "internal reasoning"
+    assert formatted["reasoning_content"] == "internal reasoning"
+    assert formatted["content"] == "Final answer"
+
+
 def test_parse_assistant_tool_calls() -> None:
     formatter = OpenAIChatFormatter()
 
@@ -124,4 +141,3 @@ def test_parse_malformed_tool_arguments_fails() -> None:
                 ],
             },
         )
-

@@ -7,6 +7,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from code_review_agent.formatters import OpenAIChatFormatter
 from code_review_agent.messages import ToolCall
+from code_review_agent.runtime import (
+    build_default_tool_descriptors,
+    build_default_tool_registry,
+)
+from code_review_agent.settings import get_settings
 from code_review_agent.tools import (
     Tool,
     ToolContext,
@@ -87,6 +92,41 @@ def test_registry_rejects_duplicate_registration() -> None:
 
     with pytest.raises(ValueError):
         registry.register(EchoTool())
+
+
+def test_default_tool_registry_respects_enabled_tools() -> None:
+    registry = build_default_tool_registry(("list_files", "read_file"))
+
+    assert [tool.name for tool in registry.list_tools()] == ["list_files", "read_file"]
+
+
+def test_default_tool_descriptors_mark_disabled_tools() -> None:
+    descriptors = build_default_tool_descriptors(("list_files",))
+    by_name = {tool.name: tool for tool in descriptors}
+
+    assert by_name["list_files"].enabled is True
+    assert by_name["read_file"].enabled is False
+    assert by_name["read_file"].disabled_reason == "not_in_enabled_tools"
+    assert by_name["run_command"].enabled is False
+
+
+def test_default_tool_registry_rejects_unknown_enabled_tool() -> None:
+    with pytest.raises(ValueError, match="unknown enabled tools"):
+        build_default_tool_registry(("missing_tool",))
+
+
+def test_default_tool_registry_uses_enabled_tools_setting(monkeypatch) -> None:
+    monkeypatch.setenv("ENABLED_TOOLS", "list_files,search_text")
+    get_settings.cache_clear()
+
+    registry = build_default_tool_registry()
+
+    assert [tool.name for tool in registry.list_tools()] == [
+        "list_files",
+        "search_text",
+    ]
+
+    get_settings.cache_clear()
 
 
 def test_tool_execution_result_converts_to_message_result() -> None:
@@ -171,4 +211,3 @@ async def test_registry_returns_error_for_tool_execution_failure(tmp_path) -> No
     assert result.status == "error"
     assert "Tool 'broken' failed" in result.content
     assert result.metadata["error_type"] == "tool_execution_error"
-

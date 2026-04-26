@@ -1,0 +1,18 @@
+风险
+Observability 包（observability/__init__.py）目前仅有模块 docstring，无任何实质实现（追踪、日志结构化等）。当前运行时日志通过 service.py 中的 logging.getLogger 硬编码，缺少统一的可观测性基础设施。
+Agent 循环为同步阻塞式顺序执行（不流式），每次工具调用都等待模型完整返回，大仓库分析可能因 max_iterations（默认 100）或 run_timeout（默认 300s）而截断。对超大仓库或有大量文件需要分析的任务，时间预算可能不足。
+read_file 工具默认 max_chars=12000，对大型源文件可能只能读取开头部分，可能漏掉关键内容。SearchTextTool 的 rg 回退在无 ripgrep 环境时使用 Python 纯搜索，大目录下性能较差。
+Runtime 当前没有持久化工作区的状态或缓存机制，同一仓库的重复分析会从头执行，浪费 token 和时间。
+API Key 认证仅通过请求头传递（明文），未使用 HTTPS 强制或更安全的认证机制（如 JWT/OAuth2），适合内网开发环境但不适合生产部署。
+Streaming 模式已标记为 'not implemented'，影响大输出场景的实时体验。
+Web UI 为单页 HTML/JS 应用，没有前后端分离或构建工具，可维护性较低。
+测试覆盖了核心逻辑，但缺少集成测试（真实模型调用、端到端 HTTP 接口测试）和性能测试。
+下一步
+实现 Observability 层：添加结构化日志、Run 执行追踪（trace_id/span_id）、Token 用量监控和告警，替代当前硬编码的 logging。
+添加集成测试和端到端测试：Mock HTTP 请求测试 FastAPI 路由；用真实小仓库验证 Repo Analyst 端到端流程；测试并发控制和超时边界。
+为 SearchTextTool 增加更智能的 rg 检测机制（不仅检查 which，还尝试执行 --version）或统一使用 Python grep 以减少跨平台兼容问题。
+考虑添加缓存层：对已分析过的仓库文件元数据（文件列表、Git 结构）做缓存，避免重复分析时重复扫描。
+实现 Streaming 支持：将 Agent 循环改为异步流式，允许逐步返回模型推理中间结果（特别是 tool_call 后的思考过程），改善大任务实时感知。
+增强 Runtime 持久化：当前 SqliteRunStore 已经做了基础工作，可以进一步添加 Run 的取消、重试、定时清理等运维能力。
+开放模型扩展：添加更多 Provider 适配器（如 Ollama 本地模型、Azure OpenAI、Google Gemini），在 settings 中增加 model_provider 切换配置。
+提升 Web UI：考虑使用现代前端框架（如 Vue/React）重构，增加实时事件推送（WebSocket/SSE）以便在分析过程中即时更新进度。

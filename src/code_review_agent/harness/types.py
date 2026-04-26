@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from datetime import datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from code_review_agent.messages import Message, ToolCall
 from code_review_agent.models import ModelUsage
 
-AgentRunStatus = Literal["completed", "failed", "max_iterations"]
+AgentRunStatus = Literal["completed", "failed", "max_iterations", "cancelled"]
 
 
 class AgentStep(BaseModel):
@@ -25,6 +26,11 @@ class AgentStep(BaseModel):
     tool_result_content: str | None = None
     usage: ModelUsage | None = None
     finish_reason: str | None = None
+    iteration: int | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    duration_ms: int | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentRunResult(BaseModel):
@@ -39,4 +45,3 @@ class AgentRunResult(BaseModel):
     iterations: int = 0
     usage: ModelUsage | None = None
     failure_reason: str | None = None
-
