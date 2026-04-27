@@ -251,6 +251,31 @@ async def test_runtime_marks_run_failed_on_timeout(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_runtime_records_live_model_request_before_timeout(tmp_path: Path) -> None:
+    runtime = AgentRuntime(
+        model_factory=lambda: SlowModel(delay_seconds=10),
+        tool_registry_factory=build_registry,
+        run_timeout_seconds=0.05,
+    )
+    run = await runtime.create_run(
+        CreateRunRequest(
+            user_input="Inspect this repo.",
+            workspace_root=str(tmp_path),
+        ),
+    )
+
+    executed = await runtime.execute_run(run.id)
+    events = await runtime.get_events(run.id)
+    event_types = [event.event_type for event in events]
+
+    assert executed.status == "failed"
+    assert executed.failure_reason == "run_timeout"
+    assert "model.request" in event_types
+    assert "model.cancelled" in event_types
+    assert event_types[-1] == "run.timeout"
+
+
+@pytest.mark.anyio
 async def test_runtime_rejects_when_concurrency_limit_exceeded(tmp_path: Path) -> None:
     runtime = AgentRuntime(
         model_factory=lambda: SlowModel(delay_seconds=0.2),
@@ -404,13 +429,13 @@ async def test_runtime_persists_requested_provider(tmp_path: Path) -> None:
         CreateRunRequest(
             user_input="inspect",
             workspace_root=str(tmp_path),
-            provider="deepseek",
-            model="deepseek-chat",
+            provider="siliconflow",
+            model="Qwen/Qwen2.5-Coder-32B-Instruct",
         ),
     )
 
-    assert run.provider == "deepseek"
-    assert run.model == "deepseek-chat"
+    assert run.provider == "siliconflow"
+    assert run.model == "Qwen/Qwen2.5-Coder-32B-Instruct"
 
 
 @pytest.mark.anyio

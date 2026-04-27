@@ -12,9 +12,41 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from code_review_agent.sandbox.path import resolve_workspace_path
 
 from .base import Tool, ToolContext, ToolExecutionError, ToolExecutionResult
+from .truncation import truncate_text
 
 
-IGNORED_DIR_NAMES = {".git", "__pycache__", ".pytest_cache"}
+IGNORED_DIR_NAMES = frozenset({".git", "__pycache__", ".pytest_cache"})
+
+IGNORED_DIR_SUFFIXES = frozenset({".egg-info"})
+
+IGNORED_DIR_PARTS_COMBINED = IGNORED_DIR_NAMES | {
+    "node_modules",
+    ".venv",
+    "venv",
+    "env",
+    ".tox",
+    ".mypy_cache",
+    ".ruff_cache",
+    "dist",
+    "build",
+}
+
+BINARY_EXTENSIONS = frozenset({
+    ".db", ".sqlite", ".sqlite3",
+    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".bmp",
+    ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar",
+    ".exe", ".dll", ".so", ".dylib", ".pyc", ".pyd", ".o", ".obj",
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    ".woff", ".woff2", ".ttf", ".eot",
+    ".mp3", ".mp4", ".wav", ".avi", ".mov",
+    ".pkl", ".npy", ".npz", ".h5", ".parquet",
+})
+
+SENSITIVE_FILE_NAMES = frozenset({".env", ".env.local", ".env.production", ".env.staging"})
+
+MAX_SEARCH_FILE_SIZE_BYTES = 512 * 1024
+
+MAX_MATCH_LINE_CHARS = 500
 
 
 def _is_hidden_path(path: Path) -> bool:
@@ -22,25 +54,78 @@ def _is_hidden_path(path: Path) -> bool:
     return any(part.startswith(".") for part in path.parts if part not in {".", ".."})
 
 
+def _is_sensitive_file(path: Path) -> bool:
+    """Check if a file is a sensitive file that should never be searched."""
+    return path.name in SENSITIVE_FILE_NAMES
+
+
+def _has_binary_extension(path: Path) -> bool:
+    """Check if a file has a known binary extension."""
+    return path.suffix.lower() in BINARY_EXTENSIONS
+
+
 def _should_skip_path(path: Path, include_hidden: bool) -> bool:
     """Skip hidden and ignored cache paths by default."""
-    if any(part in IGNORED_DIR_NAMES for part in path.parts):
+    if any(part in IGNORED_DIR_PARTS_COMBINED for part in path.parts):
+        return True
+    if any(part.endswith(suffix) for part in path.parts for suffix in IGNORED_DIR_SUFFIXES):
+        return True
+    if _is_sensitive_file(path):
         return True
     if not include_hidden and _is_hidden_path(path):
         return True
     return False
 
 
+def _should_skip_file(
+    relative_path: Path,
+    include_hidden: bool,
+    *,
+    full_path: Path | None = None,
+    max_size_bytes: int = MAX_SEARCH_FILE_SIZE_BYTES,
+) -> tuple[bool, str | None]:
+    """Return (should_skip, reason) for a file path."""
+    if _is_sensitive_file(relative_path):
+        return True, "sensitive"
+    if any(part in IGNORED_DIR_PARTS_COMBINED for part in relative_path.parts):
+        return True, "ignored_dir"
+    if any(part.endswith(suffix) for part in relative_path.parts for suffix in IGNORED_DIR_SUFFIXES):
+        return True, "ignored_dir_suffix"
+    if not include_hidden and _is_hidden_path(relative_path):
+        return True, "hidden"
+    if _has_binary_extension(relative_path):
+        return True, "binary_extension"
+    if full_path is not None and full_path.is_file():
+        try:
+            if full_path.stat().st_size > max_size_bytes:
+                return True, "oversized"
+        except OSError:
+            return True, "stat_error"
+    return False, None
+
+
+def _is_likely_binary(file_path: Path, sample_size: int = 4096) -> bool:
+    """Sample the beginning of a file to detect binary content."""
+    try:
+        with file_path.open("rb") as f:
+            chunk = f.read(sample_size)
+    except OSError:
+        return True
+    if not chunk:
+        return False
+    if b"\x00" in chunk:
+        return True
+    non_printable = sum(
+        1
+        for b in chunk
+        if b < 0x20 and b not in (0x09, 0x0A, 0x0D)
+    )
+    return (non_printable / len(chunk)) > 0.30
+
+
 def _to_workspace_relative(workspace_root: Path, path: Path) -> str:
     """Return a POSIX path relative to the workspace root."""
     return path.relative_to(workspace_root).as_posix()
-
-
-def _truncate_text(text: str, max_chars: int) -> tuple[str, bool]:
-    """Truncate text to the requested character limit."""
-    if len(text) <= max_chars:
-        return text, False
-    return text[:max_chars].rstrip() + "\n...[truncated]", True
 
 
 class ListFilesArguments(BaseModel):
@@ -89,6 +174,7 @@ class SearchTextArguments(BaseModel):
     limit: int = Field(default=50, ge=1, le=1000)
     context_lines: int = Field(default=0, ge=0, le=20)
     include_hidden: bool = False
+    max_output_chars: int = Field(default=20000, ge=1000, le=100000)
 
     @field_validator("query")
     @classmethod
@@ -191,6 +277,16 @@ class ReadFileTool(Tool):
         if not file_path.is_file():
             raise ToolExecutionError(f"path is not a file: {arguments.path}")
 
+        if _is_likely_binary(file_path):
+            raise ToolExecutionError(
+                f"file appears to be binary: {arguments.path}",
+            )
+
+        if _has_binary_extension(file_path):
+            raise ToolExecutionError(
+                f"file has a binary extension: {arguments.path}",
+            )
+
         raw_bytes = file_path.read_bytes()
         replaced_characters = False
         try:
@@ -217,7 +313,7 @@ class ReadFileTool(Tool):
 
         relative_path = _to_workspace_relative(context.workspace_root, file_path)
         header = f"File: {relative_path}\nLines: {start_line}-{end_line}\n"
-        truncated_body, truncated = _truncate_text(numbered_text, arguments.max_chars)
+        truncated_body, truncated = truncate_text(numbered_text, arguments.max_chars)
         rendered = header + ("\n" + truncated_body if truncated_body else "\n")
 
         return ToolExecutionResult.success(
@@ -237,7 +333,12 @@ class SearchTextTool(Tool):
     """Search text in repository files."""
 
     name = "search_text"
-    description = "Search for text in repository files."
+    description = (
+        "Search for text in repository files. "
+        "Always provide a glob pattern (e.g., '*.py', 'src/**/*.py') to narrow scope. "
+        "Use path to limit search to a subdirectory. "
+        "Results are truncated if too large; narrow your query when that happens."
+    )
     arguments_model = SearchTextArguments
 
     async def _execute(
@@ -274,21 +375,52 @@ class SearchTextTool(Tool):
             )
             backend = "python"
 
-        truncated = len(matches) > arguments.limit
+        total_match_count = len(matches)
+        count_truncated = total_match_count > arguments.limit
         matches = matches[: arguments.limit]
-        content = "\n".join(
-            f"{match['path']}:{match['line_number']}: {match['line_text']}"
-            for match in matches
-        )
+
+        content_lines: list[str] = []
+        output_chars = 0
+        output_truncated = False
+        shown_matches = 0
+
+        for match in matches:
+            line_text = match["line_text"]
+            if len(line_text) > MAX_MATCH_LINE_CHARS:
+                line_text = line_text[:MAX_MATCH_LINE_CHARS] + "...[truncated]"
+
+            line_content = f"{match['path']}:{match['line_number']}: {line_text}"
+            line_len = len(line_content) + 1
+
+            if output_chars + line_len > arguments.max_output_chars:
+                output_truncated = True
+                break
+
+            content_lines.append(line_content)
+            output_chars += line_len
+            shown_matches += 1
+
+        content = "\n".join(content_lines)
         if not content:
             content = "No matches found."
+
+        if output_truncated:
+            remaining = total_match_count - shown_matches
+            content += (
+                f"\n\n...[output truncated at {output_chars} chars, "
+                f"{remaining} more matches not shown. "
+                f"Narrow the query/path/glob to get focused results.]"
+            )
 
         return ToolExecutionResult.success(
             tool_name=self.name,
             content=content,
             data={
-                "matches": matches,
-                "truncated": truncated,
+                "matches": matches[:shown_matches],
+                "match_count_truncated": count_truncated,
+                "output_truncated": output_truncated,
+                "total_match_count": total_match_count,
+                "shown_match_count": shown_matches,
                 "backend": backend,
             },
             metadata=metadata,
@@ -307,6 +439,11 @@ class SearchTextTool(Tool):
             "never",
             "--no-heading",
             "-F",
+            "--max-filesize",
+            "512k",
+            "--max-columns",
+            "1000",
+            "--max-columns-preview",
         ]
 
         if arguments.case_sensitive:
@@ -320,8 +457,14 @@ class SearchTextTool(Tool):
         if arguments.glob:
             command.extend(["-g", arguments.glob])
 
-        for ignored_dir in IGNORED_DIR_NAMES:
+        for ignored_dir in IGNORED_DIR_PARTS_COMBINED:
             command.extend(["-g", f"!{ignored_dir}/**"])
+        for suffix in IGNORED_DIR_SUFFIXES:
+            command.extend(["-g", f"!*{suffix}/**"])
+        for ext in BINARY_EXTENSIONS:
+            command.extend(["-g", f"!*{ext}"])
+        for name in SENSITIVE_FILE_NAMES:
+            command.extend(["-g", f"!{name}"])
 
         command.extend([arguments.query, str(search_root)])
 
@@ -367,7 +510,7 @@ class SearchTextTool(Tool):
         arguments: SearchTextArguments,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         matches: list[dict[str, Any]] = []
-        skipped_files = 0
+        skip_reasons: dict[str, int] = {}
 
         if search_root.is_file():
             candidates = [search_root]
@@ -377,7 +520,13 @@ class SearchTextTool(Tool):
                 if candidate.is_dir():
                     continue
                 relative_path = candidate.relative_to(workspace_root)
-                if _should_skip_path(relative_path, arguments.include_hidden):
+                skip, reason = _should_skip_file(
+                    relative_path,
+                    arguments.include_hidden,
+                    full_path=candidate,
+                )
+                if skip:
+                    skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
                     continue
                 if arguments.glob and not candidate.match(arguments.glob):
                     continue
@@ -390,19 +539,18 @@ class SearchTextTool(Tool):
 
         for file_path in candidates:
             relative_path = file_path.relative_to(workspace_root)
-            if _should_skip_path(relative_path, arguments.include_hidden):
+
+            if _is_likely_binary(file_path):
+                skip_reasons["binary_detected"] = skip_reasons.get("binary_detected", 0) + 1
                 continue
 
             try:
                 text = file_path.read_text(encoding="utf-8")
             except UnicodeDecodeError:
-                try:
-                    text = file_path.read_text(encoding="utf-8", errors="replace")
-                except OSError:
-                    skipped_files += 1
-                    continue
+                skip_reasons["encoding_error"] = skip_reasons.get("encoding_error", 0) + 1
+                continue
             except OSError:
-                skipped_files += 1
+                skip_reasons["read_error"] = skip_reasons.get("read_error", 0) + 1
                 continue
 
             lines = text.splitlines()
@@ -429,4 +577,4 @@ class SearchTextTool(Tool):
                     },
                 )
 
-        return matches, {"skipped_files": skipped_files}
+        return matches, {"skipped": skip_reasons}

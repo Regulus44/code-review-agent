@@ -55,12 +55,16 @@ class Settings:
 
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
+    siliconflow_api_key: str | None = None
+    siliconflow_base_url: str = "https://api.siliconflow.cn/v1"
+    siliconflow_model: str = "Qwen/Qwen2.5-Coder-32B-Instruct"
     default_provider: str = "deepseek"
     default_model: str = "deepseek-chat"
     runtime_workspace_root: str = "D:\\Develop"
     database_url: str = "sqlite:///./runtime.db"
     api_key: str | None = None
     run_timeout_seconds: int = 300
+    model_request_timeout_seconds: float = 180.0
     max_concurrent_runs: int = 4
     enabled_tools: tuple[str, ...] | None = None
 
@@ -72,12 +76,24 @@ def get_settings() -> Settings:
     return Settings(
         deepseek_api_key=os.getenv("DEEPSEEK_API_KEY") or None,
         deepseek_base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+        siliconflow_api_key=os.getenv("SILICONFLOW_API_KEY") or None,
+        siliconflow_base_url=os.getenv(
+            "SILICONFLOW_BASE_URL",
+            "https://api.siliconflow.cn/v1",
+        ),
+        siliconflow_model=os.getenv(
+            "SILICONFLOW_MODEL",
+            "Qwen/Qwen2.5-Coder-32B-Instruct",
+        ),
         default_provider=os.getenv("DEFAULT_PROVIDER", "deepseek"),
         default_model=os.getenv("DEFAULT_MODEL", "deepseek-chat"),
         runtime_workspace_root=os.getenv("RUNTIME_WORKSPACE_ROOT", "D:\\Develop"),
         database_url=os.getenv("DATABASE_URL", "sqlite:///./runtime.db"),
         api_key=os.getenv("API_KEY") or None,
         run_timeout_seconds=int(os.getenv("RUN_TIMEOUT_SECONDS", "300")),
+        model_request_timeout_seconds=float(
+            os.getenv("MODEL_REQUEST_TIMEOUT_SECONDS", "180"),
+        ),
         max_concurrent_runs=int(os.getenv("MAX_CONCURRENT_RUNS", "4")),
         enabled_tools=_parse_csv_env(os.getenv("ENABLED_TOOLS")),
     )

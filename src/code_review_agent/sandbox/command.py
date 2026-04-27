@@ -5,9 +5,12 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
+
+from code_review_agent.tools.truncation import truncate_text
 
 from .path import resolve_workspace_path
 
@@ -67,6 +70,14 @@ class CommandRunResult:
     timed_out: bool
     policy_id: str
     execution_error: str | None = None
+
+
+def _exception_detail(exc: BaseException) -> str:
+    """Return a non-empty exception detail for command diagnostics."""
+    message = str(exc).strip()
+    if message:
+        return f"{exc.__class__.__name__}: {message}"
+    return f"{exc.__class__.__name__}: {exc!r}"
 
 
 class CommandPolicy:
@@ -159,7 +170,10 @@ class CommandPolicy:
             return
 
         if remaining[0] != "--":
-            raise CommandPolicyError("git diff only allows pathspecs after --")
+            raise CommandPolicyError(
+                "git diff only allows pathspecs after --; "
+                "use 'git diff -- <path>' instead of 'git diff <path>'"
+            )
 
         if len(remaining) == 1:
             raise CommandPolicyError("git diff -- requires at least one pathspec")
@@ -197,9 +211,81 @@ class CommandPolicy:
 
 def truncate_output(text: str, max_chars: int) -> tuple[str, bool]:
     """Truncate command output and mark whether truncation happened."""
-    if len(text) <= max_chars:
-        return text, False
-    return text[:max_chars].rstrip() + "\n...[truncated]", True
+    return truncate_text(text, max_chars)
+
+
+def _decode_output(data: bytes | str | None) -> str:
+    """Decode subprocess output to string, handling None and str edge cases."""
+    if data is None:
+        return ""
+    if isinstance(data, str):
+        return data
+    return data.decode("utf-8", errors="replace")
+
+
+def _run_command_sync(
+    program: str,
+    args: list[str],
+    cwd: Path,
+    timeout_seconds: int,
+) -> CommandRunResult:
+    """Synchronous subprocess.run fallback for Windows event loop compatibility."""
+    started = time.perf_counter()
+    try:
+        completed = subprocess.run(
+            [program, *args],
+            cwd=cwd,
+            env=os.environ.copy(),
+            capture_output=True,
+            text=False,
+            timeout=timeout_seconds,
+            shell=False,
+        )
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        return CommandRunResult(
+            program=program,
+            args=args,
+            cwd=cwd,
+            exit_code=completed.returncode,
+            duration_ms=duration_ms,
+            stdout=_decode_output(completed.stdout),
+            stderr=_decode_output(completed.stderr),
+            stdout_truncated=False,
+            stderr_truncated=False,
+            timed_out=False,
+            policy_id="",
+        )
+    except subprocess.TimeoutExpired as exc:
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        return CommandRunResult(
+            program=program,
+            args=args,
+            cwd=cwd,
+            exit_code=None,
+            duration_ms=duration_ms,
+            stdout=_decode_output(exc.stdout),
+            stderr=_decode_output(exc.stderr),
+            stdout_truncated=False,
+            stderr_truncated=False,
+            timed_out=True,
+            policy_id="",
+        )
+    except OSError as exc:
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        return CommandRunResult(
+            program=program,
+            args=args,
+            cwd=cwd,
+            exit_code=None,
+            duration_ms=duration_ms,
+            stdout="",
+            stderr="",
+            stdout_truncated=False,
+            stderr_truncated=False,
+            timed_out=False,
+            policy_id="",
+            execution_error=_exception_detail(exc),
+        )
 
 
 async def run_allowed_command(
@@ -238,6 +324,30 @@ async def run_allowed_command(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+    except NotImplementedError:
+        result = await asyncio.to_thread(
+            _run_command_sync,
+            program,
+            args,
+            resolved_cwd,
+            timeout_seconds,
+        )
+        stdout, stdout_truncated = truncate_output(result.stdout, max_output_chars)
+        stderr, stderr_truncated = truncate_output(result.stderr, max_output_chars)
+        return CommandRunResult(
+            program=program,
+            args=args,
+            cwd=resolved_cwd,
+            exit_code=result.exit_code,
+            duration_ms=result.duration_ms,
+            stdout=stdout,
+            stderr=stderr,
+            stdout_truncated=stdout_truncated,
+            stderr_truncated=stderr_truncated,
+            timed_out=result.timed_out,
+            policy_id=decision.policy_id,
+            execution_error=result.execution_error,
+        )
     except OSError as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
         return CommandRunResult(
@@ -252,7 +362,7 @@ async def run_allowed_command(
             stderr_truncated=False,
             timed_out=False,
             policy_id=decision.policy_id,
-            execution_error=str(exc),
+            execution_error=_exception_detail(exc),
         )
 
     timed_out = False

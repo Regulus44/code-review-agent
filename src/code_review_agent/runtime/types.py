@@ -17,6 +17,7 @@ RunStatus = Literal[
     "failed",
     "max_iterations",
     "cancelled",
+    "model_output_truncated",
 ]
 
 

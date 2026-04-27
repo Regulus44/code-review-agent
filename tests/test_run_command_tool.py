@@ -10,6 +10,7 @@ from code_review_agent.messages import ToolCall
 from code_review_agent.runtime.service import build_default_tool_registry
 from code_review_agent.sandbox import CommandPolicyError, CommandRunResult
 from code_review_agent.tools import RunCommandTool, ToolContext, ToolRegistry
+from code_review_agent.tools.base import Tool
 
 
 @pytest.fixture
@@ -178,3 +179,29 @@ async def test_tool_registry_invokes_run_command(
     assert result.status == "success"
     assert result.data is not None
     assert result.data["program"] == "python"
+
+
+class EmptyErrorTool(Tool):
+    """Tool that raises an exception with an empty string representation."""
+
+    name = "empty_error"
+    description = "Raise an empty exception."
+    arguments_model = RunCommandTool.arguments_model
+
+    async def _execute(self, context, arguments):
+        raise RuntimeError()
+
+
+@pytest.mark.anyio
+async def test_tool_registry_unexpected_error_includes_exception_type(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    registry.register(EmptyErrorTool())
+
+    result = await registry.invoke(
+        ToolCall(id="call_1", name="empty_error", arguments={"program": "python"}),
+        ToolContext(workspace_root=tmp_path),
+    )
+
+    assert result.status == "error"
+    assert "RuntimeError" in result.content
+    assert result.metadata["exception_type"] == "RuntimeError"

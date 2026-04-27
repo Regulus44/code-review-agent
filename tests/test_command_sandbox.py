@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -13,6 +14,7 @@ from code_review_agent.sandbox import (
     run_allowed_command,
     truncate_output,
 )
+from code_review_agent.sandbox.command import _decode_output
 
 
 @pytest.fixture
@@ -211,3 +213,143 @@ async def test_run_allowed_command_kills_process_when_cancelled(
     process = process_holder["process"]
     assert process.killed is True
     assert process.returncode == -9
+
+
+def test_decode_output_handles_none() -> None:
+    assert _decode_output(None) == ""
+
+
+def test_decode_output_handles_str() -> None:
+    assert _decode_output("hello") == "hello"
+
+
+def test_decode_output_handles_bytes() -> None:
+    assert _decode_output(b"hello") == "hello"
+
+
+def test_decode_output_handles_invalid_utf8() -> None:
+    result = _decode_output(b"\xff\xfe")
+    assert isinstance(result, str)
+
+
+@pytest.mark.anyio
+async def test_run_allowed_command_falls_back_on_not_implemented_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def raise_not_implemented(*args, **kwargs):
+        raise NotImplementedError
+
+    monkeypatch.setattr(
+        asyncio,
+        "create_subprocess_exec",
+        raise_not_implemented,
+    )
+
+    import subprocess
+
+    original_run = subprocess.run
+
+    def fake_subprocess_run(cmd, **kwargs):
+        if cmd[0] == "git":
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout=b"M file.py\n",
+                stderr=b"",
+            )
+        return original_run(cmd, **kwargs)
+
+    monkeypatch.setattr(
+        "code_review_agent.sandbox.command.subprocess.run",
+        fake_subprocess_run,
+    )
+
+    result = await run_allowed_command(
+        workspace_root=tmp_path,
+        program="git",
+        args=["status", "--short"],
+        cwd=".",
+        timeout_seconds=10,
+        max_output_chars=1000,
+    )
+
+    assert result.exit_code == 0
+    assert "M file.py" in result.stdout
+    assert result.timed_out is False
+    assert result.execution_error is None
+
+
+@pytest.mark.anyio
+async def test_run_allowed_command_fallback_handles_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def raise_not_implemented(*args, **kwargs):
+        raise NotImplementedError
+
+    monkeypatch.setattr(
+        asyncio,
+        "create_subprocess_exec",
+        raise_not_implemented,
+    )
+
+    import subprocess
+
+    def fake_subprocess_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, timeout=kwargs.get("timeout", 10))
+
+    monkeypatch.setattr(
+        "code_review_agent.sandbox.command.subprocess.run",
+        fake_subprocess_run,
+    )
+
+    result = await run_allowed_command(
+        workspace_root=tmp_path,
+        program="git",
+        args=["status", "--short"],
+        cwd=".",
+        timeout_seconds=5,
+        max_output_chars=1000,
+    )
+
+    assert result.timed_out is True
+    assert result.exit_code is None
+
+
+@pytest.mark.anyio
+async def test_run_allowed_command_fallback_handles_oserror(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def raise_not_implemented(*args, **kwargs):
+        raise NotImplementedError
+
+    monkeypatch.setattr(
+        asyncio,
+        "create_subprocess_exec",
+        raise_not_implemented,
+    )
+
+    import subprocess
+
+    def fake_subprocess_run(cmd, **kwargs):
+        raise OSError("command not found")
+
+    monkeypatch.setattr(
+        "code_review_agent.sandbox.command.subprocess.run",
+        fake_subprocess_run,
+    )
+
+    result = await run_allowed_command(
+        workspace_root=tmp_path,
+        program="git",
+        args=["status", "--short"],
+        cwd=".",
+        timeout_seconds=5,
+        max_output_chars=1000,
+    )
+
+    assert result.execution_error is not None
+    assert "OSError" in result.execution_error
+    assert result.exit_code is None

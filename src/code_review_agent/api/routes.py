@@ -10,6 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 from fastapi.responses import FileResponse
 
 from code_review_agent.apps.repo_analyst import RepoAnalystRequest, RepoAnalystService
+from code_review_agent.models import ModelProviderDescriptor, list_model_providers
 from code_review_agent.runtime import (
     AgentRuntime,
     CreateRunRequest,
@@ -108,6 +109,13 @@ async def list_tools(request: Request) -> list[ToolDescriptor]:
     _enforce_api_key(request)
     runtime = get_runtime(request)
     return runtime.list_tools()
+
+
+@router.get("/models/providers", response_model=list[ModelProviderDescriptor])
+async def list_providers(request: Request) -> list[ModelProviderDescriptor]:
+    """List model providers and model names known to the runtime."""
+    _enforce_api_key(request)
+    return list_model_providers()
 
 
 @router.post("/runs", status_code=status.HTTP_202_ACCEPTED)

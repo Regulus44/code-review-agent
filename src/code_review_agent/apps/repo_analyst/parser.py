@@ -86,6 +86,11 @@ def _candidate_json_texts(raw_text: str) -> list[str]:
 def _load_json_payload(result: AgentRunResult, report_label: str) -> object:
     """Parse the final assistant output into a JSON payload."""
     if result.final_message is None or not result.final_message.content:
+        if result.status == "model_output_truncated":
+            raise RepoAnalystParseError(
+                "final_output_truncated",
+                "model output was truncated before producing final content (finish_reason=length)",
+            )
         raise RepoAnalystParseError(
             "missing_final_content",
             "missing final assistant content",

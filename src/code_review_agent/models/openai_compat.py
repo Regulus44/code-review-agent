@@ -18,6 +18,19 @@ from .base import (
 )
 
 
+def _exception_detail(exc: BaseException) -> str:
+    """Return a non-empty exception detail for diagnostics."""
+    parts = [exc.__class__.__name__]
+    message = str(exc).strip()
+    if message:
+        parts.append(message)
+    else:
+        parts.append(repr(exc))
+    if exc.__cause__ is not None:
+        parts.append(f"cause={exc.__cause__.__class__.__name__}: {exc.__cause__!r}")
+    return " | ".join(parts)
+
+
 class OpenAICompatibleModel(ChatModel):
     """Adapter for providers that implement OpenAI-style chat completions."""
 
@@ -73,7 +86,11 @@ class OpenAICompatibleModel(ChatModel):
                 f"{exc.response.status_code}: {body}",
             ) from exc
         except httpx.HTTPError as exc:
-            raise ModelAPIError(f"{self.provider} API request failed: {exc}") from exc
+            raise ModelAPIError(
+                f"{self.provider} API request failed "
+                f"({self.base_url}/chat/completions, timeout={self.timeout}s): "
+                f"{_exception_detail(exc)}",
+            ) from exc
 
         raw = response.json()
         return self._parse_response(raw)

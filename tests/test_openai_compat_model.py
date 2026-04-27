@@ -171,6 +171,33 @@ async def test_openai_compatible_model_maps_http_errors() -> None:
     await client.aclose()
 
 
+@pytest.mark.anyio
+async def test_openai_compatible_model_includes_timeout_error_details() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("", request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    model = OpenAICompatibleModel(
+        api_key="test-key",
+        base_url="https://api.deepseek.com",
+        model_name="deepseek-chat",
+        provider="deepseek",
+        timeout=123,
+        client=client,
+    )
+
+    with pytest.raises(ModelAPIError) as exc_info:
+        await model.complete(ChatRequest(messages=[user_message("hello")]))
+
+    message = str(exc_info.value)
+    assert "deepseek API request failed" in message
+    assert "ReadTimeout" in message
+    assert "timeout=123" in message
+    assert message.rstrip() != "deepseek API request failed:"
+
+    await client.aclose()
+
+
 def test_openai_compatible_model_rejects_missing_config() -> None:
     with pytest.raises(ModelConfigurationError):
         OpenAICompatibleModel(

@@ -12,8 +12,11 @@ def test_dotenv_strips_wrapping_quotes(tmp_path: Path, monkeypatch) -> None:
     env_file.write_text(
         (
             'DEEPSEEK_API_KEY="quoted-key"\n'
+            "SILICONFLOW_API_KEY='sf-key'\n"
+            "SILICONFLOW_MODEL=Qwen/Qwen2.5-Coder-32B-Instruct\n"
             "DEFAULT_PROVIDER='deepseek'\n"
             "DEFAULT_MODEL='deepseek-v4-pro'\n"
+            "MODEL_REQUEST_TIMEOUT_SECONDS=240\n"
             "ENABLED_TOOLS=list_files, read_file,run_command\n"
         ),
         encoding="utf-8",
@@ -21,16 +24,22 @@ def test_dotenv_strips_wrapping_quotes(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("SILICONFLOW_API_KEY", raising=False)
+    monkeypatch.delenv("SILICONFLOW_MODEL", raising=False)
     monkeypatch.delenv("DEFAULT_PROVIDER", raising=False)
     monkeypatch.delenv("DEFAULT_MODEL", raising=False)
+    monkeypatch.delenv("MODEL_REQUEST_TIMEOUT_SECONDS", raising=False)
     monkeypatch.delenv("ENABLED_TOOLS", raising=False)
     get_settings.cache_clear()
 
     settings = get_settings()
 
     assert settings.deepseek_api_key == "quoted-key"
+    assert settings.siliconflow_api_key == "sf-key"
+    assert settings.siliconflow_model == "Qwen/Qwen2.5-Coder-32B-Instruct"
     assert settings.default_provider == "deepseek"
     assert settings.default_model == "deepseek-v4-pro"
+    assert settings.model_request_timeout_seconds == 240
     assert settings.enabled_tools == ("list_files", "read_file", "run_command")
 
     get_settings.cache_clear()

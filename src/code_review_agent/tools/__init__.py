@@ -13,6 +13,7 @@ from .command_tools import RunCommandTool
 from .discovery import ToolDescriptor, describe_registry, describe_tool
 from .file_tools import ListFilesTool, ReadFileTool, SearchTextTool
 from .registry import ToolRegistry
+from .truncation import truncate_text
 
 __all__ = [
     "ListFilesTool",
@@ -30,4 +31,5 @@ __all__ = [
     "ToolDescriptor",
     "describe_registry",
     "describe_tool",
+    "truncate_text",
 ]

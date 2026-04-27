@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from code_review_agent.messages import Message, ToolCall
 from code_review_agent.models import ModelUsage
 
-AgentRunStatus = Literal["completed", "failed", "max_iterations", "cancelled"]
+AgentRunStatus = Literal["completed", "failed", "max_iterations", "cancelled", "model_output_truncated"]
 
 
 class AgentStep(BaseModel):

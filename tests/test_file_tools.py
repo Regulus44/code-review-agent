@@ -166,11 +166,11 @@ async def test_search_text_uses_python_fallback_with_context_and_limit(
     assert result.status == "success"
     assert result.data is not None
     assert result.data["backend"] == "python"
-    assert result.data["truncated"] is True
+    assert result.data["match_count_truncated"] is True
     assert result.data["matches"][0]["path"] == "src/main.py"
     assert "1: alpha" in result.data["matches"][0]["line_text"]
     assert "2: needle here" in result.data["matches"][0]["line_text"]
-    assert result.metadata["skipped_files"] == 0
+    assert result.metadata["skipped"] == {"ignored_dir": 1}
 
 
 @pytest.mark.anyio
@@ -233,3 +233,33 @@ async def test_search_text_respects_case_sensitivity(tmp_path: Path) -> None:
     assert sensitive.data is not None
     assert len(insensitive.data["matches"]) == 2
     assert len(sensitive.data["matches"]) == 1
+
+
+@pytest.mark.anyio
+async def test_search_text_treats_svg_as_searchable_text(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_file(
+        tmp_path / "assets" / "logo.svg",
+        '<svg><title>Needle Logo</title></svg>\n',
+    )
+    monkeypatch.setattr(shutil, "which", lambda _: None)
+
+    tool = SearchTextTool()
+    context = ToolContext(workspace_root=tmp_path)
+
+    result = await tool.execute(
+        context,
+        {"query": "Needle", "path": ".", "glob": "*.svg"},
+    )
+
+    assert result.status == "success"
+    assert result.data is not None
+    assert result.data["matches"] == [
+        {
+            "path": "assets/logo.svg",
+            "line_number": 1,
+            "line_text": '<svg><title>Needle Logo</title></svg>',
+        },
+    ]

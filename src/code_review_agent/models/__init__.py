@@ -31,6 +31,7 @@ __all__ = [
     "ModelUsage",
     "ModelProviderDescriptor",
     "OpenAICompatibleModel",
+    "SiliconFlowModel",
     "create_model",
     "list_model_providers",
     "normalize_provider",
@@ -47,4 +48,8 @@ def __getattr__(name: str):
         from .openai_compat import OpenAICompatibleModel
 
         return OpenAICompatibleModel
+    if name == "SiliconFlowModel":
+        from .siliconflow import SiliconFlowModel
+
+        return SiliconFlowModel
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

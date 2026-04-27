@@ -425,6 +425,40 @@ async def test_repo_analyst_review_uses_command_tool_when_enabled(tmp_path: Path
 
 
 @pytest.mark.anyio
+async def test_repo_analyst_review_applies_bounded_runtime_defaults(tmp_path: Path) -> None:
+    model = FakeModel(
+        [
+            make_response(
+                content=(
+                    '{"summary":"Review complete",'
+                    '"changed_files":[],"test_result":{"status":"not_run",'
+                    '"command":null,"exit_code":null,"summary":"Not run"},'
+                    '"findings":[],"risks":[],"next_steps":[]}'
+                ),
+            ),
+        ],
+    )
+    runtime = AgentRuntime(
+        model_factory=lambda: model,
+        tool_registry_factory=build_registry,
+    )
+    service = RepoAnalystService(runtime)
+
+    run = await service.create_run(
+        RepoAnalystRequest(
+            workspace_root=str(tmp_path),
+            mode="review",
+            max_iterations=100,
+        ),
+    )
+    await service.execute_run(run.id)
+
+    assert run.max_iterations == 40
+    assert run.max_tokens == 8192
+    assert model.requests[0].max_tokens == 8192
+
+
+@pytest.mark.anyio
 async def test_repo_analyst_review_respects_global_disabled_tools(
     tmp_path: Path,
 ) -> None:

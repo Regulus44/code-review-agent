@@ -13,7 +13,13 @@ from pathlib import Path
 from uuid import uuid4
 
 from code_review_agent.harness import Agent, AgentRunResult, AgentStep
-from code_review_agent.models import ChatModel, create_model, normalize_provider
+from code_review_agent.models import (
+    ChatModel,
+    ChatRequest,
+    ChatResponse,
+    create_model,
+    normalize_provider,
+)
 from code_review_agent.observability import (
     log_structured_event,
     make_run_event,
@@ -57,7 +63,7 @@ DEFAULT_SYSTEM_PROMPT = (
     "Use tools when you need grounded file information. "
     "Base every conclusion on the repository contents."
 )
-TERMINAL_RUN_STATUSES = {"completed", "failed", "max_iterations", "cancelled"}
+TERMINAL_RUN_STATUSES = {"completed", "failed", "max_iterations", "cancelled", "model_output_truncated"}
 CANCELLED_BY_USER = "cancelled_by_user"
 BUILTIN_TOOL_FACTORIES: dict[str, ToolFactory] = {
     "list_files": ListFilesTool,
@@ -65,6 +71,117 @@ BUILTIN_TOOL_FACTORIES: dict[str, ToolFactory] = {
     "search_text": SearchTextTool,
     "run_command": RunCommandTool,
 }
+
+
+def _exception_detail(exc: BaseException) -> str:
+    """Return a non-empty exception detail for runtime diagnostics."""
+    message = str(exc).strip()
+    if message:
+        return f"{exc.__class__.__name__}: {message}"
+    return f"{exc.__class__.__name__}: {exc!r}"
+
+
+class _ObservableChatModel(ChatModel):
+    """Emit live model request/response events around a chat model."""
+
+    def __init__(
+        self,
+        model: ChatModel,
+        *,
+        emit: EventEmitter,
+        root_span_id: str,
+    ) -> None:
+        self._model = model
+        self._emit = emit
+        self._root_span_id = root_span_id
+        self._request_count = 0
+        self.provider = model.provider
+        self.model_name = model.model_name
+
+    async def complete(self, request: ChatRequest) -> ChatResponse:
+        """Emit live observability events for one model request."""
+        self._request_count += 1
+        request_index = self._request_count
+        span_id = new_span_id()
+        started_at = datetime.utcnow()
+        started_perf = time.perf_counter()
+        payload = {
+            "request_index": request_index,
+            "provider": self.provider,
+            "model": self.model_name,
+            "requested_model": self.model_name,
+            "message_count": len(request.messages),
+            "tool_count": len(request.tools or []),
+        }
+        await self._emit(
+            legacy_type="model_request",
+            event_type="model.request",
+            payload=payload,
+            timestamp=started_at,
+            status="running",
+            span_id=span_id,
+            parent_span_id=self._root_span_id,
+        )
+
+        try:
+            response = await self._model.complete(request)
+        except asyncio.CancelledError:
+            duration_ms = int((time.perf_counter() - started_perf) * 1000)
+            await self._emit(
+                legacy_type="model_request",
+                event_type="model.cancelled",
+                payload={
+                    **payload,
+                    "failure_reason": "model_request_cancelled",
+                },
+                timestamp=datetime.utcnow(),
+                status="cancelled",
+                duration_ms=duration_ms,
+                failure_reason="model_request_cancelled",
+                parent_span_id=span_id,
+            )
+            raise
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started_perf) * 1000)
+            detail = _exception_detail(exc)
+            await self._emit(
+                legacy_type="model_response",
+                event_type="model.error",
+                payload={
+                    **payload,
+                    "failure_reason": detail,
+                },
+                timestamp=datetime.utcnow(),
+                status="error",
+                duration_ms=duration_ms,
+                failure_reason=detail,
+                parent_span_id=span_id,
+            )
+            raise
+
+        duration_ms = int((time.perf_counter() - started_perf) * 1000)
+        await self._emit(
+            legacy_type="model_response",
+            event_type="model.response",
+            payload={
+                **payload,
+                "provider": response.provider,
+                "model": response.model,
+                "returned_model": response.model,
+                "finish_reason": response.finish_reason,
+                "usage": response.usage.model_dump() if response.usage else None,
+                "message": response.message.model_dump(),
+            },
+            timestamp=datetime.utcnow(),
+            status="success",
+            duration_ms=duration_ms,
+            parent_span_id=span_id,
+        )
+        return response
+
+    async def aclose(self) -> None:
+        """Close the wrapped model if it owns resources."""
+        await _close_model_if_needed(self._model)
 
 
 class WorkspaceValidationError(ValueError):
@@ -302,7 +419,11 @@ class AgentRuntime:
                 span_id=root_span_id,
             )
 
-            model = self._create_model(run.provider, run.model)
+            model = _ObservableChatModel(
+                self._create_model(run.provider, run.model),
+                emit=emit,
+                root_span_id=root_span_id,
+            )
             registry = self.tool_registry_factory()
             if run.tool_names is not None:
                 registry = _filter_tool_registry(registry, run.tool_names)
@@ -333,6 +454,7 @@ class AgentRuntime:
                 steps=result.steps,
                 emit=emit,
                 root_span_id=root_span_id,
+                include_model_events=False,
             )
             await self.store.update_status(
                 run_id,
@@ -452,6 +574,7 @@ class AgentRuntime:
         steps: list[AgentStep],
         emit: EventEmitter,
         root_span_id: str,
+        include_model_events: bool = True,
     ) -> None:
         """Convert agent steps into normalized observability events."""
         if not steps:
@@ -493,29 +616,30 @@ class AgentRuntime:
 
             if step.type == "model_response":
                 step_payload.update(step.metadata or {})
-                if step.started_at is not None:
+                if include_model_events:
+                    if step.started_at is not None:
+                        await emit(
+                            legacy_type="model_request",
+                            event_type="model.request",
+                            payload=step_payload,
+                            timestamp=step.started_at,
+                            status="running",
+                            parent_span_id=iteration_span_id,
+                        )
                     await emit(
-                        legacy_type="model_request",
-                        event_type="model.request",
-                        payload=step_payload,
-                        timestamp=step.started_at,
-                        status="running",
+                        legacy_type="model_response",
+                        event_type="model.response",
+                        payload={
+                            **step_payload,
+                            "finish_reason": step.finish_reason,
+                            "usage": step.usage.model_dump() if step.usage else None,
+                            "message": step.message.model_dump() if step.message else None,
+                        },
+                        timestamp=step.finished_at or step.started_at,
+                        duration_ms=step.duration_ms,
+                        status="success",
                         parent_span_id=iteration_span_id,
                     )
-                await emit(
-                    legacy_type="model_response",
-                    event_type="model.response",
-                    payload={
-                        **step_payload,
-                        "finish_reason": step.finish_reason,
-                        "usage": step.usage.model_dump() if step.usage else None,
-                        "message": step.message.model_dump() if step.message else None,
-                    },
-                    timestamp=step.finished_at or step.started_at,
-                    duration_ms=step.duration_ms,
-                    status="success",
-                    parent_span_id=iteration_span_id,
-                )
             else:
                 step_payload.update(step.metadata or {})
                 step_payload["tool_call"] = (

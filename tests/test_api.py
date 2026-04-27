@@ -20,6 +20,7 @@ from code_review_agent.runtime import (
     build_default_tool_descriptors,
     build_default_tool_registry,
 )
+from code_review_agent.settings import get_settings
 from code_review_agent.tools import Tool, ToolExecutionResult, ToolRegistry
 
 
@@ -137,6 +138,7 @@ def test_index_page_serves_frontend_html() -> None:
     assert "text/html" in response.headers["content-type"]
     assert "Repo Analyst" in response.text
     assert "/repo-analyst/runs" in response.text
+    assert "siliconflow" in response.text
 
 
 def test_tools_endpoint_lists_default_runtime_tools() -> None:
@@ -219,6 +221,39 @@ def test_tools_endpoint_accepts_valid_api_key_for_remote_request() -> None:
     assert response.status_code == 200
 
 
+def test_model_providers_endpoint_lists_supported_providers(monkeypatch) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-secret")
+    monkeypatch.setenv("SILICONFLOW_API_KEY", "siliconflow-secret")
+    monkeypatch.setenv("SILICONFLOW_MODEL", "deepseek-ai/DeepSeek-V4-Flash")
+    get_settings.cache_clear()
+    client = build_client()
+
+    response = client.get("/models/providers")
+
+    assert response.status_code == 200
+    payload = response.json()
+    by_name = {provider["name"]: provider for provider in payload}
+    assert set(by_name) == {"deepseek", "siliconflow"}
+    assert by_name["deepseek"]["configured"] is True
+    assert by_name["siliconflow"]["configured"] is True
+    assert "deepseek-v4-pro" in by_name["deepseek"]["models"]
+    assert "deepseek-ai/DeepSeek-V4-Flash" in by_name["siliconflow"]["models"]
+    assert "Pro/moonshotai/Kimi-K2.6" in by_name["siliconflow"]["models"]
+    serialized = response.text
+    assert "deepseek-secret" not in serialized
+    assert "siliconflow-secret" not in serialized
+
+    get_settings.cache_clear()
+
+
+def test_model_providers_endpoint_requires_api_key_for_remote_request() -> None:
+    client = build_client(api_key="secret-key")
+
+    response = client.get("/models/providers", headers={"x-forwarded-for": "8.8.8.8"})
+
+    assert response.status_code == 401
+
+
 def test_tools_endpoint_marks_disabled_tools_from_runtime_policy() -> None:
     enabled_tools = ("list_files", "read_file")
     runtime = AgentRuntime(
@@ -269,6 +304,29 @@ def test_run_endpoints_execute_and_return_events(tmp_path: Path) -> None:
     assert event_types[-1] == "run.completed"
     assert get_response.json()["diagnostics"]["model_call_count"] == 2
     assert list_response.json()[0]["id"] == run_id
+
+
+def test_run_endpoint_persists_provider_and_model(tmp_path: Path) -> None:
+    client = build_client()
+
+    create_response = client.post(
+        "/runs",
+        json={
+            "user_input": "Inspect this repo.",
+            "workspace_root": str(tmp_path),
+            "provider": "siliconflow",
+            "model": "deepseek-ai/DeepSeek-V4-Flash",
+        },
+    )
+    run_id = create_response.json()["id"]
+    get_response = client.get(f"/runs/{run_id}")
+
+    assert create_response.status_code == 202
+    assert create_response.json()["provider"] == "siliconflow"
+    assert create_response.json()["model"] == "deepseek-ai/DeepSeek-V4-Flash"
+    assert get_response.status_code == 200
+    assert get_response.json()["provider"] == "siliconflow"
+    assert get_response.json()["model"] == "deepseek-ai/DeepSeek-V4-Flash"
 
 
 def test_run_endpoints_return_404_for_missing_run() -> None:
@@ -504,8 +562,8 @@ def test_repo_analyst_run_accepts_enabled_tools_override(tmp_path: Path) -> None
         json={
             "workspace_root": str(tmp_path),
             "mode": "overview",
-            "provider": "deepseek",
-            "model": "deepseek-chat",
+            "provider": "siliconflow",
+            "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
             "enabled_tools": ["list_files"],
         },
     )
@@ -515,8 +573,8 @@ def test_repo_analyst_run_accepts_enabled_tools_override(tmp_path: Path) -> None
 
     assert create_response.status_code == 202
     assert get_response.status_code == 200
-    assert get_response.json()["provider"] == "deepseek"
-    assert get_response.json()["model"] == "deepseek-chat"
+    assert get_response.json()["provider"] == "siliconflow"
+    assert get_response.json()["model"] == "Qwen/Qwen2.5-Coder-32B-Instruct"
     assert get_response.json()["tool_names"] == ["list_files"]
 
 

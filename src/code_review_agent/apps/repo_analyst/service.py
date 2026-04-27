@@ -38,6 +38,8 @@ REPO_ANALYST_REVIEW_TOOLS = [
 REPO_ANALYST_KNOWN_TOOLS = set(REPO_ANALYST_OVERVIEW_TOOLS) | set(
     REPO_ANALYST_REVIEW_TOOLS,
 )
+REPO_REVIEW_DEFAULT_MAX_TOKENS = 8192
+REPO_REVIEW_MAX_ITERATIONS = 40
 
 
 class RepoAnalystService:
@@ -58,15 +60,22 @@ class RepoAnalystService:
             if request.question and request.question.strip()
             else default_question
         )
+        max_iterations = request.max_iterations
+        max_tokens = request.max_tokens
+        if request.mode == "review":
+            max_iterations = min(max_iterations, REPO_REVIEW_MAX_ITERATIONS)
+            if max_tokens is None:
+                max_tokens = REPO_REVIEW_DEFAULT_MAX_TOKENS
+
         return await self.runtime.create_run(
             CreateRunRequest(
                 user_input=question,
                 workspace_root=request.workspace_root,
                 app_name=APP_NAME,
                 system_prompt=build_repo_analyst_prompt(question, mode=request.mode),
-                max_iterations=request.max_iterations,
+                max_iterations=max_iterations,
                 temperature=request.temperature,
-                max_tokens=request.max_tokens,
+                max_tokens=max_tokens,
                 provider=request.provider,
                 model=request.model,
                 tool_names=self._resolve_tool_names(
@@ -117,7 +126,7 @@ class RepoAnalystService:
         failure_reason = run.failure_reason
         parse_diagnostics: RepoAnalystParseDiagnostics | None = None
 
-        if run.result is not None and run.status in {"completed", "max_iterations"}:
+        if run.result is not None and run.status in {"completed", "max_iterations", "model_output_truncated"}:
             try:
                 if mode == "review":
                     review_report = parse_repo_review_report(run.result)
@@ -130,7 +139,7 @@ class RepoAnalystService:
                     code=exc.code,
                     message=exc.message,
                 )
-                if run.status == "completed":
+                if run.status in ("completed", "model_output_truncated"):
                     failure_reason = self._parse_failure_reason(mode, exc.code)
 
         return RepoAnalystRunResult(
@@ -162,6 +171,8 @@ class RepoAnalystService:
 
     def _parse_failure_reason(self, mode: RepoAnalystMode, code: str) -> str:
         prefix = "invalid_repo_review_report" if mode == "review" else "invalid_repo_analyst_report"
+        if code == "final_output_truncated":
+            return f"{prefix}_truncated"
         if code == "invalid_json":
             return f"{prefix}_json"
         if code == "schema_validation_failed":

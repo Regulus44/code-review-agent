@@ -8,7 +8,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
 from code_review_agent.harness import Agent
-from code_review_agent.messages import ToolCall, assistant_message
+from code_review_agent.messages import Message, Role, ToolCall, assistant_message
 from code_review_agent.models import (
     ChatRequest,
     ChatResponse,
@@ -98,13 +98,18 @@ class FakeModel(ChatModel):
 def make_response(
     *,
     content: str | None = None,
+    reasoning_content: str | None = None,
     tool_calls: list[ToolCall] | None = None,
     usage: ModelUsage | None = None,
     finish_reason: str | None = "stop",
 ) -> ChatResponse:
     """Create a fake chat response."""
     return ChatResponse(
-        message=assistant_message(content=content, tool_calls=tool_calls or []),
+        message=assistant_message(
+            content=content,
+            reasoning_content=reasoning_content,
+            tool_calls=tool_calls or [],
+        ),
         provider="fake",
         model="fake-model",
         usage=usage,
@@ -409,3 +414,81 @@ async def test_agent_usage_aggregation_ignores_missing_usage(tmp_path) -> None:
     assert result.usage.prompt_tokens == 5
     assert result.usage.completion_tokens == 2
     assert result.usage.total_tokens == 7
+
+
+@pytest.mark.anyio
+async def test_agent_preserves_reasoning_content_in_model_request(tmp_path) -> None:
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+    reasoning = "private reasoning " * 200
+    model = FakeModel(
+        [
+            make_response(
+                reasoning_content=reasoning,
+                tool_calls=[
+                    ToolCall(id="call_1", name="echo", arguments={"value": "hello"}),
+                ],
+                finish_reason="tool_calls",
+            ),
+            make_response(content="Done"),
+        ],
+    )
+    agent = Agent(
+        name="reviewer",
+        model=model,
+        tool_registry=registry,
+        session=InMemorySession(),
+    )
+
+    result = await agent.run("Inspect", ToolContext(workspace_root=tmp_path))
+
+    assert result.status == "completed"
+    assert model.requests[1].messages[1].role == Role.ASSISTANT
+    assert model.requests[1].messages[1].reasoning_content == reasoning
+
+
+@pytest.mark.anyio
+async def test_agent_summarizes_old_large_tool_messages_for_model_request(tmp_path) -> None:
+    session = InMemorySession()
+    session.append(Message(role=Role.USER, content="Earlier task"))
+    for index in range(8):
+        session.append(
+            assistant_message(
+                tool_calls=[
+                    ToolCall(
+                        id=f"old_call_{index}",
+                        name="echo",
+                        arguments={"value": str(index)},
+                    ),
+                ],
+            ),
+        )
+        session.append(
+            Message(
+                role=Role.TOOL,
+                content="x" * 5000,
+                name="echo",
+                tool_call_id=f"old_call_{index}",
+            ),
+        )
+
+    model = FakeModel([make_response(content="Done")])
+    agent = Agent(name="reviewer", model=model, session=session)
+
+    result = await agent.run(
+        "Current task",
+        ToolContext(workspace_root=tmp_path),
+        reset_session=False,
+    )
+
+    assert result.status == "completed"
+    old_tool_messages = [
+        message
+        for message in model.requests[0].messages
+        if message.role == Role.TOOL and message.tool_call_id == "old_call_0"
+    ]
+    assert old_tool_messages
+    assert old_tool_messages[0].content is not None
+    assert old_tool_messages[0].content.startswith(
+        "Tool result summarized for model context budget.",
+    )

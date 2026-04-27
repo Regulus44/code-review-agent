@@ -200,7 +200,8 @@
       }
 
       .status-failed,
-      .status-max_iterations {
+      .status-max_iterations,
+      .status-model_output_truncated {
         color: var(--danger);
         background: #fef2f2;
         border-color: #fecaca;
@@ -478,6 +479,7 @@
               <span id="providerSelectLabel">选择 Provider</span>
               <select id="providerSelect" class="model-select">
                 <option value="deepseek" selected>DeepSeek</option>
+                <option value="siliconflow">SiliconFlow</option>
               </select>
             </label>
 
@@ -639,6 +641,7 @@
           status_failed: "失败",
           status_cancelled: "已取消",
           status_max_iterations: "达到最大迭代次数",
+          status_model_output_truncated: "输出被截断",
           status_unknown: "未知状态",
           run_detail_meta_separator: " | ",
           request_failed: "请求失败",
@@ -739,6 +742,7 @@
           status_failed: "Failed",
           status_cancelled: "Cancelled",
           status_max_iterations: "Max Iterations",
+          status_model_output_truncated: "Output Truncated",
           status_unknown: "Unknown",
           run_detail_meta_separator: " | ",
           request_failed: "Request failed",
@@ -748,6 +752,7 @@
       const state = {
         runs: [],
         tools: [],
+        modelProviders: [],
         selectedToolNames: [],
         selectedRunId: null,
         pollTimer: null,
@@ -815,6 +820,7 @@
         if (!formStatus.dataset.customMessage) {
           formStatus.textContent = t("waiting_form");
         }
+        renderProviderModelControls();
         renderToolPermissions();
       }
 
@@ -877,6 +883,70 @@
         return `${value} ms`;
       }
 
+      function providerLabel(provider) {
+        const names = {
+          deepseek: "DeepSeek",
+          siliconflow: "SiliconFlow",
+        };
+        const baseName = names[provider.name] || provider.name;
+        const notConfigured = state.lang === "zh" ? "未配置" : "Not configured";
+        return provider.configured ? baseName : `${baseName} (${notConfigured})`;
+      }
+
+      function renderProviderModelControls(options = {}) {
+        if (!state.modelProviders.length) return;
+
+        const preserveModel = options.preserveModel !== false;
+        const currentProvider = providerSelect.value;
+        const currentModel = modelSelect.value;
+
+        providerSelect.innerHTML = state.modelProviders
+          .map(
+            (provider) =>
+              `<option value="${escapeHtml(provider.name)}">${escapeHtml(providerLabel(provider))}</option>`,
+          )
+          .join("");
+
+        const configuredProvider = state.modelProviders.find((provider) => provider.configured);
+        const fallbackProvider = configuredProvider || state.modelProviders[0];
+        const providerNames = new Set(state.modelProviders.map((provider) => provider.name));
+        const nextProvider = providerNames.has(currentProvider) ? currentProvider : fallbackProvider.name;
+        providerSelect.value = nextProvider;
+
+        const descriptor =
+          state.modelProviders.find((provider) => provider.name === nextProvider) || fallbackProvider;
+        const models = descriptor.models?.length
+          ? descriptor.models
+          : descriptor.default_model
+            ? [descriptor.default_model]
+            : [];
+
+        modelSelect.innerHTML = models
+          .map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`)
+          .join("");
+
+        if (preserveModel && models.includes(currentModel)) {
+          modelSelect.value = currentModel;
+        } else if (descriptor.default_model && models.includes(descriptor.default_model)) {
+          modelSelect.value = descriptor.default_model;
+        } else if (models.length) {
+          modelSelect.value = models[0];
+        }
+      }
+
+      async function loadModelProviders() {
+        try {
+          state.modelProviders = await requestJson("/models/providers");
+          providerSelect.value = "";
+          renderProviderModelControls({ preserveModel: false });
+        } catch (error) {
+          if (!formStatus.dataset.customMessage) {
+            const prefix = state.lang === "zh" ? "模型列表加载失败" : "Failed to load model providers";
+            setFormStatus(`${prefix}: ${error.message}`, true);
+          }
+        }
+      }
+
       function eventTypeText(event) {
         return event.event_type || event.type || "unknown";
       }
@@ -892,6 +962,12 @@
 
       function resetToolSelectionForMode() {
         state.selectedToolNames = defaultToolNamesForMode(modeSelect.value);
+        maxIterationsInput.value = modeSelect.value === "review" ? "40" : "100";
+        if (modeSelect.value === "review" && !maxTokensInput.value.trim()) {
+          maxTokensInput.placeholder = "2048";
+        } else {
+          maxTokensInput.placeholder = t("max_tokens_placeholder");
+        }
         renderToolPermissions();
       }
 
@@ -1392,6 +1468,7 @@
 
       refreshRunsButton.addEventListener("click", loadRuns);
       modeSelect.addEventListener("change", resetToolSelectionForMode);
+      providerSelect.addEventListener("change", () => renderProviderModelControls({ preserveModel: false }));
       refreshDetailButton.addEventListener("click", async () => {
         if (state.selectedRunId) {
           await loadRunDetail(state.selectedRunId, true);
@@ -1431,6 +1508,7 @@
       langSelect.value = state.lang === "en" ? "en" : "zh";
       applyStaticTranslations();
       loadHealth();
+      loadModelProviders();
       loadTools();
       loadRuns();
     </script>

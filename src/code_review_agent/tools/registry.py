@@ -16,6 +16,14 @@ from .base import (
 )
 
 
+def _exception_detail(exc: BaseException) -> str:
+    """Return a non-empty exception detail for tool diagnostics."""
+    message = str(exc).strip()
+    if message:
+        return f"{exc.__class__.__name__}: {message}"
+    return f"{exc.__class__.__name__}: {exc!r}"
+
+
 class ToolRegistry:
     """Registry for local built-in tools."""
 
@@ -76,10 +84,14 @@ class ToolRegistry:
                 metadata={"error_type": "tool_execution_error"},
             )
         except Exception as exc:  # pragma: no cover - defensive fallback
+            detail = _exception_detail(exc)
             return ToolExecutionResult.error(
                 tool_name=tool.name,
-                content=f"Tool '{tool.name}' failed unexpectedly: {exc}",
+                content=f"Tool '{tool.name}' failed unexpectedly: {detail}",
                 data={"arguments": tool_call.arguments},
-                metadata={"error_type": "unexpected_tool_error"},
+                metadata={
+                    "error_type": "unexpected_tool_error",
+                    "exception_type": exc.__class__.__name__,
+                    "detail": detail,
+                },
             )
-
