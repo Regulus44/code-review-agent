@@ -112,6 +112,27 @@ class RepoAnalystRunResult(BaseModel):
     tool_names: list[str] | None = None
 
 
+class RepoAnalystRunSummary(BaseModel):
+    """Lightweight repo analyst run summary for list views."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    status: str
+    mode: RepoAnalystMode = "overview"
+    report_type: RepoAnalystMode = "overview"
+    workspace_root: str
+    question: str
+    created_at: RunRecord.model_fields["created_at"].annotation
+    started_at: RunRecord.model_fields["started_at"].annotation = None
+    finished_at: RunRecord.model_fields["finished_at"].annotation = None
+    failure_reason: str | None = None
+    diagnostics: RunDiagnostics | None = None
+    provider: str | None = None
+    model: str | None = None
+    tool_names: list[str] | None = None
+
+
 class RepoAnalystParseDiagnostics(BaseModel):
     """Minimal diagnostics for strict repo analyst parsing failures."""
 

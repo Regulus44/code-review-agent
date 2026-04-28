@@ -1391,7 +1391,7 @@
         try {
           const [run, events] = await Promise.all([
             requestJson(`/repo-analyst/runs/${runId}`),
-            requestJson(`/repo-analyst/runs/${runId}/events`),
+            requestJson(`/repo-analyst/runs/${runId}/events?limit=100&include_payload=false`),
           ]);
           const runIndex = state.runs.findIndex((r) => r.id === run.id);
           if (runIndex !== -1) {

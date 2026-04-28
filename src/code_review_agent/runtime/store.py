@@ -27,9 +27,46 @@ class RunStore(ABC):
     async def list_runs(self) -> list[RunRecord]:
         """List all runs in reverse creation order."""
 
+    async def get_run_summary(self, run_id: str) -> RunRecord:
+        """Get one run without loading heavy raw result data."""
+        run = await self.get_run(run_id)
+        run.result = None
+        return run
+
+    async def list_run_summaries(self) -> list[RunRecord]:
+        """List runs without loading heavy raw result data."""
+        runs = await self.list_runs()
+        for run in runs:
+            run.result = None
+        return runs
+
+    async def get_result_size(self, run_id: str) -> int | None:
+        """Return serialized result size when available."""
+        run = await self.get_run(run_id)
+        return len(run.result.model_dump_json()) if run.result else None
+
     @abstractmethod
     async def get_events(self, run_id: str) -> list[RunEvent]:
         """Get all events for one run."""
+
+    async def get_event_summaries(
+        self,
+        run_id: str,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        include_payload: bool = False,
+        max_payload_chars: int = 5000,
+    ) -> list[RunEvent]:
+        """Get event summaries with optional payload truncation."""
+        events = await self.get_events(run_id)
+        selected = events[offset : offset + limit]
+        if include_payload:
+            return [
+                _truncate_event_payload(event, max_payload_chars)
+                for event in selected
+            ]
+        return [_strip_event_payload(event) for event in selected]
 
     @abstractmethod
     async def append_event(self, run_id: str, event: RunEvent) -> RunEvent:
@@ -116,7 +153,13 @@ class InMemoryRunStore(RunStore):
             run.status = status
             if status == "running" and run.started_at is None:
                 run.started_at = utc_now()
-            if status in {"completed", "failed", "max_iterations", "cancelled"}:
+            if status in {
+                "completed",
+                "failed",
+                "max_iterations",
+                "cancelled",
+                "model_output_truncated",
+            }:
                 run.finished_at = utc_now()
             if failure_reason is not None:
                 run.failure_reason = failure_reason
@@ -132,3 +175,36 @@ class InMemoryRunStore(RunStore):
             run.result = result.model_copy(deep=True)
             run.failure_reason = result.failure_reason
             return run.model_copy(deep=True)
+
+
+def _strip_event_payload(event: RunEvent) -> RunEvent:
+    return RunEvent(
+        index=event.index,
+        type=event.type,
+        event_type=event.event_type,
+        timestamp=event.timestamp,
+        status=event.status,
+        duration_ms=event.duration_ms,
+        failure_reason=event.failure_reason,
+        trace_id=event.trace_id,
+        span_id=event.span_id,
+        parent_span_id=event.parent_span_id,
+    )
+
+
+def _truncate_event_payload(event: RunEvent, max_payload_chars: int) -> RunEvent:
+    copied = event.model_copy(deep=True)
+    for field_name in ("payload", "data"):
+        value = getattr(copied, field_name)
+        text = str(value)
+        if len(text) > max_payload_chars:
+            setattr(
+                copied,
+                field_name,
+                {
+                    "truncated": True,
+                    "original_chars": len(text),
+                    "preview": text[:max_payload_chars],
+                },
+            )
+    return copied

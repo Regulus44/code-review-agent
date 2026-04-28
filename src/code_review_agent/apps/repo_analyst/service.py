@@ -25,6 +25,7 @@ from .types import (
     RepoAnalystParseDiagnostics,
     RepoAnalystRequest,
     RepoAnalystRunResult,
+    RepoAnalystRunSummary,
 )
 
 APP_NAME = "repo_analyst"
@@ -40,6 +41,7 @@ REPO_ANALYST_KNOWN_TOOLS = set(REPO_ANALYST_OVERVIEW_TOOLS) | set(
 )
 REPO_REVIEW_DEFAULT_MAX_TOKENS = 8192
 REPO_REVIEW_MAX_ITERATIONS = 40
+MAX_DETAIL_RESULT_JSON_CHARS = 10_000_000
 
 
 class RepoAnalystService:
@@ -90,12 +92,27 @@ class RepoAnalystService:
         run = await self.runtime.execute_run(run_id)
         return self._to_app_result(run)
 
-    async def get_run(self, run_id: str) -> RepoAnalystRunResult:
+    async def get_run(
+        self,
+        run_id: str,
+        *,
+        include_raw: bool = False,
+    ) -> RepoAnalystRunResult:
         """Get one app-specific run result."""
-        run = await self.runtime.get_run(run_id)
+        if include_raw:
+            run = await self.runtime.get_run(run_id)
+            if run.app_name != APP_NAME:
+                raise RunNotFoundError(run_id)
+            return self._to_app_result(run, include_raw=True)
+
+        run = await self.runtime.get_run_summary(run_id)
         if run.app_name != APP_NAME:
             raise RunNotFoundError(run_id)
-        return self._to_app_result(run)
+
+        result_size = await self.runtime.get_result_size(run_id)
+        if result_size is not None and result_size <= MAX_DETAIL_RESULT_JSON_CHARS:
+            run = await self.runtime.get_run(run_id)
+        return self._to_app_result(run, include_raw=False)
 
     async def cancel_run(self, run_id: str) -> RepoAnalystRunResult:
         """Cancel one repo analyst run."""
@@ -109,16 +126,57 @@ class RepoAnalystService:
         """Return the underlying runtime events."""
         return await self.runtime.get_events(run_id)
 
-    async def list_runs(self) -> list[RepoAnalystRunResult]:
-        """List all repo analyst runs in app-specific shape."""
-        runs = await self.runtime.list_runs()
+    async def get_event_summaries(
+        self,
+        run_id: str,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        include_payload: bool = False,
+        max_payload_chars: int = 5000,
+    ) -> list[RunEvent]:
+        """Return lightweight runtime event summaries."""
+        return await self.runtime.get_event_summaries(
+            run_id,
+            limit=limit,
+            offset=offset,
+            include_payload=include_payload,
+            max_payload_chars=max_payload_chars,
+        )
+
+    async def list_run_summaries(self) -> list[RepoAnalystRunSummary]:
+        """List repo analyst runs in lightweight app-specific shape."""
+        runs = await self.runtime.list_run_summaries()
         return [
-            self._to_app_result(run)
+            self._to_app_summary(run)
             for run in runs
             if run.app_name == APP_NAME
         ]
 
-    def _to_app_result(self, run):
+    async def list_runs(self) -> list[RepoAnalystRunSummary]:
+        """List all repo analyst runs in lightweight app-specific shape."""
+        return await self.list_run_summaries()
+
+    def _to_app_summary(self, run) -> RepoAnalystRunSummary:
+        mode = self._run_mode(run)
+        return RepoAnalystRunSummary(
+            id=run.id,
+            status=run.status,
+            mode=mode,
+            report_type=mode,
+            workspace_root=run.workspace_root,
+            question=run.user_input,
+            created_at=run.created_at,
+            started_at=run.started_at,
+            finished_at=run.finished_at,
+            failure_reason=run.failure_reason,
+            diagnostics=run.diagnostics,
+            provider=run.provider,
+            model=run.model,
+            tool_names=run.tool_names,
+        )
+
+    def _to_app_result(self, run, *, include_raw: bool = True):
         mode = self._run_mode(run)
         question = run.user_input
         report = None
@@ -154,7 +212,7 @@ class RepoAnalystService:
             finished_at=run.finished_at,
             report=report,
             review_report=review_report,
-            result=run.result,
+            result=run.result if include_raw else None,
             failure_reason=failure_reason,
             parse_diagnostics=parse_diagnostics,
             diagnostics=run.diagnostics,

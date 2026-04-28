@@ -30,6 +30,8 @@ class ModelUsage(BaseModel):
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     total_tokens: int | None = None
+    prompt_cache_hit_tokens: int | None = None
+    prompt_cache_miss_tokens: int | None = None
 
 
 class ChatRequest(BaseModel):
@@ -79,4 +81,3 @@ class ChatModel(ABC):
     @abstractmethod
     async def complete(self, request: ChatRequest) -> ChatResponse:
         """Execute one chat completion request."""
-

@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
+from code_review_agent.context import ContextBudget
 from code_review_agent.harness import Agent, AgentRunResult, AgentStep
 from code_review_agent.models import (
     ChatModel,
@@ -65,6 +66,21 @@ DEFAULT_SYSTEM_PROMPT = (
 )
 TERMINAL_RUN_STATUSES = {"completed", "failed", "max_iterations", "cancelled", "model_output_truncated"}
 CANCELLED_BY_USER = "cancelled_by_user"
+DEFAULT_CONTEXT_BUDGET = ContextBudget()
+REPO_ANALYST_OVERVIEW_CONTEXT_BUDGET = ContextBudget(
+    max_prompt_chars=140_000,
+    recent_full_message_count=12,
+    max_single_tool_message_chars=20_000,
+    historical_tool_preview_chars=2_000,
+    max_total_tool_content_chars=80_000,
+)
+REPO_ANALYST_REVIEW_CONTEXT_BUDGET = ContextBudget(
+    max_prompt_chars=120_000,
+    recent_full_message_count=12,
+    max_single_tool_message_chars=20_000,
+    historical_tool_preview_chars=2_000,
+    max_total_tool_content_chars=80_000,
+)
 BUILTIN_TOOL_FACTORIES: dict[str, ToolFactory] = {
     "list_files": ListFilesTool,
     "read_file": ReadFileTool,
@@ -112,6 +128,7 @@ class _ObservableChatModel(ChatModel):
             "requested_model": self.model_name,
             "message_count": len(request.messages),
             "tool_count": len(request.tools or []),
+            "context": request.metadata or {},
         }
         await self._emit(
             legacy_type="model_request",
@@ -274,13 +291,44 @@ class AgentRuntime:
         run = await self.store.get_run(run_id)
         return await self._decorate_run(run)
 
+    async def get_run_summary(self, run_id: str) -> RunRecord:
+        """Fetch one run record without loading raw agent result data."""
+        run = await self.store.get_run_summary(run_id)
+        return run
+
     async def list_runs(self) -> list[RunRecord]:
         """List all runs."""
         return await self.store.list_runs()
 
+    async def list_run_summaries(self) -> list[RunRecord]:
+        """List runs without loading raw agent result data."""
+        return await self.store.list_run_summaries()
+
     async def get_events(self, run_id: str) -> list[RunEvent]:
         """Fetch runtime events for a run."""
         return await self.store.get_events(run_id)
+
+    async def get_event_summaries(
+        self,
+        run_id: str,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        include_payload: bool = False,
+        max_payload_chars: int = 5000,
+    ) -> list[RunEvent]:
+        """Fetch lightweight runtime event summaries."""
+        return await self.store.get_event_summaries(
+            run_id,
+            limit=limit,
+            offset=offset,
+            include_payload=include_payload,
+            max_payload_chars=max_payload_chars,
+        )
+
+    async def get_result_size(self, run_id: str) -> int | None:
+        """Return serialized result size when known."""
+        return await self.store.get_result_size(run_id)
 
     def list_tools(self) -> list[ToolDescriptor]:
         """List tools visible through the runtime discovery surface."""
@@ -316,6 +364,15 @@ class AgentRuntime:
             return normalize_provider(provider or self.default_provider)
         except Exception as exc:
             raise WorkspaceValidationError(str(exc)) from exc
+
+    def _context_budget_for_run(self, run: RunRecord) -> ContextBudget:
+        """Return the model request context budget for this run."""
+        if run.app_name == "repo_analyst":
+            system_prompt = run.system_prompt or ""
+            if "summary, changed_files, test_result, findings, risks, next_steps" in system_prompt:
+                return REPO_ANALYST_REVIEW_CONTEXT_BUDGET
+            return REPO_ANALYST_OVERVIEW_CONTEXT_BUDGET
+        return DEFAULT_CONTEXT_BUDGET
 
     async def cancel_run(self, run_id: str) -> RunRecord:
         """Request cancellation for a queued or running run."""
@@ -436,6 +493,7 @@ class AgentRuntime:
                 max_iterations=run.max_iterations,
                 temperature=run.temperature,
                 max_tokens=run.max_tokens,
+                context_budget=self._context_budget_for_run(run),
             )
 
             result = await asyncio.wait_for(

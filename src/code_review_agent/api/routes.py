@@ -6,7 +6,7 @@ import ipaddress
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 
 from code_review_agent.apps.repo_analyst import RepoAnalystRequest, RepoAnalystService
@@ -194,27 +194,55 @@ async def list_repo_analyst_runs(request: Request):
     """List repo analyst runs."""
     _enforce_api_key(request)
     service = get_repo_analyst_service(request)
-    return await service.list_runs()
+    return await service.list_run_summaries()
 
 
 @router.get("/repo-analyst/runs/{run_id}")
-async def get_repo_analyst_run(run_id: str, request: Request):
+async def get_repo_analyst_run(
+    run_id: str,
+    request: Request,
+    include_raw: bool = False,
+):
     """Get one repo analyst run result."""
     _enforce_api_key(request)
     service = get_repo_analyst_service(request)
     try:
-        return await service.get_run(run_id)
+        return await service.get_run(run_id, include_raw=include_raw)
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="run not found") from exc
+
+
+@router.get("/repo-analyst/runs/{run_id}/raw")
+async def get_repo_analyst_run_raw(run_id: str, request: Request):
+    """Get one repo analyst run with the raw agent result attached."""
+    _enforce_api_key(request)
+    service = get_repo_analyst_service(request)
+    try:
+        return await service.get_run(run_id, include_raw=True)
     except RunNotFoundError as exc:
         raise HTTPException(status_code=404, detail="run not found") from exc
 
 
 @router.get("/repo-analyst/runs/{run_id}/events")
-async def get_repo_analyst_run_events(run_id: str, request: Request):
-    """Get runtime events for one repo analyst run."""
+async def get_repo_analyst_run_events(
+    run_id: str,
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    include_payload: bool = False,
+    max_payload_chars: int = Query(default=5000, ge=500, le=50000),
+):
+    """Get lightweight runtime event summaries for one repo analyst run."""
     _enforce_api_key(request)
     service = get_repo_analyst_service(request)
     try:
-        return await service.get_events(run_id)
+        return await service.get_event_summaries(
+            run_id,
+            limit=limit,
+            offset=offset,
+            include_payload=include_payload,
+            max_payload_chars=max_payload_chars,
+        )
     except RunNotFoundError as exc:
         raise HTTPException(status_code=404, detail="run not found") from exc
 

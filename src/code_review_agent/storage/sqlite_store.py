@@ -6,7 +6,7 @@ import asyncio
 import json
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, select
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -138,6 +138,17 @@ class SqliteRunStore(RunStore):
                 raise RunNotFoundError(run_id)
             return self._row_to_run_record(row)
 
+    async def get_run_summary(self, run_id: str) -> RunRecord:
+        await self._ensure_initialized()
+        async with self._session_factory() as session:
+            result = await session.execute(
+                self._run_summary_select().where(RunRow.id == run_id),
+            )
+            row = result.mappings().first()
+            if row is None:
+                raise RunNotFoundError(run_id)
+            return self._mapping_to_run_record(row, result_json=None)
+
     async def list_runs(self) -> list[RunRecord]:
         await self._ensure_initialized()
         async with self._session_factory() as session:
@@ -146,6 +157,32 @@ class SqliteRunStore(RunStore):
             )
             rows = result.scalars().all()
             return [self._row_to_run_record(row) for row in rows]
+
+    async def list_run_summaries(self) -> list[RunRecord]:
+        await self._ensure_initialized()
+        async with self._session_factory() as session:
+            result = await session.execute(
+                self._run_summary_select().order_by(
+                    RunRow.created_at.desc(),
+                    RunRow.id.desc(),
+                ),
+            )
+            rows = result.mappings().all()
+            return [
+                self._mapping_to_run_record(row, result_json=None)
+                for row in rows
+            ]
+
+    async def get_result_size(self, run_id: str) -> int | None:
+        await self._ensure_initialized()
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(func.length(RunRow.result_json)).where(RunRow.id == run_id),
+            )
+            value = result.scalar_one_or_none()
+            if value is None:
+                await self.get_run_summary(run_id)
+            return value
 
     async def get_events(self, run_id: str) -> list[RunEvent]:
         await self._ensure_initialized()
@@ -158,6 +195,82 @@ class SqliteRunStore(RunStore):
             )
             rows = result.scalars().all()
             return [self._row_to_event(row) for row in rows]
+
+    async def get_event_summaries(
+        self,
+        run_id: str,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        include_payload: bool = False,
+        max_payload_chars: int = 5000,
+    ) -> list[RunEvent]:
+        await self._ensure_initialized()
+        await self.get_run_summary(run_id)
+        async with self._session_factory() as session:
+            if include_payload:
+                result = await session.execute(
+                    select(RunEventRow)
+                    .where(RunEventRow.run_id == run_id)
+                    .order_by(RunEventRow.event_index.asc())
+                    .offset(offset)
+                    .limit(limit),
+                )
+                rows = result.scalars().all()
+                return [
+                    self._truncate_event_payload(self._row_to_event(row), max_payload_chars)
+                    for row in rows
+                ]
+
+            result = await session.execute(
+                select(
+                    RunEventRow.event_index.label("index"),
+                    RunEventRow.type.label("type"),
+                    RunEventRow.timestamp.label("timestamp"),
+                    func.json_extract(RunEventRow.data_json, "$.event_type").label(
+                        "event_type",
+                    ),
+                    func.json_extract(RunEventRow.data_json, "$.trace_id").label(
+                        "trace_id",
+                    ),
+                    func.json_extract(RunEventRow.data_json, "$.span_id").label(
+                        "span_id",
+                    ),
+                    func.json_extract(
+                        RunEventRow.data_json,
+                        "$.parent_span_id",
+                    ).label("parent_span_id"),
+                    func.json_extract(RunEventRow.data_json, "$.status").label(
+                        "status",
+                    ),
+                    func.json_extract(RunEventRow.data_json, "$.duration_ms").label(
+                        "duration_ms",
+                    ),
+                    func.json_extract(
+                        RunEventRow.data_json,
+                        "$.failure_reason",
+                    ).label("failure_reason"),
+                )
+                .where(RunEventRow.run_id == run_id)
+                .order_by(RunEventRow.event_index.asc())
+                .offset(offset)
+                .limit(limit),
+            )
+            return [
+                RunEvent(
+                    index=row.index,
+                    type=row.type,
+                    event_type=row.event_type,
+                    timestamp=row.timestamp,
+                    trace_id=row.trace_id,
+                    span_id=row.span_id,
+                    parent_span_id=row.parent_span_id,
+                    status=row.status,
+                    duration_ms=row.duration_ms,
+                    failure_reason=row.failure_reason,
+                )
+                for row in result.mappings().all()
+            ]
 
     async def append_event(self, run_id: str, event: RunEvent) -> RunEvent:
         await self._ensure_initialized()
@@ -201,7 +314,13 @@ class SqliteRunStore(RunStore):
             row.status = status
             if status == "running" and row.started_at is None:
                 row.started_at = utc_now()
-            if status in {"completed", "failed", "max_iterations", "cancelled"}:
+            if status in {
+                "completed",
+                "failed",
+                "max_iterations",
+                "cancelled",
+                "model_output_truncated",
+            }:
                 row.finished_at = utc_now()
             if failure_reason is not None:
                 row.failure_reason = failure_reason
@@ -227,6 +346,37 @@ class SqliteRunStore(RunStore):
             if row.result_json
             else None
         )
+        return self._mapping_to_run_record(row, result_json=row.result_json, result=result)
+
+    def _run_summary_select(self):
+        return select(
+            RunRow.id,
+            RunRow.status,
+            RunRow.app_name,
+            RunRow.user_input,
+            RunRow.workspace_root,
+            RunRow.created_at,
+            RunRow.started_at,
+            RunRow.finished_at,
+            RunRow.system_prompt,
+            RunRow.max_iterations,
+            RunRow.temperature,
+            RunRow.max_tokens,
+            RunRow.provider,
+            RunRow.model,
+            RunRow.tool_names_json,
+            RunRow.failure_reason,
+        )
+
+    def _mapping_to_run_record(
+        self,
+        row,
+        *,
+        result_json: str | None,
+        result: AgentRunResult | None = None,
+    ) -> RunRecord:
+        if result is None and result_json:
+            result = AgentRunResult.model_validate_json(result_json)
         return RunRecord(
             id=row.id,
             status=row.status,
@@ -289,3 +439,24 @@ class SqliteRunStore(RunStore):
             timestamp=row.timestamp,
             data=data,
         )
+
+    def _truncate_event_payload(
+        self,
+        event: RunEvent,
+        max_payload_chars: int,
+    ) -> RunEvent:
+        copied = event.model_copy(deep=True)
+        for field_name in ("payload", "data"):
+            value = getattr(copied, field_name)
+            text = json.dumps(value, ensure_ascii=False)
+            if len(text) > max_payload_chars:
+                setattr(
+                    copied,
+                    field_name,
+                    {
+                        "truncated": True,
+                        "original_chars": len(text),
+                        "preview": text[:max_payload_chars],
+                    },
+                )
+        return copied

@@ -17,6 +17,7 @@ from code_review_agent.models import ChatResponse, ChatModel
 from code_review_agent.runtime import (
     AgentRuntime,
     CreateRunRequest,
+    RunEvent,
     build_default_tool_descriptors,
     build_default_tool_registry,
 )
@@ -437,18 +438,66 @@ def test_repo_analyst_run_endpoints(tmp_path: Path) -> None:
 
     get_response = client.get(f"/repo-analyst/runs/{run_id}")
     events_response = client.get(f"/repo-analyst/runs/{run_id}/events")
+    list_response = client.get("/repo-analyst/runs")
+    raw_response = client.get(f"/repo-analyst/runs/{run_id}/raw")
 
     assert create_response.status_code == 202
     assert get_response.status_code == 200
     assert events_response.status_code == 200
+    assert list_response.status_code == 200
+    assert raw_response.status_code == 200
     assert get_response.json()["status"] == "completed"
     assert get_response.json()["report"]["summary"] == "A repository analysis tool"
     assert get_response.json()["report"]["modules"][0]["name"] == "runtime"
+    assert get_response.json()["result"] is None
+    assert "result" not in list_response.json()[0]
+    assert raw_response.json()["result"]["final_message"]["content"].startswith(
+        '{"summary"',
+    )
     event_types = [event["event_type"] for event in events_response.json()]
     assert event_types[0] == "run.queued"
     assert "model.response" in event_types
     assert "tool.finished" in event_types
     assert event_types[-1] == "run.completed"
+    assert all(event["payload"] == {} for event in events_response.json())
+
+
+def test_repo_analyst_events_limit_and_payload_opt_in(tmp_path: Path) -> None:
+    runtime = AgentRuntime(
+        model_factory=lambda: FakeModel([make_response(content='{"summary":"x"}')]),
+        tool_registry_factory=build_registry,
+    )
+    client = build_client(runtime=runtime)
+    run = anyio.run(
+        runtime.create_run,
+        CreateRunRequest(
+            user_input="Analyze",
+            workspace_root=str(tmp_path),
+            app_name="repo_analyst",
+        ),
+    )
+    for index in range(2, 7):
+        anyio.run(
+            runtime.store.append_event,
+            run.id,
+            RunEvent(
+                index=index,
+                type="custom",
+                event_type="custom.event",
+                payload={"large": "x" * 1000},
+            ),
+        )
+
+    response = client.get(f"/repo-analyst/runs/{run.id}/events?limit=2")
+    payload_response = client.get(
+        f"/repo-analyst/runs/{run.id}/events?limit=1&include_payload=true&max_payload_chars=1000",
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+    assert all(event["payload"] == {} for event in response.json())
+    assert payload_response.status_code == 200
+    assert payload_response.json()[0]["payload"]
 
 
 def test_repo_analyst_review_run_endpoint(tmp_path: Path) -> None:

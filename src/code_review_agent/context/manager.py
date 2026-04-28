@@ -1,0 +1,207 @@
+"""Context manager for bounded model request windows."""
+
+from __future__ import annotations
+
+from code_review_agent.messages import Message, Role
+
+from .types import ContextBudget, ContextBuildResult
+
+
+class ContextManager:
+    """Build model request messages without mutating the stored session."""
+
+    def build(
+        self,
+        messages: list[Message],
+        budget: ContextBudget | None = None,
+    ) -> ContextBuildResult:
+        """Return a bounded request context and metrics."""
+        budget = budget or ContextBudget()
+        original_messages = [message.model_copy(deep=True) for message in messages]
+        original_chars = self.messages_context_chars(original_messages)
+        original_tool_chars = self.tool_content_chars(original_messages)
+
+        compacted, summarized_count, notes = self._compact_tool_messages(
+            original_messages,
+            budget,
+        )
+        if self.messages_context_chars(compacted) > budget.max_prompt_chars:
+            compacted, dropped_count = self._trim_to_context_window(compacted, budget)
+            if dropped_count:
+                notes.append("old_messages_dropped_to_fit_prompt_budget")
+        else:
+            dropped_count = 0
+
+        final_chars = self.messages_context_chars(compacted)
+        return ContextBuildResult(
+            messages=compacted,
+            original_message_count=len(messages),
+            final_message_count=len(compacted),
+            original_chars=original_chars,
+            final_chars=final_chars,
+            summarized_tool_messages=summarized_count,
+            dropped_messages=dropped_count,
+            original_tool_content_chars=original_tool_chars,
+            final_tool_content_chars=self.tool_content_chars(compacted),
+            notes=notes,
+        )
+
+    def _compact_tool_messages(
+        self,
+        messages: list[Message],
+        budget: ContextBudget,
+    ) -> tuple[list[Message], int, list[str]]:
+        """Summarize large tool results while preserving non-tool messages."""
+        recent_start = max(0, len(messages) - budget.recent_full_message_count)
+        compacted: list[Message] = []
+        summarized_count = 0
+        notes: list[str] = []
+        total_tool_chars = 0
+
+        for index, message in enumerate(messages):
+            if message.role != Role.TOOL or message.content is None:
+                compacted.append(message)
+                continue
+
+            is_historical = index < recent_start
+            limit = (
+                budget.historical_tool_preview_chars
+                if is_historical
+                else budget.max_single_tool_message_chars
+            )
+            remaining_total_budget = max(
+                0,
+                budget.max_total_tool_content_chars - total_tool_chars,
+            )
+            effective_limit = min(limit, remaining_total_budget) if remaining_total_budget else 0
+
+            if len(message.content) > effective_limit:
+                summarized_count += 1
+                reason = (
+                    "historical_tool_result"
+                    if is_historical
+                    else "large_recent_tool_result"
+                )
+                if remaining_total_budget == 0:
+                    reason = "total_tool_history_budget_exceeded"
+                message = self._summarize_tool_message(
+                    message,
+                    preview_chars=effective_limit,
+                    reason=reason,
+                )
+                if reason not in notes:
+                    notes.append(reason)
+
+            total_tool_chars += len(message.content or "")
+            compacted.append(message)
+
+        return compacted, summarized_count, notes
+
+    def _summarize_tool_message(
+        self,
+        message: Message,
+        *,
+        preview_chars: int,
+        reason: str,
+    ) -> Message:
+        """Create a compact tool message that remains useful to the model."""
+        original = message.content or ""
+        preview = original[:preview_chars].rstrip() if preview_chars > 0 else ""
+        content = (
+            "Tool result summarized for model context budget.\n"
+            f"reason: {reason}\n"
+            f"tool_name: {message.name or ''}\n"
+            f"tool_call_id: {message.tool_call_id}\n"
+            f"original_chars: {len(original)}\n"
+            f"preview_chars: {len(preview)}\n"
+        )
+        if preview:
+            content += (
+                "\n"
+                f"{preview}\n\n"
+                "...[tool result truncated; rerun the tool with a narrower "
+                "query/path if exact output is needed]"
+            )
+        else:
+            content += "\n...[tool result omitted because tool history budget was exhausted]"
+        return message.model_copy(update={"content": content})
+
+    def _trim_to_context_window(
+        self,
+        messages: list[Message],
+        budget: ContextBudget,
+    ) -> tuple[list[Message], int]:
+        """Keep stable task header plus the latest contiguous suffix."""
+        if not messages:
+            return [], 0
+
+        header_indices = self._header_indices(messages)
+        header_chars = self.messages_context_chars(
+            [messages[index] for index in header_indices],
+        )
+        remaining_budget = max(0, budget.max_prompt_chars - header_chars)
+
+        suffix_start = len(messages)
+        suffix_chars = 0
+        for index in range(len(messages) - 1, -1, -1):
+            if index in header_indices:
+                continue
+
+            message_chars = self.message_context_chars(messages[index])
+            if suffix_chars and suffix_chars + message_chars > remaining_budget:
+                break
+            suffix_chars += message_chars
+            suffix_start = index
+
+        while suffix_start > 0 and messages[suffix_start].role == Role.TOOL:
+            suffix_start -= 1
+
+        selected_indices = {
+            index
+            for index in header_indices
+            if index < suffix_start
+        }
+        selected_indices.update(range(suffix_start, len(messages)))
+        selected = [
+            message
+            for index, message in enumerate(messages)
+            if index in selected_indices
+        ]
+        return selected, len(messages) - len(selected)
+
+    def _header_indices(self, messages: list[Message]) -> list[int]:
+        """Return stable prefix message indices useful for cache reuse."""
+        header_indices: list[int] = []
+        first_user_seen = False
+        for index, message in enumerate(messages):
+            if message.role == Role.SYSTEM:
+                header_indices.append(index)
+            elif message.role == Role.USER and not first_user_seen:
+                header_indices.append(index)
+                first_user_seen = True
+        return header_indices
+
+    def messages_context_chars(self, messages: list[Message]) -> int:
+        """Approximate the formatted request context size in characters."""
+        return sum(self.message_context_chars(message) for message in messages)
+
+    def message_context_chars(self, message: Message) -> int:
+        """Approximate one message's formatted size."""
+        total = len(message.role.value)
+        total += len(message.content or "")
+        total += len(message.reasoning_content or "")
+        total += len(message.name or "")
+        total += len(message.tool_call_id or "")
+        for tool_call in message.tool_calls:
+            total += len(tool_call.id)
+            total += len(tool_call.name)
+            total += len(tool_call.raw_arguments or str(tool_call.arguments))
+        return total
+
+    def tool_content_chars(self, messages: list[Message]) -> int:
+        """Return total tool content size in characters."""
+        return sum(
+            len(message.content or "")
+            for message in messages
+            if message.role == Role.TOOL
+        )

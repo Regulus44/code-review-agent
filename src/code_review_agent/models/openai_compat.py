@@ -156,4 +156,6 @@ class OpenAICompatibleModel(ChatModel):
             prompt_tokens=usage.get("prompt_tokens"),
             completion_tokens=usage.get("completion_tokens"),
             total_tokens=usage.get("total_tokens"),
+            prompt_cache_hit_tokens=usage.get("prompt_cache_hit_tokens"),
+            prompt_cache_miss_tokens=usage.get("prompt_cache_miss_tokens"),
         )

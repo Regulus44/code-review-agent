@@ -46,6 +46,8 @@ async def test_openai_compatible_model_builds_request_and_parses_response() -> N
                     "prompt_tokens": 10,
                     "completion_tokens": 5,
                     "total_tokens": 15,
+                    "prompt_cache_hit_tokens": 6,
+                    "prompt_cache_miss_tokens": 4,
                 },
             },
         )
@@ -85,6 +87,8 @@ async def test_openai_compatible_model_builds_request_and_parses_response() -> N
     assert response.message.content == "No issues found."
     assert response.usage is not None
     assert response.usage.total_tokens == 15
+    assert response.usage.prompt_cache_hit_tokens == 6
+    assert response.usage.prompt_cache_miss_tokens == 4
     assert response.finish_reason == "stop"
 
 

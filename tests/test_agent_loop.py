@@ -123,7 +123,13 @@ async def test_agent_completes_without_tools(tmp_path) -> None:
         [
             make_response(
                 content="Final answer",
-                usage=ModelUsage(prompt_tokens=5, completion_tokens=3, total_tokens=8),
+                usage=ModelUsage(
+                    prompt_tokens=5,
+                    completion_tokens=3,
+                    total_tokens=8,
+                    prompt_cache_hit_tokens=2,
+                    prompt_cache_miss_tokens=3,
+                ),
             ),
         ],
     )
@@ -148,6 +154,10 @@ async def test_agent_completes_without_tools(tmp_path) -> None:
     assert result.steps[0].type == "model_response"
     assert result.usage is not None
     assert result.usage.total_tokens == 8
+    assert result.usage.prompt_cache_hit_tokens == 2
+    assert result.usage.prompt_cache_miss_tokens == 3
+    assert result.steps[0].metadata["context_original_message_count"] == 2
+    assert result.steps[0].metadata["context_final_message_count"] == 2
 
 
 @pytest.mark.anyio
@@ -492,3 +502,4 @@ async def test_agent_summarizes_old_large_tool_messages_for_model_request(tmp_pa
     assert old_tool_messages[0].content.startswith(
         "Tool result summarized for model context budget.",
     )
+    assert model.requests[0].metadata["context_summarized_tool_messages"] >= 1
