@@ -39,6 +39,44 @@
         padding: 16px;
       }
 
+      .page-session {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 320px 1fr;
+        gap: 16px;
+        padding: 16px;
+      }
+
+      .tab-bar {
+        display: flex;
+        gap: 0;
+        background: var(--panel);
+        border-bottom: 1px solid var(--border);
+        padding: 0 16px;
+      }
+
+      .tab-btn {
+        padding: 12px 20px;
+        border: none;
+        background: none;
+        font: inherit;
+        font-weight: 600;
+        font-size: 14px;
+        color: var(--muted);
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+      }
+
+      .tab-btn:hover {
+        color: var(--text);
+      }
+
+      .tab-btn.active {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+      }
+
       .panel {
         background: var(--panel);
         border: 1px solid var(--border);
@@ -408,14 +446,123 @@
           grid-template-columns: 1fr;
         }
 
+        .page-session {
+          grid-template-columns: 1fr;
+        }
+
         .panel {
           min-height: 320px;
         }
       }
+
+      .session-list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .session-item {
+        border: 1px solid var(--border);
+        background: var(--panel-muted);
+        border-radius: 6px;
+        padding: 10px 12px;
+        cursor: pointer;
+        display: grid;
+        gap: 4px;
+      }
+
+      .session-item.active {
+        border-color: var(--accent);
+        background: #eef4ff;
+      }
+
+      .session-item-title {
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .session-item-meta {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .chat-area {
+        flex: 1;
+        overflow: auto;
+        padding: 16px;
+        display: grid;
+        gap: 12px;
+        align-content: start;
+      }
+
+      .chat-msg {
+        max-width: 85%;
+        padding: 10px 14px;
+        border-radius: 8px;
+        font-size: 13px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .chat-msg-user {
+        background: #eef4ff;
+        border: 1px solid #c4d4f5;
+        justify-self: end;
+      }
+
+      .chat-msg-assistant {
+        background: var(--panel-muted);
+        border: 1px solid var(--border);
+        justify-self: start;
+      }
+
+      .chat-msg-system {
+        background: #fefce8;
+        border: 1px solid #fde68a;
+        justify-self: center;
+        font-style: italic;
+        max-width: 90%;
+      }
+
+      .chat-msg-tool {
+        background: #f0fdf4;
+        border: 1px solid #bbf7d0;
+        justify-self: start;
+        font-family: monospace;
+        font-size: 12px;
+      }
+
+      .chat-input-bar {
+        padding: 12px 16px;
+        border-top: 1px solid var(--border);
+        display: flex;
+        gap: 8px;
+      }
+
+      .chat-input-bar input {
+        flex: 1;
+      }
+
+      .status-idle {
+        color: var(--muted);
+        background: #f3f4f6;
+        border-color: #d1d5db;
+      }
+
+      .status-archived {
+        color: var(--muted);
+        background: #f3f4f6;
+        border-color: #d1d5db;
+      }
     </style>
   </head>
   <body>
-    <main class="page">
+    <nav class="tab-bar">
+      <button class="tab-btn active" id="tabRuns" type="button">Repo Analyst</button>
+      <button class="tab-btn" id="tabSessions" type="button">Session</button>
+    </nav>
+
+    <main class="page" id="pageRuns">
       <section class="panel">
         <div class="panel-header">
           <div>
@@ -540,6 +687,47 @@
               创建或选择一个 Repo Analyst 任务后，这里会显示结构化报告、失败原因和执行事件。
             </div>
           </div>
+        </div>
+      </section>
+    </main>
+
+    <main class="page-session" id="pageSessions" hidden>
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Sessions</div>
+            <div class="panel-subtitle" id="sessionListSubtitle">持续对话</div>
+          </div>
+          <div class="toolbar">
+            <button type="button" class="secondary" id="refreshSessionsButton">刷新</button>
+            <button type="button" id="newSessionButton">新建</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div id="sessionList" class="session-list">
+            <div class="empty-state">暂无 Session</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" style="min-height:0;">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title" id="sessionChatTitle">选择一个 Session</div>
+            <div class="panel-subtitle" id="sessionChatMeta">-</div>
+          </div>
+          <div class="toolbar">
+            <span id="sessionTurnStatus" class="status-chip status-idle">idle</span>
+            <button type="button" class="danger" id="cancelTurnButton" hidden>取消 Turn</button>
+            <button type="button" class="secondary" id="archiveSessionButton">归档</button>
+          </div>
+        </div>
+        <div class="chat-area" id="chatArea">
+          <div class="empty-state">选择或创建一个 Session 开始对话</div>
+        </div>
+        <div class="chat-input-bar">
+          <input type="text" id="chatInput" placeholder="输入消息..." disabled />
+          <button type="button" id="sendChatButton" disabled>发送</button>
         </div>
       </section>
     </main>
@@ -1511,6 +1699,248 @@
       loadModelProviders();
       loadTools();
       loadRuns();
+
+      // ── Session Tab Logic ─────────────────────────────────────────────────
+
+      const sessionState = {
+        sessions: [],
+        selectedSessionId: null,
+        lastSequence: 0,
+        sessionPollTimer: null,
+      };
+
+      const tabRuns = document.getElementById("tabRuns");
+      const tabSessions = document.getElementById("tabSessions");
+      const pageRuns = document.getElementById("pageRuns");
+      const pageSessions = document.getElementById("pageSessions");
+      const sessionListEl = document.getElementById("sessionList");
+      const chatArea = document.getElementById("chatArea");
+      const chatInput = document.getElementById("chatInput");
+      const sendChatButton = document.getElementById("sendChatButton");
+      const sessionChatTitle = document.getElementById("sessionChatTitle");
+      const sessionChatMeta = document.getElementById("sessionChatMeta");
+      const sessionTurnStatus = document.getElementById("sessionTurnStatus");
+      const cancelTurnButton = document.getElementById("cancelTurnButton");
+      const archiveSessionButton = document.getElementById("archiveSessionButton");
+      const refreshSessionsButton = document.getElementById("refreshSessionsButton");
+      const newSessionButton = document.getElementById("newSessionButton");
+
+      function switchTab(tab) {
+        if (tab === "runs") {
+          tabRuns.classList.add("active");
+          tabSessions.classList.remove("active");
+          pageRuns.hidden = false;
+          pageSessions.hidden = true;
+        } else {
+          tabRuns.classList.remove("active");
+          tabSessions.classList.add("active");
+          pageRuns.hidden = true;
+          pageSessions.hidden = false;
+          loadSessions();
+        }
+      }
+
+      tabRuns.addEventListener("click", () => switchTab("runs"));
+      tabSessions.addEventListener("click", () => switchTab("sessions"));
+
+      function renderSessionList() {
+        if (!sessionState.sessions.length) {
+          sessionListEl.innerHTML = '<div class="empty-state">暂无 Session</div>';
+          return;
+        }
+        sessionListEl.innerHTML = sessionState.sessions.map((s) => {
+          const activeClass = s.id === sessionState.selectedSessionId ? " active" : "";
+          const title = s.title || s.last_user_input || "新会话";
+          const meta = `${s.mode} | ${formatStatus(s.status)} | ${timestampText(s.updated_at)}`;
+          return `
+            <div class="session-item${activeClass}" data-session-id="${escapeHtml(s.id)}" type="button">
+              <div class="session-item-title">${escapeHtml(title)}</div>
+              <div class="session-item-meta">${escapeHtml(meta)}</div>
+            </div>
+          `;
+        }).join("");
+
+        sessionListEl.querySelectorAll("[data-session-id]").forEach((el) => {
+          el.addEventListener("click", () => {
+            sessionState.selectedSessionId = el.getAttribute("data-session-id");
+            sessionState.lastSequence = 0;
+            renderSessionList();
+            loadSessionChat();
+          });
+        });
+      }
+
+      async function loadSessions() {
+        try {
+          sessionState.sessions = await requestJson("/sessions");
+          renderSessionList();
+        } catch (error) {
+          sessionListEl.innerHTML = `<div class="empty-state error-text">${escapeHtml(error.message)}</div>`;
+        }
+      }
+
+      async function loadSessionChat() {
+        const sid = sessionState.selectedSessionId;
+        if (!sid) return;
+
+        try {
+          const [session, messages, turns] = await Promise.all([
+            requestJson(`/sessions/${sid}`),
+            requestJson(`/sessions/${sid}/messages?since_sequence=0`),
+            requestJson(`/sessions/${sid}/turns`),
+          ]);
+
+          sessionChatTitle.textContent = session.title || "Session";
+          sessionChatMeta.textContent = `${session.mode} | ${session.workspace_root}`;
+
+          const turnStatus = turns.length > 0 ? turns[turns.length - 1].status : "idle";
+          sessionTurnStatus.textContent = formatStatus(turnStatus);
+          sessionTurnStatus.className = `status-chip status-${turnStatus}`;
+
+          const canSend = session.status === "idle" || session.status === "running";
+          chatInput.disabled = !canSend;
+          sendChatButton.disabled = !canSend;
+
+          const hasActiveTurn = turns.some((t) => t.status === "running" || t.status === "queued");
+          cancelTurnButton.hidden = !hasActiveTurn;
+
+          if (messages.length > 0) {
+            sessionState.lastSequence = Math.max(...messages.map((m) => m.sequence || 0));
+          }
+
+          renderChatMessages(messages);
+          scheduleSessionPoll(session, turns);
+        } catch (error) {
+          chatArea.innerHTML = `<div class="empty-state error-text">${escapeHtml(error.message)}</div>`;
+        }
+      }
+
+      function renderChatMessages(messages) {
+        if (!messages.length) {
+          chatArea.innerHTML = '<div class="empty-state">对话为空，发送第一条消息开始</div>';
+          return;
+        }
+        chatArea.innerHTML = messages.map((m) => {
+          const role = m.role;
+          let cls = "chat-msg";
+          let label = "";
+          if (role === "user") { cls += " chat-msg-user"; label = ""; }
+          else if (role === "assistant") { cls += " chat-msg-assistant"; label = ""; }
+          else if (role === "system") { cls += " chat-msg-system"; label = "[System] "; }
+          else if (role === "tool") { cls += " chat-msg-tool"; label = `[Tool: ${m.name || ""}] `; }
+          else { label = `[${role}] `; }
+
+          let content = m.content || "";
+          if (m.tool_calls && m.tool_calls.length) {
+            const tcText = m.tool_calls.map((tc) => `${tc.name}(${JSON.stringify(tc.arguments)})`).join("\n");
+            content = content ? `${content}\n\n[Tool Calls]\n${tcText}` : `[Tool Calls]\n${tcText}`;
+          }
+          return `<div class="${cls}">${label}${escapeHtml(content)}</div>`;
+        }).join("");
+        chatArea.scrollTop = chatArea.scrollHeight;
+      }
+
+      function scheduleSessionPoll(session, turns) {
+        if (sessionState.sessionPollTimer) {
+          clearTimeout(sessionState.sessionPollTimer);
+          sessionState.sessionPollTimer = null;
+        }
+        const hasActiveTurn = turns.some((t) => t.status === "running" || t.status === "queued");
+        if (!hasActiveTurn) return;
+
+        sessionState.sessionPollTimer = window.setTimeout(async () => {
+          await loadSessionChat();
+        }, 2000);
+      }
+
+      async function sendChatMessage() {
+        const sid = sessionState.selectedSessionId;
+        const message = chatInput.value.trim();
+        if (!sid || !message) return;
+
+        chatInput.value = "";
+        chatInput.disabled = true;
+        sendChatButton.disabled = true;
+
+        try {
+          const turn = await requestJson(`/sessions/${sid}/turns`, {
+            method: "POST",
+            body: JSON.stringify({ message }),
+          });
+          sessionTurnStatus.textContent = formatStatus(turn.status);
+          sessionTurnStatus.className = `status-chip status-${turn.status}`;
+          cancelTurnButton.hidden = false;
+          await loadSessionChat();
+        } catch (error) {
+          chatArea.innerHTML += `<div class="chat-msg chat-msg-system error-text">${escapeHtml(error.message)}</div>`;
+          chatInput.disabled = false;
+          sendChatButton.disabled = false;
+        }
+      }
+
+      sendChatButton.addEventListener("click", sendChatMessage);
+      chatInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          sendChatMessage();
+        }
+      });
+
+      cancelTurnButton.addEventListener("click", async () => {
+        const sid = sessionState.selectedSessionId;
+        if (!sid) return;
+        try {
+          const turns = await requestJson(`/sessions/${sid}/turns`);
+          const activeTurn = turns.find((t) => t.status === "running" || t.status === "queued");
+          if (activeTurn) {
+            await requestJson(`/sessions/${sid}/turns/${activeTurn.id}/cancel`, { method: "POST" });
+            cancelTurnButton.hidden = true;
+            await loadSessionChat();
+          }
+        } catch (error) {
+          chatArea.innerHTML += `<div class="chat-msg chat-msg-system error-text">${escapeHtml(error.message)}</div>`;
+        }
+      });
+
+      archiveSessionButton.addEventListener("click", async () => {
+        const sid = sessionState.selectedSessionId;
+        if (!sid) return;
+        try {
+          await requestJson(`/sessions/${sid}`, { method: "DELETE" });
+          sessionState.selectedSessionId = null;
+          await loadSessions();
+          chatArea.innerHTML = '<div class="empty-state">选择或创建一个 Session 开始对话</div>';
+          sessionChatTitle.textContent = "选择一个 Session";
+          sessionChatMeta.textContent = "-";
+          chatInput.disabled = true;
+          sendChatButton.disabled = true;
+        } catch (error) {
+          chatArea.innerHTML += `<div class="chat-msg chat-msg-system error-text">${escapeHtml(error.message)}</div>`;
+        }
+      });
+
+      refreshSessionsButton.addEventListener("click", loadSessions);
+
+      newSessionButton.addEventListener("click", async () => {
+        const wsRoot = workspaceRootInput.value.trim() || ".";
+        try {
+          const session = await requestJson("/sessions", {
+            method: "POST",
+            body: JSON.stringify({
+              workspace_root: wsRoot,
+              mode: "overview",
+              max_iterations: 8,
+              provider: providerSelect.value || "deepseek",
+              model: modelSelect.value || "deepseek-v4-pro",
+            }),
+          });
+          sessionState.selectedSessionId = session.id;
+          await loadSessions();
+          await loadSessionChat();
+        } catch (error) {
+          sessionListEl.innerHTML = `<div class="empty-state error-text">${escapeHtml(error.message)}</div>`;
+        }
+      });
     </script>
   </body>
 </html>

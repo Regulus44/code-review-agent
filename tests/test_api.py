@@ -225,6 +225,7 @@ def test_tools_endpoint_accepts_valid_api_key_for_remote_request() -> None:
 def test_model_providers_endpoint_lists_supported_providers(monkeypatch) -> None:
     monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-secret")
     monkeypatch.setenv("SILICONFLOW_API_KEY", "siliconflow-secret")
+    monkeypatch.setenv("MIMO_API_KEY", "mimo-secret")
     monkeypatch.setenv("SILICONFLOW_MODEL", "deepseek-ai/DeepSeek-V4-Flash")
     get_settings.cache_clear()
     client = build_client()
@@ -234,15 +235,18 @@ def test_model_providers_endpoint_lists_supported_providers(monkeypatch) -> None
     assert response.status_code == 200
     payload = response.json()
     by_name = {provider["name"]: provider for provider in payload}
-    assert set(by_name) == {"deepseek", "siliconflow"}
+    assert set(by_name) == {"deepseek", "siliconflow", "mimo"}
     assert by_name["deepseek"]["configured"] is True
     assert by_name["siliconflow"]["configured"] is True
+    assert by_name["mimo"]["configured"] is True
     assert "deepseek-v4-pro" in by_name["deepseek"]["models"]
     assert "deepseek-ai/DeepSeek-V4-Flash" in by_name["siliconflow"]["models"]
     assert "Pro/moonshotai/Kimi-K2.6" in by_name["siliconflow"]["models"]
+    assert "mimo-v2.5-pro" in by_name["mimo"]["models"]
     serialized = response.text
     assert "deepseek-secret" not in serialized
     assert "siliconflow-secret" not in serialized
+    assert "mimo-secret" not in serialized
 
     get_settings.cache_clear()
 

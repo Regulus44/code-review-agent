@@ -18,6 +18,14 @@ from code_review_agent.runtime import (
     RunNotFoundError,
     WorkspaceValidationError,
 )
+from code_review_agent.runtime.session_service import (
+    SessionConflictError,
+    SessionService,
+)
+from code_review_agent.session.store import (
+    SessionNotFoundError as AppSessionNotFoundError,
+    TurnNotFoundError,
+)
 from code_review_agent.settings import get_settings
 from code_review_agent.tools import ToolDescriptor
 
@@ -33,6 +41,11 @@ def get_runtime(request: Request) -> AgentRuntime:
 def get_repo_analyst_service(request: Request) -> RepoAnalystService:
     """Get the repo analyst service from application state."""
     return request.app.state.repo_analyst_service
+
+
+def get_session_service(request: Request) -> SessionService:
+    """Get the session service from application state."""
+    return request.app.state.session_service
 
 
 def _request_host(request: Request) -> str:
@@ -258,3 +271,105 @@ async def cancel_repo_analyst_run(run_id: str, request: Request):
         raise HTTPException(status_code=404, detail="run not found") from exc
     except RunAlreadyTerminalError as exc:
         raise HTTPException(status_code=409, detail="run is already terminal") from exc
+
+
+# ── Session API ──────────────────────────────────────────────────────────────
+
+
+class CreateSessionRequest:
+    """Placeholder — actual fields are passed as kwargs to SessionService.create_session."""
+    pass
+
+
+@router.post("/sessions", status_code=status.HTTP_201_CREATED)
+async def create_session(request: Request):
+    """Create a new persistent session."""
+    _enforce_api_key(request)
+    svc = get_session_service(request)
+    body = await request.json()
+    try:
+        record = await svc.create_session(**body)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return record
+
+
+@router.get("/sessions")
+async def list_sessions(request: Request):
+    """List all sessions as lightweight summaries."""
+    _enforce_api_key(request)
+    svc = get_session_service(request)
+    return await svc.list_sessions()
+
+
+@router.get("/sessions/{session_id}")
+async def get_session(session_id: str, request: Request):
+    """Get one session by id."""
+    _enforce_api_key(request)
+    svc = get_session_service(request)
+    record = await svc.get_session(session_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return record
+
+
+@router.post("/sessions/{session_id}/turns", status_code=status.HTTP_202_ACCEPTED)
+async def create_turn(session_id: str, request: Request):
+    """Start a new turn in a session — triggers agent execution."""
+    _enforce_api_key(request)
+    svc = get_session_service(request)
+    body = await request.json()
+    message = body.get("message", "")
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required")
+    try:
+        turn = await svc.start_turn(session_id, message)
+    except AppSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="session not found") from exc
+    except SessionConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return turn
+
+
+@router.get("/sessions/{session_id}/turns")
+async def list_turns(session_id: str, request: Request):
+    """List all turns for a session."""
+    _enforce_api_key(request)
+    svc = get_session_service(request)
+    return await svc.list_turns(session_id)
+
+
+@router.post("/sessions/{session_id}/turns/{turn_id}/cancel")
+async def cancel_turn(session_id: str, turn_id: str, request: Request):
+    """Cancel a running or queued turn."""
+    _enforce_api_key(request)
+    svc = get_session_service(request)
+    try:
+        return await svc.cancel_turn(session_id, turn_id)
+    except TurnNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="turn not found") from exc
+    except SessionConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/sessions/{session_id}/messages")
+async def get_session_messages(
+    session_id: str,
+    request: Request,
+    since_sequence: int = Query(default=0, ge=0),
+):
+    """Get messages for a session, optionally starting from a sequence number."""
+    _enforce_api_key(request)
+    svc = get_session_service(request)
+    return await svc.get_messages_with_sequence(session_id, since_sequence=since_sequence)
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str, request: Request):
+    """Archive a session."""
+    _enforce_api_key(request)
+    svc = get_session_service(request)
+    try:
+        return await svc.archive_session(session_id)
+    except AppSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="session not found") from exc

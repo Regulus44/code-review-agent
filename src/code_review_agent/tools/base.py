@@ -34,6 +34,8 @@ class ToolContext(BaseModel):
 
     workspace_root: Path
     run_id: str | None = None
+    session_id: str | None = None
+    turn_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("workspace_root")

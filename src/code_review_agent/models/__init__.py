@@ -24,6 +24,7 @@ __all__ = [
     "ChatRequest",
     "ChatResponse",
     "DeepSeekModel",
+    "MiMoModel",
     "ModelAPIError",
     "ModelConfigurationError",
     "ModelError",
@@ -52,4 +53,8 @@ def __getattr__(name: str):
         from .siliconflow import SiliconFlowModel
 
         return SiliconFlowModel
+    if name == "MiMoModel":
+        from .mimo import MiMoModel
+
+        return MiMoModel
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

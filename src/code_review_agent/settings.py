@@ -58,6 +58,9 @@ class Settings:
     siliconflow_api_key: str | None = None
     siliconflow_base_url: str = "https://api.siliconflow.cn/v1"
     siliconflow_model: str = "Qwen/Qwen2.5-Coder-32B-Instruct"
+    mimo_api_key: str | None = None
+    mimo_base_url: str = "https://api.xiaomi.com"
+    mimo_model: str = "mimo-v2.5-pro"
     default_provider: str = "deepseek"
     default_model: str = "deepseek-chat"
     runtime_workspace_root: str = "D:\\Develop"
@@ -85,6 +88,9 @@ def get_settings() -> Settings:
             "SILICONFLOW_MODEL",
             "Qwen/Qwen2.5-Coder-32B-Instruct",
         ),
+        mimo_api_key=os.getenv("MIMO_API_KEY") or None,
+        mimo_base_url=os.getenv("MIMO_BASE_URL", "https://api.xiaomi.com"),
+        mimo_model=os.getenv("MIMO_MODEL", "mimo-v2.5-pro"),
         default_provider=os.getenv("DEFAULT_PROVIDER", "deepseek"),
         default_model=os.getenv("DEFAULT_MODEL", "deepseek-chat"),
         runtime_workspace_root=os.getenv("RUNTIME_WORKSPACE_ROOT", "D:\\Develop"),
