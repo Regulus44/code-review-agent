@@ -13,18 +13,16 @@ A repository analysis and code review agent runtime.
 
 ## Run the API
 
-Use the `dl` environment:
+Create and activate a Python environment with the project dependencies installed, then start the API from the repository root:
 
 ```bash
-conda activate dl
-cd D:\Develop\code-review-agent
 uvicorn code_review_agent.api.app:create_app --factory --reload
 ```
 
 Prepare `.env` from `.env.example`:
 
 ```bash
-copy .env.example .env
+cp .env.example .env
 ```
 
 Recommended `.env` values:
@@ -38,7 +36,7 @@ SILICONFLOW_MODEL=Qwen/Qwen2.5-Coder-32B-Instruct
 DEFAULT_PROVIDER=deepseek
 DEFAULT_MODEL=deepseek-chat
 API_KEY=optional_api_key_for_remote_calls
-RUNTIME_WORKSPACE_ROOT=D:\Develop
+RUNTIME_WORKSPACE_ROOT=/path/to/allowed/workspaces
 DATABASE_URL=sqlite:///./runtime.db
 RUN_TIMEOUT_SECONDS=300
 MODEL_REQUEST_TIMEOUT_SECONDS=180
@@ -65,7 +63,7 @@ Create a run:
 curl -X POST http://127.0.0.1:8000/repo-analyst/runs \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your_api_key_if_required" \
-  -d "{\"workspace_root\":\"D:/Develop/code-review-agent\",\"question\":\"Analyze this repository\"}"
+  -d "{\"workspace_root\":\"/path/to/your/repository\",\"question\":\"Analyze this repository\"}"
 ```
 
 Check result and events:
