@@ -54,3 +54,16 @@ def test_enabled_tools_empty_env_value_means_no_tools(monkeypatch) -> None:
     assert settings.enabled_tools == ()
 
     get_settings.cache_clear()
+
+
+def test_default_runtime_workspace_root_is_generic(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("RUNTIME_WORKSPACE_ROOT", raising=False)
+    get_settings.cache_clear()
+
+    settings = get_settings()
+
+    assert settings.runtime_workspace_root == "."
+    assert "D:\\Develop" not in settings.runtime_workspace_root
+
+    get_settings.cache_clear()

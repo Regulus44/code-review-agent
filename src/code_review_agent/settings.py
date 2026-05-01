@@ -63,7 +63,7 @@ class Settings:
     mimo_model: str = "mimo-v2.5-pro"
     default_provider: str = "deepseek"
     default_model: str = "deepseek-chat"
-    runtime_workspace_root: str = "D:\\Develop"
+    runtime_workspace_root: str = "."
     database_url: str = "sqlite:///./runtime.db"
     api_key: str | None = None
     run_timeout_seconds: int = 300
@@ -93,7 +93,7 @@ def get_settings() -> Settings:
         mimo_model=os.getenv("MIMO_MODEL", "mimo-v2.5-pro"),
         default_provider=os.getenv("DEFAULT_PROVIDER", "deepseek"),
         default_model=os.getenv("DEFAULT_MODEL", "deepseek-chat"),
-        runtime_workspace_root=os.getenv("RUNTIME_WORKSPACE_ROOT", "D:\\Develop"),
+        runtime_workspace_root=os.getenv("RUNTIME_WORKSPACE_ROOT", "."),
         database_url=os.getenv("DATABASE_URL", "sqlite:///./runtime.db"),
         api_key=os.getenv("API_KEY") or None,
         run_timeout_seconds=int(os.getenv("RUN_TIMEOUT_SECONDS", "300")),

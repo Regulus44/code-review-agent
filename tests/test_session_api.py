@@ -6,11 +6,12 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from code_review_agent.api.app import create_app
+from code_review_agent.session.store import InMemorySessionStore
 
 
 @pytest.fixture
 async def client():
-    app = create_app()
+    app = create_app(session_store=InMemorySessionStore())
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac

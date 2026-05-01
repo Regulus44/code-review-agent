@@ -157,16 +157,18 @@ class SessionService:
         if session_record is None:
             return
 
-        model = self.model_factory(session_record.provider, session_record.model)
+        model = None
         try:
-            await self._store.update_turn(
-                turn_id, status="running", started_at=utc_now(),
-            )
-
             history = await self._store.get_messages(session_id)
             session = InMemorySession()
             if history:
                 session.append(history)
+
+            model = self.model_factory(session_record.provider, session_record.model)
+
+            await self._store.update_turn(
+                turn_id, status="running", started_at=utc_now(),
+            )
 
             registry = self.tool_registry_factory()
             if session_record.tool_names is not None:
@@ -221,11 +223,13 @@ class SessionService:
             )
 
         except asyncio.CancelledError:
+            current = await self._store.get_turn(turn_id)
+            existing_reason = current.failure_reason if current else None
             await self._store.update_turn(
                 turn_id,
                 status="cancelled",
                 finished_at=utc_now(),
-                failure_reason="cancelled",
+                failure_reason=existing_reason or "cancelled",
             )
             await self._store.update_session(
                 session_id, status="idle", updated_at=utc_now(),

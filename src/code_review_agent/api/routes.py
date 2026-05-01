@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from code_review_agent.apps.repo_analyst import RepoAnalystRequest, RepoAnalystService
 from code_review_agent.models import ModelProviderDescriptor, list_model_providers
@@ -278,6 +278,25 @@ async def cancel_repo_analyst_run(run_id: str, request: Request):
 # ── Session API ──────────────────────────────────────────────────────────────
 
 
+def _validate_session_workspace(request: Request, workspace_root: str) -> None:
+    """Validate that workspace_root is under the allowed runtime root.
+
+    Raises ``HTTPException(400)`` on invalid or disallowed workspace paths.
+    """
+    runtime = get_runtime(request)
+    allowed_path = runtime.allowed_workspace_root
+    if allowed_path is None:
+        return
+    try:
+        resolved = Path(workspace_root).resolve(strict=False)
+        resolved.relative_to(allowed_path)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="workspace_root is outside the allowed runtime root",
+        )
+
+
 class CreateSessionRequest(BaseModel):
     """Request body for POST /sessions."""
 
@@ -285,8 +304,8 @@ class CreateSessionRequest(BaseModel):
 
     workspace_root: str
     mode: RepoAnalystMode = "review"
-    max_iterations: int = 100
-    max_tokens: int | None = None
+    max_iterations: int = Field(default=100, ge=1, le=200)
+    max_tokens: int | None = Field(default=None, ge=1)
     provider: str | None = None
     model: str | None = None
     tool_names: list[str] | None = None
@@ -299,13 +318,14 @@ class CreateSessionTurnRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    message: str
+    message: str = Field(..., min_length=1)
 
 
 @router.post("/sessions", status_code=status.HTTP_201_CREATED)
 async def create_session(payload: CreateSessionRequest, request: Request):
     """Create a new persistent session."""
     _enforce_api_key(request)
+    _validate_session_workspace(request, payload.workspace_root)
     svc = get_session_service(request)
     try:
         record = await svc.create_session(**payload.model_dump())

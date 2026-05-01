@@ -21,6 +21,7 @@ from code_review_agent.runtime import (
     build_default_tool_descriptors,
     build_default_tool_registry,
 )
+from code_review_agent.session.store import InMemorySessionStore
 from code_review_agent.settings import get_settings
 from code_review_agent.tools import Tool, ToolExecutionResult, ToolRegistry
 
@@ -101,7 +102,7 @@ def build_runtime() -> AgentRuntime:
 
 
 def build_client(*, runtime: AgentRuntime | None = None, api_key: str | None = None) -> TestClient:
-    app = create_app(runtime=runtime or build_runtime())
+    app = create_app(runtime=runtime or build_runtime(), session_store=InMemorySessionStore())
     app.state.api_key = api_key
     return TestClient(app)
 
@@ -871,3 +872,27 @@ def test_workspace_root_outside_allowlist_returns_400(tmp_path: Path) -> None:
     )
 
     assert response.status_code == 400
+
+
+def test_session_workspace_root_uses_runtime_allowlist(tmp_path: Path) -> None:
+    allowed_root = tmp_path / "allowed"
+    outside_root = tmp_path / "outside"
+    allowed_root.mkdir()
+    outside_root.mkdir()
+
+    runtime = AgentRuntime(
+        model_factory=lambda: FakeModel([make_response(content="Done")]),
+        tool_registry_factory=build_registry,
+        allowed_workspace_root=allowed_root,
+    )
+    client = build_client(runtime=runtime)
+
+    response = client.post(
+        "/sessions",
+        json={
+            "workspace_root": str(outside_root),
+        },
+    )
+
+    assert response.status_code == 400
+    assert "workspace_root is outside the allowed runtime root" in response.text
