@@ -83,7 +83,7 @@ async def test_create_turn_missing_message(client: AsyncClient):
     session_id = create_resp.json()["id"]
 
     resp = await client.post(f"/sessions/{session_id}/turns", json={})
-    assert resp.status_code == 400
+    assert resp.status_code == 422
 
 
 @pytest.mark.anyio

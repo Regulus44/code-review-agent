@@ -23,6 +23,7 @@ from code_review_agent.session.types import (
     TurnStatus,
 )
 from code_review_agent.tools import ToolContext, ToolRegistry
+from code_review_agent.tools.policy import filter_tool_registry
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,7 @@ class SessionService:
     async def cancel_turn(self, session_id: str, turn_id: str) -> SessionTurn:
         """Cancel a running or queued turn."""
         turn = await self._store.get_turn(turn_id)
-        if turn is None:
+        if turn is None or turn.session_id != session_id:
             raise TurnNotFoundError(turn_id)
 
         terminal_statuses: set[TurnStatus] = {
@@ -156,6 +157,7 @@ class SessionService:
         if session_record is None:
             return
 
+        model = self.model_factory(session_record.provider, session_record.model)
         try:
             await self._store.update_turn(
                 turn_id, status="running", started_at=utc_now(),
@@ -166,11 +168,9 @@ class SessionService:
             if history:
                 session.append(history)
 
-            model = self.model_factory(session_record.provider, session_record.model)
             registry = self.tool_registry_factory()
             if session_record.tool_names is not None:
-                from code_review_agent.runtime.service import _filter_tool_registry
-                registry = _filter_tool_registry(registry, session_record.tool_names)
+                registry = filter_tool_registry(registry, session_record.tool_names)
 
             budget = (
                 self.context_budget_factory(session_record)
@@ -253,6 +253,14 @@ class SessionService:
             await self._store.update_session(
                 session_id, status="idle", updated_at=utc_now(),
             )
+
+        finally:
+            close = getattr(model, "aclose", None)
+            if close is not None:
+                try:
+                    await close()
+                except Exception:
+                    pass
 
     async def recover_stale_sessions(self) -> int:
         """Recover stale sessions after server restart."""

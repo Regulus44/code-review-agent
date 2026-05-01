@@ -1,1946 +1,1345 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Code Review Agent</title>
-    <style>
-      :root {
-        color-scheme: light;
-        --bg: #f5f7fb;
-        --panel: #ffffff;
-        --panel-muted: #f1f4f8;
-        --border: #d7dee8;
-        --text: #18212f;
-        --muted: #5c6b80;
-        --accent: #0f62fe;
-        --accent-strong: #0043ce;
-        --success: #198038;
-        --warning: #d97706;
-        --danger: #c81e1e;
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        margin: 0;
-        font-family: "Segoe UI", system-ui, sans-serif;
-        color: var(--text);
-        background: var(--bg);
-      }
-
-      .page {
-        min-height: 100vh;
-        display: grid;
-        grid-template-columns: 360px minmax(280px, 360px) minmax(420px, 1fr);
-        gap: 16px;
-        padding: 16px;
-      }
-
-      .page-session {
-        min-height: 100vh;
-        display: grid;
-        grid-template-columns: 320px 1fr;
-        gap: 16px;
-        padding: 16px;
-      }
-
-      .tab-bar {
-        display: flex;
-        gap: 0;
-        background: var(--panel);
-        border-bottom: 1px solid var(--border);
-        padding: 0 16px;
-      }
-
-      .tab-btn {
-        padding: 12px 20px;
-        border: none;
-        background: none;
-        font: inherit;
-        font-weight: 600;
-        font-size: 14px;
-        color: var(--muted);
-        cursor: pointer;
-        border-bottom: 2px solid transparent;
-        margin-bottom: -1px;
-      }
-
-      .tab-btn:hover {
-        color: var(--text);
-      }
-
-      .tab-btn.active {
-        color: var(--accent);
-        border-bottom-color: var(--accent);
-      }
-
-      .panel {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        display: flex;
-        flex-direction: column;
-        min-height: 0;
-      }
-
-      .panel-header {
-        padding: 14px 16px;
-        border-bottom: 1px solid var(--border);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 12px;
-      }
-
-      .header-actions {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-
-      .lang-select {
-        width: 90px;
-        padding: 6px 8px;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        font-size: 12px;
-        background: #fff;
-      }
-
-      .model-select {
-        width: 100%;
-        padding: 10px 12px;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        font-size: 13px;
-        background: #fff;
-      }
-
-      .panel-title {
-        font-size: 15px;
-        font-weight: 600;
-      }
-
-      .panel-subtitle {
-        font-size: 12px;
-        color: var(--muted);
-        margin-top: 2px;
-      }
-
-      .panel-body {
-        padding: 16px;
-        overflow: auto;
-        min-height: 0;
-      }
-
-      .form-grid {
-        display: grid;
-        gap: 14px;
-      }
-
-      label {
-        display: grid;
-        gap: 6px;
-        font-size: 13px;
-        font-weight: 600;
-      }
-
-      input,
-      textarea {
-        width: 100%;
-        padding: 10px 12px;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        font: inherit;
-        color: inherit;
-        background: #fff;
-      }
-
-      textarea {
-        resize: vertical;
-        min-height: 120px;
-      }
-
-      pre {
-        margin: 0;
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-
-      .inline-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 10px;
-      }
-
-      button {
-        border: 1px solid var(--accent);
-        background: var(--accent);
-        color: #fff;
-        padding: 10px 14px;
-        border-radius: 6px;
-        font: inherit;
-        cursor: pointer;
-      }
-
-      button:hover {
-        background: var(--accent-strong);
-        border-color: var(--accent-strong);
-      }
-
-      button.secondary {
-        background: #fff;
-        color: var(--text);
-        border-color: var(--border);
-      }
-
-      button.danger {
-        background: #fff;
-        color: var(--danger);
-        border-color: #fecaca;
-      }
-
-      button.danger:hover {
-        background: #fef2f2;
-        border-color: var(--danger);
-      }
-
-      .status-line {
-        font-size: 13px;
-        color: var(--muted);
-      }
-
-      .status-chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 4px 8px;
-        border-radius: 999px;
-        font-size: 12px;
-        font-weight: 600;
-        border: 1px solid var(--border);
-      }
-
-      .status-queued,
-      .status-running {
-        color: var(--warning);
-        background: #fff7ed;
-        border-color: #fed7aa;
-      }
-
-      .status-completed {
-        color: var(--success);
-        background: #ecfdf3;
-        border-color: #a7f3d0;
-      }
-
-      .status-failed,
-      .status-max_iterations,
-      .status-model_output_truncated {
-        color: var(--danger);
-        background: #fef2f2;
-        border-color: #fecaca;
-      }
-
-      .status-cancelled {
-        color: var(--muted);
-        background: #f3f4f6;
-        border-color: #d1d5db;
-      }
-
-      .run-list {
-        display: grid;
-        gap: 10px;
-      }
-
-      .run-item {
-        border: 1px solid var(--border);
-        background: var(--panel-muted);
-        border-radius: 6px;
-        padding: 12px;
-        display: grid;
-        gap: 8px;
-        cursor: pointer;
-      }
-
-      .run-item.active {
-        border-color: var(--accent);
-        background: #eef4ff;
-      }
-
-      .run-question {
-        font-size: 13px;
-        line-height: 1.45;
-      }
-
-      .run-meta {
-        font-size: 12px;
-        color: var(--muted);
-        display: flex;
-        justify-content: space-between;
-        gap: 12px;
-      }
-
-      .detail-grid {
-        display: grid;
-        gap: 14px;
-      }
-
-      .detail-section {
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        overflow: hidden;
-      }
-
-      .detail-section h3 {
-        margin: 0;
-        padding: 10px 12px;
-        font-size: 13px;
-        font-weight: 600;
-        background: var(--panel-muted);
-        border-bottom: 1px solid var(--border);
-      }
-
-      .detail-content {
-        padding: 12px;
-        font-size: 13px;
-        line-height: 1.6;
-      }
-
-      .detail-content ul {
-        margin: 0;
-        padding-left: 18px;
-      }
-
-      .module-list {
-        display: grid;
-        gap: 10px;
-      }
-
-      .module-item {
-        padding: 10px;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        background: #fff;
-      }
-
-      .module-name {
-        font-weight: 600;
-        margin-bottom: 4px;
-      }
-
-      .tool-permissions {
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        background: #fff;
-      }
-
-      .tool-permissions summary {
-        cursor: pointer;
-        display: flex;
-        justify-content: space-between;
-        gap: 10px;
-        padding: 10px 12px;
-        font-size: 13px;
-        font-weight: 600;
-      }
-
-      .tool-permissions-panel {
-        border-top: 1px solid var(--border);
-        display: grid;
-        gap: 8px;
-        padding: 10px;
-      }
-
-      .tool-row {
-        align-items: start;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        display: grid;
-        gap: 8px;
-        grid-template-columns: auto 1fr;
-        padding: 10px;
-      }
-
-      .tool-row input[type="checkbox"] {
-        margin-top: 3px;
-        width: auto;
-      }
-
-      .tool-title {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        align-items: center;
-        font-weight: 600;
-      }
-
-      .risk-chip {
-        border: 1px solid var(--border);
-        border-radius: 999px;
-        font-size: 11px;
-        padding: 2px 6px;
-      }
-
-      .risk-low {
-        color: var(--success);
-        background: #ecfdf3;
-        border-color: #a7f3d0;
-      }
-
-      .risk-medium {
-        color: var(--warning);
-        background: #fff7ed;
-        border-color: #fed7aa;
-      }
-
-      .risk-high {
-        color: var(--danger);
-        background: #fef2f2;
-        border-color: #fecaca;
-      }
-
-      .event-list {
-        display: grid;
-        gap: 8px;
-      }
-
-      .event-item {
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        padding: 10px;
-        background: #fff;
-        font-size: 12px;
-      }
-
-      .event-type {
-        font-weight: 600;
-        margin-bottom: 6px;
-      }
-
-      .empty-state {
-        color: var(--muted);
-        font-size: 13px;
-        line-height: 1.6;
-      }
-
-      .error-text {
-        color: var(--danger);
-      }
-
-      .muted {
-        color: var(--muted);
-      }
-
-      .toolbar {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
-
-      @media (max-width: 1200px) {
-        .page {
-          grid-template-columns: 1fr;
-        }
-
-        .page-session {
-          grid-template-columns: 1fr;
-        }
-
-        .panel {
-          min-height: 320px;
-        }
-      }
-
-      .session-list {
-        display: grid;
-        gap: 8px;
-      }
-
-      .session-item {
-        border: 1px solid var(--border);
-        background: var(--panel-muted);
-        border-radius: 6px;
-        padding: 10px 12px;
-        cursor: pointer;
-        display: grid;
-        gap: 4px;
-      }
-
-      .session-item.active {
-        border-color: var(--accent);
-        background: #eef4ff;
-      }
-
-      .session-item-title {
-        font-size: 13px;
-        font-weight: 600;
-      }
-
-      .session-item-meta {
-        font-size: 12px;
-        color: var(--muted);
-      }
-
-      .chat-area {
-        flex: 1;
-        overflow: auto;
-        padding: 16px;
-        display: grid;
-        gap: 12px;
-        align-content: start;
-      }
-
-      .chat-msg {
-        max-width: 85%;
-        padding: 10px 14px;
-        border-radius: 8px;
-        font-size: 13px;
-        line-height: 1.5;
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-
-      .chat-msg-user {
-        background: #eef4ff;
-        border: 1px solid #c4d4f5;
-        justify-self: end;
-      }
-
-      .chat-msg-assistant {
-        background: var(--panel-muted);
-        border: 1px solid var(--border);
-        justify-self: start;
-      }
-
-      .chat-msg-system {
-        background: #fefce8;
-        border: 1px solid #fde68a;
-        justify-self: center;
-        font-style: italic;
-        max-width: 90%;
-      }
-
-      .chat-msg-tool {
-        background: #f0fdf4;
-        border: 1px solid #bbf7d0;
-        justify-self: start;
-        font-family: monospace;
-        font-size: 12px;
-      }
-
-      .chat-input-bar {
-        padding: 12px 16px;
-        border-top: 1px solid var(--border);
-        display: flex;
-        gap: 8px;
-      }
-
-      .chat-input-bar input {
-        flex: 1;
-      }
-
-      .status-idle {
-        color: var(--muted);
-        background: #f3f4f6;
-        border-color: #d1d5db;
-      }
-
-      .status-archived {
-        color: var(--muted);
-        background: #f3f4f6;
-        border-color: #d1d5db;
-      }
-    </style>
-  </head>
-  <body>
-    <nav class="tab-bar">
-      <button class="tab-btn active" id="tabRuns" type="button">Repo Analyst</button>
-      <button class="tab-btn" id="tabSessions" type="button">Session</button>
-    </nav>
-
-    <main class="page" id="pageRuns">
-      <section class="panel">
-        <div class="panel-header">
-          <div>
-            <div id="repoAnalystTitle" class="panel-title">Repo Analyst</div>
-            <div id="repoAnalystSubtitle" class="panel-subtitle">提交仓库分析任务</div>
-          </div>
-          <div class="header-actions">
-            <select id="langSelect" class="lang-select" aria-label="language switch">
-              <option value="zh">中文</option>
-              <option value="en">EN</option>
-            </select>
-            <span id="healthChip" class="status-chip status-queued">检查中</span>
-          </div>
-        </div>
-        <div class="panel-body">
-          <form id="runForm" class="form-grid">
-            <label>
-              <span id="workspaceRootLabel">仓库路径</span>
-              <input
-                id="workspaceRoot"
-                name="workspaceRoot"
-                type="text"
-                required
-                value="D:/Develop/code-review-agent"
-              />
-            </label>
-
-            <label>
-              <span id="analysisQuestionLabel">分析问题</span>
-              <textarea
-                id="question"
-                name="question"
-                placeholder="留空则使用默认仓库分析问题。"
-              ></textarea>
-            </label>
-
-            <div class="inline-grid">
-              <label>
-                <span id="maxIterationsLabel">最大迭代</span>
-                <input id="maxIterations" type="number" min="1" value="100" placeholder="100" />
-              </label>
-              <label>
-                <span id="temperatureLabel">温度</span>
-                <input id="temperature" type="number" min="0" max="2" step="0.1" placeholder="默认" />
-              </label>
-              <label>
-                <span id="maxTokensLabel">最大 tokens</span>
-                <input id="maxTokens" type="number" min="1" placeholder="默认" />
-              </label>
-            </div>
-
-            <label>
-              <span id="modeSelectLabel">任务模式</span>
-              <select id="modeSelect" class="model-select">
-                <option value="overview" selected>仓库总览</option>
-                <option value="review">代码审查</option>
-              </select>
-            </label>
-
-            <label>
-              <span id="providerSelectLabel">选择 Provider</span>
-              <select id="providerSelect" class="model-select">
-                <option value="deepseek" selected>DeepSeek</option>
-                <option value="siliconflow">SiliconFlow</option>
-              </select>
-            </label>
-
-            <label>
-              <span id="modelSelectLabel">选择模型</span>
-              <select id="modelSelect" class="model-select">
-                <option value="deepseek-v4-pro" selected>DeepSeek V4 Pro (推荐)</option>
-                <option value="deepseek-v4-flash">DeepSeek V4 Flash (快速)</option>
-              </select>
-            </label>
-
-            <details class="tool-permissions" open>
-              <summary>
-                <span id="toolPermissionsLabel">工具权限</span>
-                <span id="toolPermissionsHint" class="muted">按任务模式自动选择</span>
-              </summary>
-              <div id="toolPermissionsPanel" class="tool-permissions-panel">
-                <div class="empty-state">正在加载工具列表...</div>
-              </div>
-            </details>
-
-            <div class="toolbar">
-              <button type="submit" id="submitButton">创建任务</button>
-              <button type="button" class="secondary" id="refreshRunsButton">刷新任务列表</button>
-            </div>
-
-            <div id="formStatus" class="status-line">等待创建任务。</div>
-          </form>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-header">
-          <div>
-            <div id="runsTitle" class="panel-title">分析任务</div>
-            <div id="runsSubtitle" class="panel-subtitle">点击任务查看报告与事件</div>
-          </div>
-        </div>
-        <div class="panel-body">
-          <div id="runList" class="run-list"></div>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-header">
-          <div>
-            <div id="resultTitle" class="panel-title">分析结果</div>
-            <div id="detailMeta" class="panel-subtitle">尚未选择任务</div>
-          </div>
-          <div class="toolbar">
-            <button type="button" class="danger" id="cancelRunButton" hidden>取消任务</button>
-            <button type="button" class="secondary" id="refreshDetailButton">刷新详情</button>
-          </div>
-        </div>
-        <div class="panel-body">
-          <div id="detailView" class="detail-grid">
-            <div id="detailEmpty" class="empty-state">
-              创建或选择一个 Repo Analyst 任务后，这里会显示结构化报告、失败原因和执行事件。
-            </div>
-          </div>
-        </div>
-      </section>
-    </main>
-
-    <main class="page-session" id="pageSessions" hidden>
-      <section class="panel">
-        <div class="panel-header">
-          <div>
-            <div class="panel-title">Sessions</div>
-            <div class="panel-subtitle" id="sessionListSubtitle">持续对话</div>
-          </div>
-          <div class="toolbar">
-            <button type="button" class="secondary" id="refreshSessionsButton">刷新</button>
-            <button type="button" id="newSessionButton">新建</button>
-          </div>
-        </div>
-        <div class="panel-body">
-          <div id="sessionList" class="session-list">
-            <div class="empty-state">暂无 Session</div>
-          </div>
-        </div>
-      </section>
-
-      <section class="panel" style="min-height:0;">
-        <div class="panel-header">
-          <div>
-            <div class="panel-title" id="sessionChatTitle">选择一个 Session</div>
-            <div class="panel-subtitle" id="sessionChatMeta">-</div>
-          </div>
-          <div class="toolbar">
-            <span id="sessionTurnStatus" class="status-chip status-idle">idle</span>
-            <button type="button" class="danger" id="cancelTurnButton" hidden>取消 Turn</button>
-            <button type="button" class="secondary" id="archiveSessionButton">归档</button>
-          </div>
-        </div>
-        <div class="chat-area" id="chatArea">
-          <div class="empty-state">选择或创建一个 Session 开始对话</div>
-        </div>
-        <div class="chat-input-bar">
-          <input type="text" id="chatInput" placeholder="输入消息..." disabled />
-          <button type="button" id="sendChatButton" disabled>发送</button>
-        </div>
-      </section>
-    </main>
-
-    <script>
-      const I18N = {
-        zh: {
-          repo_analyst_subtitle: "提交仓库分析任务",
-          health_checking: "检查中",
-          health_ok: "API 正常",
-          health_error: "API 异常",
-          workspace_root: "仓库路径",
-          analysis_question: "分析问题",
-          analysis_question_placeholder: "留空则使用默认仓库分析问题。",
-          max_iterations: "最大迭代",
-          temperature: "温度",
-          max_tokens: "最大 tokens",
-          temperature_placeholder: "默认",
-          max_tokens_placeholder: "默认",
-          mode_select: "任务模式",
-          mode_overview: "仓库总览",
-          mode_review: "代码审查",
-          provider_select: "选择 Provider",
-          model_select: "选择模型",
-          model_v4_pro: "DeepSeek V4 Pro (推荐)",
-          model_v4_flash: "DeepSeek V4 Flash (快速)",
-          tool_permissions: "工具权限",
-          tool_permissions_hint: "按任务模式自动选择",
-          loading_tools: "正在加载工具列表...",
-          tool_load_failed: "工具列表加载失败",
-          disabled_reason: "禁用原因",
-          tool_disabled: "已禁用",
-          risk_low: "低风险",
-          risk_medium: "中风险",
-          risk_high: "高风险",
-          create_run: "创建任务",
-          refresh_runs: "刷新任务列表",
-          waiting_form: "等待创建任务。",
-          creating_run: "正在创建任务...",
-          run_created: "任务已创建",
-          cancel_run: "取消任务",
-          cancelling_run: "正在取消任务...",
-          run_cancelled: "任务已取消",
-          cancel_failed: "取消失败",
-          runs_title: "分析任务",
-          runs_subtitle: "点击任务查看报告与事件",
-          result_title: "分析结果",
-          no_run_selected: "尚未选择任务",
-          refresh_details: "刷新详情",
-          detail_empty:
-            "创建或选择一个 Repo Analyst 任务后，这里会显示结构化报告、失败原因和执行事件。",
-          no_runs: "还没有任务。",
-          untitled_run: "未命名任务",
-          no_content: "没有内容。",
-          no_events: "暂无事件。",
-          no_tools: "未启用工具。",
-          no_module_info: "暂无模块信息。",
-          no_structured_report: "当前没有可解析的结构化报告。",
-          summary: "总结",
-          modules: "模块",
-          architecture: "架构",
-          risks: "风险",
-          next_steps: "下一步",
-          changed_files: "改动文件",
-          test_result: "测试结果",
-          findings: "审查发现",
-          no_findings: "没有明确问题。",
-          command: "命令",
-          exit_code: "退出码",
-          severity: "严重级别",
-          file: "文件",
-          line: "行号",
-          suggestion: "建议",
-          report: "报告",
-          raw_model_output: "原始模型输出",
-          failure_reason: "失败原因",
-          parse_diagnostics: "解析诊断",
-          diagnostics: "运行诊断",
-          timeline: "执行时间线",
-          total_duration: "总耗时",
-          model_calls: "模型调用",
-          tool_calls: "工具调用",
-          event_count: "事件数量",
-          token_usage: "Token 用量",
-          slowest_steps: "最慢步骤",
-          no_diagnostics: "暂无运行诊断。",
-          events: "运行事件",
-          run_info: "任务信息",
-          question: "问题",
-          provider: "Provider",
-          enabled_tools: "本次启用工具",
-          workspace: "路径",
-          status: "状态",
-          started: "开始",
-          finished: "结束",
-          status_queued: "排队中",
-          status_running: "运行中",
-          status_completed: "已完成",
-          status_failed: "失败",
-          status_cancelled: "已取消",
-          status_max_iterations: "达到最大迭代次数",
-          status_model_output_truncated: "输出被截断",
-          status_unknown: "未知状态",
-          run_detail_meta_separator: " | ",
-          request_failed: "请求失败",
-        },
-        en: {
-          repo_analyst_subtitle: "Submit repository analysis runs",
-          health_checking: "Checking",
-          health_ok: "API OK",
-          health_error: "API Error",
-          workspace_root: "Workspace root",
-          analysis_question: "Analysis question",
-          analysis_question_placeholder:
-            "Leave empty to use the default repository analysis question.",
-          max_iterations: "Max iterations",
-          temperature: "Temperature",
-          max_tokens: "Max tokens",
-          temperature_placeholder: "default",
-          max_tokens_placeholder: "default",
-          mode_select: "Task mode",
-          mode_overview: "Repository Overview",
-          mode_review: "Code Review",
-          provider_select: "Select Provider",
-          model_select: "Select Model",
-          model_v4_pro: "DeepSeek V4 Pro (Recommended)",
-          model_v4_flash: "DeepSeek V4 Flash (Fast)",
-          tool_permissions: "Tool Permissions",
-          tool_permissions_hint: "Auto-selected by task mode",
-          loading_tools: "Loading tools...",
-          tool_load_failed: "Failed to load tools",
-          disabled_reason: "Disabled reason",
-          tool_disabled: "Disabled",
-          risk_low: "Low Risk",
-          risk_medium: "Medium Risk",
-          risk_high: "High Risk",
-          create_run: "Create run",
-          refresh_runs: "Refresh runs",
-          waiting_form: "Waiting for a new run.",
-          creating_run: "Creating run...",
-          run_created: "Run created",
-          cancel_run: "Cancel run",
-          cancelling_run: "Cancelling run...",
-          run_cancelled: "Run cancelled",
-          cancel_failed: "Cancel failed",
-          runs_title: "Runs",
-          runs_subtitle: "Select a run to inspect report and events",
-          result_title: "Result",
-          no_run_selected: "No run selected",
-          refresh_details: "Refresh details",
-          detail_empty:
-            "Create or select a Repo Analyst run to see structured report, failure reason, and execution events.",
-          no_runs: "No runs yet.",
-          untitled_run: "Untitled run",
-          no_content: "No content.",
-          no_events: "No events.",
-          no_tools: "No tools enabled.",
-          no_module_info: "No module info.",
-          no_structured_report: "No structured report available.",
-          summary: "Summary",
-          modules: "Modules",
-          architecture: "Architecture",
-          risks: "Risks",
-          next_steps: "Next Steps",
-          changed_files: "Changed Files",
-          test_result: "Test Result",
-          findings: "Findings",
-          no_findings: "No concrete findings.",
-          command: "Command",
-          exit_code: "Exit Code",
-          severity: "Severity",
-          file: "File",
-          line: "Line",
-          suggestion: "Suggestion",
-          report: "Report",
-          raw_model_output: "Raw Model Output",
-          failure_reason: "Failure Reason",
-          parse_diagnostics: "Parse Diagnostics",
-          diagnostics: "Diagnostics",
-          timeline: "Execution Timeline",
-          total_duration: "Total Duration",
-          model_calls: "Model Calls",
-          tool_calls: "Tool Calls",
-          event_count: "Event Count",
-          token_usage: "Token Usage",
-          slowest_steps: "Slowest Steps",
-          no_diagnostics: "No diagnostics available.",
-          events: "Events",
-          run_info: "Run Info",
-          question: "Question",
-          provider: "Provider",
-          enabled_tools: "Enabled Tools",
-          workspace: "Workspace",
-          status: "Status",
-          started: "Started",
-          finished: "Finished",
-          status_queued: "Queued",
-          status_running: "Running",
-          status_completed: "Completed",
-          status_failed: "Failed",
-          status_cancelled: "Cancelled",
-          status_max_iterations: "Max Iterations",
-          status_model_output_truncated: "Output Truncated",
-          status_unknown: "Unknown",
-          run_detail_meta_separator: " | ",
-          request_failed: "Request failed",
-        },
-      };
-
-      const state = {
-        runs: [],
-        tools: [],
-        modelProviders: [],
-        selectedToolNames: [],
-        selectedRunId: null,
-        pollTimer: null,
-        lang: localStorage.getItem("ui_lang") || "zh",
-      };
-
-      const runForm = document.getElementById("runForm");
-      const workspaceRootInput = document.getElementById("workspaceRoot");
-      const questionInput = document.getElementById("question");
-      const maxIterationsInput = document.getElementById("maxIterations");
-      const temperatureInput = document.getElementById("temperature");
-      const maxTokensInput = document.getElementById("maxTokens");
-      const modeSelect = document.getElementById("modeSelect");
-      const providerSelect = document.getElementById("providerSelect");
-      const modelSelect = document.getElementById("modelSelect");
-      const toolPermissionsPanel = document.getElementById("toolPermissionsPanel");
-      const formStatus = document.getElementById("formStatus");
-      const runList = document.getElementById("runList");
-      const detailView = document.getElementById("detailView");
-      const detailMeta = document.getElementById("detailMeta");
-      const healthChip = document.getElementById("healthChip");
-      const refreshRunsButton = document.getElementById("refreshRunsButton");
-      const refreshDetailButton = document.getElementById("refreshDetailButton");
-      const cancelRunButton = document.getElementById("cancelRunButton");
-      const langSelect = document.getElementById("langSelect");
-
-      function t(key) {
-        const table = I18N[state.lang] || I18N.zh;
-        return table[key] || I18N.zh[key] || key;
-      }
-
-      function applyStaticTranslations() {
-        document.getElementById("repoAnalystSubtitle").textContent = t("repo_analyst_subtitle");
-        document.getElementById("workspaceRootLabel").textContent = t("workspace_root");
-        document.getElementById("analysisQuestionLabel").textContent = t("analysis_question");
-        questionInput.placeholder = t("analysis_question_placeholder");
-        document.getElementById("maxIterationsLabel").textContent = t("max_iterations");
-        document.getElementById("temperatureLabel").textContent = t("temperature");
-        document.getElementById("maxTokensLabel").textContent = t("max_tokens");
-        temperatureInput.placeholder = t("temperature_placeholder");
-        maxTokensInput.placeholder = t("max_tokens_placeholder");
-        document.getElementById("modeSelectLabel").textContent = t("mode_select");
-        modeSelect.options[0].textContent = t("mode_overview");
-        modeSelect.options[1].textContent = t("mode_review");
-        document.getElementById("providerSelectLabel").textContent = t("provider_select");
-        document.getElementById("modelSelectLabel").textContent = t("model_select");
-        document.getElementById("toolPermissionsLabel").textContent = t("tool_permissions");
-        document.getElementById("toolPermissionsHint").textContent = t("tool_permissions_hint");
-        document.getElementById("submitButton").textContent = t("create_run");
-        refreshRunsButton.textContent = t("refresh_runs");
-        document.getElementById("runsTitle").textContent = t("runs_title");
-        document.getElementById("runsSubtitle").textContent = t("runs_subtitle");
-        document.getElementById("resultTitle").textContent = t("result_title");
-        refreshDetailButton.textContent = t("refresh_details");
-        cancelRunButton.textContent = t("cancel_run");
-
-        if (!state.selectedRunId) {
-          detailMeta.textContent = t("no_run_selected");
-          updateCancelButton(null);
-          detailView.innerHTML = `<div id="detailEmpty" class="empty-state">${escapeHtml(
-            t("detail_empty"),
-          )}</div>`;
-        }
-
-        if (!formStatus.dataset.customMessage) {
-          formStatus.textContent = t("waiting_form");
-        }
-        renderProviderModelControls();
-        renderToolPermissions();
-      }
-
-      async function requestJson(url, options = {}) {
-        const response = await fetch(url, {
-          headers: {
-            "Content-Type": "application/json",
-            ...(options.headers || {}),
-          },
-          ...options,
-        });
-
-        if (!response.ok) {
-          let message = `${t("request_failed")}: ${response.status}`;
-          try {
-            const payload = await response.json();
-            message = payload.detail || JSON.stringify(payload);
-          } catch (_error) {
-            // Ignore JSON parse failures.
-          }
-          throw new Error(message);
-        }
-
-        return response.json();
-      }
-
-      function statusClass(status) {
-        return `status-chip status-${status || "queued"}`;
-      }
-
-      function formatStatus(status) {
-        if (!status) return t("status_unknown");
-        return t(`status_${status}`) || status;
-      }
-
-      function canCancelRun(run) {
-        return Boolean(run && ["queued", "running"].includes(run.status));
-      }
-
-      function updateCancelButton(run) {
-        cancelRunButton.hidden = !canCancelRun(run);
-        cancelRunButton.disabled = false;
-      }
-
-      function escapeHtml(value) {
-        return String(value)
-          .replaceAll("&", "&amp;")
-          .replaceAll("<", "&lt;")
-          .replaceAll(">", "&gt;")
-          .replaceAll('"', "&quot;");
-      }
-
-      function timestampText(value) {
-        if (!value) return "-";
-        return new Date(value).toLocaleString();
-      }
-
-      function durationText(value) {
-        if (value === null || value === undefined) return "-";
-        return `${value} ms`;
-      }
-
-      function providerLabel(provider) {
-        const names = {
-          deepseek: "DeepSeek",
-          siliconflow: "SiliconFlow",
-        };
-        const baseName = names[provider.name] || provider.name;
-        const notConfigured = state.lang === "zh" ? "未配置" : "Not configured";
-        return provider.configured ? baseName : `${baseName} (${notConfigured})`;
-      }
-
-      function renderProviderModelControls(options = {}) {
-        if (!state.modelProviders.length) return;
-
-        const preserveModel = options.preserveModel !== false;
-        const currentProvider = providerSelect.value;
-        const currentModel = modelSelect.value;
-
-        providerSelect.innerHTML = state.modelProviders
-          .map(
-            (provider) =>
-              `<option value="${escapeHtml(provider.name)}">${escapeHtml(providerLabel(provider))}</option>`,
-          )
-          .join("");
-
-        const configuredProvider = state.modelProviders.find((provider) => provider.configured);
-        const fallbackProvider = configuredProvider || state.modelProviders[0];
-        const providerNames = new Set(state.modelProviders.map((provider) => provider.name));
-        const nextProvider = providerNames.has(currentProvider) ? currentProvider : fallbackProvider.name;
-        providerSelect.value = nextProvider;
-
-        const descriptor =
-          state.modelProviders.find((provider) => provider.name === nextProvider) || fallbackProvider;
-        const models = descriptor.models?.length
-          ? descriptor.models
-          : descriptor.default_model
-            ? [descriptor.default_model]
-            : [];
-
-        modelSelect.innerHTML = models
-          .map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`)
-          .join("");
-
-        if (preserveModel && models.includes(currentModel)) {
-          modelSelect.value = currentModel;
-        } else if (descriptor.default_model && models.includes(descriptor.default_model)) {
-          modelSelect.value = descriptor.default_model;
-        } else if (models.length) {
-          modelSelect.value = models[0];
-        }
-      }
-
-      async function loadModelProviders() {
-        try {
-          state.modelProviders = await requestJson("/models/providers");
-          providerSelect.value = "";
-          renderProviderModelControls({ preserveModel: false });
-        } catch (error) {
-          if (!formStatus.dataset.customMessage) {
-            const prefix = state.lang === "zh" ? "模型列表加载失败" : "Failed to load model providers";
-            setFormStatus(`${prefix}: ${error.message}`, true);
-          }
-        }
-      }
-
-      function eventTypeText(event) {
-        return event.event_type || event.type || "unknown";
-      }
-
-      function defaultToolNamesForMode(mode) {
-        const defaults =
-          mode === "review"
-            ? ["list_files", "read_file", "search_text", "run_command"]
-            : ["list_files", "read_file", "search_text"];
-        const enabledTools = new Set(state.tools.filter((tool) => tool.enabled).map((tool) => tool.name));
-        return defaults.filter((name) => enabledTools.has(name));
-      }
-
-      function resetToolSelectionForMode() {
-        state.selectedToolNames = defaultToolNamesForMode(modeSelect.value);
-        maxIterationsInput.value = modeSelect.value === "review" ? "40" : "100";
-        if (modeSelect.value === "review" && !maxTokensInput.value.trim()) {
-          maxTokensInput.placeholder = "2048";
-        } else {
-          maxTokensInput.placeholder = t("max_tokens_placeholder");
-        }
-        renderToolPermissions();
-      }
-
-      function riskText(riskLevel) {
-        return t(`risk_${riskLevel}`) || riskLevel;
-      }
-
-      function renderToolPermissions() {
-        if (!toolPermissionsPanel) return;
-        if (!state.tools.length) {
-          toolPermissionsPanel.innerHTML = `<div class="empty-state">${escapeHtml(t("loading_tools"))}</div>`;
-          return;
-        }
-
-        const selected = new Set(state.selectedToolNames);
-        toolPermissionsPanel.innerHTML = state.tools
-          .map((tool) => {
-            const checked = selected.has(tool.name) && tool.enabled ? "checked" : "";
-            const disabled = tool.enabled ? "" : "disabled";
-            const disabledText = tool.enabled
-              ? ""
-              : `<div class="muted">${escapeHtml(t("disabled_reason"))}: ${escapeHtml(
-                  tool.disabled_reason || t("tool_disabled"),
-                )}</div>`;
-            return `
-              <label class="tool-row">
-                <input type="checkbox" data-tool-name="${escapeHtml(tool.name)}" ${checked} ${disabled} />
-                <span>
-                  <span class="tool-title">
-                    <span>${escapeHtml(tool.name)}</span>
-                    <span class="risk-chip risk-${escapeHtml(tool.risk_level)}">${escapeHtml(
-                      riskText(tool.risk_level),
-                    )}</span>
-                    ${tool.enabled ? "" : `<span class="status-chip status-cancelled">${escapeHtml(t("tool_disabled"))}</span>`}
-                  </span>
-                  <span class="muted">${escapeHtml(tool.description)}</span>
-                  ${disabledText}
-                </span>
-              </label>
-            `;
-          })
-          .join("");
-
-        toolPermissionsPanel.querySelectorAll("[data-tool-name]").forEach((element) => {
-          element.addEventListener("change", () => {
-            const enabledSelection = Array.from(
-              toolPermissionsPanel.querySelectorAll("[data-tool-name]:checked"),
-            ).map((item) => item.getAttribute("data-tool-name"));
-            state.selectedToolNames = enabledSelection.filter(Boolean);
-          });
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Code Review Agent</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f5f7fb;
+  --panel: #ffffff;
+  --panel-muted: #f1f4f8;
+  --border: #d7dee8;
+  --text: #18212f;
+  --muted: #5c6b80;
+  --accent: #0f62fe;
+  --accent-strong: #0043ce;
+  --success: #198038;
+  --warning: #d97706;
+  --danger: #c81e1e;
+  --sidebar-w: 260px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app-layout {
+  height: 100vh;
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+}
+
+/* ── Sidebar ───────────────────────────────────────────── */
+
+.sidebar {
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sidebar-header {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-header button {
+  width: 100%;
+  padding: 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.sidebar-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.sidebar-footer {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lang-select {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  background: #fff;
+}
+
+.health-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.health-ok { background: var(--success); }
+.health-err { background: var(--danger); }
+.health-chk { background: var(--warning); }
+
+.session-list { display: grid; gap: 4px; }
+
+.session-item {
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+  position: relative;
+}
+
+.session-item .archive-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  display: none;
+  border-radius: 4px;
+}
+.session-item:hover .archive-btn { display: flex; align-items: center; justify-content: center; }
+.session-item .archive-btn:hover { background: #fee2e2; color: var(--danger); }
+.session-item:hover { background: var(--panel-muted); }
+.session-item.active {
+  border-color: var(--accent);
+  background: #eef4ff;
+}
+
+.session-title {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-time {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ── Main workspace ─────────────────────────────────────── */
+
+.main-workspace {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg);
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.welcome-state {
+  color: var(--muted);
+  font-size: 15px;
+  text-align: center;
+  margin: auto;
+  line-height: 1.8;
+}
+
+.empty-state {
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+  padding: 20px;
+}
+.error-text { color: var(--danger); }
+
+/* ── Message bubbles ────────────────────────────────────── */
+
+.msg-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.msg-bubble {
+  max-width: 75%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.msg-user {
+  align-self: flex-end;
+  background: #eef4ff;
+  border: 1px solid #c4d4f5;
+}
+
+.msg-assistant {
+  align-self: flex-start;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+.msg-system {
+  align-self: center;
+  background: #fefce8;
+  border: 1px solid #fde68a;
+  font-style: italic;
+  max-width: 85%;
+  font-size: 12px;
+}
+
+.msg-error {
+  align-self: center;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: var(--danger);
+  max-width: 85%;
+  font-size: 12px;
+}
+
+/* ── Loading bubble ─────────────────────────────────────── */
+
+.loading-bubble {
+  align-self: flex-start;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.loading-bubble .dots {
+  display: flex;
+  gap: 4px;
+}
+
+.loading-bubble .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.loading-bubble .dot:nth-child(2) { animation-delay: 0.2s; }
+.loading-bubble .dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.3; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.3); }
+}
+
+.loading-text {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* ── Tool accordion ─────────────────────────────────────── */
+
+.tool-accordion {
+  align-self: flex-start;
+  max-width: 75%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f8fafc;
+}
+
+.tool-accordion summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+}
+.tool-accordion summary:hover { background: #eef0f4; }
+
+.tool-accordion-body {
+  padding: 8px 12px;
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.tool-step {
+  font-size: 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.tool-step-header {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.tool-step-args,
+.tool-step-result {
+  font-family: "Cascadia Code", "Fira Code", monospace;
+  font-size: 11px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.tool-step-error {
+  color: var(--danger);
+  font-weight: 500;
+}
+
+/* ── Chat input area ────────────────────────────────────── */
+
+.chat-input-area {
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  padding: 0;
+}
+
+.config-bar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px 0;
+  align-items: center;
+}
+
+.config-bar select {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  background: #fff;
+  max-width: 180px;
+}
+
+.config-bar .spacer { flex: 1; }
+
+.icon-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 16px;
+}
+.icon-btn img {
+   display: block;
+ }
+.icon-btn:hover { background: var(--panel-muted); }
+
+/* ── Settings panel ─────────────────────────────────────── */
+
+.config-panel {
+  margin: 8px 16px 0;
+  padding: 12px 14px;
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.config-panel[hidden] {
+  display: none !important;
+}
+
+.config-panel label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.config-panel input,
+.config-panel select {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.config-panel .wide { grid-column: 1 / -1; }
+
+.input-row {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px;
+  align-items: flex-end;
+}
+
+.input-row textarea {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  resize: none;
+  min-height: 42px;
+  max-height: 150px;
+}
+
+.input-row button {
+  flex-shrink: 0;
+  padding: 10px 20px;
+  font-weight: 600;
+}
+
+.input-row button.danger-outline {
+  background: #fff;
+  color: var(--danger);
+  border-color: #fecaca;
+  font-weight: 600;
+}
+.input-row button.danger-outline:hover {
+  background: #fef2f2;
+  border-color: var(--danger);
+}
+
+/* ── Buttons ────────────────────────────────────────────── */
+
+button {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  border-radius: 8px;
+  font: inherit;
+  cursor: pointer;
+}
+button:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+button.secondary {
+  background: #fff;
+  color: var(--text);
+  border-color: var(--border);
+}
+button.secondary:hover { background: var(--panel-muted); }
+
+/* ── Responsive ─────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .app-layout { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+  .sidebar.open {
+    display: flex;
+    position: fixed;
+    z-index: 10;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: var(--sidebar-w);
+  }
+  .msg-bubble { max-width: 90%; }
+  .chat-messages { padding: 12px 16px; }
+  .config-panel { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="app-layout">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <button id="newSessionBtn">+ 新建对话</button>
+    </div>
+    <div class="sidebar-body">
+      <div id="sessionList" class="session-list">
+        <div class="empty-state">暂无对话</div>
+      </div>
+    </div>
+    <div class="sidebar-footer">
+      <select id="langSelect" class="lang-select" aria-label="语言">
+        <option value="zh">中文</option>
+        <option value="en">EN</option>
+      </select>
+      <span id="healthDot" class="health-dot health-chk" title="检查中"></span>
+    </div>
+  </aside>
+
+  <main class="main-workspace">
+    <div id="chatMessages" class="chat-messages">
+      <div class="welcome-state">
+        选择一个已有的对话，<br>或点击左侧 <strong>+ 新建对话</strong> 开始。
+      </div>
+    </div>
+    <div class="chat-input-area">
+      <div class="config-bar">
+        <select id="providerSelect" aria-label="Provider"></select>
+        <select id="modelSelect" aria-label="Model"></select>
+        <span class="spacer"></span>
+        <button id="settingsToggle" class="icon-btn" title="会话设置"><img src="/assets/images/config.svg" alt="设置" width="18" height="18" /></button>
+      </div>
+      <div id="configPanel" class="config-panel" hidden>
+        <label class="wide">
+          仓库路径
+          <input id="cfgWorkspace" type="text" value="D:\Develop\code-review-agent" />
+        </label>
+        <label>
+          最大迭代
+          <input id="cfgMaxIterations" type="number" min="1" value="100" />
+        </label>
+        <label>
+          最大 Tokens
+          <input id="cfgMaxTokens" type="number" min="1" placeholder="默认" />
+        </label>
+      </div>
+      <div class="input-row">
+        <textarea id="chatInput"
+          placeholder="输入消息…" rows="1"
+          disabled></textarea>
+        <button id="stopBtn" hidden>停止</button>
+        <button id="sendBtn" disabled>发送</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+const I18N = {
+  zh: {
+    health_checking: "检查中",
+    health_ok: "API 正常",
+    health_error: "API 异常",
+    new_session: "新建对话",
+    no_sessions: "暂无对话",
+    select_session: "选择一个已有的对话，",
+    or_new: "或点击左侧",
+    to_start: "开始。",
+    new_chat: "新对话",
+    send: "发送",
+    input_placeholder: "输入消息…",
+    agent_thinking: "Agent 正在处理…",
+    settings_title: "会话设置",
+    workspace_root: "仓库路径",
+    mode: "任务模式",
+    mode_overview: "仓库总览",
+    mode_review: "代码审查",
+    max_iterations: "最大迭代",
+    max_tokens: "最大 Tokens",
+    max_tokens_placeholder: "默认",
+    provider: "Provider",
+    model: "Model",
+    request_failed: "请求失败",
+    turn_failed: "Turn 失败",
+    turn_cancelled: "Turn 已取消",
+    turn_timeout: "Turn 超时",
+    chat_empty: "对话为空，发送第一条消息开始。",
+    tool_called: "调用了 {count} 个工具",
+    tool_args: "参数",
+    tool_result: "结果",
+    tool_error: "错误",
+    archived: "已归档",
+    archived_desc: "此对话已归档，无法发送新消息。",
+    stop: "停止",
+    archive: "归档",
+    archive_confirm: "确定归档这个对话吗？",
+    stop_first: "请先停止当前请求",
+    settings: "设置",
+  },
+  en: {
+    health_checking: "Checking",
+    health_ok: "API OK",
+    health_error: "API Error",
+    new_session: "New Chat",
+    no_sessions: "No conversations",
+    select_session: "Select a conversation,",
+    or_new: "or click",
+    to_start: "to start.",
+    new_chat: "New Chat",
+    send: "Send",
+    input_placeholder: "Type a message…",
+    agent_thinking: "Agent is working…",
+    settings_title: "Session Settings",
+    workspace_root: "Workspace Root",
+    mode: "Mode",
+    mode_overview: "Repository Overview",
+    mode_review: "Code Review",
+    max_iterations: "Max Iterations",
+    max_tokens: "Max Tokens",
+    max_tokens_placeholder: "default",
+    provider: "Provider",
+    model: "Model",
+    request_failed: "Request failed",
+    turn_failed: "Turn failed",
+    turn_cancelled: "Turn cancelled",
+    turn_timeout: "Turn timed out",
+    chat_empty: "No messages yet. Send the first one.",
+    tool_called: "Called {count} tools",
+    tool_args: "Args",
+    tool_result: "Result",
+    tool_error: "Error",
+    archived: "Archived",
+    archived_desc: "This conversation is archived and read-only.",
+    stop: "Stop",
+    archive: "Archive",
+    archive_confirm: "Archive this conversation?",
+    stop_first: "Please stop the current request first",
+    settings: "Settings",
+  },
+};
+
+const state = {
+  sessions: [],
+  selectedSessionId: null,
+  lastSequence: 0,
+  activeTurnId: null,
+  pollTimer: null,
+  modelProviders: [],
+  lang: localStorage.getItem("ui_lang") || "zh",
+  pendingUserMessage: null,
+  pendingLoadingBubble: false,
+  currentSession: null,
+  currentMessages: [],
+};
+
+function t(key) {
+  const table = I18N[state.lang] || I18N.zh;
+  return table[key] || I18N.zh[key] || key;
+}
+
+// ── Reusable utilities (kept from original) ──────────────────
+
+async function requestJson(url, options = {}) {
+  const response = await fetch(url, {
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    ...options,
+  });
+  if (!response.ok) {
+    let message = `${t("request_failed")}: ${response.status}`;
+    try { const p = await response.json(); message = p.detail || JSON.stringify(p); } catch (_) {}
+    throw new Error(message);
+  }
+  return response.json();
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function timestampText(value) {
+  if (!value) return "-";
+  const d = new Date(value);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  if (isToday) return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleDateString("zh-CN", { month: "short", day: "numeric" }) + " " +
+    d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatStatus(status) {
+  const map = {
+    idle: "空闲", running: "运行中", archived: "已归档",
+    queued: "排队中", completed: "已完成", failed: "失败",
+    cancelled: "已取消", max_iterations: "达到上限",
+    model_output_truncated: "输出截断",
+  };
+  return map[status] || status || "未知";
+}
+
+function statusClass(status) {
+  const map = {
+    completed: "status-chip status-completed",
+    running: "status-chip status-running", queued: "status-chip status-running",
+    failed: "status-chip status-failed", cancelled: "status-chip status-cancelled",
+    max_iterations: "status-chip status-failed",
+    model_output_truncated: "status-chip status-failed",
+    idle: "status-chip status-idle", archived: "status-chip status-cancelled",
+  };
+  return map[status] || "status-chip status-queued";
+}
+
+function statusDot(status) {
+  const map = {
+    idle: "var(--muted)", running: "var(--warning)", queued: "var(--warning)",
+    completed: "var(--success)", failed: "var(--danger)", cancelled: "var(--muted)",
+    max_iterations: "var(--danger)", model_output_truncated: "var(--danger)",
+    archived: "var(--muted)",
+  };
+  return map[status] || "var(--muted)";
+}
+
+function providerLabel(provider) {
+  const names = { deepseek: "DeepSeek", siliconflow: "SiliconFlow", mimo: "MiMo" };
+  const base = names[provider.name] || provider.name;
+  const hint = state.lang === "zh" ? "未配置" : "Not configured";
+  return provider.configured ? base : base + " (" + hint + ")";
+}
+
+// ── DOM refs ─────────────────────────────────────────────────
+
+const sidebarBody = document.querySelector(".sidebar-body");
+const sessionListEl = document.getElementById("sessionList");
+const chatMessages = document.getElementById("chatMessages");
+const chatInput = document.getElementById("chatInput");
+const sendBtn = document.getElementById("sendBtn");
+const stopBtn = document.getElementById("stopBtn");
+const providerSelect = document.getElementById("providerSelect");
+const modelSelect = document.getElementById("modelSelect");
+const settingsToggle = document.getElementById("settingsToggle");
+const configPanel = document.getElementById("configPanel");
+const cfgWorkspace = document.getElementById("cfgWorkspace");
+const cfgMaxIterations = document.getElementById("cfgMaxIterations");
+const cfgMaxTokens = document.getElementById("cfgMaxTokens");
+const healthDot = document.getElementById("healthDot");
+const langSelect = document.getElementById("langSelect");
+
+// ── Health check ─────────────────────────────────────────────
+
+async function loadHealth() {
+  healthDot.className = "health-dot health-chk";
+  healthDot.title = t("health_checking");
+  try {
+    await requestJson("/health");
+    healthDot.className = "health-dot health-ok";
+    healthDot.title = t("health_ok");
+  } catch (_) {
+    healthDot.className = "health-dot health-err";
+    healthDot.title = t("health_error");
+  }
+}
+
+// ── Model providers ──────────────────────────────────────────
+
+function renderProviderModelControls(options = {}) {
+  if (!state.modelProviders.length) return;
+  const preserveModel = options.preserveModel !== false;
+  const curProvider = providerSelect.value;
+  const curModel = modelSelect.value;
+
+  providerSelect.innerHTML = state.modelProviders
+    .map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(providerLabel(p))}</option>`)
+    .join("");
+
+  const configured = state.modelProviders.find(p => p.configured);
+  const fallback = configured || state.modelProviders[0];
+  const names = new Set(state.modelProviders.map(p => p.name));
+  const next = names.has(curProvider) ? curProvider : fallback.name;
+  providerSelect.value = next;
+
+  const desc = state.modelProviders.find(p => p.name === next) || fallback;
+  const models = desc.models?.length ? desc.models : desc.default_model ? [desc.default_model] : [];
+
+  modelSelect.innerHTML = models
+    .map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`)
+    .join("");
+
+  if (preserveModel && models.includes(curModel)) {
+    modelSelect.value = curModel;
+  } else if (desc.default_model && models.includes(desc.default_model)) {
+    modelSelect.value = desc.default_model;
+  } else if (models.length) {
+    modelSelect.value = models[0];
+  }
+}
+
+async function loadModelProviders() {
+  try {
+    state.modelProviders = await requestJson("/models/providers");
+    providerSelect.value = "";
+    renderProviderModelControls({ preserveModel: false });
+  } catch (_) {}
+}
+
+// ── Session list ─────────────────────────────────────────────
+
+function renderSessionList() {
+  if (!state.sessions.length) {
+    sessionListEl.innerHTML = '<div class="empty-state">' + t("no_sessions") + '</div>';
+    return;
+  }
+  sessionListEl.innerHTML = state.sessions.map(s => {
+    const active = s.id === state.selectedSessionId ? " active" : "";
+    const title = s.title || s.last_user_input || t("new_chat");
+    const dot = statusDot(s.status);
+    return '<button class="session-item' + active + '" data-sid="' + escapeHtml(s.id) + '">' +
+      '<span class="session-title">' + escapeHtml(title) + '</span>' +
+      '<span class="session-time">' +
+        '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + dot + ';margin-right:4px;vertical-align:middle;"></span>' +
+        timestampText(s.updated_at) +
+      '</span>' +
+      '<span class="archive-btn" data-archive="' + escapeHtml(s.id) + '" title="' + t("archive") + '">&times;</span>' +
+    '</button>';
+  }).join("");
+
+  sessionListEl.querySelectorAll("[data-sid]").forEach(el => {
+    el.addEventListener("click", (e) => {
+      if (e.target.closest(".archive-btn")) return;
+      state.selectedSessionId = el.getAttribute("data-sid");
+      state.lastSequence = 0;
+      state.currentSession = null;
+      state.currentMessages = [];
+      renderSessionList();
+      loadSessionChat();
+    });
+  });
+
+  sessionListEl.querySelectorAll("[data-archive]").forEach(el => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      archiveSession(el.getAttribute("data-archive"));
+    });
+  });
+}
+
+async function loadSessions() {
+  try {
+    const all = await requestJson("/sessions");
+    state.sessions = all.filter(s => s.status !== "archived");
+    renderSessionList();
+  } catch (e) {
+    sessionListEl.innerHTML = '<div class="empty-state error-text">' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+// ── Chat rendering ───────────────────────────────────────────
+
+function renderChatMessages(messages) {
+  if (!messages.length && !state.pendingUserMessage && !state.pendingLoadingBubble) {
+    chatMessages.innerHTML = '<div class="empty-state">' + t("chat_empty") + '</div>';
+    return;
+  }
+
+  const groups = [];
+  let currentToolGroup = null;
+
+  for (const msg of messages) {
+    if (msg.role === "assistant" && msg.tool_calls && msg.tool_calls.length) {
+      if (currentToolGroup) {
+        groups.push({ type: "tool_group", steps: currentToolGroup.steps });
+      }
+      currentToolGroup = { steps: [] };
+      for (const tc of msg.tool_calls) {
+        currentToolGroup.steps.push({
+          tool_name: tc.name,
+          tool_call_id: tc.id,
+          arguments: tc.arguments,
+          raw_arguments: tc.raw_arguments,
+          result: null,
+          error: false,
         });
       }
+      if (msg.content) {
+        groups.push({ type: "tool_group", steps: currentToolGroup.steps });
+        currentToolGroup = null;
+        groups.push({ type: "assistant", content: msg.content });
+      }
+      continue;
+    }
 
-      async function loadTools() {
-        try {
-          state.tools = await requestJson("/tools");
-          resetToolSelectionForMode();
-        } catch (error) {
-          toolPermissionsPanel.innerHTML = `<div class="empty-state error-text">${escapeHtml(
-            `${t("tool_load_failed")}: ${error.message}`,
-          )}</div>`;
+    if (msg.role === "tool") {
+      if (currentToolGroup) {
+        const step = currentToolGroup.steps.find(s => s.tool_call_id === msg.tool_call_id);
+        if (step) {
+          step.result = msg.content;
+          step.error = msg.is_error || false;
+          continue;
         }
       }
-
-      function setFormStatus(message, isError = false, isCustom = true) {
-        formStatus.textContent = message;
-        formStatus.className = isError ? "status-line error-text" : "status-line";
-        formStatus.dataset.customMessage = isCustom ? "1" : "";
+      if (currentToolGroup) {
+        groups.push({ type: "tool_group", steps: currentToolGroup.steps });
+        currentToolGroup = null;
       }
-
-      function renderRuns() {
-        if (!state.runs.length) {
-          runList.innerHTML = `<div class="empty-state">${escapeHtml(t("no_runs"))}</div>`;
-          return;
-        }
-
-        runList.innerHTML = state.runs
-          .map((run) => {
-            const activeClass = run.id === state.selectedRunId ? " active" : "";
-            return `
-              <button class="run-item${activeClass}" data-run-id="${escapeHtml(run.id)}" type="button">
-                <div class="toolbar">
-                  <span class="${statusClass(run.status)}">${escapeHtml(formatStatus(run.status))}</span>
-                  <span class="muted">${escapeHtml(run.id.slice(0, 8))}</span>
-                </div>
-                <div class="run-question">${escapeHtml(run.question || run.user_input || t("untitled_run"))}</div>
-                <div class="run-meta">
-                  <span>${escapeHtml(run.workspace_root)}</span>
-                  <span>${escapeHtml(timestampText(run.created_at))}</span>
-                </div>
-              </button>
-            `;
-          })
-          .join("");
-
-        runList.querySelectorAll("[data-run-id]").forEach((element) => {
-          element.addEventListener("click", async () => {
-            const runId = element.getAttribute("data-run-id");
-            state.selectedRunId = runId;
-            renderRuns();
-            await loadRunDetail(runId, true);
-          });
-        });
-      }
-
-      function renderBulletList(items) {
-        if (!items || !items.length) {
-          return `<div class="empty-state">${escapeHtml(t("no_content"))}</div>`;
-        }
-        return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
-      }
-
-      function toolNamesText(toolNames) {
-        if (!toolNames || !toolNames.length) return t("no_tools");
-        return toolNames.join(", ");
-      }
-
-      function renderOverviewReport(report) {
-        return `
-          <div class="detail-section">
-            <h3>${escapeHtml(t("summary"))}</h3>
-            <div class="detail-content">${escapeHtml(report.summary)}</div>
-          </div>
-          <div class="detail-section">
-            <h3>${escapeHtml(t("modules"))}</h3>
-            <div class="detail-content">
-              <div class="module-list">
-                ${
-                  report.modules
-                    .map(
-                      (item) => `
-                      <div class="module-item">
-                        <div class="module-name">${escapeHtml(item.name)}</div>
-                        <div>${escapeHtml(item.description)}</div>
-                      </div>
-                    `,
-                    )
-                    .join("") || `<div class="empty-state">${escapeHtml(t("no_module_info"))}</div>`
-                }
-              </div>
-            </div>
-          </div>
-          <div class="detail-section">
-            <h3>${escapeHtml(t("architecture"))}</h3>
-            <div class="detail-content">${renderBulletList(report.architecture)}</div>
-          </div>
-          <div class="detail-section">
-            <h3>${escapeHtml(t("risks"))}</h3>
-            <div class="detail-content">${renderBulletList(report.risks)}</div>
-          </div>
-          <div class="detail-section">
-            <h3>${escapeHtml(t("next_steps"))}</h3>
-            <div class="detail-content">${renderBulletList(report.next_steps)}</div>
-          </div>
-        `;
-      }
-
-      function renderReviewReport(report) {
-        const testResult = report.test_result || {};
-        const findingsHtml = report.findings?.length
-          ? report.findings
-              .map(
-                (item) => `
-                <div class="module-item">
-                  <div class="module-name">${escapeHtml(item.title)}</div>
-                  <div><strong>${escapeHtml(t("severity"))}:</strong> ${escapeHtml(item.severity)}</div>
-                  <div><strong>${escapeHtml(t("file"))}:</strong> ${escapeHtml(item.file || t("no_content"))}</div>
-                  <div><strong>${escapeHtml(t("line"))}:</strong> ${escapeHtml(item.line ? String(item.line) : t("no_content"))}</div>
-                  <div>${escapeHtml(item.description)}</div>
-                  <div><strong>${escapeHtml(t("suggestion"))}:</strong> ${escapeHtml(item.suggestion)}</div>
-                </div>
-              `,
-              )
-              .join("")
-          : `<div class="empty-state">${escapeHtml(t("no_findings"))}</div>`;
-
-        return `
-          <div class="detail-section">
-            <h3>${escapeHtml(t("summary"))}</h3>
-            <div class="detail-content">${escapeHtml(report.summary)}</div>
-          </div>
-          <div class="detail-section">
-            <h3>${escapeHtml(t("test_result"))}</h3>
-            <div class="detail-content">
-              <div><strong>${escapeHtml(t("status"))}:</strong> ${escapeHtml(testResult.status || t("status_unknown"))}</div>
-              <div><strong>${escapeHtml(t("command"))}:</strong> ${escapeHtml(testResult.command || t("no_content"))}</div>
-              <div><strong>${escapeHtml(t("exit_code"))}:</strong> ${escapeHtml(testResult.exit_code === null || testResult.exit_code === undefined ? t("no_content") : String(testResult.exit_code))}</div>
-              <div>${escapeHtml(testResult.summary || "")}</div>
-            </div>
-          </div>
-          <div class="detail-section">
-            <h3>${escapeHtml(t("changed_files"))}</h3>
-            <div class="detail-content">${renderBulletList(report.changed_files)}</div>
-          </div>
-          <div class="detail-section">
-            <h3>${escapeHtml(t("findings"))}</h3>
-            <div class="detail-content"><div class="module-list">${findingsHtml}</div></div>
-          </div>
-          <div class="detail-section">
-            <h3>${escapeHtml(t("risks"))}</h3>
-            <div class="detail-content">${renderBulletList(report.risks)}</div>
-          </div>
-          <div class="detail-section">
-            <h3>${escapeHtml(t("next_steps"))}</h3>
-            <div class="detail-content">${renderBulletList(report.next_steps)}</div>
-          </div>
-        `;
-      }
-
-      function renderDetail(run, events) {
-        updateCancelButton(run);
-        detailMeta.textContent = `${run.id.slice(0, 8)}${t("run_detail_meta_separator")}${formatStatus(
-          run.status,
-        )}${t("run_detail_meta_separator")}${timestampText(run.created_at)}`;
-        const report = run.report;
-        const reviewReport = run.review_report;
-        const failureReason = run.failure_reason;
-        const parseDiagnostics = run.parse_diagnostics;
-        const diagnostics = run.diagnostics;
-
-        const reportHtml = reviewReport
-          ? renderReviewReport(reviewReport)
-          : report
-            ? renderOverviewReport(report)
-            : `
-            <div class="detail-section">
-              <h3>${escapeHtml(t("report"))}</h3>
-              <div class="detail-content empty-state">${escapeHtml(t("no_structured_report"))}</div>
-            </div>
-          `;
-
-        const rawOutputHtml = run.result?.final_message?.content
-          ? `
-            <div class="detail-section">
-              <h3>${escapeHtml(t("raw_model_output"))}</h3>
-              <div class="detail-content"><pre>${escapeHtml(run.result.final_message.content)}</pre></div>
-            </div>
-          `
-          : "";
-
-        const failureHtml = failureReason
-          ? `
-            <div class="detail-section">
-              <h3>${escapeHtml(t("failure_reason"))}</h3>
-              <div class="detail-content error-text">${escapeHtml(failureReason)}</div>
-            </div>
-          `
-          : "";
-
-        const parseDiagnosticsHtml = parseDiagnostics
-          ? `
-            <div class="detail-section">
-              <h3>${escapeHtml(t("parse_diagnostics"))}</h3>
-              <div class="detail-content">
-                <div><strong>code:</strong> ${escapeHtml(parseDiagnostics.code)}</div>
-                <div><strong>message:</strong> ${escapeHtml(parseDiagnostics.message)}</div>
-              </div>
-            </div>
-          `
-          : "";
-
-        const diagnosticsHtml = diagnostics
-          ? `
-            <div class="detail-section">
-              <h3>${escapeHtml(t("diagnostics"))}</h3>
-              <div class="detail-content">
-                <div><strong>${escapeHtml(t("total_duration"))}:</strong> ${escapeHtml(durationText(diagnostics.total_duration_ms))}</div>
-                <div><strong>${escapeHtml(t("model_calls"))}:</strong> ${escapeHtml(String(diagnostics.model_call_count ?? 0))}</div>
-                <div><strong>${escapeHtml(t("tool_calls"))}:</strong> ${escapeHtml(String(diagnostics.tool_call_count ?? 0))}</div>
-                <div><strong>${escapeHtml(t("event_count"))}:</strong> ${escapeHtml(String(diagnostics.event_count ?? 0))}</div>
-                <div><strong>${escapeHtml(t("token_usage"))}:</strong> ${escapeHtml(
-                  diagnostics.token_usage ? JSON.stringify(diagnostics.token_usage) : t("no_content"),
-                )}</div>
-                <div><strong>${escapeHtml(t("slowest_steps"))}:</strong></div>
-                ${
-                  diagnostics.slowest_steps && diagnostics.slowest_steps.length
-                    ? `<ul>${diagnostics.slowest_steps
-                        .map(
-                          (item) =>
-                            `<li>${escapeHtml(item.label || item.event_type)} (${escapeHtml(
-                              String(item.duration_ms),
-                            )} ms)</li>`,
-                        )
-                        .join("")}</ul>`
-                    : `<div class="empty-state">${escapeHtml(t("no_content"))}</div>`
-                }
-              </div>
-            </div>
-          `
-          : `
-            <div class="detail-section">
-              <h3>${escapeHtml(t("diagnostics"))}</h3>
-              <div class="detail-content empty-state">${escapeHtml(t("no_diagnostics"))}</div>
-            </div>
-          `;
-
-        const timelineHtml = `
-          <div class="detail-section">
-            <h3>${escapeHtml(t("timeline"))}</h3>
-            <div class="detail-content">
-              <div class="event-list">
-                ${
-                  events.length
-                    ? events
-                        .map(
-                          (event) => `
-                            <div class="event-item">
-                              <div class="event-type">${escapeHtml(eventTypeText(event))}</div>
-                              <div class="muted">
-                                ${escapeHtml(timestampText(event.timestamp))}
-                                ${event.duration_ms !== null && event.duration_ms !== undefined
-                                  ? ` | ${escapeHtml(durationText(event.duration_ms))}`
-                                  : ""}
-                              </div>
-                            </div>
-                          `,
-                        )
-                        .join("")
-                    : `<div class="empty-state">${escapeHtml(t("no_events"))}</div>`
-                }
-              </div>
-            </div>
-          </div>
-        `;
-
-        const eventHtml = `
-          <div class="detail-section">
-            <h3>${escapeHtml(t("events"))}</h3>
-            <div class="detail-content">
-              <div class="event-list">
-                ${
-                  events.length
-                    ? events
-                        .map(
-                          (event) => `
-                            <div class="event-item">
-                              <div class="event-type">${escapeHtml(eventTypeText(event))}</div>
-                              <div class="muted">${escapeHtml(timestampText(event.timestamp))}</div>
-                              <pre>${escapeHtml(
-                                JSON.stringify(
-                                  {
-                                    status: event.status,
-                                    duration_ms: event.duration_ms,
-                                    failure_reason: event.failure_reason,
-                                    payload: event.payload || event.data,
-                                    trace_id: event.trace_id,
-                                    span_id: event.span_id,
-                                    parent_span_id: event.parent_span_id,
-                                  },
-                                  null,
-                                  2,
-                                ),
-                              )}</pre>
-                            </div>
-                          `,
-                        )
-                        .join("")
-                    : `<div class="empty-state">${escapeHtml(t("no_events"))}</div>`
-                }
-              </div>
-            </div>
-          </div>
-        `;
-
-        detailView.innerHTML = `
-          <div class="detail-section">
-            <h3>${escapeHtml(t("run_info"))}</h3>
-            <div class="detail-content">
-              <div><strong>${escapeHtml(t("question"))}:</strong> ${escapeHtml(run.question)}</div>
-              <div><strong>${escapeHtml(t("mode_select"))}:</strong> ${escapeHtml(run.mode || run.report_type || "overview")}</div>
-              <div><strong>${escapeHtml(t("provider"))}:</strong> ${escapeHtml(run.provider || "deepseek")}${run.model ? ` / ${escapeHtml(run.model)}` : ""}</div>
-              <div><strong>${escapeHtml(t("enabled_tools"))}:</strong> ${escapeHtml(toolNamesText(run.tool_names))}</div>
-              <div><strong>${escapeHtml(t("workspace"))}:</strong> ${escapeHtml(run.workspace_root)}</div>
-              <div><strong>${escapeHtml(t("status"))}:</strong> <span class="${statusClass(run.status)}">${escapeHtml(
-          formatStatus(run.status),
-        )}</span></div>
-              <div><strong>${escapeHtml(t("started"))}:</strong> ${escapeHtml(timestampText(run.started_at))}</div>
-              <div><strong>${escapeHtml(t("finished"))}:</strong> ${escapeHtml(timestampText(run.finished_at))}</div>
-            </div>
-          </div>
-          ${failureHtml}
-          ${parseDiagnosticsHtml}
-          ${diagnosticsHtml}
-          ${reportHtml}
-          ${rawOutputHtml}
-          ${timelineHtml}
-          ${eventHtml}
-        `;
-      }
-
-      async function loadHealth() {
-        healthChip.textContent = t("health_checking");
-        try {
-          await requestJson("/health");
-          healthChip.textContent = t("health_ok");
-          healthChip.className = "status-chip status-completed";
-        } catch (_error) {
-          healthChip.textContent = t("health_error");
-          healthChip.className = "status-chip status-failed";
-        }
-      }
-
-      async function loadRuns() {
-        try {
-          state.runs = await requestJson("/repo-analyst/runs");
-          if (!state.selectedRunId && state.runs.length) {
-            state.selectedRunId = state.runs[0].id;
-          }
-          renderRuns();
-          if (state.selectedRunId) {
-            await loadRunDetail(state.selectedRunId, false);
-          }
-        } catch (error) {
-          runList.innerHTML = `<div class="empty-state error-text">${escapeHtml(error.message)}</div>`;
-        }
-      }
-
-      async function loadRunDetail(runId, resetPoll) {
-        if (!runId) return;
-
-        try {
-          const [run, events] = await Promise.all([
-            requestJson(`/repo-analyst/runs/${runId}`),
-            requestJson(`/repo-analyst/runs/${runId}/events?limit=100&include_payload=false`),
-          ]);
-          const runIndex = state.runs.findIndex((r) => r.id === run.id);
-          if (runIndex !== -1) {
-            state.runs[runIndex] = run;
-          }
-          renderRuns();
-          renderDetail(run, events);
-          if (resetPoll) {
-            schedulePolling(run);
-          }
-        } catch (error) {
-          updateCancelButton(null);
-          detailView.innerHTML = `<div class="empty-state error-text">${escapeHtml(error.message)}</div>`;
-        }
-      }
-
-      function schedulePolling(run) {
-        if (state.pollTimer) {
-          clearTimeout(state.pollTimer);
-          state.pollTimer = null;
-        }
-
-        if (!run || !["queued", "running"].includes(run.status)) {
-          return;
-        }
-
-        state.pollTimer = window.setTimeout(async () => {
-          await loadRuns();
-        }, 2000);
-      }
-
-      runForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        setFormStatus(t("creating_run"));
-
-        const payload = {
-          workspace_root: workspaceRootInput.value.trim(),
-          mode: modeSelect.value,
-        };
-
-        const question = questionInput.value.trim();
-        if (question) payload.question = question;
-
-        const maxIterations = maxIterationsInput.value.trim();
-        if (maxIterations) payload.max_iterations = Number(maxIterations);
-
-        const temperature = temperatureInput.value.trim();
-        if (temperature) payload.temperature = Number(temperature);
-
-        const maxTokens = maxTokensInput.value.trim();
-        if (maxTokens) payload.max_tokens = Number(maxTokens);
-
-        const model = modelSelect.value;
-        const provider = providerSelect.value;
-        if (provider) payload.provider = provider;
-        if (model) payload.model = model;
-
-        if (state.tools.length) {
-          payload.enabled_tools = state.selectedToolNames.slice();
-        }
-
-        try {
-          const run = await requestJson("/repo-analyst/runs", {
-            method: "POST",
-            body: JSON.stringify(payload),
-          });
-          state.selectedRunId = run.id;
-          setFormStatus(`${t("run_created")}: ${run.id}`);
-          await loadRuns();
-        } catch (error) {
-          setFormStatus(error.message, true);
-        }
+      groups.push({
+        type: "tool_group",
+        steps: [{
+          tool_name: msg.name || msg.tool_call_id || "tool",
+          tool_call_id: msg.tool_call_id || "",
+          arguments: {},
+          raw_arguments: null,
+          result: msg.content,
+          error: msg.is_error || false,
+        }],
       });
+      continue;
+    }
 
-      refreshRunsButton.addEventListener("click", loadRuns);
-      modeSelect.addEventListener("change", resetToolSelectionForMode);
-      providerSelect.addEventListener("change", () => renderProviderModelControls({ preserveModel: false }));
-      refreshDetailButton.addEventListener("click", async () => {
-        if (state.selectedRunId) {
-          await loadRunDetail(state.selectedRunId, true);
-        }
-      });
+    if (currentToolGroup) {
+      groups.push({ type: "tool_group", steps: currentToolGroup.steps });
+      currentToolGroup = null;
+    }
 
-      cancelRunButton.addEventListener("click", async () => {
-        if (!state.selectedRunId) return;
+    groups.push({ type: msg.role, content: msg.content, ...msg });
+  }
 
-        cancelRunButton.disabled = true;
-        setFormStatus(t("cancelling_run"));
+  if (currentToolGroup) {
+    groups.push({ type: "tool_group", steps: currentToolGroup.steps });
+  }
 
-        try {
-          await requestJson(`/repo-analyst/runs/${state.selectedRunId}/cancel`, {
-            method: "POST",
-          });
-          setFormStatus(t("run_cancelled"));
-          await loadRuns();
-        } catch (error) {
-          setFormStatus(`${t("cancel_failed")}: ${error.message}`, true);
-          cancelRunButton.disabled = false;
-        }
-      });
+  chatMessages.innerHTML = groups.map(g => {
+    if (g.type === "user") {
+      return '<div class="msg-bubble msg-user">' + escapeHtml(g.content || "") + '</div>';
+    }
+    if (g.type === "assistant") {
+      return '<div class="msg-bubble msg-assistant">' + formatContent(g.content || "") + '</div>';
+    }
+    if (g.type === "system") {
+      return '<div class="msg-bubble msg-system">' + escapeHtml(g.content || "") + '</div>';
+    }
+    if (g.type === "tool_group") {
+      return renderToolAccordion(g.steps);
+    }
+    return "";
+  }).join("");
 
-      langSelect.addEventListener("change", async () => {
-        state.lang = langSelect.value === "en" ? "en" : "zh";
-        localStorage.setItem("ui_lang", state.lang);
-        formStatus.dataset.customMessage = "";
-        applyStaticTranslations();
-        await loadHealth();
-        renderRuns();
-        if (state.selectedRunId) {
-          await loadRunDetail(state.selectedRunId, false);
-        }
-      });
+  if (state.pendingUserMessage) {
+    chatMessages.innerHTML += '<div class="msg-bubble msg-user">' + escapeHtml(state.pendingUserMessage) + '</div>';
+  }
+  if (state.pendingLoadingBubble) {
+    chatMessages.innerHTML += renderLoadingBubble();
+  }
 
-      langSelect.value = state.lang === "en" ? "en" : "zh";
-      applyStaticTranslations();
-      loadHealth();
-      loadModelProviders();
-      loadTools();
-      loadRuns();
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
 
-      // ── Session Tab Logic ─────────────────────────────────────────────────
+function formatContent(content) {
+  let html = escapeHtml(content);
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
+    return '<pre style="background:#f1f4f8;padding:8px;border-radius:4px;overflow-x:auto;font-size:12px;margin:6px 0;">' + escapeHtml(code) + '</pre>';
+  });
+  html = html.replace(/\n/g, "<br>");
+  return html;
+}
 
-      const sessionState = {
-        sessions: [],
-        selectedSessionId: null,
-        lastSequence: 0,
-        sessionPollTimer: null,
-      };
+function renderToolAccordion(steps) {
+  const toolNames = steps.map(s => s.tool_name).join(", ");
+  const summaryText = "&#9881; " + t("tool_called").replace("{count}", steps.length) + ": " + escapeHtml(toolNames);
 
-      const tabRuns = document.getElementById("tabRuns");
-      const tabSessions = document.getElementById("tabSessions");
-      const pageRuns = document.getElementById("pageRuns");
-      const pageSessions = document.getElementById("pageSessions");
-      const sessionListEl = document.getElementById("sessionList");
-      const chatArea = document.getElementById("chatArea");
-      const chatInput = document.getElementById("chatInput");
-      const sendChatButton = document.getElementById("sendChatButton");
-      const sessionChatTitle = document.getElementById("sessionChatTitle");
-      const sessionChatMeta = document.getElementById("sessionChatMeta");
-      const sessionTurnStatus = document.getElementById("sessionTurnStatus");
-      const cancelTurnButton = document.getElementById("cancelTurnButton");
-      const archiveSessionButton = document.getElementById("archiveSessionButton");
-      const refreshSessionsButton = document.getElementById("refreshSessionsButton");
-      const newSessionButton = document.getElementById("newSessionButton");
+  const bodyHtml = steps.map(s => {
+    let argsHtml = "";
+    if (s.arguments && Object.keys(s.arguments).length) {
+      argsHtml = '<div class="tool-step-args"><strong>' + t("tool_args") + ':</strong> ' + escapeHtml(s.raw_arguments || JSON.stringify(s.arguments, null, 2)) + '</div>';
+    }
+    let resultHtml = "";
+    if (s.result !== null && s.result !== undefined) {
+      const cls = s.error ? " tool-step-error" : "";
+      resultHtml = '<div class="tool-step-result' + cls + '"><strong>' + (s.error ? t("tool_error") : t("tool_result")) + ':</strong> ' + escapeHtml(String(s.result).slice(0, 3000)) + '</div>';
+    }
+    return '<div class="tool-step">' +
+      '<div class="tool-step-header">' + escapeHtml(s.tool_name) + '</div>' +
+      argsHtml +
+      resultHtml +
+    '</div>';
+  }).join("");
 
-      function switchTab(tab) {
-        if (tab === "runs") {
-          tabRuns.classList.add("active");
-          tabSessions.classList.remove("active");
-          pageRuns.hidden = false;
-          pageSessions.hidden = true;
-        } else {
-          tabRuns.classList.remove("active");
-          tabSessions.classList.add("active");
-          pageRuns.hidden = true;
-          pageSessions.hidden = false;
-          loadSessions();
-        }
+  return '<details class="tool-accordion">' +
+    '<summary>' + summaryText + '</summary>' +
+    '<div class="tool-accordion-body">' + bodyHtml + '</div>' +
+  '</details>';
+}
+
+// ── Loading bubble ───────────────────────────────────────────
+
+function renderLoadingBubble() {
+  return '<div class="loading-bubble" id="loadingBubble">' +
+    '<div class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>' +
+    '<span class="loading-text">' + t("agent_thinking") + '</span>' +
+  '</div>';
+}
+
+function removeLoadingBubble() {
+  const el = document.getElementById("loadingBubble");
+  if (el) el.remove();
+}
+
+// ── Session chat load ────────────────────────────────────────
+
+async function loadSessionChat() {
+  const sid = state.selectedSessionId;
+  if (!sid) return;
+
+  try {
+    const [session, messages, turns] = await Promise.all([
+      requestJson("/sessions/" + sid),
+      requestJson("/sessions/" + sid + "/messages?since_sequence=0"),
+      requestJson("/sessions/" + sid + "/turns"),
+    ]);
+
+    state.currentSession = session;
+    state.currentMessages = messages;
+
+    if (messages.length > 0) {
+      state.lastSequence = Math.max(...messages.map(m => m.sequence || 0));
+    }
+
+    const hasActive = turns.some(t => t.status === "running" || t.status === "queued");
+    if (hasActive) {
+      const activeTurn = turns.find(t => t.status === "running" || t.status === "queued");
+      if (activeTurn) state.activeTurnId = activeTurn.id;
+    } else {
+      state.activeTurnId = null;
+    }
+
+    state.pendingUserMessage = null;
+    state.pendingLoadingBubble = false;
+    removeLoadingBubble();
+    renderChatMessages(messages);
+    updateActionButtons();
+
+    if (hasActive) {
+      schedulePoll();
+    }
+  } catch (e) {
+    chatMessages.innerHTML = '<div class="empty-state error-text">' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+// ── Polling ──────────────────────────────────────────────────
+
+function schedulePoll() {
+  if (state.pollTimer) {
+    clearTimeout(state.pollTimer);
+    state.pollTimer = null;
+  }
+  state.pollTimer = window.setTimeout(async () => {
+    await pollTurnStatus();
+  }, 2000);
+}
+
+async function pollTurnStatus() {
+  const sid = state.selectedSessionId;
+  if (!sid || !state.activeTurnId) {
+    state.pendingUserMessage = null;
+    state.pendingLoadingBubble = false;
+    removeLoadingBubble();
+    updateActionButtons();
+    return;
+  }
+
+  try {
+    const [session, turns, messages] = await Promise.all([
+      requestJson("/sessions/" + sid),
+      requestJson("/sessions/" + sid + "/turns"),
+      requestJson("/sessions/" + sid + "/messages?after_sequence=" + state.lastSequence),
+    ]);
+
+    if (messages.length > 0) {
+      state.lastSequence = Math.max(...messages.map(m => m.sequence || 0));
+      state.pendingUserMessage = null;
+      state.pendingLoadingBubble = false;
+      removeLoadingBubble();
+      updateActionButtons();
+      await loadSessionChat();
+      return;
+    }
+
+    const activeTurn = turns.find(t => t.id === state.activeTurnId);
+    if (!activeTurn) {
+      state.pendingUserMessage = null;
+      state.pendingLoadingBubble = false;
+      removeLoadingBubble();
+      state.activeTurnId = null;
+      updateActionButtons();
+      await loadSessionChat();
+      await loadSessions();
+      return;
+    }
+
+    const terminalStatuses = ["completed", "failed", "cancelled", "max_iterations", "model_output_truncated"];
+    if (terminalStatuses.includes(activeTurn.status)) {
+      state.pendingUserMessage = null;
+      state.pendingLoadingBubble = false;
+      removeLoadingBubble();
+      state.activeTurnId = null;
+      updateActionButtons();
+      if (activeTurn.status === "failed" || activeTurn.status === "max_iterations" || activeTurn.status === "model_output_truncated") {
+        const errMsg = activeTurn.status === "failed" ? t("turn_failed") : t("turn_failed");
+        const detail = activeTurn.failure_reason ? ": " + activeTurn.failure_reason : "";
+        chatMessages.innerHTML += '<div class="msg-bubble msg-error">' + escapeHtml(errMsg + detail) + '</div>';
       }
+      await loadSessionChat();
+      await loadSessions();
+      return;
+    }
 
-      tabRuns.addEventListener("click", () => switchTab("runs"));
-      tabSessions.addEventListener("click", () => switchTab("sessions"));
+    const sessionTerminal = session.status === "idle" && !turns.some(t => t.status === "running" || t.status === "queued");
+    if (sessionTerminal) {
+      state.pendingUserMessage = null;
+      state.pendingLoadingBubble = false;
+      removeLoadingBubble();
+      state.activeTurnId = null;
+      updateActionButtons();
+      await loadSessionChat();
+      return;
+    }
 
-      function renderSessionList() {
-        if (!sessionState.sessions.length) {
-          sessionListEl.innerHTML = '<div class="empty-state">暂无 Session</div>';
-          return;
-        }
-        sessionListEl.innerHTML = sessionState.sessions.map((s) => {
-          const activeClass = s.id === sessionState.selectedSessionId ? " active" : "";
-          const title = s.title || s.last_user_input || "新会话";
-          const meta = `${s.mode} | ${formatStatus(s.status)} | ${timestampText(s.updated_at)}`;
-          return `
-            <div class="session-item${activeClass}" data-session-id="${escapeHtml(s.id)}" type="button">
-              <div class="session-item-title">${escapeHtml(title)}</div>
-              <div class="session-item-meta">${escapeHtml(meta)}</div>
-            </div>
-          `;
-        }).join("");
+    schedulePoll();
+  } catch (e) {
+    schedulePoll();
+  }
+}
 
-        sessionListEl.querySelectorAll("[data-session-id]").forEach((el) => {
-          el.addEventListener("click", () => {
-            sessionState.selectedSessionId = el.getAttribute("data-session-id");
-            sessionState.lastSequence = 0;
-            renderSessionList();
-            loadSessionChat();
-          });
-        });
-      }
+// ── Send message (optimistic) ────────────────────────────────
 
-      async function loadSessions() {
-        try {
-          sessionState.sessions = await requestJson("/sessions");
-          renderSessionList();
-        } catch (error) {
-          sessionListEl.innerHTML = `<div class="empty-state error-text">${escapeHtml(error.message)}</div>`;
-        }
-      }
+async function sendMessage() {
+  const message = chatInput.value.trim();
+  if (!message) return;
 
-      async function loadSessionChat() {
-        const sid = sessionState.selectedSessionId;
-        if (!sid) return;
+  let sid = state.selectedSessionId;
 
-        try {
-          const [session, messages, turns] = await Promise.all([
-            requestJson(`/sessions/${sid}`),
-            requestJson(`/sessions/${sid}/messages?since_sequence=0`),
-            requestJson(`/sessions/${sid}/turns`),
-          ]);
-
-          sessionChatTitle.textContent = session.title || "Session";
-          sessionChatMeta.textContent = `${session.mode} | ${session.workspace_root}`;
-
-          const turnStatus = turns.length > 0 ? turns[turns.length - 1].status : "idle";
-          sessionTurnStatus.textContent = formatStatus(turnStatus);
-          sessionTurnStatus.className = `status-chip status-${turnStatus}`;
-
-          const canSend = session.status === "idle" || session.status === "running";
-          chatInput.disabled = !canSend;
-          sendChatButton.disabled = !canSend;
-
-          const hasActiveTurn = turns.some((t) => t.status === "running" || t.status === "queued");
-          cancelTurnButton.hidden = !hasActiveTurn;
-
-          if (messages.length > 0) {
-            sessionState.lastSequence = Math.max(...messages.map((m) => m.sequence || 0));
-          }
-
-          renderChatMessages(messages);
-          scheduleSessionPoll(session, turns);
-        } catch (error) {
-          chatArea.innerHTML = `<div class="empty-state error-text">${escapeHtml(error.message)}</div>`;
-        }
-      }
-
-      function renderChatMessages(messages) {
-        if (!messages.length) {
-          chatArea.innerHTML = '<div class="empty-state">对话为空，发送第一条消息开始</div>';
-          return;
-        }
-        chatArea.innerHTML = messages.map((m) => {
-          const role = m.role;
-          let cls = "chat-msg";
-          let label = "";
-          if (role === "user") { cls += " chat-msg-user"; label = ""; }
-          else if (role === "assistant") { cls += " chat-msg-assistant"; label = ""; }
-          else if (role === "system") { cls += " chat-msg-system"; label = "[System] "; }
-          else if (role === "tool") { cls += " chat-msg-tool"; label = `[Tool: ${m.name || ""}] `; }
-          else { label = `[${role}] `; }
-
-          let content = m.content || "";
-          if (m.tool_calls && m.tool_calls.length) {
-            const tcText = m.tool_calls.map((tc) => `${tc.name}(${JSON.stringify(tc.arguments)})`).join("\n");
-            content = content ? `${content}\n\n[Tool Calls]\n${tcText}` : `[Tool Calls]\n${tcText}`;
-          }
-          return `<div class="${cls}">${label}${escapeHtml(content)}</div>`;
-        }).join("");
-        chatArea.scrollTop = chatArea.scrollHeight;
-      }
-
-      function scheduleSessionPoll(session, turns) {
-        if (sessionState.sessionPollTimer) {
-          clearTimeout(sessionState.sessionPollTimer);
-          sessionState.sessionPollTimer = null;
-        }
-        const hasActiveTurn = turns.some((t) => t.status === "running" || t.status === "queued");
-        if (!hasActiveTurn) return;
-
-        sessionState.sessionPollTimer = window.setTimeout(async () => {
-          await loadSessionChat();
-        }, 2000);
-      }
-
-      async function sendChatMessage() {
-        const sid = sessionState.selectedSessionId;
-        const message = chatInput.value.trim();
-        if (!sid || !message) return;
-
-        chatInput.value = "";
-        chatInput.disabled = true;
-        sendChatButton.disabled = true;
-
-        try {
-          const turn = await requestJson(`/sessions/${sid}/turns`, {
-            method: "POST",
-            body: JSON.stringify({ message }),
-          });
-          sessionTurnStatus.textContent = formatStatus(turn.status);
-          sessionTurnStatus.className = `status-chip status-${turn.status}`;
-          cancelTurnButton.hidden = false;
-          await loadSessionChat();
-        } catch (error) {
-          chatArea.innerHTML += `<div class="chat-msg chat-msg-system error-text">${escapeHtml(error.message)}</div>`;
-          chatInput.disabled = false;
-          sendChatButton.disabled = false;
-        }
-      }
-
-      sendChatButton.addEventListener("click", sendChatMessage);
-      chatInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && !e.shiftKey) {
-          e.preventDefault();
-          sendChatMessage();
-        }
+  if (!sid) {
+    const wsRoot = cfgWorkspace.value.trim();
+    if (!wsRoot) {
+      chatMessages.innerHTML = '<div class="msg-bubble msg-system">请先在设置中填写仓库路径。</div>';
+      return;
+    }
+    try {
+      const session = await requestJson("/sessions", {
+        method: "POST",
+        body: JSON.stringify({
+          workspace_root: wsRoot,
+          mode: "review",
+          max_iterations: parseInt(cfgMaxIterations.value) || 100,
+          max_tokens: cfgMaxTokens.value ? parseInt(cfgMaxTokens.value) : undefined,
+          provider: providerSelect.value || undefined,
+          model: modelSelect.value || undefined,
+        }),
       });
+      sid = session.id;
+      state.selectedSessionId = sid;
+      state.lastSequence = 0;
+      state.currentSession = session;
+      state.currentMessages = [];
+      state.pendingUserMessage = message;
+      state.pendingLoadingBubble = true;
+      await loadSessions();
+      renderChatMessages([]);
+      updateActionButtons();
+    } catch (e) {
+      chatMessages.innerHTML += '<div class="msg-bubble msg-error">' + escapeHtml(e.message) + '</div>';
+      return;
+    }
+  }
 
-      cancelTurnButton.addEventListener("click", async () => {
-        const sid = sessionState.selectedSessionId;
-        if (!sid) return;
-        try {
-          const turns = await requestJson(`/sessions/${sid}/turns`);
-          const activeTurn = turns.find((t) => t.status === "running" || t.status === "queued");
-          if (activeTurn) {
-            await requestJson(`/sessions/${sid}/turns/${activeTurn.id}/cancel`, { method: "POST" });
-            cancelTurnButton.hidden = true;
-            await loadSessionChat();
-          }
-        } catch (error) {
-          chatArea.innerHTML += `<div class="chat-msg chat-msg-system error-text">${escapeHtml(error.message)}</div>`;
-        }
-      });
+  chatInput.value = "";
+  chatInput.style.height = "auto";
 
-      archiveSessionButton.addEventListener("click", async () => {
-        const sid = sessionState.selectedSessionId;
-        if (!sid) return;
-        try {
-          await requestJson(`/sessions/${sid}`, { method: "DELETE" });
-          sessionState.selectedSessionId = null;
-          await loadSessions();
-          chatArea.innerHTML = '<div class="empty-state">选择或创建一个 Session 开始对话</div>';
-          sessionChatTitle.textContent = "选择一个 Session";
-          sessionChatMeta.textContent = "-";
-          chatInput.disabled = true;
-          sendChatButton.disabled = true;
-        } catch (error) {
-          chatArea.innerHTML += `<div class="chat-msg chat-msg-system error-text">${escapeHtml(error.message)}</div>`;
-        }
-      });
+  state.pendingUserMessage = message;
+  state.pendingLoadingBubble = true;
 
-      refreshSessionsButton.addEventListener("click", loadSessions);
+  renderChatMessages(state.currentMessages);
+  updateActionButtons();
 
-      newSessionButton.addEventListener("click", async () => {
-        const wsRoot = workspaceRootInput.value.trim() || ".";
-        try {
-          const session = await requestJson("/sessions", {
-            method: "POST",
-            body: JSON.stringify({
-              workspace_root: wsRoot,
-              mode: "overview",
-              max_iterations: 8,
-              provider: providerSelect.value || "deepseek",
-              model: modelSelect.value || "deepseek-v4-pro",
-            }),
-          });
-          sessionState.selectedSessionId = session.id;
-          await loadSessions();
-          await loadSessionChat();
-        } catch (error) {
-          sessionListEl.innerHTML = `<div class="empty-state error-text">${escapeHtml(error.message)}</div>`;
-        }
-      });
-    </script>
-  </body>
+  try {
+    const turn = await requestJson("/sessions/" + sid + "/turns", {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    });
+    state.activeTurnId = turn.id;
+    updateActionButtons();
+    schedulePoll();
+  } catch (e) {
+    state.pendingUserMessage = null;
+    state.pendingLoadingBubble = false;
+    chatMessages.innerHTML += '<div class="msg-bubble msg-error">' + escapeHtml(e.message) + '</div>';
+    state.activeTurnId = null;
+    updateActionButtons();
+  }
+}
+
+// ── Cancel current turn ──────────────────────────────────────
+
+async function cancelCurrentTurn() {
+  if (!state.selectedSessionId || !state.activeTurnId) return;
+  stopBtn.disabled = true;
+  try {
+    await requestJson(
+      "/sessions/" + state.selectedSessionId + "/turns/" + state.activeTurnId + "/cancel",
+      { method: "POST" },
+    );
+    state.pendingUserMessage = null;
+    state.pendingLoadingBubble = false;
+    state.activeTurnId = null;
+    removeLoadingBubble();
+    updateActionButtons();
+    await loadSessionChat();
+    await loadSessions();
+  } catch (e) {
+    chatMessages.innerHTML += '<div class="msg-bubble msg-error">' + escapeHtml(e.message) + '</div>';
+  } finally {
+    stopBtn.disabled = false;
+  }
+}
+
+// ── Archive session ──────────────────────────────────────────
+
+async function archiveSession(sessionId) {
+  if (!confirm(t("archive_confirm"))) return;
+  const session = state.sessions.find(s => s.id === sessionId);
+  if (session && session.status === "running") {
+    chatMessages.innerHTML += '<div class="msg-bubble msg-system">' + t("stop_first") + '</div>';
+    return;
+  }
+  try {
+    await requestJson("/sessions/" + sessionId, { method: "DELETE" });
+    if (state.selectedSessionId === sessionId) {
+      state.selectedSessionId = null;
+      state.activeTurnId = null;
+      state.currentSession = null;
+      state.currentMessages = [];
+      state.pendingUserMessage = null;
+      state.pendingLoadingBubble = false;
+      state.lastSequence = 0;
+      removeLoadingBubble();
+      chatMessages.innerHTML = '<div class="empty-state">' + t("chat_empty") + '</div>';
+      updateActionButtons();
+    }
+    await loadSessions();
+  } catch (e) {
+    chatMessages.innerHTML += '<div class="msg-bubble msg-error">' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+// ── Action button state machine ──────────────────────────────
+
+function updateActionButtons() {
+  const hasActive = !!state.activeTurnId;
+  const archived = state.currentSession?.status === "archived";
+
+  chatInput.disabled = archived || hasActive;
+  sendBtn.disabled = archived || hasActive;
+  stopBtn.hidden = !hasActive;
+  stopBtn.disabled = !hasActive;
+
+  if (archived) {
+    chatInput.placeholder = t("archived_desc");
+  } else if (!hasActive) {
+    chatInput.placeholder = t("input_placeholder");
+  }
+}
+
+function autoResizeTextarea() {
+  chatInput.style.height = "auto";
+  chatInput.style.height = Math.min(chatInput.scrollHeight, 150) + "px";
+}
+
+// ── Event listeners ──────────────────────────────────────────
+
+sendBtn.addEventListener("click", sendMessage);
+stopBtn.addEventListener("click", cancelCurrentTurn);
+chatInput.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+chatInput.addEventListener("input", autoResizeTextarea);
+
+document.getElementById("newSessionBtn").addEventListener("click", () => {
+  state.selectedSessionId = null;
+  state.lastSequence = 0;
+  state.activeTurnId = null;
+  state.currentSession = null;
+  state.currentMessages = [];
+  state.pendingUserMessage = null;
+  state.pendingLoadingBubble = false;
+  removeLoadingBubble();
+  renderSessionList();
+  chatMessages.innerHTML = '<div class="empty-state">' + t("chat_empty") + '</div>';
+  chatInput.focus();
+  updateActionButtons();
+});
+
+settingsToggle.addEventListener("click", () => {
+  configPanel.hidden = !configPanel.hidden;
+});
+
+providerSelect.addEventListener("change", () => {
+  renderProviderModelControls({ preserveModel: false });
+});
+
+langSelect.addEventListener("change", () => {
+  state.lang = langSelect.value === "en" ? "en" : "zh";
+  localStorage.setItem("ui_lang", state.lang);
+  document.documentElement.lang = state.lang === "en" ? "en" : "zh-CN";
+  applyI18n();
+  loadSessions();
+  if (state.selectedSessionId) loadSessionChat();
+});
+
+// ── I18n apply ───────────────────────────────────────────────
+
+function applyI18n() {
+  document.getElementById("newSessionBtn").textContent = "+ " + t("new_session");
+  if (!state.selectedSessionId) {
+    chatInput.placeholder = t("input_placeholder");
+  }
+  sendBtn.textContent = t("send");
+  stopBtn.textContent = t("stop");
+  settingsToggle.title = t("settings_title");
+  cfgMaxTokens.placeholder = t("max_tokens_placeholder");
+  document.querySelector('.config-panel label.wide').childNodes[0].textContent = t("workspace_root");
+  const panelLabels = configPanel.querySelectorAll("label:not(.wide)");
+  if (panelLabels.length >= 2) {
+    panelLabels[0].childNodes[0].textContent = t("max_iterations");
+    panelLabels[1].childNodes[0].textContent = t("max_tokens");
+  }
+  healthDot.title = state.lang === "en"
+    ? (healthDot.className.includes("health-ok") ? "API OK" : healthDot.className.includes("health-err") ? "API Error" : "Checking")
+    : (healthDot.className.includes("health-ok") ? "API 正常" : healthDot.className.includes("health-err") ? "API 异常" : "检查中");
+}
+
+// ── Startup ──────────────────────────────────────────────────
+
+langSelect.value = state.lang === "en" ? "en" : "zh";
+document.documentElement.lang = state.lang === "en" ? "en" : "zh-CN";
+applyI18n();
+loadHealth();
+loadModelProviders();
+loadSessions();
+</script>
+
+</body>
 </html>

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, ConfigDict
 
 from code_review_agent.apps.repo_analyst import RepoAnalystRequest, RepoAnalystService
 from code_review_agent.models import ModelProviderDescriptor, list_model_providers
@@ -26,6 +27,7 @@ from code_review_agent.session.store import (
     SessionNotFoundError as AppSessionNotFoundError,
     TurnNotFoundError,
 )
+from code_review_agent.session.types import RepoAnalystMode
 from code_review_agent.settings import get_settings
 from code_review_agent.tools import ToolDescriptor
 
@@ -276,19 +278,37 @@ async def cancel_repo_analyst_run(run_id: str, request: Request):
 # ── Session API ──────────────────────────────────────────────────────────────
 
 
-class CreateSessionRequest:
-    """Placeholder — actual fields are passed as kwargs to SessionService.create_session."""
-    pass
+class CreateSessionRequest(BaseModel):
+    """Request body for POST /sessions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_root: str
+    mode: RepoAnalystMode = "review"
+    max_iterations: int = 100
+    max_tokens: int | None = None
+    provider: str | None = None
+    model: str | None = None
+    tool_names: list[str] | None = None
+    system_prompt: str | None = None
+    title: str | None = None
+
+
+class CreateSessionTurnRequest(BaseModel):
+    """Request body for POST /sessions/{id}/turns."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    message: str
 
 
 @router.post("/sessions", status_code=status.HTTP_201_CREATED)
-async def create_session(request: Request):
+async def create_session(payload: CreateSessionRequest, request: Request):
     """Create a new persistent session."""
     _enforce_api_key(request)
     svc = get_session_service(request)
-    body = await request.json()
     try:
-        record = await svc.create_session(**body)
+        record = await svc.create_session(**payload.model_dump())
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return record
@@ -314,16 +334,12 @@ async def get_session(session_id: str, request: Request):
 
 
 @router.post("/sessions/{session_id}/turns", status_code=status.HTTP_202_ACCEPTED)
-async def create_turn(session_id: str, request: Request):
+async def create_turn(session_id: str, payload: CreateSessionTurnRequest, request: Request):
     """Start a new turn in a session — triggers agent execution."""
     _enforce_api_key(request)
     svc = get_session_service(request)
-    body = await request.json()
-    message = body.get("message", "")
-    if not message:
-        raise HTTPException(status_code=400, detail="message is required")
     try:
-        turn = await svc.start_turn(session_id, message)
+        turn = await svc.start_turn(session_id, payload.message)
     except AppSessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="session not found") from exc
     except SessionConflictError as exc:
@@ -357,11 +373,20 @@ async def get_session_messages(
     session_id: str,
     request: Request,
     since_sequence: int = Query(default=0, ge=0),
+    after_sequence: int = Query(default=None, ge=0),
 ):
-    """Get messages for a session, optionally starting from a sequence number."""
+    """Get messages for a session, optionally starting from a sequence number.
+
+    Use ``after_sequence`` for strict > semantics (recommended).
+    ``since_sequence`` uses >= semantics (kept for backward compatibility).
+    If both are given, ``after_sequence`` wins.
+    """
     _enforce_api_key(request)
     svc = get_session_service(request)
-    return await svc.get_messages_with_sequence(session_id, since_sequence=since_sequence)
+    effective_since = since_sequence
+    if after_sequence is not None:
+        effective_since = after_sequence + 1
+    return await svc.get_messages_with_sequence(session_id, since_sequence=effective_since)
 
 
 @router.delete("/sessions/{session_id}")

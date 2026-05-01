@@ -41,6 +41,7 @@ from code_review_agent.tools import (
     ToolRegistry,
     describe_registry,
     describe_tool,
+    filter_tool_registry,
 )
 
 from .store import InMemoryRunStore, RunStore
@@ -483,7 +484,7 @@ class AgentRuntime:
             )
             registry = self.tool_registry_factory()
             if run.tool_names is not None:
-                registry = _filter_tool_registry(registry, run.tool_names)
+                registry = filter_tool_registry(registry, run.tool_names)
             agent = Agent(
                 name=self.agent_name,
                 model=model,
@@ -969,12 +970,6 @@ def _resolve_enabled_tool_names(
     return set(configured)
 
 
-def _filter_tool_registry(registry: ToolRegistry, tool_names: list[str]) -> ToolRegistry:
-    """Create a registry containing only the named tools."""
-    filtered = ToolRegistry()
-    for name in tool_names:
-        filtered.register(registry.get(name))
-    return filtered
 
 
 def build_default_tool_registry(

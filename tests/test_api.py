@@ -137,9 +137,8 @@ def test_index_page_serves_frontend_html() -> None:
 
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
-    assert "Repo Analyst" in response.text
-    assert "/repo-analyst/runs" in response.text
-    assert "siliconflow" in response.text
+    assert "新建对话" in response.text
+    assert "/sessions" in response.text
 
 
 def test_tools_endpoint_lists_default_runtime_tools() -> None:
