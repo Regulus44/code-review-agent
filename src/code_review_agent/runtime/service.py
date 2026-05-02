@@ -3,21 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
 from code_review_agent.context import ContextBudget
-from code_review_agent.harness import Agent, AgentRunResult, AgentStep
+from code_review_agent.harness import Agent, AgentRunResult
 from code_review_agent.models import (
     ChatModel,
-    ChatRequest,
-    ChatResponse,
     create_model,
     normalize_provider,
 )
@@ -45,12 +42,16 @@ from code_review_agent.tools import (
 )
 
 from .store import InMemoryRunStore, RunStore
+from .turn_events import (
+    ObservableChatModel,
+    aclose_model_if_needed,
+    build_diagnostics,
+    convert_agent_steps_to_events,
+)
 from .types import (
     CreateRunRequest,
-    RunDiagnostics,
     RunEvent,
     RunRecord,
-    RunStepTiming,
 )
 
 
@@ -58,7 +59,6 @@ ModelFactory = Callable[..., ChatModel]
 ToolRegistryFactory = Callable[[], ToolRegistry]
 ToolDiscoveryFactory = Callable[[], list[ToolDescriptor]]
 ToolFactory = Callable[[], Tool]
-EventEmitter = Callable[..., Awaitable[RunEvent]]
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are a repository analysis and code review agent. "
@@ -88,118 +88,6 @@ BUILTIN_TOOL_FACTORIES: dict[str, ToolFactory] = {
     "search_text": SearchTextTool,
     "run_command": RunCommandTool,
 }
-
-
-def _exception_detail(exc: BaseException) -> str:
-    """Return a non-empty exception detail for runtime diagnostics."""
-    message = str(exc).strip()
-    if message:
-        return f"{exc.__class__.__name__}: {message}"
-    return f"{exc.__class__.__name__}: {exc!r}"
-
-
-class _ObservableChatModel(ChatModel):
-    """Emit live model request/response events around a chat model."""
-
-    def __init__(
-        self,
-        model: ChatModel,
-        *,
-        emit: EventEmitter,
-        root_span_id: str,
-    ) -> None:
-        self._model = model
-        self._emit = emit
-        self._root_span_id = root_span_id
-        self._request_count = 0
-        self.provider = model.provider
-        self.model_name = model.model_name
-
-    async def complete(self, request: ChatRequest) -> ChatResponse:
-        """Emit live observability events for one model request."""
-        self._request_count += 1
-        request_index = self._request_count
-        span_id = new_span_id()
-        started_at = datetime.utcnow()
-        started_perf = time.perf_counter()
-        payload = {
-            "request_index": request_index,
-            "provider": self.provider,
-            "model": self.model_name,
-            "requested_model": self.model_name,
-            "message_count": len(request.messages),
-            "tool_count": len(request.tools or []),
-            "context": request.metadata or {},
-        }
-        await self._emit(
-            legacy_type="model_request",
-            event_type="model.request",
-            payload=payload,
-            timestamp=started_at,
-            status="running",
-            span_id=span_id,
-            parent_span_id=self._root_span_id,
-        )
-
-        try:
-            response = await self._model.complete(request)
-        except asyncio.CancelledError:
-            duration_ms = int((time.perf_counter() - started_perf) * 1000)
-            await self._emit(
-                legacy_type="model_request",
-                event_type="model.cancelled",
-                payload={
-                    **payload,
-                    "failure_reason": "model_request_cancelled",
-                },
-                timestamp=datetime.utcnow(),
-                status="cancelled",
-                duration_ms=duration_ms,
-                failure_reason="model_request_cancelled",
-                parent_span_id=span_id,
-            )
-            raise
-        except Exception as exc:
-            duration_ms = int((time.perf_counter() - started_perf) * 1000)
-            detail = _exception_detail(exc)
-            await self._emit(
-                legacy_type="model_response",
-                event_type="model.error",
-                payload={
-                    **payload,
-                    "failure_reason": detail,
-                },
-                timestamp=datetime.utcnow(),
-                status="error",
-                duration_ms=duration_ms,
-                failure_reason=detail,
-                parent_span_id=span_id,
-            )
-            raise
-
-        duration_ms = int((time.perf_counter() - started_perf) * 1000)
-        await self._emit(
-            legacy_type="model_response",
-            event_type="model.response",
-            payload={
-                **payload,
-                "provider": response.provider,
-                "model": response.model,
-                "returned_model": response.model,
-                "finish_reason": response.finish_reason,
-                "usage": response.usage.model_dump() if response.usage else None,
-                "message": response.message.model_dump(),
-            },
-            timestamp=datetime.utcnow(),
-            status="success",
-            duration_ms=duration_ms,
-            parent_span_id=span_id,
-        )
-        return response
-
-    async def aclose(self) -> None:
-        """Close the wrapped model if it owns resources."""
-        await _close_model_if_needed(self._model)
 
 
 class WorkspaceValidationError(ValueError):
@@ -477,7 +365,7 @@ class AgentRuntime:
                 span_id=root_span_id,
             )
 
-            model = _ObservableChatModel(
+            model = ObservableChatModel(
                 self._create_model(run.provider, run.model),
                 emit=emit,
                 root_span_id=root_span_id,
@@ -509,7 +397,7 @@ class AgentRuntime:
             )
 
             await self.store.attach_result(run_id, result)
-            await self._append_step_events(
+            await convert_agent_steps_to_events(
                 steps=result.steps,
                 emit=emit,
                 root_span_id=root_span_id,
@@ -612,7 +500,7 @@ class AgentRuntime:
             return await self.get_run(run_id)
         finally:
             if model is not None:
-                await _close_model_if_needed(model)
+                await aclose_model_if_needed(model)
             await self._unregister_running_task(run_id)
             await self._release_active_slot()
 
@@ -626,123 +514,6 @@ class AgentRuntime:
             return self.model_factory(provider, model_name)
         except TypeError:
             return self.model_factory()
-
-    async def _append_step_events(
-        self,
-        *,
-        steps: list[AgentStep],
-        emit: EventEmitter,
-        root_span_id: str,
-        include_model_events: bool = True,
-    ) -> None:
-        """Convert agent steps into normalized observability events."""
-        if not steps:
-            return
-
-        iteration_span_ids: dict[int, str] = {}
-        iteration_last_timestamp: dict[int, datetime | None] = {}
-        current_iteration: int | None = None
-
-        for step in steps:
-            iteration = step.iteration or 0
-            if current_iteration != iteration:
-                if current_iteration is not None:
-                    previous_span_id = iteration_span_ids[current_iteration]
-                    await emit(
-                        legacy_type="agent_iteration",
-                        event_type="agent.iteration.finished",
-                        payload={"iteration": current_iteration},
-                        timestamp=iteration_last_timestamp.get(current_iteration),
-                        status="completed",
-                        span_id=previous_span_id,
-                        parent_span_id=root_span_id,
-                    )
-
-                current_iteration = iteration
-                current_span_id = iteration_span_ids.setdefault(iteration, new_span_id())
-                await emit(
-                    legacy_type="agent_iteration",
-                    event_type="agent.iteration.started",
-                    payload={"iteration": iteration},
-                    timestamp=step.started_at,
-                    status="running",
-                    span_id=current_span_id,
-                    parent_span_id=root_span_id,
-                )
-
-            iteration_span_id = iteration_span_ids.setdefault(iteration, new_span_id())
-            step_payload = {"step_index": step.index, "iteration": iteration}
-
-            if step.type == "model_response":
-                step_payload.update(step.metadata or {})
-                if include_model_events:
-                    if step.started_at is not None:
-                        await emit(
-                            legacy_type="model_request",
-                            event_type="model.request",
-                            payload=step_payload,
-                            timestamp=step.started_at,
-                            status="running",
-                            parent_span_id=iteration_span_id,
-                        )
-                    await emit(
-                        legacy_type="model_response",
-                        event_type="model.response",
-                        payload={
-                            **step_payload,
-                            "finish_reason": step.finish_reason,
-                            "usage": step.usage.model_dump() if step.usage else None,
-                            "message": step.message.model_dump() if step.message else None,
-                        },
-                        timestamp=step.finished_at or step.started_at,
-                        duration_ms=step.duration_ms,
-                        status="success",
-                        parent_span_id=iteration_span_id,
-                    )
-            else:
-                step_payload.update(step.metadata or {})
-                step_payload["tool_call"] = (
-                    step.tool_call.model_dump() if step.tool_call else None
-                )
-                if step.started_at is not None:
-                    await emit(
-                        legacy_type="tool_call",
-                        event_type="tool.started",
-                        payload=step_payload,
-                        timestamp=step.started_at,
-                        status="running",
-                        parent_span_id=iteration_span_id,
-                    )
-                await emit(
-                    legacy_type="tool_call",
-                    event_type="tool.finished",
-                    payload={
-                        **step_payload,
-                        "tool_result_status": step.tool_result_status,
-                        "tool_result_content": step.tool_result_content,
-                    },
-                    timestamp=step.finished_at or step.started_at,
-                    duration_ms=step.duration_ms,
-                    status=step.tool_result_status or "unknown",
-                    failure_reason=step.tool_result_content
-                    if step.tool_result_status == "error"
-                    else None,
-                    parent_span_id=iteration_span_id,
-                )
-
-            iteration_last_timestamp[iteration] = step.finished_at or step.started_at
-
-        if current_iteration is not None:
-            final_iteration_span_id = iteration_span_ids[current_iteration]
-            await emit(
-                legacy_type="agent_iteration",
-                event_type="agent.iteration.finished",
-                payload={"iteration": current_iteration},
-                timestamp=iteration_last_timestamp.get(current_iteration),
-                status="completed",
-                span_id=final_iteration_span_id,
-                parent_span_id=root_span_id,
-            )
 
     async def _next_event_index(self, run_id: str) -> int:
         events = await self.store.get_events(run_id)
@@ -848,79 +619,14 @@ class AgentRuntime:
     async def _decorate_run(self, run: RunRecord) -> RunRecord:
         decorated = run.model_copy(deep=True)
         events = await self.store.get_events(run.id)
-        decorated.diagnostics = self._build_run_diagnostics(decorated, events)
-        return decorated
-
-    def _build_run_diagnostics(
-        self,
-        run: RunRecord,
-        events: list[RunEvent],
-    ) -> RunDiagnostics:
-        total_duration_ms: int | None = None
-        if run.started_at and run.finished_at:
-            total_duration_ms = int(
-                (run.finished_at - run.started_at).total_seconds() * 1000,
-            )
-
-        model_events = [
-            event
-            for event in events
-            if (event.event_type or event.type) == "model.response"
-        ]
-        tool_events = [
-            event
-            for event in events
-            if (event.event_type or event.type) == "tool.finished"
-        ]
-        timed_events = [
-            event
-            for event in events
-            if event.duration_ms is not None
-            and (event.event_type or event.type) in {"model.response", "tool.finished"}
-        ]
-        timed_events.sort(key=lambda event: event.duration_ms or 0, reverse=True)
-
-        slowest_steps = [
-            RunStepTiming(
-                event_type=event.event_type or event.type,
-                label=self._step_label(event),
-                iteration=(event.payload or event.data).get("iteration"),
-                duration_ms=event.duration_ms or 0,
-            )
-            for event in timed_events[:3]
-        ]
-
-        return RunDiagnostics(
-            total_duration_ms=total_duration_ms,
-            iterations=run.result.iterations if run.result else None,
-            model_call_count=len(model_events),
-            tool_call_count=len(tool_events),
-            event_count=len(events),
-            token_usage=run.result.usage.model_copy(deep=True)
-            if run.result and run.result.usage
-            else None,
-            failure_reason=run.failure_reason,
-            slowest_steps=slowest_steps,
+        decorated.diagnostics = build_diagnostics(
+            result=decorated.result or AgentRunResult(status="completed"),
+            events=events,
+            started_at=decorated.started_at,
+            finished_at=decorated.finished_at,
+            failure_reason=decorated.failure_reason,
         )
-
-    def _step_label(self, event: RunEvent) -> str:
-        payload = event.payload or event.data
-        event_type = event.event_type or event.type
-        if event_type == "tool.finished":
-            return str(payload.get("tool_name") or "tool")
-        if event_type == "model.response":
-            provider = payload.get("provider")
-            model = (
-                payload.get("returned_model")
-                or payload.get("model")
-                or payload.get("requested_model")
-            )
-            if provider and model:
-                return f"{provider}/{model}"
-            if model:
-                return str(model)
-            return "model"
-        return event_type
+        return decorated
 
     def _log_runtime_summary(
         self,
@@ -939,17 +645,6 @@ class AgentRuntime:
             "failure_reason": failure_reason,
         }
         self._logger.info("runtime_summary %s", json.dumps(payload, ensure_ascii=False))
-
-
-async def _close_model_if_needed(model: ChatModel) -> None:
-    """Close model resources when the model exposes `aclose`."""
-    close_method = getattr(model, "aclose", None)
-    if close_method is None:
-        return
-
-    result = close_method()
-    if inspect.isawaitable(result):
-        await result
 
 
 def _resolve_enabled_tool_names(

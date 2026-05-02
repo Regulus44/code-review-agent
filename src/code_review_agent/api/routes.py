@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from code_review_agent.runtime import (
     RunNotFoundError,
     WorkspaceValidationError,
 )
+from code_review_agent.runtime.types import RunEvent
 from code_review_agent.runtime.session_service import (
     SessionConflictError,
     SessionService,
@@ -373,6 +375,79 @@ async def list_turns(session_id: str, request: Request):
     _enforce_api_key(request)
     svc = get_session_service(request)
     return await svc.list_turns(session_id)
+
+
+@router.get("/sessions/{session_id}/turns/{turn_id}/events")
+async def get_turn_events(
+    session_id: str,
+    turn_id: str,
+    request: Request,
+    after_index: int = Query(default=None, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
+    include_payload: bool = Query(default=False),
+    max_payload_chars: int = Query(default=5000, ge=0, le=50000),
+):
+    """Get runtime events for a turn.
+
+    Parameters:
+        after_index: Only return events with index > after_index.
+        limit: Maximum events to return (1-500).
+        include_payload: If false, event payloads are stripped.
+        max_payload_chars: Truncate payloads to this length when include_payload is true.
+    """
+    _enforce_api_key(request)
+    store = request.app.state.session_service._store
+    turn = await store.get_turn(turn_id)
+    if turn is None or turn.session_id != session_id:
+        raise HTTPException(status_code=404, detail="turn not found")
+    events = await store.get_turn_events(
+        turn_id, after_index=after_index, limit=limit,
+    )
+    if not include_payload:
+        return [_strip_event_payload(e) for e in events]
+    return [_truncate_event_payload(e, max_payload_chars) for e in events]
+
+
+@router.get("/sessions/{session_id}/turns/{turn_id}/diagnostics")
+async def get_turn_diagnostics(
+    session_id: str,
+    turn_id: str,
+    request: Request,
+):
+    """Get diagnostics for a turn, computed from stored events."""
+    _enforce_api_key(request)
+    store = request.app.state.session_service._store
+    turn = await store.get_turn(turn_id)
+    if turn is None or turn.session_id != session_id:
+        raise HTTPException(status_code=404, detail="turn not found")
+
+    from code_review_agent.models import ModelUsage
+    from code_review_agent.runtime.turn_events import build_diagnostics
+
+    events = await store.get_turn_events(turn_id)
+    usage = ModelUsage.model_validate(json.loads(turn.usage_json)) if turn.usage_json else None
+    return build_diagnostics(
+        result=None,
+        events=events,
+        started_at=turn.started_at,
+        finished_at=turn.finished_at,
+        failure_reason=turn.failure_reason,
+        usage=usage,
+    )
+
+
+def _strip_event_payload(event: RunEvent) -> RunEvent:
+    return event.model_copy(update={"payload": {}, "data": {}})
+
+
+def _truncate_event_payload(event: RunEvent, max_chars: int) -> RunEvent:
+    if not event.payload:
+        return event
+    truncated = {}
+    for k, v in event.payload.items():
+        s = str(v) if not isinstance(v, str) else v
+        truncated[k] = s[:max_chars] if len(s) > max_chars else v
+    return event.model_copy(update={"payload": truncated})
 
 
 @router.post("/sessions/{session_id}/turns/{turn_id}/cancel")

@@ -16,6 +16,7 @@ from code_review_agent.messages import (
     tool_message,
     user_message,
 )
+from code_review_agent.runtime.types import RunEvent
 from code_review_agent.session.store import (
     InMemorySessionStore,
     SessionNotFoundError,
@@ -217,6 +218,36 @@ class TestInMemorySessionStore:
         t1 = await mem_store.get_turn("t1")
         assert t1.status == "failed"
 
+    @pytest.mark.anyio
+    async def test_append_and_get_turn_events(self, mem_store: InMemorySessionStore):
+        await mem_store.create_session(_make_session())
+        await mem_store.create_turn(_make_turn("sess-1"))
+        await mem_store.append_turn_event(
+            "turn-1",
+            RunEvent(
+                index=1,
+                type="model_response",
+                event_type="model.response",
+                payload={"message": "first"},
+            ),
+        )
+        await mem_store.append_turn_event(
+            "turn-1",
+            RunEvent(
+                index=2,
+                type="tool_result",
+                event_type="tool.finished",
+                payload={"tool_name": "read_file"},
+            ),
+        )
+
+        events = await mem_store.get_turn_events("turn-1", after_index=1, limit=1)
+
+        assert len(events) == 1
+        assert events[0].index == 2
+        assert events[0].event_type == "tool.finished"
+        assert events[0].payload["tool_name"] == "read_file"
+
 
 class TestSqliteSessionStore:
     @pytest.mark.anyio
@@ -393,5 +424,40 @@ class TestSqliteSessionStore:
             assert await store.get_message_count("sess-1") == 0
             await store.append_messages("sess-1", [user_message("hi")], turn_index=0)
             assert await store.get_message_count("sess-1") == 1
+        finally:
+            await cleanup()
+
+    @pytest.mark.anyio
+    async def test_append_and_get_turn_events(self):
+        store, cleanup = _sqlite_store()
+        try:
+            await store.create_session(_make_session())
+            await store.create_turn(_make_turn("sess-1"))
+            await store.append_turn_event(
+                "turn-1",
+                RunEvent(
+                    index=1,
+                    type="model_response",
+                    event_type="model.response",
+                    payload={"message": "first"},
+                    duration_ms=10,
+                ),
+            )
+            await store.append_turn_event(
+                "turn-1",
+                RunEvent(
+                    index=2,
+                    type="tool_result",
+                    event_type="tool.finished",
+                    payload={"tool_name": "search_text"},
+                    duration_ms=5,
+                ),
+            )
+
+            events = await store.get_turn_events("turn-1", after_index=0, limit=2)
+
+            assert [event.index for event in events] == [1, 2]
+            assert events[0].event_type == "model.response"
+            assert events[1].payload["tool_name"] == "search_text"
         finally:
             await cleanup()

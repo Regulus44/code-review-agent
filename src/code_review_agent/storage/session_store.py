@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from code_review_agent.messages import Message, Role, ToolCall
+from code_review_agent.runtime.types import RunEvent
 from code_review_agent.session.store import (
     SessionNotFoundError,
     SessionStore,
@@ -91,6 +92,28 @@ class SessionMessageRow(Base):
     name: Mapped[str | None] = mapped_column(String(128))
     raw_json: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SessionTurnEventRow(Base):
+    __tablename__ = "session_turn_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    turn_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("session_turns.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    index: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    payload_json: Mapped[str | None] = mapped_column(Text)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str | None] = mapped_column(String(32))
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    trace_id: Mapped[str | None] = mapped_column(String(64))
+    span_id: Mapped[str | None] = mapped_column(String(64))
+    parent_span_id: Mapped[str | None] = mapped_column(String(64))
 
 
 class SqliteSessionStore(SessionStore):
@@ -358,6 +381,64 @@ class SqliteSessionStore(SessionStore):
                 .values(status="idle", updated_at=now),
             )
         return affected or 0
+
+    async def append_turn_event(self, turn_id: str, event: RunEvent) -> RunEvent:
+        await self._ensure_initialized()
+        async with self._session_factory() as session, session.begin():
+            payload = event.payload or event.data
+            row = SessionTurnEventRow(
+                turn_id=turn_id,
+                index=event.index,
+                event_type=event.event_type or event.type,
+                payload_json=json.dumps(payload) if payload else None,
+                timestamp=event.timestamp,
+                status=event.status,
+                duration_ms=event.duration_ms,
+                failure_reason=event.failure_reason,
+                trace_id=event.trace_id,
+                span_id=event.span_id,
+                parent_span_id=event.parent_span_id,
+            )
+            session.add(row)
+            return event
+
+    async def get_turn_events(
+        self,
+        turn_id: str,
+        *,
+        after_index: int | None = None,
+        limit: int | None = None,
+    ) -> list[RunEvent]:
+        await self._ensure_initialized()
+        async with self._session_factory() as session:
+            query = (
+                select(SessionTurnEventRow)
+                .where(SessionTurnEventRow.turn_id == turn_id)
+                .order_by(SessionTurnEventRow.index.asc())
+            )
+            if after_index is not None:
+                query = query.where(SessionTurnEventRow.index > after_index)
+            if limit is not None:
+                query = query.limit(limit)
+            result = await session.execute(query)
+            rows = result.scalars().all()
+            events = []
+            for row in rows:
+                payload = json.loads(row.payload_json) if row.payload_json else {}
+                events.append(RunEvent(
+                    index=row.index,
+                    type=row.event_type,
+                    event_type=row.event_type,
+                    timestamp=row.timestamp,
+                    payload=payload,
+                    status=row.status,
+                    duration_ms=row.duration_ms,
+                    failure_reason=row.failure_reason,
+                    trace_id=row.trace_id,
+                    span_id=row.span_id,
+                    parent_span_id=row.parent_span_id,
+                ))
+            return events
 
     async def aclose(self) -> None:
         await self._engine.dispose()

@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from threading import RLock
 
 from code_review_agent.messages import Message
+from code_review_agent.runtime.types import RunEvent
 from code_review_agent.session.types import (
     SessionRecord,
     SessionStatus,
@@ -96,6 +97,28 @@ class SessionStore(ABC):
     async def recover_stale_sessions(self) -> int:
         """Mark stale running/queued turns as failed after server restart."""
 
+    @abstractmethod
+    async def append_turn_event(self, turn_id: str, event: RunEvent) -> RunEvent:
+        """Append a runtime event to a turn's event log.
+
+        Events are stored per-turn, ordered by ``event.index``.
+        """
+
+    @abstractmethod
+    async def get_turn_events(
+        self,
+        turn_id: str,
+        *,
+        after_index: int | None = None,
+        limit: int | None = None,
+    ) -> list[RunEvent]:
+        """Get events for a turn, optionally filtered by index range.
+
+        Parameters:
+            after_index: If given, only return events with index > after_index.
+            limit: If given, return at most this many events.
+        """
+
     async def aclose(self) -> None:
         """Close store resources."""
         return
@@ -108,6 +131,7 @@ class InMemorySessionStore(SessionStore):
         self._sessions: dict[str, SessionRecord] = {}
         self._turns: dict[str, list[SessionTurn]] = {}
         self._messages: dict[str, list[tuple[int, int, Message]]] = {}
+        self._events: dict[str, list[RunEvent]] = {}
         self._lock = RLock()
 
     async def create_session(self, record: SessionRecord) -> SessionRecord:
@@ -243,6 +267,26 @@ class InMemorySessionStore(SessionStore):
     async def get_message_count(self, session_id: str) -> int:
         with self._lock:
             return len(self._messages.get(session_id, []))
+
+    async def append_turn_event(self, turn_id: str, event: RunEvent) -> RunEvent:
+        with self._lock:
+            self._events.setdefault(turn_id, []).append(event.model_copy(deep=True))
+            return event
+
+    async def get_turn_events(
+        self,
+        turn_id: str,
+        *,
+        after_index: int | None = None,
+        limit: int | None = None,
+    ) -> list[RunEvent]:
+        with self._lock:
+            events = self._events.get(turn_id, [])
+            if after_index is not None:
+                events = [e for e in events if e.index > after_index]
+            if limit is not None:
+                events = events[:limit]
+            return [e.model_copy(deep=True) for e in events]
 
     async def recover_stale_sessions(self) -> int:
         with self._lock:

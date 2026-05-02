@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -24,6 +25,13 @@ from code_review_agent.session.types import (
 )
 from code_review_agent.tools import ToolContext, ToolRegistry
 from code_review_agent.tools.policy import filter_tool_registry
+
+from .turn_events import (
+    TurnEventEmitter,
+    aclose_model_if_needed,
+    build_diagnostics,
+    convert_agent_steps_to_events,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -157,14 +165,24 @@ class SessionService:
         if session_record is None:
             return
 
+        emitter = TurnEventEmitter(self._store, turn_id)
         model = None
+        started_at = datetime.utcnow()
         try:
+            await emitter.emit(
+                legacy_type="status_change",
+                event_type="turn.started",
+                payload={"status": "running"},
+                status="running",
+            )
+
             history = await self._store.get_messages(session_id)
             session = InMemorySession()
             if history:
                 session.append(history)
 
-            model = self.model_factory(session_record.provider, session_record.model)
+            raw_model = self.model_factory(session_record.provider, session_record.model)
+            model = emitter.wrap_model(raw_model)
 
             await self._store.update_turn(
                 turn_id, status="running", started_at=utc_now(),
@@ -207,10 +225,27 @@ class SessionService:
             new_messages = all_messages[len(history):]
             await self._store.append_messages(session_id, new_messages, turn.turn_index)
 
+            await convert_agent_steps_to_events(
+                steps=result.steps,
+                emit=emitter.emit,
+                root_span_id=emitter.root_span_id,
+                include_model_events=False,
+            )
+
+            finished_at = utc_now()
+            events = await self._store.get_turn_events(turn_id)
+            diagnostics = build_diagnostics(
+                result=result,
+                events=events,
+                started_at=started_at,
+                finished_at=finished_at,
+                failure_reason=result.failure_reason,
+            )
+
             await self._store.update_turn(
                 turn_id,
                 status=result.status,
-                finished_at=utc_now(),
+                finished_at=finished_at,
                 usage_json=result.usage.model_dump_json() if result.usage else None,
                 failure_reason=result.failure_reason,
             )
@@ -222,17 +257,38 @@ class SessionService:
                 updated_at=utc_now(),
             )
 
+            await emitter.emit(
+                legacy_type="status_change",
+                event_type=f"turn.{result.status}",
+                payload={
+                    "status": result.status,
+                    "failure_reason": result.failure_reason,
+                    "model_call_count": diagnostics.model_call_count,
+                    "tool_call_count": diagnostics.tool_call_count,
+                },
+                status=result.status,
+                failure_reason=result.failure_reason,
+            )
+
         except asyncio.CancelledError:
             current = await self._store.get_turn(turn_id)
             existing_reason = current.failure_reason if current else None
+            reason = existing_reason or "cancelled"
             await self._store.update_turn(
                 turn_id,
                 status="cancelled",
                 finished_at=utc_now(),
-                failure_reason=existing_reason or "cancelled",
+                failure_reason=reason,
             )
             await self._store.update_session(
                 session_id, status="idle", updated_at=utc_now(),
+            )
+            await emitter.emit(
+                legacy_type="status_change",
+                event_type="turn.cancelled",
+                payload={"status": "cancelled", "failure_reason": reason},
+                status="cancelled",
+                failure_reason=reason,
             )
 
         except asyncio.TimeoutError:
@@ -244,6 +300,13 @@ class SessionService:
             )
             await self._store.update_session(
                 session_id, status="idle", updated_at=utc_now(),
+            )
+            await emitter.emit(
+                legacy_type="status_change",
+                event_type="turn.timeout",
+                payload={"status": "failed", "failure_reason": "run_timeout"},
+                status="failed",
+                failure_reason="run_timeout",
             )
 
         except Exception as e:
@@ -257,14 +320,16 @@ class SessionService:
             await self._store.update_session(
                 session_id, status="idle", updated_at=utc_now(),
             )
+            await emitter.emit(
+                legacy_type="status_change",
+                event_type="turn.failed",
+                payload={"status": "failed", "failure_reason": str(e)},
+                status="failed",
+                failure_reason=str(e),
+            )
 
         finally:
-            close = getattr(model, "aclose", None)
-            if close is not None:
-                try:
-                    await close()
-                except Exception:
-                    pass
+            await aclose_model_if_needed(model)
 
     async def recover_stale_sessions(self) -> int:
         """Recover stale sessions after server restart."""
