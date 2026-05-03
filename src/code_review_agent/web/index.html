@@ -212,6 +212,94 @@ body {
   border: 1px solid var(--border);
 }
 
+.msg-markdown {
+  white-space: normal;
+}
+.msg-markdown p {
+  margin: 0 0 8px;
+}
+.msg-markdown p:last-child {
+  margin-bottom: 0;
+}
+.msg-markdown h1,
+.msg-markdown h2,
+.msg-markdown h3,
+.msg-markdown h4 {
+  margin: 10px 0 6px;
+  line-height: 1.35;
+}
+.msg-markdown h1 { font-size: 18px; }
+.msg-markdown h2 { font-size: 16px; }
+.msg-markdown h3 { font-size: 14px; }
+.msg-markdown h4 { font-size: 13px; }
+.msg-markdown ul,
+.msg-markdown ol {
+  margin: 4px 0 10px 20px;
+  padding: 0;
+}
+.msg-markdown li {
+  margin: 3px 0;
+}
+.msg-markdown blockquote {
+  margin: 6px 0 10px;
+  padding: 4px 10px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+  background: var(--panel-muted);
+  border-radius: 4px;
+}
+.msg-markdown pre {
+  margin: 8px 0;
+  padding: 10px 12px;
+  background: #0f172a;
+  color: #e5e7eb;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+}
+.msg-markdown code {
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+}
+.msg-markdown :not(pre) > code {
+  background: #eef2f7;
+  color: #1f2937;
+  border: 1px solid #d9e1ec;
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 12px;
+}
+.msg-markdown a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.msg-markdown a:hover {
+  text-decoration: underline;
+}
+.msg-markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0 10px;
+  font-size: 12px;
+}
+.msg-markdown th,
+.msg-markdown td {
+  border: 1px solid var(--border);
+  padding: 5px 7px;
+  text-align: left;
+  vertical-align: top;
+}
+.msg-markdown th {
+  background: var(--panel-muted);
+  font-weight: 600;
+}
+.msg-markdown hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 10px 0;
+}
+
 .msg-system {
   align-self: center;
   background: #fefce8;
@@ -229,6 +317,140 @@ body {
   max-width: 85%;
   font-size: 12px;
 }
+
+/* ── Turn Summary ────────────────────────────────────────── */
+
+.turn-summary {
+  margin: 4px 0 8px 0;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: var(--panel);
+  border-left: 3px solid var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+.turn-summary.turn-running { border-left-color: #3b82f6; background: #eff6ff; }
+.turn-summary.turn-completed { border-left-color: #22c55e; background: #f0fdf4; }
+.turn-summary.turn-failed { border-left-color: #ef4444; background: #fef2f2; }
+.turn-summary.turn-cancelled { border-left-color: #9ca3af; background: #f9fafb; }
+.turn-summary.turn-max_iterations { border-left-color: #f59e0b; background: #fffbeb; }
+
+.turn-status-text { font-weight: 600; }
+.turn-sep { color: var(--border); }
+.turn-duration { font-variant-numeric: tabular-nums; }
+.turn-stats {}
+.turn-spacer { flex: 1; }
+.turn-expand-btn {
+  cursor: pointer;
+  color: var(--primary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.turn-expand-btn:hover { text-decoration: underline; }
+
+.turn-failure-reason {
+  color: var(--danger);
+  margin-left: 4px;
+  font-size: 11px;
+}
+
+.turn-spinner {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border: 2px solid #3b82f6;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Tool Timeline ───────────────────────────────────────── */
+
+.turn-timeline {
+  margin: 0 0 10px 12px;
+  padding: 8px 12px;
+  border-left: 2px solid #e5e7eb;
+  font-size: 12px;
+}
+.turn-timeline-loading {
+  color: var(--muted);
+  font-style: italic;
+  padding: 4px 0;
+}
+.turn-timeline-empty {
+  color: var(--muted);
+  padding: 4px 0;
+}
+.tool-calls-header {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text);
+}
+
+.tool-call-detail {
+  margin: 2px 0;
+}
+.tool-call-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+}
+.tool-call-summary::-webkit-details-marker { display: none; }
+.tool-call-name {
+  font-weight: 600;
+  color: var(--primary);
+  min-width: 0;
+}
+.tool-call-path {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.tool-call-duration {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.tool-call-status {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.tool-call-status.success { background: #dcfce7; color: #166534; }
+.tool-call-status.error { background: #fef2f2; color: #991b1b; }
+.tool-call-status.running { background: #dbeafe; color: #1e40af; }
+
+.tool-call-body {
+  padding: 6px 0 4px 16px;
+  font-size: 11px;
+}
+.tool-call-section { margin: 4px 0; }
+.tool-call-section pre {
+  margin: 2px 0 0 0;
+  padding: 4px 8px;
+  background: #f3f4f6;
+  border-radius: 3px;
+  font-size: 10px;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.tool-call-error { color: var(--danger); }
 
 /* ── Loading bubble ─────────────────────────────────────── */
 
@@ -584,6 +806,26 @@ const I18N = {
     archive_confirm: "确定归档这个对话吗？",
     stop_first: "请先停止当前请求",
     settings: "设置",
+    turn_queued: "等待中",
+    turn_running: "运行中",
+    turn_completed: "已完成",
+    turn_failed: "失败",
+    turn_cancelled: "已取消",
+    turn_max_iterations: "达到上限",
+    turn_model_calls: "模型",
+    turn_tool_calls: "工具",
+    turn_duration_sec: "秒",
+    turn_expand: "查看执行过程",
+    turn_collapse: "收起执行过程",
+    turn_no_tool_events: "无工具调用记录",
+    turn_tool_call: "工具调用",
+    turn_times: "次",
+    tool_args: "参数",
+    tool_result: "结果",
+    tool_status_success: "成功",
+    tool_status_running: "运行中",
+    tool_status_error: "错误",
+    tool_args_none: "(无参数)",
   },
   en: {
     health_checking: "Checking",
@@ -624,6 +866,26 @@ const I18N = {
     archive_confirm: "Archive this conversation?",
     stop_first: "Please stop the current request first",
     settings: "Settings",
+    turn_queued: "Waiting",
+    turn_running: "Running",
+    turn_completed: "Completed",
+    turn_failed: "Failed",
+    turn_cancelled: "Cancelled",
+    turn_max_iterations: "Max Iterations",
+    turn_model_calls: "Model",
+    turn_tool_calls: "Tool",
+    turn_duration_sec: "s",
+    turn_expand: "View execution",
+    turn_collapse: "Hide execution",
+    turn_no_tool_events: "No tool calls",
+    turn_tool_call: "Tool calls",
+    turn_times: "times",
+    tool_args: "Arguments",
+    tool_result: "Result",
+    tool_status_success: "Success",
+    tool_status_running: "Running",
+    tool_status_error: "Error",
+    tool_args_none: "(no arguments)",
   },
 };
 
@@ -639,6 +901,10 @@ const state = {
   pendingLoadingBubble: false,
   currentSession: null,
   currentMessages: [],
+  turns: [],
+  turnDiagnostics: {},
+  expandedTurns: new Set(),
+  turnToolEvents: {},
 };
 
 function t(key) {
@@ -716,6 +982,25 @@ function providerLabel(provider) {
   const base = names[provider.name] || provider.name;
   const hint = state.lang === "zh" ? "未配置" : "Not configured";
   return provider.configured ? base : base + " (" + hint + ")";
+}
+
+function formatDuration(ms) {
+  if (!ms && ms !== 0) return "-";
+  if (ms < 1000) return ms + "ms";
+  return (ms / 1000).toFixed(1) + t("turn_duration_sec");
+}
+
+function turnStatusLabel(status) {
+  const map = {
+    queued: "turn_queued", running: "turn_running", completed: "turn_completed",
+    failed: "turn_failed", cancelled: "turn_cancelled",
+    max_iterations: "turn_max_iterations", model_output_truncated: "turn_failed",
+  };
+  return t(map[status] || "turn_failed");
+}
+
+function turnStatusDash(status) {
+  return "turn-" + status;
 }
 
 // ── DOM refs ─────────────────────────────────────────────────
@@ -852,87 +1137,48 @@ function renderChatMessages(messages) {
     return;
   }
 
-  const groups = [];
-  let currentToolGroup = null;
+  let seenUserTurn = new Set();
+  let html = "";
 
   for (const msg of messages) {
-    if (msg.role === "assistant" && msg.tool_calls && msg.tool_calls.length) {
-      if (currentToolGroup) {
-        groups.push({ type: "tool_group", steps: currentToolGroup.steps });
-      }
-      currentToolGroup = { steps: [] };
-      for (const tc of msg.tool_calls) {
-        currentToolGroup.steps.push({
-          tool_name: tc.name,
-          tool_call_id: tc.id,
-          arguments: tc.arguments,
-          raw_arguments: tc.raw_arguments,
-          result: null,
-          error: false,
-        });
-      }
-      if (msg.content) {
-        groups.push({ type: "tool_group", steps: currentToolGroup.steps });
-        currentToolGroup = null;
-        groups.push({ type: "assistant", content: msg.content });
-      }
+    if (msg.role === "assistant" && msg.tool_calls && msg.tool_calls.length && !(msg.content && msg.content.trim())) {
       continue;
     }
 
     if (msg.role === "tool") {
-      if (currentToolGroup) {
-        const step = currentToolGroup.steps.find(s => s.tool_call_id === msg.tool_call_id);
-        if (step) {
-          step.result = msg.content;
-          step.error = msg.is_error || false;
-          continue;
-        }
-      }
-      if (currentToolGroup) {
-        groups.push({ type: "tool_group", steps: currentToolGroup.steps });
-        currentToolGroup = null;
-      }
-      groups.push({
-        type: "tool_group",
-        steps: [{
-          tool_name: msg.name || msg.tool_call_id || "tool",
-          tool_call_id: msg.tool_call_id || "",
-          arguments: {},
-          raw_arguments: null,
-          result: msg.content,
-          error: msg.is_error || false,
-        }],
-      });
       continue;
     }
 
-    if (currentToolGroup) {
-      groups.push({ type: "tool_group", steps: currentToolGroup.steps });
-      currentToolGroup = null;
+    if (msg.role === "assistant" && msg.tool_calls && msg.tool_calls.length && msg.content && msg.content.trim()) {
+      html += '<div class="msg-bubble msg-assistant msg-markdown">' + formatContent(msg.content) + '</div>';
+      continue;
     }
 
-    groups.push({ type: msg.role, content: msg.content, ...msg });
+    if (msg.role === "system") {
+      html += '<div class="msg-bubble msg-system">' + escapeHtml(msg.content || "") + '</div>';
+      continue;
+    }
+
+    const bubbleClass = "msg-bubble msg-" + msg.role + (msg.role === "assistant" ? " msg-markdown" : "");
+    html += '<div class="' + bubbleClass + '">';
+    if (msg.role === "user") {
+      html += escapeHtml(msg.content || "") + '</div>';
+
+      const ti = msg.turn_index;
+      if (ti !== undefined && ti !== null && !seenUserTurn.has(ti)) {
+        seenUserTurn.add(ti);
+        const turn = state.turns.find(t => t.turn_index === ti);
+        if (turn) {
+          const diag = state.turnDiagnostics[turn.id];
+          html += renderTurnSummary(turn, diag);
+        }
+      }
+    } else {
+      html += formatContent(msg.content || "") + '</div>';
+    }
   }
 
-  if (currentToolGroup) {
-    groups.push({ type: "tool_group", steps: currentToolGroup.steps });
-  }
-
-  chatMessages.innerHTML = groups.map(g => {
-    if (g.type === "user") {
-      return '<div class="msg-bubble msg-user">' + escapeHtml(g.content || "") + '</div>';
-    }
-    if (g.type === "assistant") {
-      return '<div class="msg-bubble msg-assistant">' + formatContent(g.content || "") + '</div>';
-    }
-    if (g.type === "system") {
-      return '<div class="msg-bubble msg-system">' + escapeHtml(g.content || "") + '</div>';
-    }
-    if (g.type === "tool_group") {
-      return renderToolAccordion(g.steps);
-    }
-    return "";
-  }).join("");
+  chatMessages.innerHTML = html;
 
   if (state.pendingUserMessage) {
     chatMessages.innerHTML += '<div class="msg-bubble msg-user">' + escapeHtml(state.pendingUserMessage) + '</div>';
@@ -945,11 +1191,152 @@ function renderChatMessages(messages) {
 }
 
 function formatContent(content) {
-  let html = escapeHtml(content);
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
-    return '<pre style="background:#f1f4f8;padding:8px;border-radius:4px;overflow-x:auto;font-size:12px;margin:6px 0;">' + escapeHtml(code) + '</pre>';
+  if (!content) return "";
+
+  const codeBlocks = [];
+  let text = String(content).replace(/\r\n/g, "\n");
+  text = text.replace(/```([^\n`]*)\n?([\s\S]*?)```/g, function(_, lang, code) {
+    const id = codeBlocks.length;
+    codeBlocks.push({
+      lang: String(lang || "").trim(),
+      code: code.replace(/\n$/, ""),
+    });
+    return "\n@@CODE_BLOCK_" + id + "@@\n";
   });
-  html = html.replace(/\n/g, "<br>");
+
+  const lines = text.split("\n");
+  const out = [];
+  let paragraph = [];
+  let listType = null;
+
+  function flushParagraph() {
+    if (!paragraph.length) return;
+    out.push("<p>" + renderInline(paragraph.join(" ")) + "</p>");
+    paragraph = [];
+  }
+
+  function closeList() {
+    if (!listType) return;
+    out.push("</" + listType + ">");
+    listType = null;
+  }
+
+  function ensureList(type) {
+    flushParagraph();
+    if (listType === type) return;
+    closeList();
+    listType = type;
+    out.push("<" + type + ">");
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const line = raw.trim();
+
+    if (!line) {
+      flushParagraph();
+      closeList();
+      continue;
+    }
+
+    const codeMatch = line.match(/^@@CODE_BLOCK_(\d+)@@$/);
+    if (codeMatch) {
+      flushParagraph();
+      closeList();
+      const block = codeBlocks[Number(codeMatch[1])];
+      const langClass = block.lang ? ' class="language-' + escapeHtml(block.lang) + '"' : "";
+      out.push("<pre><code" + langClass + ">" + escapeHtml(block.code) + "</code></pre>");
+      continue;
+    }
+
+    if (/^\|.+\|$/.test(line) && i + 1 < lines.length && /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(lines[i + 1].trim())) {
+      flushParagraph();
+      closeList();
+      const headers = splitMarkdownTableRow(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && /^\|.+\|$/.test(lines[i].trim())) {
+        rows.push(splitMarkdownTableRow(lines[i].trim()));
+        i++;
+      }
+      i--;
+      out.push(renderMarkdownTable(headers, rows));
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      flushParagraph();
+      closeList();
+      const level = heading[1].length;
+      out.push("<h" + level + ">" + renderInline(heading[2]) + "</h" + level + ">");
+      continue;
+    }
+
+    if (/^(-{3,}|\*{3,})$/.test(line)) {
+      flushParagraph();
+      closeList();
+      out.push("<hr>");
+      continue;
+    }
+
+    const quote = line.match(/^>\s?(.*)$/);
+    if (quote) {
+      flushParagraph();
+      closeList();
+      out.push("<blockquote>" + renderInline(quote[1]) + "</blockquote>");
+      continue;
+    }
+
+    const unordered = line.match(/^[-*]\s+(.+)$/);
+    if (unordered) {
+      ensureList("ul");
+      out.push("<li>" + renderInline(unordered[1]) + "</li>");
+      continue;
+    }
+
+    const ordered = line.match(/^\d+\.\s+(.+)$/);
+    if (ordered) {
+      ensureList("ol");
+      out.push("<li>" + renderInline(ordered[1]) + "</li>");
+      continue;
+    }
+
+    closeList();
+    paragraph.push(line);
+  }
+
+  flushParagraph();
+  closeList();
+  return out.join("");
+}
+
+function renderInline(value) {
+  let html = escapeHtml(value);
+  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+  html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, function(_, label, href) {
+    return '<a href="' + escapeHtml(href) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>';
+  });
+  return html;
+}
+
+function splitMarkdownTableRow(line) {
+  return line.replace(/^\|/, "").replace(/\|$/, "").split("|").map(cell => cell.trim());
+}
+
+function renderMarkdownTable(headers, rows) {
+  let html = "<table><thead><tr>";
+  html += headers.map(h => "<th>" + renderInline(h) + "</th>").join("");
+  html += "</tr></thead><tbody>";
+  for (const row of rows) {
+    html += "<tr>";
+    html += headers.map((_, i) => "<td>" + renderInline(row[i] || "") + "</td>").join("");
+    html += "</tr>";
+  }
+  html += "</tbody></table>";
   return html;
 }
 
@@ -1009,6 +1396,10 @@ async function loadSessionChat() {
 
     state.currentSession = session;
     state.currentMessages = messages;
+    state.turns = turns;
+    state.turnDiagnostics = {};
+    state.expandedTurns = new Set();
+    state.turnToolEvents = {};
 
     if (messages.length > 0) {
       state.lastSequence = Math.max(...messages.map(m => m.sequence || 0));
@@ -1022,6 +1413,8 @@ async function loadSessionChat() {
       state.activeTurnId = null;
     }
 
+    await loadTurnDiagnosticsBatch(sid, turns);
+
     state.pendingUserMessage = null;
     state.pendingLoadingBubble = false;
     removeLoadingBubble();
@@ -1033,6 +1426,166 @@ async function loadSessionChat() {
     }
   } catch (e) {
     chatMessages.innerHTML = '<div class="empty-state error-text">' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+async function loadTurnDiagnosticsBatch(sid, turns) {
+  const targets = turns.filter(t => t.status !== "queued");
+  const results = await Promise.allSettled(
+    targets.map(t => requestJson("/sessions/" + sid + "/turns/" + t.id + "/diagnostics"))
+  );
+  targets.forEach((t, i) => {
+    if (results[i].status === "fulfilled") {
+      state.turnDiagnostics[t.id] = results[i].value;
+    }
+  });
+}
+
+async function loadTurnDiagnostics(sid, turnId) {
+  try {
+    const diag = await requestJson("/sessions/" + sid + "/turns/" + turnId + "/diagnostics");
+    state.turnDiagnostics[turnId] = diag;
+    return diag;
+  } catch (_) {
+    return null;
+  }
+}
+
+function findTurnForMessage(msg) {
+  if (!state.turns) return null;
+  const ti = msg.turn_index;
+  if (ti === undefined || ti === null) return null;
+  return state.turns.find(t => t.turn_index === ti) || null;
+}
+
+function renderTurnSummary(turn, diagnostics) {
+  if (!turn) return "";
+  const diag = diagnostics || {};
+  const status = turn.status;
+  const duration = formatDuration(diag.total_duration_ms || 0);
+  const modelCalls = diag.model_call_count || 0;
+  const toolCalls = diag.tool_call_count || 0;
+  const tokens = diag.token_usage?.total_tokens || 0;
+  const isTerminal = ["completed", "failed", "cancelled", "max_iterations", "model_output_truncated"].includes(status);
+  const expanded = state.expandedTurns.has(turn.id);
+
+  let statsParts = [];
+  if (isTerminal || status === "running") statsParts.push(t("turn_model_calls") + " " + modelCalls);
+  if (isTerminal || status === "running") statsParts.push(t("turn_tool_calls") + " " + toolCalls);
+  if (tokens) statsParts.push("Token " + tokens);
+
+  let statusExtra = "";
+  if (status === "running") {
+    statusExtra = ' <span class="turn-spinner"></span>';
+  }
+  if (status === "failed" || status === "max_iterations" || status === "model_output_truncated") {
+    const reason = turn.failure_reason || "";
+    if (reason) statusExtra = ' <span class="turn-failure-reason">' + escapeHtml(reason.slice(0, 120)) + '</span>';
+  }
+
+  let html = '<div class="turn-summary ' + turnStatusDash(status) + '" data-turn-id="' + turn.id + '">';
+  html += '<span class="turn-status-text">' + turnStatusLabel(status) + statusExtra + '</span>';
+  if (isTerminal || status === "running") {
+    html += '<span class="turn-sep">&middot;</span>';
+    html += '<span class="turn-duration">' + duration + '</span>';
+    html += '<span class="turn-sep">&middot;</span>';
+    html += '<span class="turn-stats">' + statsParts.join(" &middot; ") + '</span>';
+  }
+  html += '<span class="turn-spacer"></span>';
+  html += '<span class="turn-expand-btn" data-turn-id="' + turn.id + '">' + (expanded ? t("turn_collapse") : t("turn_expand")) + '</span>';
+  html += '</div>';
+
+  if (expanded) {
+    html += '<div class="turn-timeline" id="timeline-' + turn.id + '">';
+    const events = state.turnToolEvents[turn.id];
+    if (events) {
+      html += renderToolTimeline(turn.id, events);
+    } else {
+      html += '<div class="turn-timeline-loading">' + t("agent_thinking") + '</div>';
+    }
+    html += '</div>';
+  }
+
+  return html;
+}
+
+function renderToolTimeline(turnId, events) {
+  const toolCalls = groupToolEvents(events);
+  if (!toolCalls.length) {
+    return '<div class="turn-timeline-empty">' + t("turn_no_tool_events") + '</div>';
+  }
+  let html = '<div class="tool-calls-header">' + t("turn_tool_call") + " " + toolCalls.length + " " + t("turn_times") + '</div>';
+  for (const tc of toolCalls) {
+    html += '<details class="tool-call-detail">';
+    html += '<summary class="tool-call-summary">';
+    html += '<span class="tool-call-name">' + escapeHtml(tc.toolName) + '</span>';
+    html += '<span class="tool-call-path">' + escapeHtml(tc.argsHint) + '</span>';
+    if (tc.durationMs) html += '<span class="tool-call-duration">' + formatDuration(tc.durationMs) + '</span>';
+    const statusClass = tc.status === "success" ? "success" : (tc.status === "running" ? "running" : "error");
+    const statusLabel = tc.status === "success"
+      ? t("tool_status_success")
+      : (tc.status === "running" ? t("tool_status_running") : t("tool_status_error"));
+    html += '<span class="tool-call-status ' + statusClass + '">' + statusLabel + '</span>';
+    html += '</summary>';
+    html += '<div class="tool-call-body">';
+    html += '<div class="tool-call-section"><strong>' + t("tool_args") + ':</strong><pre>' + escapeHtml(tc.argsJson || t("tool_args_none")) + '</pre></div>';
+    if (tc.result) html += '<div class="tool-call-section"><strong>' + t("tool_result") + ':</strong><pre>' + escapeHtml(tc.result.slice(0, 2000)) + '</pre></div>';
+    if (tc.failureReason) html += '<div class="tool-call-section tool-call-error"><strong>' + t("tool_status_error") + ':</strong> ' + escapeHtml(tc.failureReason) + '</div>';
+    html += '</div></details>';
+  }
+  return html;
+}
+
+function groupToolEvents(events) {
+  const started = {};
+  const finished = {};
+  for (const e of events) {
+    const type = e.event_type || e.type;
+    if (type === "tool.started") {
+      const key = toolEventKey(e);
+      started[key] = e;
+    }
+    if (type === "tool.finished") {
+      const key = toolEventKey(e);
+      finished[key] = e;
+    }
+  }
+  const allKeys = new Set([...Object.keys(started), ...Object.keys(finished)]);
+  const calls = [];
+  for (const key of allKeys) {
+    const s = started[key];
+    const f = finished[key];
+    const toolName = (f?.payload?.tool_name) || (s?.payload?.tool_name) || key;
+    const args = (f?.payload?.arguments) || (s?.payload?.arguments) || {};
+    const argsJson = Object.keys(args).length ? JSON.stringify(args, null, 2) : "";
+    const result = f?.payload?.tool_result || "";
+    const failureReason = f?.failure_reason;
+    const durationMs = f?.duration_ms || 0;
+    const status = f?.status || "running";
+    let argsHint = "";
+    const firstArg = typeof args === "object" && Object.values(args)[0];
+    if (firstArg && typeof firstArg === "string") argsHint = firstArg.slice(0, 60);
+    calls.push({ toolName, argsJson, argsHint, result, failureReason, durationMs, status });
+  }
+  return calls;
+}
+
+function toolEventKey(event) {
+  const payload = event.payload || {};
+  if (payload.tool_call_id) return payload.tool_call_id;
+  const stepIndex = payload.step_index ?? event.index ?? "";
+  return (payload.tool_name || "tool") + ":" + stepIndex;
+}
+
+async function loadTurnEvents(sid, turnId) {
+  try {
+    const events = await requestJson(
+      "/sessions/" + sid + "/turns/" + turnId + "/events?include_payload=true&max_payload_chars=4000"
+    );
+    state.turnToolEvents[turnId] = events;
+    return events;
+  } catch (_) {
+    return [];
   }
 }
 
@@ -1085,6 +1638,17 @@ async function pollTurnStatus() {
       await loadSessionChat();
       await loadSessions();
       return;
+    }
+
+    const diag = await loadTurnDiagnostics(sid, activeTurn.id);
+    if (diag && state.expandedTurns.has(activeTurn.id)) {
+      try {
+        await loadTurnEvents(sid, activeTurn.id);
+      } catch (_) {}
+    }
+    state.turns = turns;
+    if (diag) {
+      renderChatMessages(state.currentMessages);
     }
 
     const terminalStatuses = ["completed", "failed", "cancelled", "max_iterations", "model_output_truncated"];
@@ -1152,6 +1716,10 @@ async function sendMessage() {
       state.lastSequence = 0;
       state.currentSession = session;
       state.currentMessages = [];
+      state.turns = [];
+      state.turnDiagnostics = {};
+      state.expandedTurns = new Set();
+      state.turnToolEvents = {};
       state.pendingUserMessage = message;
       state.pendingLoadingBubble = true;
       await loadSessions();
@@ -1178,6 +1746,10 @@ async function sendMessage() {
       body: JSON.stringify({ message }),
     });
     state.activeTurnId = turn.id;
+    state.turns = [...(state.turns || []), turn];
+    state.turnDiagnostics[turn.id] = null;
+    state.expandedTurns.delete(turn.id);
+    delete state.turnToolEvents[turn.id];
     updateActionButtons();
     schedulePoll();
   } catch (e) {
@@ -1267,6 +1839,30 @@ function autoResizeTextarea() {
 
 // ── Event listeners ──────────────────────────────────────────
 
+chatMessages.addEventListener("click", async (e) => {
+  const btn = e.target.closest(".turn-expand-btn");
+  if (!btn) return;
+  const turnId = btn.getAttribute("data-turn-id");
+  const sid = state.selectedSessionId;
+  if (!turnId || !sid) return;
+
+  if (state.expandedTurns.has(turnId)) {
+    state.expandedTurns.delete(turnId);
+  } else {
+    state.expandedTurns.add(turnId);
+    if (!state.turnToolEvents[turnId]) {
+      try {
+        await loadTurnEvents(sid, turnId);
+      } catch (_) {}
+    }
+    const turn = state.turns.find(t => t.id === turnId);
+    if (turn && ["queued", "running"].includes(turn.status)) {
+      state.turnToolEvents[turnId] = state.turnToolEvents[turnId] || [];
+    }
+  }
+  renderChatMessages(state.currentMessages);
+});
+
 sendBtn.addEventListener("click", sendMessage);
 stopBtn.addEventListener("click", cancelCurrentTurn);
 chatInput.addEventListener("keydown", e => {
@@ -1283,6 +1879,10 @@ document.getElementById("newSessionBtn").addEventListener("click", () => {
   state.activeTurnId = null;
   state.currentSession = null;
   state.currentMessages = [];
+  state.turns = [];
+  state.turnDiagnostics = {};
+  state.expandedTurns = new Set();
+  state.turnToolEvents = {};
   state.pendingUserMessage = null;
   state.pendingLoadingBubble = false;
   removeLoadingBubble();
@@ -1330,6 +1930,18 @@ function applyI18n() {
     ? (healthDot.className.includes("health-ok") ? "API OK" : healthDot.className.includes("health-err") ? "API Error" : "Checking")
     : (healthDot.className.includes("health-ok") ? "API 正常" : healthDot.className.includes("health-err") ? "API 异常" : "检查中");
 }
+
+// ── Workspace persistence ───────────────────────────────────
+
+cfgWorkspace.value = localStorage.getItem("workspace_root") || ".";
+
+cfgWorkspace.addEventListener("change", () => {
+  localStorage.setItem("workspace_root", cfgWorkspace.value.trim());
+});
+
+cfgWorkspace.addEventListener("blur", () => {
+  localStorage.setItem("workspace_root", cfgWorkspace.value.trim());
+});
 
 // ── Startup ──────────────────────────────────────────────────
 

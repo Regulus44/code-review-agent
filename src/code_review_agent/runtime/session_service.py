@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -167,7 +166,7 @@ class SessionService:
 
         emitter = TurnEventEmitter(self._store, turn_id)
         model = None
-        started_at = datetime.utcnow()
+        started_at = utc_now()
         try:
             await emitter.emit(
                 legacy_type="status_change",

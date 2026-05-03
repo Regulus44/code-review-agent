@@ -55,7 +55,7 @@ class ObservableChatModel(ChatModel):
         self._request_count += 1
         request_index = self._request_count
         span_id = new_span_id()
-        started_at = datetime.utcnow()
+        started_at = utc_now()
         started_perf = time.perf_counter()
         payload = {
             "request_index": request_index,
@@ -84,7 +84,7 @@ class ObservableChatModel(ChatModel):
                 legacy_type="model_request",
                 event_type="model.cancelled",
                 payload={**payload, "failure_reason": "model_request_cancelled"},
-                timestamp=datetime.utcnow(),
+                timestamp=utc_now(),
                 status="cancelled",
                 duration_ms=duration_ms,
                 failure_reason="model_request_cancelled",
@@ -98,7 +98,7 @@ class ObservableChatModel(ChatModel):
                 legacy_type="model_response",
                 event_type="model.error",
                 payload={**payload, "failure_reason": detail},
-                timestamp=datetime.utcnow(),
+                timestamp=utc_now(),
                 status="error",
                 duration_ms=duration_ms,
                 failure_reason=detail,
@@ -119,7 +119,7 @@ class ObservableChatModel(ChatModel):
                 "usage": response.usage.model_dump() if response.usage else None,
                 "message": response.message.model_dump(),
             },
-            timestamp=datetime.utcnow(),
+            timestamp=utc_now(),
             status="success",
             duration_ms=duration_ms,
             parent_span_id=span_id,

@@ -1,0 +1,17 @@
+curl.exe --location --request POST 'https://token-plan-cn.xiaomimimo.com/v1/chat/completions' `
+--header "api-key: tp-cq5gkmjprdalgq0rqdqc2p2s4tn6npo4p9goig148yz376ao" `
+--header "Content-Type: application/json" `
+--data-raw '{
+    "model": "mimo-v2.5-pro",
+    "messages": [
+        {
+            "role": "system",
+            "content": "You are MiMo, an AI assistant developed by Xiaomi. Today is date: Tuesday, December 16, 2025. Your knowledge cutoff date is December 2024."
+        },
+        {
+            "role": "user",
+            "content": "please introduce yourself"
+        }
+    ],
+    "max_completion_tokens": 1024
+}'
