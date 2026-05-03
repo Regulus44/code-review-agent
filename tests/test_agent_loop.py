@@ -503,3 +503,107 @@ async def test_agent_summarizes_old_large_tool_messages_for_model_request(tmp_pa
         "Tool result summarized for model context budget.",
     )
     assert model.requests[0].metadata["context_summarized_tool_messages"] >= 1
+
+
+@pytest.mark.anyio
+async def test_agent_circuit_breaks_on_consecutive_tool_errors(tmp_path) -> None:
+    registry = ToolRegistry()
+    registry.register(BrokenTool())
+    # Generate 5 consecutive broken tool calls — one per iteration
+    responses = [
+        make_response(
+            tool_calls=[ToolCall(id=f"call_{i}", name="broken", arguments={"value": str(i)})],
+            finish_reason="tool_calls",
+        )
+        for i in range(5)
+    ]
+    model = FakeModel(responses)
+    agent = Agent(
+        name="reviewer",
+        model=model,
+        tool_registry=registry,
+        session=InMemorySession(),
+        max_iterations=10,
+    )
+
+    result = await agent.run("Inspect", ToolContext(workspace_root=tmp_path))
+
+    assert result.status == "failed"
+    assert "consecutive_tool_failures" in (result.failure_reason or "")
+    assert result.iterations == 5
+    tool_steps = [s for s in result.steps if s.type == "tool_call"]
+    assert len(tool_steps) == 5
+    for ts in tool_steps:
+        assert ts.tool_result_status == "error"
+
+
+@pytest.mark.anyio
+async def test_agent_resets_error_counter_on_success(tmp_path) -> None:
+    registry = ToolRegistry()
+    registry.register(BrokenTool())
+    registry.register(EchoTool())
+    # 3 broken + 1 echo success + 3 more broken => only 3 consecutive, no trip
+    responses = [
+        make_response(
+            tool_calls=[ToolCall(id=f"broken_{i}", name="broken", arguments={"value": str(i)})],
+            finish_reason="tool_calls",
+        )
+        for i in range(3)
+    ] + [
+        make_response(
+            tool_calls=[ToolCall(id="good", name="echo", arguments={"value": "ok"})],
+            finish_reason="tool_calls",
+        ),
+    ] + [
+        make_response(
+            tool_calls=[ToolCall(id=f"broken_{i}", name="broken", arguments={"value": str(i)})],
+            finish_reason="tool_calls",
+        )
+        for i in range(3, 6)
+    ] + [
+        make_response(content="done"),
+    ]
+    model = FakeModel(responses)
+    agent = Agent(
+        name="reviewer",
+        model=model,
+        tool_registry=registry,
+        session=InMemorySession(),
+        max_iterations=10,
+    )
+
+    result = await agent.run("Inspect", ToolContext(workspace_root=tmp_path))
+
+    assert result.status == "completed"
+    assert result.final_message is not None
+    assert result.final_message.content == "done"
+    tool_steps = [s for s in result.steps if s.type == "tool_call"]
+    assert len(tool_steps) == 7
+
+
+@pytest.mark.anyio
+async def test_agent_obeys_custom_max_consecutive_tool_errors(tmp_path) -> None:
+    registry = ToolRegistry()
+    registry.register(BrokenTool())
+    responses = [
+        make_response(
+            tool_calls=[ToolCall(id=f"call_{i}", name="broken", arguments={"value": str(i)})],
+            finish_reason="tool_calls",
+        )
+        for i in range(3)
+    ]
+    model = FakeModel(responses)
+    agent = Agent(
+        name="reviewer",
+        model=model,
+        tool_registry=registry,
+        session=InMemorySession(),
+        max_consecutive_tool_errors=3,
+        max_iterations=10,
+    )
+
+    result = await agent.run("Inspect", ToolContext(workspace_root=tmp_path))
+
+    assert result.status == "failed"
+    assert "consecutive_tool_failures" in (result.failure_reason or "")
+    assert result.iterations == 3

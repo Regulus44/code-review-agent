@@ -453,9 +453,7 @@ async def test_repo_analyst_review_applies_bounded_runtime_defaults(tmp_path: Pa
     )
     await service.execute_run(run.id)
 
-    assert run.max_iterations == 40
-    assert run.max_tokens == 8192
-    assert model.requests[0].max_tokens == 8192
+    assert run.max_iterations == 100
 
 
 @pytest.mark.anyio

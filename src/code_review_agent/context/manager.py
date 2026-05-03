@@ -57,6 +57,7 @@ class ContextManager:
         summarized_count = 0
         notes: list[str] = []
         total_tool_chars = 0
+        overflow_tool_preview_used = 0
 
         for index, message in enumerate(messages):
             if message.role != Role.TOOL or message.content is None:
@@ -73,7 +74,16 @@ class ContextManager:
                 0,
                 budget.max_total_tool_content_chars - total_tool_chars,
             )
-            effective_limit = min(limit, remaining_total_budget) if remaining_total_budget else 0
+            if remaining_total_budget > 0:
+                effective_limit = min(limit, remaining_total_budget)
+                overflow_mode = False
+            else:
+                remaining_overflow = max(
+                    0,
+                    budget.max_overflow_tool_preview_chars - overflow_tool_preview_used,
+                )
+                effective_limit = min(budget.overflow_tool_preview_chars, remaining_overflow)
+                overflow_mode = True
 
             if len(message.content) > effective_limit:
                 summarized_count += 1
@@ -82,13 +92,29 @@ class ContextManager:
                     if is_historical
                     else "large_recent_tool_result"
                 )
-                if remaining_total_budget == 0:
+                if remaining_total_budget == 0 and effective_limit == 0:
+                    reason = "overflow_tool_preview_budget_exceeded"
+                elif remaining_total_budget == 0:
                     reason = "total_tool_history_budget_exceeded"
-                message = self._summarize_tool_message(
-                    message,
-                    preview_chars=effective_limit,
-                    reason=reason,
-                )
+                if overflow_mode:
+                    remaining_overflow = max(
+                        0,
+                        budget.max_overflow_tool_preview_chars
+                        - overflow_tool_preview_used,
+                    )
+                    message, reason, used = self._summarize_overflow_tool_message(
+                        message,
+                        preview_chars=effective_limit,
+                        reason=reason,
+                        remaining_overflow_chars=remaining_overflow,
+                    )
+                    overflow_tool_preview_used += used
+                else:
+                    message = self._summarize_tool_message(
+                        message,
+                        preview_chars=effective_limit,
+                        reason=reason,
+                    )
                 if reason not in notes:
                     notes.append(reason)
 
@@ -96,6 +122,56 @@ class ContextManager:
             compacted.append(message)
 
         return compacted, summarized_count, notes
+
+    def _summarize_overflow_tool_message(
+        self,
+        message: Message,
+        *,
+        preview_chars: int,
+        reason: str,
+        remaining_overflow_chars: int,
+    ) -> tuple[Message, str, int]:
+        """Summarize a tool result while counting wrapper text against overflow."""
+        if remaining_overflow_chars <= 0:
+            return (
+                self._omit_tool_message(
+                    message,
+                    reason="overflow_tool_preview_budget_exceeded",
+                ),
+                "overflow_tool_preview_budget_exceeded",
+                0,
+            )
+
+        low = 0
+        high = preview_chars
+        best: Message | None = None
+        best_len = 0
+        while low <= high:
+            mid = (low + high) // 2
+            candidate = self._summarize_tool_message(
+                message,
+                preview_chars=mid,
+                reason=reason,
+            )
+            candidate_len = len(candidate.content or "")
+            if candidate_len <= remaining_overflow_chars:
+                best = candidate
+                best_len = candidate_len
+                low = mid + 1
+            else:
+                high = mid - 1
+
+        if best is not None:
+            return best, reason, best_len
+
+        return (
+            self._omit_tool_message(
+                message,
+                reason="overflow_tool_preview_budget_exceeded",
+            ),
+            "overflow_tool_preview_budget_exceeded",
+            0,
+        )
 
     def _summarize_tool_message(
         self,
@@ -124,6 +200,15 @@ class ContextManager:
             )
         else:
             content += "\n...[tool result omitted because tool history budget was exhausted]"
+        return message.model_copy(update={"content": content})
+
+    def _omit_tool_message(self, message: Message, *, reason: str) -> Message:
+        """Create the shortest useful placeholder once overflow budget is gone."""
+        original = message.content or ""
+        content = (
+            f"Tool result omitted. reason: {reason}; "
+            f"tool_name: {message.name or ''}; original_chars: {len(original)}"
+        )
         return message.model_copy(update={"content": content})
 
     def _trim_to_context_window(

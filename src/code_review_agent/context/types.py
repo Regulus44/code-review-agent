@@ -11,11 +11,13 @@ from code_review_agent.messages import Message
 class ContextBudget:
     """Character-based budget used before each model request."""
 
-    max_prompt_chars: int = 120_000
+    max_prompt_chars: int = 250_000
     recent_full_message_count: int = 12
     max_single_tool_message_chars: int = 20_000
     historical_tool_preview_chars: int = 2_000
-    max_total_tool_content_chars: int = 80_000
+    max_total_tool_content_chars: int = 400_000
+    overflow_tool_preview_chars: int = 500
+    max_overflow_tool_preview_chars: int = 20_000
 
 
 @dataclass(frozen=True)

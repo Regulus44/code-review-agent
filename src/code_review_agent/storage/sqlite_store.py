@@ -14,6 +14,10 @@ from code_review_agent.harness import AgentRunResult
 from code_review_agent.runtime.store import RunNotFoundError, RunStore
 from code_review_agent.runtime.types import RunEvent, RunRecord, RunStatus, utc_now
 
+LEGACY_REPO_REVIEW_PROMPT_MARKER = (
+    "summary, changed_files, test_result, findings, risks, next_steps"
+)
+
 
 def _normalize_database_url(database_url: str) -> str:
     if database_url.startswith("sqlite+aiosqlite://"):
@@ -35,6 +39,7 @@ class RunRow(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     app_name: Mapped[str | None] = mapped_column(String(128))
+    app_mode: Mapped[str | None] = mapped_column(String(64))
     user_input: Mapped[str] = mapped_column(Text, nullable=False)
     workspace_root: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -102,6 +107,30 @@ class SqliteRunStore(RunStore):
             connection.exec_driver_sql("ALTER TABLE runs ADD COLUMN provider VARCHAR")
         if "tool_names_json" not in columns:
             connection.exec_driver_sql("ALTER TABLE runs ADD COLUMN tool_names_json TEXT")
+        if "app_mode" not in columns:
+            connection.exec_driver_sql("ALTER TABLE runs ADD COLUMN app_mode VARCHAR(64)")
+        self._backfill_legacy_app_modes(connection)
+
+    def _backfill_legacy_app_modes(self, connection) -> None:
+        """Backfill app_mode for repo analyst runs created before app_mode existed."""
+        connection.exec_driver_sql(
+            """
+            UPDATE runs
+            SET app_mode = 'review'
+            WHERE app_name = 'repo_analyst'
+              AND app_mode IS NULL
+              AND system_prompt LIKE ?
+            """,
+            (f"%{LEGACY_REPO_REVIEW_PROMPT_MARKER}%",),
+        )
+        connection.exec_driver_sql(
+            """
+            UPDATE runs
+            SET app_mode = 'overview'
+            WHERE app_name = 'repo_analyst'
+              AND app_mode IS NULL
+            """,
+        )
 
     async def create_run(self, run: RunRecord) -> RunRecord:
         await self._ensure_initialized()
@@ -110,6 +139,7 @@ class SqliteRunStore(RunStore):
                 id=run.id,
                 status=run.status,
                 app_name=run.app_name,
+                app_mode=run.app_mode,
                 user_input=run.user_input,
                 workspace_root=run.workspace_root,
                 created_at=run.created_at,
@@ -353,6 +383,7 @@ class SqliteRunStore(RunStore):
             RunRow.id,
             RunRow.status,
             RunRow.app_name,
+            RunRow.app_mode,
             RunRow.user_input,
             RunRow.workspace_root,
             RunRow.created_at,
@@ -381,6 +412,7 @@ class SqliteRunStore(RunStore):
             id=row.id,
             status=row.status,
             app_name=row.app_name,
+            app_mode=row.app_mode,
             user_input=row.user_input,
             workspace_root=row.workspace_root,
             created_at=row.created_at,

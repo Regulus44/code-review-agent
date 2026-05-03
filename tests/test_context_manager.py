@@ -4,6 +4,23 @@ from code_review_agent.context import ContextBudget, ContextManager
 from code_review_agent.messages import Message, Role, ToolCall, assistant_message, system_message, user_message
 
 
+def _tool_exchange(index: int, content: str) -> list[Message]:
+    call_id = f"call_{index}"
+    return [
+        assistant_message(
+            tool_calls=[
+                ToolCall(id=call_id, name="read_file", arguments={"path": f"file_{index}.py"}),
+            ],
+        ),
+        Message(
+            role=Role.TOOL,
+            content=content,
+            name="read_file",
+            tool_call_id=call_id,
+        ),
+    ]
+
+
 def test_context_manager_keeps_small_context_unchanged() -> None:
     manager = ContextManager()
     messages = [
@@ -101,3 +118,63 @@ def test_context_manager_drops_old_messages_but_keeps_header_and_recent_suffix()
     assert result.messages[-2].content == "current question"
     assert result.messages[-1].content == "current answer"
     assert result.dropped_messages > 0
+
+
+def test_context_manager_keeps_limited_overflow_preview_after_tool_budget_exhausted() -> None:
+    manager = ContextManager()
+    messages = [system_message("system"), user_message("task")]
+    messages.extend(_tool_exchange(0, "a" * 2_000))
+    messages.extend(_tool_exchange(1, "b" * 2_000))
+
+    result = manager.build(
+        messages,
+        ContextBudget(
+            max_prompt_chars=20_000,
+            recent_full_message_count=20,
+            max_single_tool_message_chars=300,
+            max_total_tool_content_chars=250,
+            overflow_tool_preview_chars=300,
+            max_overflow_tool_preview_chars=700,
+        ),
+    )
+
+    tool_messages = [message for message in result.messages if message.role == Role.TOOL]
+    assert len(tool_messages) == 2
+    assert "large_recent_tool_result" in result.notes
+    assert "total_tool_history_budget_exceeded" in result.notes
+    assert tool_messages[1].content is not None
+    assert "reason: total_tool_history_budget_exceeded" in tool_messages[1].content
+    assert "preview_chars: 0" not in tool_messages[1].content
+    assert "b" * 20 in tool_messages[1].content
+
+
+def test_context_manager_uses_short_placeholder_after_overflow_budget_exhausted() -> None:
+    manager = ContextManager()
+    messages = [system_message("system"), user_message("task")]
+    for index in range(8):
+        messages.extend(_tool_exchange(index, str(index) * 2_000))
+
+    result = manager.build(
+        messages,
+        ContextBudget(
+            max_prompt_chars=50_000,
+            recent_full_message_count=40,
+            max_single_tool_message_chars=300,
+            max_total_tool_content_chars=250,
+            overflow_tool_preview_chars=300,
+            max_overflow_tool_preview_chars=600,
+        ),
+    )
+
+    tool_messages = [message for message in result.messages if message.role == Role.TOOL]
+    omitted_messages = [
+        message
+        for message in tool_messages
+        if message.content and "reason: overflow_tool_preview_budget_exceeded" in message.content
+    ]
+
+    assert "overflow_tool_preview_budget_exceeded" in result.notes
+    assert omitted_messages
+    assert all("preview_chars:" not in (message.content or "") for message in omitted_messages)
+    assert all(len(message.content or "") < 140 for message in omitted_messages)
+    assert result.final_tool_content_chars < result.original_tool_content_chars // 2

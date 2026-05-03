@@ -68,19 +68,9 @@ DEFAULT_SYSTEM_PROMPT = (
 TERMINAL_RUN_STATUSES = {"completed", "failed", "max_iterations", "cancelled", "model_output_truncated"}
 CANCELLED_BY_USER = "cancelled_by_user"
 DEFAULT_CONTEXT_BUDGET = ContextBudget()
-REPO_ANALYST_OVERVIEW_CONTEXT_BUDGET = ContextBudget(
-    max_prompt_chars=140_000,
-    recent_full_message_count=12,
-    max_single_tool_message_chars=20_000,
-    historical_tool_preview_chars=2_000,
-    max_total_tool_content_chars=80_000,
-)
-REPO_ANALYST_REVIEW_CONTEXT_BUDGET = ContextBudget(
-    max_prompt_chars=120_000,
-    recent_full_message_count=12,
-    max_single_tool_message_chars=20_000,
-    historical_tool_preview_chars=2_000,
-    max_total_tool_content_chars=80_000,
+REPO_ANALYST_CONTEXT_BUDGET = ContextBudget(
+    max_prompt_chars=250_000,
+    max_total_tool_content_chars=400_000,
 )
 BUILTIN_TOOL_FACTORIES: dict[str, ToolFactory] = {
     "list_files": ListFilesTool,
@@ -149,6 +139,7 @@ class AgentRuntime:
             id=uuid4().hex,
             status="queued",
             app_name=request.app_name,
+            app_mode=request.app_mode,
             user_input=request.user_input,
             workspace_root=str(resolved_workspace),
             system_prompt=request.system_prompt or self.default_system_prompt,
@@ -257,10 +248,7 @@ class AgentRuntime:
     def _context_budget_for_run(self, run: RunRecord) -> ContextBudget:
         """Return the model request context budget for this run."""
         if run.app_name == "repo_analyst":
-            system_prompt = run.system_prompt or ""
-            if "summary, changed_files, test_result, findings, risks, next_steps" in system_prompt:
-                return REPO_ANALYST_REVIEW_CONTEXT_BUDGET
-            return REPO_ANALYST_OVERVIEW_CONTEXT_BUDGET
+            return REPO_ANALYST_CONTEXT_BUDGET
         return DEFAULT_CONTEXT_BUDGET
 
     async def cancel_run(self, run_id: str) -> RunRecord:

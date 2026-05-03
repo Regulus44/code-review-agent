@@ -29,7 +29,6 @@ from code_review_agent.session.store import (
     SessionNotFoundError as AppSessionNotFoundError,
     TurnNotFoundError,
 )
-from code_review_agent.session.types import RepoAnalystMode
 from code_review_agent.settings import get_settings
 from code_review_agent.tools import ToolDescriptor
 
@@ -305,7 +304,6 @@ class CreateSessionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     workspace_root: str
-    mode: RepoAnalystMode = "review"
     max_iterations: int = Field(default=100, ge=1, le=200)
     max_tokens: int | None = Field(default=None, ge=1)
     provider: str | None = None

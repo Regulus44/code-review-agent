@@ -89,6 +89,7 @@ class RunRecord(BaseModel):
     id: str
     status: RunStatus
     app_name: str | None = None
+    app_mode: str | None = None
     user_input: str
     workspace_root: str
     created_at: datetime = Field(default_factory=utc_now)
@@ -114,6 +115,7 @@ class CreateRunRequest(BaseModel):
     user_input: str
     workspace_root: str
     app_name: str | None = None
+    app_mode: str | None = None
     system_prompt: str | None = None
     max_iterations: int | None = None
     temperature: float | None = None

@@ -113,6 +113,7 @@ class Agent:
         max_tokens: int | None = None,
         context_manager: ContextManager | None = None,
         context_budget: ContextBudget | None = None,
+        max_consecutive_tool_errors: int = 5,
     ) -> None:
         self.name = name
         self.model = model
@@ -124,6 +125,7 @@ class Agent:
         self.max_tokens = max_tokens
         self.context_manager = context_manager or ContextManager()
         self.context_budget = context_budget or ContextBudget()
+        self.max_consecutive_tool_errors = max_consecutive_tool_errors
 
     async def run(
         self,
@@ -145,6 +147,8 @@ class Agent:
         iterations = 0
         latest_assistant_message: Message | None = None
         usage = _UsageAccumulator()
+        consecutive_errors = 0
+        last_errors: list[str] = []
 
         for _ in range(self.max_iterations):
             next_iteration = iterations + 1
@@ -243,6 +247,14 @@ class Agent:
                 tool_finished_at = _utc_now()
                 tool_duration_ms = int((time.perf_counter() - tool_started_perf) * 1000)
 
+                if tool_result.status == "error":
+                    consecutive_errors += 1
+                    error_text = tool_result.content[:200].replace("\n", " ")
+                    last_errors.append(f"{tool_call.name}: {error_text}")
+                else:
+                    consecutive_errors = 0
+                    last_errors.clear()
+
                 if len(tool_result.content) > MAX_TOOL_CONTENT_CHARS:
                     tool_result = ToolExecutionResult(
                         tool_name=tool_result.tool_name,
@@ -273,6 +285,18 @@ class Agent:
                         duration_ms=tool_duration_ms,
                         metadata={"tool_name": tool_call.name},
                     ),
+                )
+
+            if consecutive_errors >= self.max_consecutive_tool_errors:
+                recent = last_errors[-self.max_consecutive_tool_errors:]
+                summary = "; ".join(recent)
+                return self._build_result(
+                    status="failed",
+                    final_message=latest_assistant_message,
+                    steps=steps,
+                    iterations=iterations,
+                    usage=usage.to_model_usage(),
+                    failure_reason=f"consecutive_tool_failures: {summary}",
                 )
 
         return self._build_result(

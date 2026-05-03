@@ -24,7 +24,6 @@ async def client():
 async def test_create_session(client: AsyncClient):
     resp = await client.post("/sessions", json={
         "workspace_root": ".",
-        "mode": "overview",
         "max_iterations": 8,
     })
     assert resp.status_code == 201
@@ -37,7 +36,7 @@ async def test_create_session(client: AsyncClient):
 @pytest.mark.anyio
 async def test_list_sessions(client: AsyncClient):
     await client.post("/sessions", json={
-        "workspace_root": ".", "mode": "overview",
+        "workspace_root": ".",
     })
     resp = await client.get("/sessions")
     assert resp.status_code == 200
@@ -47,7 +46,7 @@ async def test_list_sessions(client: AsyncClient):
 @pytest.mark.anyio
 async def test_get_session(client: AsyncClient):
     create_resp = await client.post("/sessions", json={
-        "workspace_root": ".", "mode": "overview",
+        "workspace_root": ".",
     })
     session_id = create_resp.json()["id"]
 
@@ -65,7 +64,7 @@ async def test_get_nonexistent_session(client: AsyncClient):
 @pytest.mark.anyio
 async def test_create_turn(client: AsyncClient):
     create_resp = await client.post("/sessions", json={
-        "workspace_root": ".", "mode": "overview", "max_iterations": 2,
+        "workspace_root": ".", "max_iterations": 2,
     })
     session_id = create_resp.json()["id"]
 
@@ -82,7 +81,7 @@ async def test_create_turn(client: AsyncClient):
 @pytest.mark.anyio
 async def test_create_turn_missing_message(client: AsyncClient):
     create_resp = await client.post("/sessions", json={
-        "workspace_root": ".", "mode": "overview",
+        "workspace_root": ".",
     })
     session_id = create_resp.json()["id"]
 
@@ -93,7 +92,7 @@ async def test_create_turn_missing_message(client: AsyncClient):
 @pytest.mark.anyio
 async def test_list_turns(client: AsyncClient):
     create_resp = await client.post("/sessions", json={
-        "workspace_root": ".", "mode": "overview", "max_iterations": 2,
+        "workspace_root": ".", "max_iterations": 2,
     })
     session_id = create_resp.json()["id"]
 
@@ -105,7 +104,7 @@ async def test_list_turns(client: AsyncClient):
 @pytest.mark.anyio
 async def test_get_messages(client: AsyncClient):
     create_resp = await client.post("/sessions", json={
-        "workspace_root": ".", "mode": "overview",
+        "workspace_root": ".",
     })
     session_id = create_resp.json()["id"]
 
@@ -117,7 +116,7 @@ async def test_get_messages(client: AsyncClient):
 @pytest.mark.anyio
 async def test_archive_session(client: AsyncClient):
     create_resp = await client.post("/sessions", json={
-        "workspace_root": ".", "mode": "overview",
+        "workspace_root": ".",
     })
     session_id = create_resp.json()["id"]
 

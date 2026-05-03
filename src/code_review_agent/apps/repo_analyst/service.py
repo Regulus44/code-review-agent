@@ -39,8 +39,6 @@ REPO_ANALYST_REVIEW_TOOLS = [
 REPO_ANALYST_KNOWN_TOOLS = set(REPO_ANALYST_OVERVIEW_TOOLS) | set(
     REPO_ANALYST_REVIEW_TOOLS,
 )
-REPO_REVIEW_DEFAULT_MAX_TOKENS = 8192
-REPO_REVIEW_MAX_ITERATIONS = 40
 MAX_DETAIL_RESULT_JSON_CHARS = 10_000_000
 
 
@@ -64,16 +62,13 @@ class RepoAnalystService:
         )
         max_iterations = request.max_iterations
         max_tokens = request.max_tokens
-        if request.mode == "review":
-            max_iterations = min(max_iterations, REPO_REVIEW_MAX_ITERATIONS)
-            if max_tokens is None:
-                max_tokens = REPO_REVIEW_DEFAULT_MAX_TOKENS
 
         return await self.runtime.create_run(
             CreateRunRequest(
                 user_input=question,
                 workspace_root=request.workspace_root,
                 app_name=APP_NAME,
+                app_mode=request.mode,
                 system_prompt=build_repo_analyst_prompt(question, mode=request.mode),
                 max_iterations=max_iterations,
                 temperature=request.temperature,
@@ -222,8 +217,7 @@ class RepoAnalystService:
         )
 
     def _run_mode(self, run) -> RepoAnalystMode:
-        system_prompt = run.system_prompt or ""
-        if "summary, changed_files, test_result, findings, risks, next_steps" in system_prompt:
+        if getattr(run, "app_mode", None) == "review":
             return "review"
         return "overview"
 

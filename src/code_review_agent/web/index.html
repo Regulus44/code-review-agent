@@ -1704,7 +1704,6 @@ async function sendMessage() {
         method: "POST",
         body: JSON.stringify({
           workspace_root: wsRoot,
-          mode: "review",
           max_iterations: parseInt(cfgMaxIterations.value) || 100,
           max_tokens: cfgMaxTokens.value ? parseInt(cfgMaxTokens.value) : undefined,
           provider: providerSelect.value || undefined,

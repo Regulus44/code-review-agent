@@ -111,3 +111,62 @@ async def test_sqlite_store_lists_runs_in_reverse_creation_order(tmp_path: Path)
     await store.aclose()
 
     assert [item.id for item in runs] == ["run_two", "run_one"]
+
+
+@pytest.mark.anyio
+async def test_sqlite_store_backfills_legacy_repo_analyst_app_modes(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "runtime.db"
+    database_url = make_database_url(db_path)
+    review_prompt = (
+        "Return JSON with summary, changed_files, test_result, findings, risks, next_steps."
+    )
+
+    store = SqliteRunStore(database_url)
+    await store.create_run(
+        RunRecord(
+            id="legacy_review",
+            status="completed",
+            app_name="repo_analyst",
+            app_mode=None,
+            user_input="review recent changes",
+            workspace_root=str(tmp_path),
+            system_prompt=review_prompt,
+            max_iterations=100,
+        ),
+    )
+    await store.create_run(
+        RunRecord(
+            id="legacy_overview",
+            status="completed",
+            app_name="repo_analyst",
+            app_mode=None,
+            user_input="summarize repo",
+            workspace_root=str(tmp_path),
+            system_prompt="Return JSON with summary, modules, architecture, risks, next_steps.",
+            max_iterations=100,
+        ),
+    )
+    await store.create_run(
+        RunRecord(
+            id="generic_run",
+            status="completed",
+            app_name=None,
+            app_mode=None,
+            user_input="plain run",
+            workspace_root=str(tmp_path),
+            max_iterations=8,
+        ),
+    )
+    await store.aclose()
+
+    reloaded = SqliteRunStore(database_url)
+    review = await reloaded.get_run("legacy_review")
+    overview = await reloaded.get_run("legacy_overview")
+    generic = await reloaded.get_run("generic_run")
+    await reloaded.aclose()
+
+    assert review.app_mode == "review"
+    assert overview.app_mode == "overview"
+    assert generic.app_mode is None
