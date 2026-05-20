@@ -177,6 +177,34 @@ Health check:
 curl http://127.0.0.1:8000/health
 ```
 
+## Start with Docker Compose
+
+The Docker setup keeps service code, persisted data, and reviewed repositories
+on separate paths:
+
+```text
+/app         service code
+/data        SQLite runtime database
+/workspaces  allowed repository mount root
+```
+
+Build and start:
+
+```bash
+docker compose up --build
+```
+
+Then open `http://127.0.0.1:8000/`.
+
+By default, Compose mounts the current repository at:
+
+```text
+/workspaces/code-review-agent
+```
+
+Use that container path as `workspace_root` in the UI or API. To review another
+repository, set `CODE_REVIEW_WORKSPACE_HOST_ROOT` before starting Compose.
+
 ## Web UI
 
 The built-in UI is a local, single-page workspace for persistent sessions.

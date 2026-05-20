@@ -114,6 +114,7 @@ class Agent:
         context_manager: ContextManager | None = None,
         context_budget: ContextBudget | None = None,
         max_consecutive_tool_errors: int = 5,
+        persist_system_prompt: bool = True,
     ) -> None:
         self.name = name
         self.model = model
@@ -126,6 +127,7 @@ class Agent:
         self.context_manager = context_manager or ContextManager()
         self.context_budget = context_budget or ContextBudget()
         self.max_consecutive_tool_errors = max_consecutive_tool_errors
+        self.persist_system_prompt = persist_system_prompt
 
     async def run(
         self,
@@ -137,8 +139,11 @@ class Agent:
         if reset_session:
             self.session.clear()
 
-        if self.system_prompt and not self.session.get_messages():
+        transient_system_prompt = None
+        if self.system_prompt and self.persist_system_prompt and not self.session.get_messages():
             self.session.append(system_message(self.system_prompt))
+        elif self.system_prompt:
+            transient_system_prompt = self.system_prompt
 
         self.session.append(user_message(user_input))
 
@@ -155,8 +160,14 @@ class Agent:
             model_started_at = _utc_now()
             model_started_perf = time.perf_counter()
             try:
+                model_messages = self.session.get_messages()
+                if transient_system_prompt:
+                    model_messages = [
+                        system_message(transient_system_prompt),
+                        *model_messages,
+                    ]
                 context_result = self.context_manager.build(
-                    self.session.get_messages(),
+                    model_messages,
                     self.context_budget,
                 )
                 response = await self.model.complete(

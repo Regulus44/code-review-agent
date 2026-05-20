@@ -163,6 +163,33 @@ http://127.0.0.1:8000/
 curl http://127.0.0.1:8000/health
 ```
 
+## 使用 Docker Compose 启动
+
+Docker 配置把服务代码、持久数据和被审查仓库拆到固定路径：
+
+```text
+/app         服务代码
+/data        SQLite runtime 数据库
+/workspaces 允许访问的仓库挂载根
+```
+
+构建并启动：
+
+```bash
+docker compose up --build
+```
+
+然后打开 `http://127.0.0.1:8000/`。
+
+默认情况下，Compose 会把当前仓库挂载到：
+
+```text
+/workspaces/code-review-agent
+```
+
+在 UI 或 API 中创建 session/run 时，`workspace_root` 应使用这个容器内路径。
+如需审查其他仓库，启动前设置 `CODE_REVIEW_WORKSPACE_HOST_ROOT`。
+
 ## Web UI
 
 内置 Web UI 是一个本地单页工作台，主要围绕持久化 Session 使用。

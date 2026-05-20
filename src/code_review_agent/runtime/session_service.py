@@ -22,6 +22,12 @@ from code_review_agent.session.types import (
     SessionTurn,
     TurnStatus,
 )
+from code_review_agent.skills import (
+    LlmSkillRouter,
+    SkillCatalog,
+    SkillDefinition,
+    SkillSelectionResult,
+)
 from code_review_agent.tools import ToolContext, ToolRegistry
 from code_review_agent.tools.policy import filter_tool_registry
 
@@ -54,6 +60,8 @@ class SessionService:
         model_factory=None,
         tool_registry_factory=None,
         context_budget_factory=None,
+        skill_catalog: SkillCatalog | None = None,
+        skill_router: LlmSkillRouter | None = None,
         run_timeout_seconds: int = 300,
     ) -> None:
         self._store = store
@@ -61,6 +69,8 @@ class SessionService:
         self.model_factory = model_factory
         self.tool_registry_factory = tool_registry_factory
         self.context_budget_factory = context_budget_factory
+        self.skill_catalog = skill_catalog
+        self.skill_router = skill_router
         self.run_timeout_seconds = run_timeout_seconds
         self._active_turns: dict[str, asyncio.Task] = {}
         self._logger = logging.getLogger(__name__)
@@ -84,8 +94,16 @@ class SessionService:
     async def get_messages(self, session_id: str, *, since_sequence: int = 0) -> list[Message]:
         return await self._store.get_messages(session_id, since_sequence=since_sequence)
 
-    async def get_messages_with_sequence(self, session_id: str, *, since_sequence: int = 0) -> list[dict]:
-        return await self._store.get_messages_with_sequence(session_id, since_sequence=since_sequence)
+    async def get_messages_with_sequence(
+        self,
+        session_id: str,
+        *,
+        since_sequence: int = 0,
+    ) -> list[dict]:
+        return await self._store.get_messages_with_sequence(
+            session_id,
+            since_sequence=since_sequence,
+        )
 
     async def list_turns(self, session_id: str):
         return await self._store.list_turns(session_id)
@@ -181,15 +199,7 @@ class SessionService:
                 session.append(history)
 
             raw_model = self.model_factory(session_record.provider, session_record.model)
-            model = emitter.wrap_model(raw_model)
-
-            await self._store.update_turn(
-                turn_id, status="running", started_at=utc_now(),
-            )
-
-            registry = self.tool_registry_factory()
-            if session_record.tool_names is not None:
-                registry = filter_tool_registry(registry, session_record.tool_names)
+            model = raw_model
 
             budget = (
                 self.context_budget_factory(session_record)
@@ -197,15 +207,56 @@ class SessionService:
                 else ContextBudget()
             )
 
+            await self._store.update_turn(
+                turn_id, status="running", started_at=utc_now(),
+            )
+
+            skill_selection = await self._select_skills(
+                model=raw_model,
+                user_input=turn.user_input,
+                history=history,
+                workspace_root=session_record.workspace_root,
+            )
+            selected_skills = self._skills_from_selection(
+                skill_selection.selected_skills,
+            )
+            if self.skill_router is not None:
+                await emitter.emit(
+                    legacy_type="skill_selection",
+                    event_type="skill.selected"
+                    if not skill_selection.error
+                    else "skill.selection_failed",
+                    payload={
+                        "selected_skills": [skill.name for skill in selected_skills],
+                        "requested_skills": skill_selection.selected_skills,
+                        "confidence": skill_selection.confidence,
+                        "reason": skill_selection.reason,
+                        "error": skill_selection.error,
+                    },
+                    status="success" if not skill_selection.error else "failed",
+                    failure_reason=skill_selection.error,
+                )
+
+            model = emitter.wrap_model(raw_model)
+            registry = self._apply_skill_tool_policy(
+                self.tool_registry_factory(),
+                session_record=session_record,
+                selected_skills=selected_skills,
+            )
+
             agent = Agent(
                 name=self.agent_name,
                 model=model,
                 tool_registry=registry,
                 session=session,
-                system_prompt=session_record.system_prompt,
+                system_prompt=self._build_turn_system_prompt(
+                    session_record.system_prompt,
+                    selected_skills,
+                ),
                 max_iterations=session_record.max_iterations,
                 max_tokens=session_record.max_tokens,
                 context_budget=budget,
+                persist_system_prompt=False,
             )
 
             tool_context = ToolContext(
@@ -329,6 +380,86 @@ class SessionService:
 
         finally:
             await aclose_model_if_needed(model)
+
+    async def _select_skills(
+        self,
+        *,
+        model,
+        user_input: str,
+        history: list[Message],
+        workspace_root: str,
+    ) -> SkillSelectionResult:
+        if self.skill_router is None:
+            return SkillSelectionResult(reason="skill router disabled")
+        return await self.skill_router.select(
+            model=model,
+            user_input=user_input,
+            history=history,
+            workspace_root=workspace_root,
+        )
+
+    def _skills_from_selection(self, selected_names: list[str]) -> list[SkillDefinition]:
+        if self.skill_catalog is None:
+            return []
+        skills: list[SkillDefinition] = []
+        for name in selected_names:
+            skill = self.skill_catalog.get(name)
+            if skill is not None:
+                skills.append(skill)
+        return skills
+
+    def _build_turn_system_prompt(
+        self,
+        base_prompt: str | None,
+        selected_skills: list[SkillDefinition],
+    ) -> str | None:
+        parts: list[str] = []
+        if base_prompt:
+            parts.append(base_prompt.strip())
+        if selected_skills:
+            skill_sections = [
+                f"## Active skill: {skill.display_name} ({skill.name})\n\n"
+                f"{skill.prompt.strip()}"
+                for skill in selected_skills
+            ]
+            parts.append(
+                "The following skills are active for this turn. "
+                "Follow their instructions when they are relevant.\n\n"
+                + "\n\n".join(skill_sections)
+            )
+        if not parts:
+            return None
+        return "\n\n".join(parts)
+
+    def _apply_skill_tool_policy(
+        self,
+        registry: ToolRegistry,
+        *,
+        session_record: SessionRecord,
+        selected_skills: list[SkillDefinition],
+    ) -> ToolRegistry:
+        available_order = [tool.name for tool in registry.list_tools()]
+        available = set(available_order)
+        allowed = (
+            set(session_record.tool_names)
+            if session_record.tool_names is not None
+            else set(available)
+        )
+
+        skill_tools: set[str] = set()
+        for skill in selected_skills:
+            skill_tools.update(skill.tools)
+
+        if skill_tools:
+            target = allowed & skill_tools & available
+        else:
+            target = allowed & available
+
+        if not target and session_record.tool_names is None:
+            return registry
+
+        ordered_target = [name for name in available_order if name in target]
+        return filter_tool_registry(registry, ordered_target)
 
     async def recover_stale_sessions(self) -> int:
         """Recover stale sessions after server restart."""

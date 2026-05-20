@@ -259,6 +259,18 @@ def test_model_providers_endpoint_requires_api_key_for_remote_request() -> None:
     assert response.status_code == 401
 
 
+def test_skills_endpoint_returns_skill_descriptors() -> None:
+    client = build_client()
+
+    response = client.get("/skills")
+
+    assert response.status_code == 200
+    payload = response.json()
+    names = {skill["name"] for skill in payload}
+    assert "code-review" in names
+    assert "prompt" not in payload[0]
+
+
 def test_tools_endpoint_marks_disabled_tools_from_runtime_policy() -> None:
     enabled_tools = ("list_files", "read_file")
     runtime = AgentRuntime(

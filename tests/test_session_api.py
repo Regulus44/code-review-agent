@@ -14,7 +14,10 @@ from code_review_agent.session.types import SessionRecord, SessionTurn
 
 @pytest.fixture
 async def client():
-    app = create_app(session_store=InMemorySessionStore())
+    app = create_app(
+        session_store=InMemorySessionStore(),
+        enable_skill_routing=False,
+    )
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
@@ -150,7 +153,7 @@ async def test_get_turn_events_strips_and_truncates_payload():
         ),
     )
 
-    app = create_app(session_store=store)
+    app = create_app(session_store=store, enable_skill_routing=False)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         stripped = await ac.get("/sessions/sess-events/turns/turn-events/events")
@@ -184,7 +187,7 @@ async def test_get_turn_events_rejects_wrong_session():
         ),
     )
 
-    app = create_app(session_store=store)
+    app = create_app(session_store=store, enable_skill_routing=False)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         response = await ac.get("/sessions/sess-b/turns/turn-a/events")
@@ -222,7 +225,7 @@ async def test_get_turn_diagnostics_allows_running_turn():
         ),
     )
 
-    app = create_app(session_store=store)
+    app = create_app(session_store=store, enable_skill_routing=False)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         response = await ac.get("/sessions/sess-diag/turns/turn-diag/diagnostics")

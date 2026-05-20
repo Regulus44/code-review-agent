@@ -187,7 +187,7 @@ async def test_search_text_uses_rg_when_available(
         return subprocess.CompletedProcess(
             args=args[0],
             returncode=0,
-            stdout="src/main.py:2:1:needle here\n",
+            stdout="src/main.py:2:1:needle: here\n",
             stderr="",
         )
 
@@ -206,10 +206,12 @@ async def test_search_text_uses_rg_when_available(
     assert result.data is not None
     assert result.data["backend"] == "rg"
     assert result.data["matches"] == [
-        {"path": "src/main.py", "line_number": 2, "line_text": "needle here"},
+        {"path": "src/main.py", "line_number": 2, "line_text": "needle: here"},
     ]
     assert observed["cwd"] == tmp_path
     assert "--vimgrep" in observed["command"]
+    assert "--max-filesize" in observed["command"]
+    assert "512K" in observed["command"]
     assert "-g" in observed["command"]
 
 

@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from code_review_agent.messages import Message, Role
 
+from .token_estimator import estimate_messages_tokens
 from .types import ContextBudget, ContextBuildResult
+
+
+@dataclass(frozen=True)
+class _MessageGroup:
+    """A trimming unit that should not be split across context compaction."""
+
+    indices: tuple[int, ...]
 
 
 class ContextManager:
@@ -19,26 +29,35 @@ class ContextManager:
         budget = budget or ContextBudget()
         original_messages = [message.model_copy(deep=True) for message in messages]
         original_chars = self.messages_context_chars(original_messages)
+        original_tokens = estimate_messages_tokens(original_messages)
         original_tool_chars = self.tool_content_chars(original_messages)
 
         compacted, summarized_count, notes = self._compact_tool_messages(
             original_messages,
             budget,
         )
-        if self.messages_context_chars(compacted) > budget.max_prompt_chars:
-            compacted, dropped_count = self._trim_to_context_window(compacted, budget)
+        if self._exceeds_budget(compacted, budget):
+            compacted, dropped_count, trim_notes = self._trim_to_context_window(
+                compacted,
+                budget,
+            )
+            notes.extend(note for note in trim_notes if note not in notes)
             if dropped_count:
                 notes.append("old_messages_dropped_to_fit_prompt_budget")
         else:
             dropped_count = 0
 
         final_chars = self.messages_context_chars(compacted)
+        final_tokens = estimate_messages_tokens(compacted)
         return ContextBuildResult(
             messages=compacted,
             original_message_count=len(messages),
             final_message_count=len(compacted),
             original_chars=original_chars,
             final_chars=final_chars,
+            original_estimated_tokens=original_tokens,
+            final_estimated_tokens=final_tokens,
+            max_prompt_tokens=budget.max_prompt_tokens,
             summarized_tool_messages=summarized_count,
             dropped_messages=dropped_count,
             original_tool_content_chars=original_tool_chars,
@@ -215,60 +234,146 @@ class ContextManager:
         self,
         messages: list[Message],
         budget: ContextBudget,
-    ) -> tuple[list[Message], int]:
-        """Keep stable task header plus the latest contiguous suffix."""
+    ) -> tuple[list[Message], int, list[str]]:
+        """Keep stable task header plus the latest contiguous suffix by groups."""
         if not messages:
-            return [], 0
+            return [], 0, []
 
-        header_indices = self._header_indices(messages)
-        header_chars = self.messages_context_chars(
-            [messages[index] for index in header_indices],
+        notes: list[str] = []
+        groups = self._message_groups(messages)
+        header_group_positions = self._header_group_positions(messages, groups)
+        selected_group_positions = set(header_group_positions)
+
+        selected = self._messages_for_group_positions(
+            messages,
+            groups,
+            selected_group_positions,
         )
-        remaining_budget = max(0, budget.max_prompt_chars - header_chars)
+        if self._exceeds_budget(selected, budget):
+            notes.append("stable_header_exceeds_prompt_budget")
+            selected_group_positions = {
+                position
+                for position in header_group_positions
+                if self._group_has_role(messages, groups[position], Role.SYSTEM)
+            }
+            selected = self._messages_for_group_positions(
+                messages,
+                groups,
+                selected_group_positions,
+            )
+            if self._exceeds_budget(selected, budget):
+                notes.append("stable_system_exceeds_prompt_budget")
 
-        suffix_start = len(messages)
-        suffix_chars = 0
-        for index in range(len(messages) - 1, -1, -1):
-            if index in header_indices:
+        for group_position in range(len(groups) - 1, -1, -1):
+            if group_position in selected_group_positions:
                 continue
 
-            message_chars = self.message_context_chars(messages[index])
-            if suffix_chars and suffix_chars + message_chars > remaining_budget:
-                break
-            suffix_chars += message_chars
-            suffix_start = index
+            candidate_positions = selected_group_positions | {group_position}
+            candidate = self._messages_for_group_positions(
+                messages,
+                groups,
+                candidate_positions,
+            )
+            if not self._exceeds_budget(candidate, budget):
+                selected_group_positions.add(group_position)
+                continue
 
-        while suffix_start > 0 and messages[suffix_start].role == Role.TOOL:
-            suffix_start -= 1
+            if not selected_group_positions:
+                selected_group_positions.add(group_position)
+                continue
 
-        selected_indices = {
-            index
-            for index in header_indices
-            if index < suffix_start
-        }
-        selected_indices.update(range(suffix_start, len(messages)))
-        selected = [
+            break
+
+        selected = self._messages_for_group_positions(
+            messages,
+            groups,
+            selected_group_positions,
+        )
+        return selected, len(messages) - len(selected), notes
+
+    def _message_groups(self, messages: list[Message]) -> list[_MessageGroup]:
+        """Group assistant tool calls with their consecutive tool results."""
+        groups: list[_MessageGroup] = []
+        index = 0
+        while index < len(messages):
+            message = messages[index]
+            if message.role == Role.ASSISTANT and message.tool_calls:
+                tool_call_ids = {tool_call.id for tool_call in message.tool_calls}
+                group_indices = [index]
+                index += 1
+                while (
+                    index < len(messages)
+                    and messages[index].role == Role.TOOL
+                    and messages[index].tool_call_id in tool_call_ids
+                ):
+                    group_indices.append(index)
+                    index += 1
+                groups.append(_MessageGroup(tuple(group_indices)))
+                continue
+
+            groups.append(_MessageGroup((index,)))
+            index += 1
+
+        return groups
+
+    def _header_group_positions(
+        self,
+        messages: list[Message],
+        groups: list[_MessageGroup],
+    ) -> list[int]:
+        """Return stable header group positions useful for cache reuse."""
+        header_group_positions: list[int] = []
+        first_user_seen = False
+        for position, group in enumerate(groups):
+            group_messages = [messages[index] for index in group.indices]
+            if any(message.role == Role.SYSTEM for message in group_messages):
+                header_group_positions.append(position)
+            elif (
+                not first_user_seen
+                and len(group_messages) == 1
+                and group_messages[0].role == Role.USER
+            ):
+                header_group_positions.append(position)
+                first_user_seen = True
+        return header_group_positions
+
+    def _messages_for_group_positions(
+        self,
+        messages: list[Message],
+        groups: list[_MessageGroup],
+        group_positions: set[int],
+    ) -> list[Message]:
+        """Flatten selected groups in original order."""
+        selected_indices: set[int] = set()
+        for position in sorted(group_positions):
+            selected_indices.update(groups[position].indices)
+        return [
             message
             for index, message in enumerate(messages)
             if index in selected_indices
         ]
-        return selected, len(messages) - len(selected)
 
-    def _header_indices(self, messages: list[Message]) -> list[int]:
-        """Return stable prefix message indices useful for cache reuse."""
-        header_indices: list[int] = []
-        first_user_seen = False
-        for index, message in enumerate(messages):
-            if message.role == Role.SYSTEM:
-                header_indices.append(index)
-            elif message.role == Role.USER and not first_user_seen:
-                header_indices.append(index)
-                first_user_seen = True
-        return header_indices
+    def _group_has_role(
+        self,
+        messages: list[Message],
+        group: _MessageGroup,
+        role: Role,
+    ) -> bool:
+        """Return whether a group contains a message role."""
+        return any(messages[index].role == role for index in group.indices)
 
     def messages_context_chars(self, messages: list[Message]) -> int:
         """Approximate the formatted request context size in characters."""
         return sum(self.message_context_chars(message) for message in messages)
+
+    def _exceeds_budget(self, messages: list[Message], budget: ContextBudget) -> bool:
+        """Return whether messages exceed either configured prompt budget."""
+        if self.messages_context_chars(messages) > budget.max_prompt_chars:
+            return True
+        return (
+            budget.max_prompt_tokens is not None
+            and estimate_messages_tokens(messages) > budget.max_prompt_tokens
+        )
 
     def message_context_chars(self, message: Message) -> int:
         """Approximate one message's formatted size."""

@@ -35,7 +35,11 @@ build-backend = "setuptools.build_meta"
 package-dir = {"" = "src"}
 
 [tool.setuptools.package-data]
-"code_review_agent" = ["web/*.html"]
+"code_review_agent" = [
+    "web/*.html",
+    "skills/catalog/*/skill.json",
+    "skills/catalog/*/SKILL.md",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

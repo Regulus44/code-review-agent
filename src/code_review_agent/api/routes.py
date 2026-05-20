@@ -30,6 +30,7 @@ from code_review_agent.session.store import (
     TurnNotFoundError,
 )
 from code_review_agent.settings import get_settings
+from code_review_agent.skills import SkillDescriptor, load_builtin_skill_catalog
 from code_review_agent.tools import ToolDescriptor
 
 router = APIRouter()
@@ -49,6 +50,11 @@ def get_repo_analyst_service(request: Request) -> RepoAnalystService:
 def get_session_service(request: Request) -> SessionService:
     """Get the session service from application state."""
     return request.app.state.session_service
+
+
+def get_skill_catalog(request: Request):
+    """Get the skill catalog from application state."""
+    return getattr(request.app.state, "skill_catalog", load_builtin_skill_catalog())
 
 
 def _request_host(request: Request) -> str:
@@ -132,6 +138,13 @@ async def list_providers(request: Request) -> list[ModelProviderDescriptor]:
     """List model providers and model names known to the runtime."""
     _enforce_api_key(request)
     return list_model_providers()
+
+
+@router.get("/skills", response_model=list[SkillDescriptor])
+async def list_skills(request: Request) -> list[SkillDescriptor]:
+    """List skills known to the automatic skill router."""
+    _enforce_api_key(request)
+    return get_skill_catalog(request).descriptors()
 
 
 @router.post("/runs", status_code=status.HTTP_202_ACCEPTED)

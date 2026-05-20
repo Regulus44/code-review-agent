@@ -1,6 +1,11 @@
 """Tests for context budgeting."""
 
-from code_review_agent.context import ContextBudget, ContextManager
+from code_review_agent.context import (
+    ContextBudget,
+    ContextManager,
+    estimate_string_chars,
+    estimate_tokens_from_chars,
+)
 from code_review_agent.messages import Message, Role, ToolCall, assistant_message, system_message, user_message
 
 
@@ -34,6 +39,30 @@ def test_context_manager_keeps_small_context_unchanged() -> None:
     assert [message.content for message in result.messages] == ["system", "task", "answer"]
     assert result.summarized_tool_messages == 0
     assert result.dropped_messages == 0
+
+
+def test_context_manager_estimates_cjk_tokens_with_safety_margin() -> None:
+    assert estimate_tokens_from_chars(estimate_string_chars("hello")) == 2
+    assert estimate_tokens_from_chars(estimate_string_chars("你好世界")) == 5
+
+
+def test_context_manager_metadata_contains_estimated_tokens() -> None:
+    manager = ContextManager()
+    messages = [
+        system_message("system"),
+        user_message("请审查这个改动"),
+        assistant_message("ok"),
+    ]
+
+    result = manager.build(messages, ContextBudget(max_prompt_tokens=1_000))
+    metadata = result.to_metadata()
+
+    assert result.original_estimated_tokens > 0
+    assert result.final_estimated_tokens > 0
+    assert metadata["context_original_estimated_tokens"] == result.original_estimated_tokens
+    assert metadata["context_final_estimated_tokens"] == result.final_estimated_tokens
+    assert metadata["context_max_prompt_tokens"] == 1_000
+    assert isinstance(metadata["context_token_budget_utilization"], float)
 
 
 def test_context_manager_summarizes_historical_large_tool_message() -> None:
@@ -118,6 +147,51 @@ def test_context_manager_drops_old_messages_but_keeps_header_and_recent_suffix()
     assert result.messages[-2].content == "current question"
     assert result.messages[-1].content == "current answer"
     assert result.dropped_messages > 0
+
+
+def test_context_manager_does_not_split_tool_exchange_when_trimming() -> None:
+    manager = ContextManager()
+    messages = [system_message("system"), user_message("first task")]
+    for index in range(4):
+        messages.append(user_message(f"old question {index} " + ("x" * 300)))
+        messages.append(assistant_message(f"old answer {index} " + ("y" * 300)))
+    messages.extend(_tool_exchange(99, "current result"))
+
+    result = manager.build(
+        messages,
+        ContextBudget(max_prompt_chars=180, recent_full_message_count=4),
+    )
+
+    assistant_call_ids = {
+        tool_call.id
+        for message in result.messages
+        if message.role == Role.ASSISTANT
+        for tool_call in message.tool_calls
+    }
+    tool_result_ids = {
+        message.tool_call_id
+        for message in result.messages
+        if message.role == Role.TOOL
+    }
+    assert "call_99" in assistant_call_ids
+    assert tool_result_ids == {"call_99"}
+    assert tool_result_ids <= assistant_call_ids
+
+
+def test_context_manager_notes_when_stable_header_exceeds_budget() -> None:
+    manager = ContextManager()
+    messages = [
+        system_message("system"),
+        user_message("x" * 1_000),
+        user_message("current task"),
+    ]
+
+    result = manager.build(messages, ContextBudget(max_prompt_chars=100))
+
+    assert "stable_header_exceeds_prompt_budget" in result.notes
+    assert result.messages[0].role == Role.SYSTEM
+    assert result.messages[-1].content == "current task"
+    assert all(message.content != "x" * 1_000 for message in result.messages)
 
 
 def test_context_manager_keeps_limited_overflow_preview_after_tool_budget_exhausted() -> None:

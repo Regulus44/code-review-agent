@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -45,6 +46,10 @@ BINARY_EXTENSIONS = frozenset({
 SENSITIVE_FILE_NAMES = frozenset({".env", ".env.local", ".env.production", ".env.staging"})
 
 MAX_SEARCH_FILE_SIZE_BYTES = 512 * 1024
+RG_MAX_SEARCH_FILE_SIZE = "512K"
+RG_VIMGREP_LINE_RE = re.compile(
+    r"^(?P<path>.*):(?P<line>\d+):(?P<column>\d+):(?P<text>.*)$",
+)
 
 MAX_MATCH_LINE_CHARS = 500
 
@@ -440,7 +445,7 @@ class SearchTextTool(Tool):
             "--no-heading",
             "-F",
             "--max-filesize",
-            "512k",
+            RG_MAX_SEARCH_FILE_SIZE,
             "--max-columns",
             "1000",
             "--max-columns-preview",
@@ -485,10 +490,12 @@ class SearchTextTool(Tool):
 
         matches: list[dict[str, Any]] = []
         for line in completed.stdout.splitlines():
-            parts = line.split(":", 3)
-            if len(parts) != 4:
+            match = RG_VIMGREP_LINE_RE.match(line)
+            if match is None:
                 continue
-            raw_path, raw_line, _column, line_text = parts
+            raw_path = match.group("path")
+            raw_line = match.group("line")
+            line_text = match.group("text")
             file_path = Path(raw_path)
             if not file_path.is_absolute():
                 file_path = (workspace_root / file_path).resolve(strict=False)

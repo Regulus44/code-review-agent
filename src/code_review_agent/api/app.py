@@ -12,6 +12,7 @@ from code_review_agent.runtime import AgentRuntime, build_default_runtime
 from code_review_agent.runtime.session_service import SessionService
 from code_review_agent.session.store import SessionStore
 from code_review_agent.settings import get_settings
+from code_review_agent.skills import LlmSkillRouter, load_builtin_skill_catalog
 from code_review_agent.storage import SqliteSessionStore
 
 from .routes import router
@@ -19,7 +20,12 @@ from .routes import router
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 
-def create_app(runtime: AgentRuntime | None = None, session_store: SessionStore | None = None) -> FastAPI:
+def create_app(
+    runtime: AgentRuntime | None = None,
+    session_store: SessionStore | None = None,
+    *,
+    enable_skill_routing: bool = True,
+) -> FastAPI:
     """Create the runtime API application.
 
     Parameters:
@@ -35,12 +41,16 @@ def create_app(runtime: AgentRuntime | None = None, session_store: SessionStore 
     app.state.api_key = settings.api_key
 
     store = session_store or SqliteSessionStore(settings.database_url)
+    skill_catalog = load_builtin_skill_catalog()
     app.state.session_service = SessionService(
         store=store,
         model_factory=runtime.model_factory,
         tool_registry_factory=runtime.tool_registry_factory,
         run_timeout_seconds=runtime.run_timeout_seconds,
+        skill_catalog=skill_catalog,
+        skill_router=LlmSkillRouter(skill_catalog) if enable_skill_routing else None,
     )
+    app.state.skill_catalog = skill_catalog
 
     assets_dir = WEB_DIR / "assets"
     if assets_dir.is_dir():
