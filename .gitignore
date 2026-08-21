@@ -8,6 +8,7 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 runtime.db*
+.data/
 tmp/
 docs/
 !docs/

@@ -15,10 +15,14 @@ export type AgentEventType =
   | "session/created"
   | "session/updated"
   | "user/message"
+  | "turn/queued"
   | "turn/started"
   | "turn/ended"
   | "assistant/chunk"
   | "assistant/message"
+  | "task/created"
+  | "task/updated"
+  | "task/ended"
   | "agent/status"
   | "agent/error";
 
@@ -30,15 +34,42 @@ export interface AgentEvent {
   readonly turnId?: TurnId;
   readonly type: AgentEventType;
   readonly createdAt: string;
+  readonly correlationId?: string;
   readonly payload: Readonly<Record<string, unknown>>;
 }
+
+export type SessionStatus = "idle" | "queued" | "running" | "stopped" | "failed" | "interrupted";
+export type TurnStatus = "queued" | "running" | "completed" | "stopped" | "failed" | "interrupted";
+export type TaskStatus = "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "blocked";
 
 export interface SessionSummary {
   readonly id: SessionId;
   readonly workspaceRoot: string;
   readonly createdAt: string;
   readonly updatedAt: string;
-  readonly status: "idle" | "running" | "stopped" | "failed";
+  readonly status: SessionStatus;
+  readonly lastSequence: number;
+}
+
+export interface TurnProjection {
+  readonly id: TurnId;
+  readonly status: TurnStatus;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly startedAt?: string;
+  readonly endedAt?: string;
+  readonly userMessage?: string;
+  readonly assistantMessage?: string;
+  readonly lastSequence: number;
+}
+
+export interface TaskProjection {
+  readonly id: TaskId;
+  readonly status: TaskStatus;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly title?: string;
+  readonly result?: unknown;
   readonly lastSequence: number;
 }
 
@@ -48,6 +79,8 @@ export interface SessionProjection extends SessionSummary {
     readonly content: string;
     readonly turnId?: TurnId;
   }[];
+  readonly turns: readonly TurnProjection[];
+  readonly tasks: readonly TaskProjection[];
 }
 
 export interface CreateSessionInput {
@@ -86,13 +119,38 @@ export interface EventStore {
 export interface SessionEventStore extends EventStore {
   createSession(workspaceRoot: string): Promise<SessionId>;
   listSessions(): Promise<readonly SessionSummary[]>;
+  claimCommand(input: ClaimCommandInput): Promise<CommandClaim>;
+  forkSession(sessionId: SessionId, workspaceRoot?: string, id?: SessionId): Promise<SessionId>;
 }
 
 export interface AppendEventInput {
   readonly sessionId: SessionId;
   readonly turnId?: TurnId;
+  readonly correlationId?: string;
   readonly type: AgentEventType;
   readonly payload: Readonly<Record<string, unknown>>;
 }
 
 export type EventListener = (event: AgentEvent) => void;
+
+export interface ClaimCommandInput {
+  readonly sessionId: SessionId;
+  readonly commandId: string;
+  readonly kind: string;
+  readonly request: unknown;
+  readonly result: unknown;
+}
+
+export interface CommandRecord {
+  readonly sessionId: SessionId;
+  readonly commandId: string;
+  readonly kind: string;
+  readonly request: unknown;
+  readonly result: unknown;
+  readonly createdAt: string;
+}
+
+export interface CommandClaim {
+  readonly created: boolean;
+  readonly record: CommandRecord;
+}

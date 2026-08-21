@@ -3,27 +3,32 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { sessionId, AgentHost, turnId } from "@code-review-agent/runtime";
-import { InMemoryEventStore } from "@code-review-agent/storage";
-import type { SessionEventStore } from "@code-review-agent/contracts";
+import { SqliteEventStore } from "@code-review-agent/storage";
+import type { AgentEvent, SessionEventStore } from "@code-review-agent/contracts";
 
 export interface ApiServerOptions {
   readonly store?: SessionEventStore;
+  readonly databasePath?: string;
   readonly host?: AgentHost;
   readonly webRoot?: string;
 }
 
 export function createApiServer(options: ApiServerOptions = {}): Server {
-  const store = options.store ?? new InMemoryEventStore();
-  const host = options.host ?? new AgentHost({ store });
+  const ownsStore = options.store === undefined && options.host === undefined;
+  const store = options.store ?? (options.host === undefined ? new SqliteEventStore(options.databasePath === undefined ? {} : { databasePath: options.databasePath }) : undefined);
+  const host = options.host ?? new AgentHost({ store: store as SessionEventStore });
+  const persistence = store instanceof SqliteEventStore ? "sqlite" : "custom";
   const webRoot = options.webRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web");
-  return createServer((request, response) => {
-    void handleRequest(request, response, host, webRoot);
+  const server = createServer((request, response) => {
+    void handleRequest(request, response, host, webRoot, persistence);
   });
+  if (ownsStore && store instanceof SqliteEventStore) server.on("close", () => store.close());
+  return server;
 }
 
-async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, webRoot: string): Promise<void> {
+async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, webRoot: string, persistence: string): Promise<void> {
   response.setHeader("access-control-allow-origin", "*");
-  response.setHeader("access-control-allow-headers", "content-type, last-event-id");
+  response.setHeader("access-control-allow-headers", "content-type, idempotency-key, last-event-id");
   response.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
   if (request.method === "OPTIONS") {
     response.writeHead(204).end();
@@ -32,7 +37,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
   try {
     if (request.method === "GET" && url.pathname === "/health") {
-      sendJson(response, 200, { ok: true, service: "code-review-agent", runtime: "typescript" });
+      sendJson(response, 200, { ok: true, service: "code-review-agent", runtime: "typescript", persistence });
       return;
     }
     if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
@@ -59,16 +64,22 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         sendJson(response, 200, await host.events(id, after));
         return;
       }
-      response.writeHead(200, {
-        "cache-control": "no-cache",
-        connection: "keep-alive",
-        "content-type": "text/event-stream; charset=utf-8",
-      });
-      response.write(": connected\n\n");
-      const historical = await host.events(id, after);
-      for (const event of historical) writeEvent(response, event);
-      const unsubscribe = host.subscribe(id, (event) => writeEvent(response, event));
-      request.on("close", unsubscribe);
+      await streamEvents(request, response, host, id, after);
+      return;
+    }
+    const resumeMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/resume$/u);
+    if (request.method === "POST" && resumeMatch?.[1] !== undefined) {
+      const id = sessionId(decodeURIComponent(resumeMatch[1]));
+      const body = await readJson(request);
+      sendJson(response, 200, await host.resumeSession(id, commandId(request, body)));
+      return;
+    }
+    const forkMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/fork$/u);
+    if (request.method === "POST" && forkMatch?.[1] !== undefined) {
+      const id = sessionId(decodeURIComponent(forkMatch[1]));
+      const body = await readJson(request);
+      const workspaceRoot = typeof body.workspaceRoot === "string" ? body.workspaceRoot : undefined;
+      sendJson(response, 201, { sessionId: await host.forkSession(id, workspaceRoot, commandId(request, body)) });
       return;
     }
     const cancelMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/cancel$/u);
@@ -77,7 +88,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const body = await readJson(request);
       const rawTurnId = body.turnId;
       if (typeof rawTurnId !== "string") throw new HttpError(400, "turnId is required");
-      sendJson(response, 200, { cancelled: await host.cancelTurn(id, turnId(rawTurnId)) });
+      sendJson(response, 200, { cancelled: await host.cancelTurn(id, turnId(rawTurnId), commandId(request, body)) });
       return;
     }
     const sessionMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)$/u);
@@ -87,7 +98,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const body = await readJson(request);
         const content = body.content;
         if (typeof content !== "string") throw new HttpError(400, "content is required");
-        sendJson(response, 202, { turnId: await host.sendMessage(id, content) });
+        sendJson(response, 202, { turnId: await host.sendMessage(id, content, commandId(request, body)) });
         return;
       }
       if (request.method === "GET") {
@@ -104,6 +115,53 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (!response.headersSent) sendJson(response, status, { error: message });
     else response.end();
   }
+}
+
+async function streamEvents(request: IncomingMessage, response: ServerResponse, host: AgentHost, id: ReturnType<typeof sessionId>, after: number): Promise<void> {
+  response.writeHead(200, {
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+    "content-type": "text/event-stream; charset=utf-8",
+  });
+  response.write(": connected\n\n");
+  let replaying = true;
+  let buffered: AgentEvent[] = [];
+  let lastSent = after;
+  const unsubscribe = host.subscribe(id, (event) => {
+    if (replaying) buffered.push(event);
+    else if (event.sequence > lastSent) {
+      writeEvent(response, event);
+      lastSent = event.sequence;
+    }
+  });
+  const close = () => unsubscribe();
+  request.on("close", close);
+  try {
+    const historical = await host.events(id, after);
+    for (const event of historical) {
+      if (event.sequence > lastSent) {
+        writeEvent(response, event);
+        lastSent = event.sequence;
+      }
+    }
+    replaying = false;
+    for (const event of buffered.sort((left, right) => left.sequence - right.sequence)) {
+      if (event.sequence > lastSent) {
+        writeEvent(response, event);
+        lastSent = event.sequence;
+      }
+    }
+    buffered = [];
+  } catch (error) {
+    unsubscribe();
+    throw error;
+  }
+}
+
+function commandId(request: IncomingMessage, body: Record<string, unknown>): string | undefined {
+  const header = request.headers["idempotency-key"];
+  if (typeof header === "string" && header.length > 0) return header;
+  return typeof body.commandId === "string" && body.commandId.length > 0 ? body.commandId : undefined;
 }
 
 function serveIndex(response: ServerResponse, webRoot: string): void {
