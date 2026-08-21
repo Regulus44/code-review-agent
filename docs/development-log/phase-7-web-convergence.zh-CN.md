@@ -41,3 +41,33 @@ git diff --check ✓
 - 把 Diff、Terminal、Permission、Subagent 和 MCP 详情逐步抽成可复用组件；
 - 增加窄屏、SSE 断线重连和关键事件 fixture 的浏览器回归；
 - 评估将静态 shell 迁移到 TypeScript UI package，同时保持 API contract 不变。
+
+## 2026-08-22：补齐 Workspace Picker P0
+
+### 问题判断
+
+- 第一批 Web shell 创建新 Session 时把 `workspaceRoot` 写死为 `.`，用户无法在前端指定本地仓库；
+- 后端 Session、ToolRuntime 和 WorkspaceResolver 早已按 `workspaceRoot` 工作，因此这是 Web 入口缺失，不是 Phase 8 worktree 生命周期问题；
+- 按 Phase 7 交付物中的 workspace picker 要求，本项作为当前阶段的 P0 功能立即补齐。
+
+### 变更范围
+
+- 新增 `POST /v1/workspaces/validate`，在创建 Session 前验证路径存在、可访问且确实是目录，并返回规范化路径和 Git 目录提示；
+- New session 打开 DSH 风格 workspace picker modal，支持输入 Windows/Linux 本地路径、最近使用路径和错误提示；
+- 当前 Session header 的 workspace path 可点击并打开 picker；选择路径会创建新的 Session，不修改已有 Session 的历史事实；
+- 保持 `POST /v1/sessions`、工具执行和事件契约不变。
+
+### 验证
+
+```text
+pnpm typecheck                         ✓
+pnpm --filter @code-review-agent/api test ✓
+git diff --check                       ✓
+```
+
+浏览器 smoke：
+
+- New session 打开 Workspace picker；
+- 不存在的目录显示 API 返回的可解释错误；
+- 选择 `D:/Develop/code-review-agent` 后创建新 Session，header、hero chip 和 details panel 均显示该 workspace；
+- 最近 workspace 可再次选用。

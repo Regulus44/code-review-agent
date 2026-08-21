@@ -101,6 +101,8 @@
       .hero p { margin: 10px auto 18px; color: var(--text-secondary); font-size: 14px; line-height: 1.65; }
       .workspace-chip { display: inline-flex; align-items: center; gap: 7px; padding: 7px 11px; border: 1px solid var(--border); border-radius: 99px; color: var(--text-secondary); background: rgba(255,255,255,.72); font-size: 11px; }
       .workspace-chip::before { content: "⌘"; color: var(--blue); font-size: 13px; }
+      .workspace-chip-button { cursor: pointer; }
+      .workspace-chip-button:hover { border-color: rgba(65,118,230,.28); color: var(--text); background: var(--blue-soft); }
       .message { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; margin-bottom: 24px; }
       .avatar { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; color: #fff; background: var(--text); font-size: 10px; font-weight: 700; }
       .message.user .avatar { color: #fff; background: var(--blue); }
@@ -164,6 +166,29 @@
       .tool-list-item { display: flex; align-items: center; gap: 7px; padding: 5px 0; color: var(--text-secondary); font-size: 11px; }
       .tool-list-item::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--blue); }
       .empty-detail { color: var(--text-tertiary); font-size: 11px; line-height: 1.5; }
+      .session-path-button { display: block; max-width: min(42vw, 420px); padding: 2px 6px; margin: 2px 0 0 -6px; overflow: hidden; border-radius: 6px; color: var(--text-tertiary); background: transparent; text-align: left; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+      .session-path-button:hover { color: var(--text); background: var(--surface-hover); }
+      .modal-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 20px; background: rgba(20, 26, 36, .24); backdrop-filter: blur(5px); }
+      .modal-backdrop[hidden] { display: none; }
+      .workspace-modal { width: min(520px, 100%); padding: 20px; border: 1px solid var(--border); border-radius: 18px; background: var(--surface); box-shadow: 0 22px 70px rgba(30,39,55,.22); }
+      .workspace-modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+      .workspace-modal-header h2 { margin: 0; font-size: 17px; letter-spacing: -.02em; }
+      .workspace-modal-header p { margin: 6px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+      .workspace-input-label { display: block; margin-bottom: 7px; color: var(--text-secondary); font-size: 11px; font-weight: 600; }
+      .workspace-input { width: 100%; height: 40px; padding: 0 11px; border: 1px solid var(--border-strong); border-radius: 10px; outline: none; color: var(--text); background: var(--surface-subtle); font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; }
+      .workspace-input:focus { border-color: rgba(65,118,230,.55); box-shadow: 0 0 0 3px rgba(65,118,230,.12); }
+      .workspace-error { min-height: 17px; margin-top: 7px; color: var(--red); font-size: 11px; }
+      .workspace-recent { display: grid; gap: 5px; margin-top: 15px; }
+      .workspace-recent-label { color: var(--text-tertiary); font-size: 10px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; }
+      .workspace-recent-button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 9px; border-radius: 8px; color: var(--text-secondary); background: transparent; text-align: left; font: 11px ui-monospace, SFMono-Regular, Consolas, monospace; }
+      .workspace-recent-button:hover { color: var(--text); background: var(--surface-hover); }
+      .workspace-recent-button::before { content: "⌂"; color: var(--blue); font: 14px sans-serif; }
+      .workspace-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+      .workspace-modal-actions button { height: 34px; padding: 0 13px; border-radius: 9px; font-size: 12px; font-weight: 600; }
+      .workspace-cancel { color: var(--text-secondary); background: var(--surface-subtle); }
+      .workspace-create { color: #fff; background: var(--blue); }
+      .workspace-create:hover { background: var(--blue-hover); }
+      .workspace-create:disabled { cursor: wait; }
       @media (max-width: 1120px) { :root { --details-width: 260px; } }
       @media (max-width: 900px) {
         .app-shell, .app-shell.sidebar-collapsed { grid-template-columns: var(--rail-width) minmax(0, 1fr) 0; }
@@ -209,7 +234,7 @@
       <main class="workspace">
         <header class="workspace-header">
           <button id="mobile-menu" class="icon-button mobile-menu" type="button" aria-label="Open sidebar">☰</button>
-          <div class="session-heading"><strong id="session-title">New coding session</strong><span id="session-path">Workspace · .</span></div>
+          <div class="session-heading"><strong id="session-title">New coding session</strong><button id="session-path" class="session-path-button" type="button">Workspace · .</button></div>
           <span id="status" class="connection-state disconnected">Connecting…</span>
           <button id="details-toggle" class="icon-button details-toggle" type="button" aria-label="Toggle details panel">☷</button>
         </header>
@@ -235,10 +260,20 @@
         <div class="details-header"><strong>Session details</strong><button id="details-close" class="icon-button" type="button" aria-label="Close details">›</button></div>
         <div id="details-content" class="details-content"></div>
       </aside>
+      <div id="workspace-modal" class="modal-backdrop" hidden>
+        <form id="workspace-form" class="workspace-modal">
+          <div class="workspace-modal-header"><div><h2>Choose a workspace</h2><p>New sessions run their file and terminal tools inside this local directory.</p></div><button id="workspace-close" class="icon-button" type="button" aria-label="Close workspace picker">×</button></div>
+          <label class="workspace-input-label" for="workspace-input">Local folder path</label>
+          <input id="workspace-input" class="workspace-input" type="text" autocomplete="off" spellcheck="false" placeholder="D:\\Develop\\your-repository" />
+          <div id="workspace-error" class="workspace-error" role="alert"></div>
+          <div id="workspace-recent" class="workspace-recent"></div>
+          <div class="workspace-modal-actions"><button id="workspace-cancel" class="workspace-cancel" type="button">Cancel</button><button id="workspace-create" class="workspace-create" type="submit">Create session</button></div>
+        </form>
+      </div>
     </div>
     <script>
       (() => {
-        const state = { session: null, events: new Map(), source: null, tools: new Map(), mcp: [], models: null, sidebarCollapsed: false, detailsOpen: true };
+        const state = { session: null, events: new Map(), source: null, tools: new Map(), mcp: [], models: null, sidebarCollapsed: false, detailsOpen: true, recentWorkspaces: [] };
         const app = document.querySelector('#app');
         const list = document.querySelector('#session-list');
         const mcpList = document.querySelector('#mcp-list');
@@ -251,6 +286,12 @@
         const modelTrigger = document.querySelector('#model-trigger');
         const modelPopover = document.querySelector('#model-popover');
         const details = document.querySelector('#details-content');
+        const workspaceModal = document.querySelector('#workspace-modal');
+        const workspaceForm = document.querySelector('#workspace-form');
+        const workspaceInput = document.querySelector('#workspace-input');
+        const workspaceError = document.querySelector('#workspace-error');
+        const workspaceRecent = document.querySelector('#workspace-recent');
+        const workspaceCreate = document.querySelector('#workspace-create');
         const api = async (url, options) => { const response = await fetch(url, options); if (!response.ok) throw new Error(await response.text()); return response.json(); };
         const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
         const currentModel = () => state.models?.current || state.models?.defaultModel || 'deepseek-v4-flash';
@@ -285,17 +326,26 @@
           }
           conversation.scrollTop = conversation.scrollHeight; renderDetails();
         };
-        const showSessions = (payload) => { const sessions = Array.isArray(payload) ? payload : payload.sessions || []; list.innerHTML = ''; for (const session of sessions) { const button = document.createElement('button'); button.className = `session ${state.session?.id === session.id ? 'active' : ''}`; button.type = 'button'; const name = session.title || session.workspaceRoot?.split(/[\\/]/).filter(Boolean).pop() || 'New session'; button.innerHTML = `<span class="session-dot"></span><span class="session-copy"><span class="session-name">${esc(name)}</span><span class="session-path">${esc(session.workspaceRoot || '.')}</span></span>`; button.onclick = () => openSession(session.id); list.append(button); } };
+        const renderWorkspaceRecent = () => { workspaceRecent.innerHTML = ''; const roots = [...new Set(state.recentWorkspaces.filter(Boolean))].slice(0, 6); if (!roots.length) return; const label = document.createElement('div'); label.className = 'workspace-recent-label'; label.textContent = 'Recent workspaces'; workspaceRecent.append(label); roots.forEach((root) => { const button = document.createElement('button'); button.type = 'button'; button.className = 'workspace-recent-button'; button.textContent = root; button.onclick = () => { workspaceInput.value = root; workspaceError.textContent = ''; workspaceInput.focus(); }; workspaceRecent.append(button); }); };
+        const openWorkspacePicker = () => { workspaceError.textContent = ''; workspaceInput.value = state.session?.workspaceRoot || ''; renderWorkspaceRecent(); workspaceModal.hidden = false; workspaceInput.focus(); workspaceInput.select(); };
+        const closeWorkspacePicker = () => { workspaceModal.hidden = true; workspaceError.textContent = ''; };
+        const showSessions = (payload) => { const sessions = Array.isArray(payload) ? payload : payload.sessions || []; state.recentWorkspaces = sessions.map((session) => session.workspaceRoot); list.innerHTML = ''; for (const session of sessions) { const button = document.createElement('button'); button.className = `session ${state.session?.id === session.id ? 'active' : ''}`; button.type = 'button'; const name = session.title || session.workspaceRoot?.split(/[\\/]/).filter(Boolean).pop() || 'New session'; button.innerHTML = `<span class="session-dot"></span><span class="session-copy"><span class="session-name">${esc(name)}</span><span class="session-path">${esc(session.workspaceRoot || '.')}</span></span>`; button.onclick = () => openSession(session.id); list.append(button); } };
         const renderMcp = () => { mcpList.innerHTML = ''; for (const server of state.mcp) { const name = server.config?.name || server.name; const row = document.createElement('div'); row.className = 'mcp-row'; const label = document.createElement('span'); label.className = `mcp-copy mcp-status ${server.status === 'disabled' ? 'disabled' : server.status === 'error' ? 'error' : ''}`; label.textContent = `${name} · ${server.status}`; const actions = document.createElement('span'); actions.className = 'mcp-actions'; const reconnect = document.createElement('button'); reconnect.type = 'button'; reconnect.textContent = '↻'; reconnect.title = 'Reconnect'; reconnect.onclick = async () => { reconnect.disabled = true; try { await api(`/v1/mcp/servers/${encodeURIComponent(name)}/reconnect`, { method: 'POST' }); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); renderDetails(); } finally { reconnect.disabled = false; } }; const toggle = document.createElement('button'); toggle.type = 'button'; toggle.textContent = server.status === 'disabled' ? '＋' : '−'; toggle.title = server.status === 'disabled' ? 'Enable' : 'Disable'; toggle.onclick = async () => { await api(`/v1/mcp/servers/${encodeURIComponent(name)}/${server.status === 'disabled' ? 'enable' : 'disable'}`, { method: 'POST' }); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); renderDetails(); }; actions.append(reconnect, toggle); row.append(label, actions); mcpList.append(row); } if (!state.mcp.length) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = 'No MCP servers configured.'; mcpList.append(empty); } };
         const renderModels = (payload) => { state.models = payload; modelTrigger.textContent = `Model · ${currentModel()}`; modelPopover.innerHTML = '<div class="popover-label">Choose a model</div>'; for (const model of payload?.models || []) { const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${model === currentModel() ? 'selected' : ''}`; option.innerHTML = `<span class="model-check">${model === currentModel() ? '✓' : ''}</span><span>${esc(model)}<span class="model-meta">DeepSeek API</span></span>`; option.onclick = async () => { modelPopover.hidden = true; modelTrigger.setAttribute('aria-expanded', 'false'); modelTrigger.disabled = true; try { await api('/v1/models', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }) }); renderModels(await api('/v1/models')); setStatus(`Model · ${model}`); renderDetails(); } catch (error) { setStatus(error.message, false); } finally { modelTrigger.disabled = false; } }; modelPopover.append(option); } };
         const renderDetails = () => { const connected = state.mcp.filter((server) => server.status !== 'disabled' && server.status !== 'error').length; details.innerHTML = `<div class="detail-section"><div class="detail-label">Model</div><div class="detail-value">${esc(currentModel())}</div><div class="detail-line"><span>Provider</span><strong>${esc(state.models?.provider || 'DeepSeek-compatible')}</strong></div><div class="detail-line"><span>Default</span><strong>${esc(state.models?.defaultModel || 'deepseek-v4-flash')}</strong></div></div><div class="detail-section"><div class="detail-label">Session</div><div class="detail-line"><span>Status</span><span class="status-pill">Connected</span></div><div class="detail-line"><span>Events</span><strong>${state.events.size}</strong></div><div class="detail-line"><span>Workspace</span><strong title="${esc(state.session?.workspaceRoot || '.')}">${esc(state.session?.workspaceRoot || '.')}</strong></div></div><div class="detail-section"><div class="detail-label">MCP</div><div class="detail-line"><span>Servers</span><strong>${connected}/${state.mcp.length}</strong></div><div class="detail-line"><span>Tools</span><strong>${state.tools.size}</strong></div></div><div class="detail-section"><div class="detail-label">Tools</div><div id="detail-tools" class="tool-list"></div></div><div class="detail-section"><div class="detail-label">Permissions</div><div class="empty-detail">Tool approvals appear here when a turn needs confirmation.</div></div>`; const toolList = details.querySelector('#detail-tools'); const names = [...state.tools.keys()].slice(0, 8); if (!names.length) toolList.innerHTML = '<div class="empty-detail">No tools discovered.</div>'; else names.forEach((name) => { const row = document.createElement('div'); row.className = 'tool-list-item'; row.textContent = name; toolList.append(row); }); };
         const openSession = async (id) => { if (state.source) state.source.close(); state.session = await api(`/v1/sessions/${encodeURIComponent(id)}`); title.textContent = state.session.title || 'Coding session'; path.textContent = `Workspace · ${state.session.workspaceRoot || '.'}`; state.events.clear(); const history = await api(`/v1/sessions/${encodeURIComponent(id)}/events?format=json`); for (const event of history) addEvent(event); state.source = new EventSource(`/v1/sessions/${encodeURIComponent(id)}/events?after_sequence=${state.session.lastSequence || 0}`); const types = ['session/created','session/updated','user/message','turn/queued','turn/started','turn/ended','assistant/chunk','assistant/message','task/created','task/updated','task/ended','tool/call','tool/progress','tool/result','diff/preview','permission/requested','permission/resolved','mcp/server','mcp/tool','agent/status','agent/error']; types.forEach((type) => state.source.addEventListener(type, (message) => addEvent(JSON.parse(message.data)))); state.source.onerror = () => setStatus('Reconnecting…', false); state.source.onopen = () => setStatus('Connected', true); showSessions(await api('/v1/sessions')); render(); };
-        const newSession = async () => { const session = await api('/v1/sessions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspaceRoot: '.' }) }); await openSession(session.id); };
-        const boot = async () => { const result = await api('/v1/sessions'); const tools = await api('/v1/tools'); state.tools = new Map((tools.tools || []).map((tool) => [tool.name, tool])); renderModels(await api('/v1/models')); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); if (result.sessions?.length) await openSession(result.sessions[0].id); else await newSession(); };
+        const createSession = async (workspaceRoot) => { const checked = await api('/v1/workspaces/validate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspaceRoot }) }); const session = await api('/v1/sessions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspaceRoot: checked.workspaceRoot }) }); await openSession(session.id); };
+        const newSession = () => openWorkspacePicker();
+        const boot = async () => { const result = await api('/v1/sessions'); const tools = await api('/v1/tools'); state.tools = new Map((tools.tools || []).map((tool) => [tool.name, tool])); renderModels(await api('/v1/models')); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); if (result.sessions?.length) await openSession(result.sessions[0].id); else await createSession('.'); };
         document.querySelector('#sidebar-toggle').onclick = () => { state.sidebarCollapsed = !state.sidebarCollapsed; app.classList.toggle('sidebar-collapsed', state.sidebarCollapsed); };
         document.querySelector('#details-toggle').onclick = () => { state.detailsOpen = !state.detailsOpen; app.classList.toggle('details-collapsed', !state.detailsOpen); };
         document.querySelector('#details-close').onclick = () => { state.detailsOpen = false; app.classList.add('details-collapsed'); };
-        document.querySelector('#new-session').onclick = () => newSession().catch((error) => setStatus(error.message, false));
+        document.querySelector('#new-session').onclick = () => newSession();
+        document.querySelector('#session-path').onclick = () => openWorkspacePicker();
+        document.querySelector('#workspace-close').onclick = () => closeWorkspacePicker();
+        document.querySelector('#workspace-cancel').onclick = () => closeWorkspacePicker();
+        workspaceModal.addEventListener('click', (event) => { if (event.target === workspaceModal) closeWorkspacePicker(); });
+        workspaceForm.addEventListener('submit', async (event) => { event.preventDefault(); const workspaceRoot = workspaceInput.value.trim(); if (!workspaceRoot) { workspaceError.textContent = 'Enter a local folder path.'; return; } workspaceCreate.disabled = true; workspaceError.textContent = ''; try { await createSession(workspaceRoot); closeWorkspacePicker(); } catch (error) { workspaceError.textContent = error.message; } finally { workspaceCreate.disabled = false; } });
         document.querySelector('#mobile-menu').onclick = () => { state.sidebarCollapsed = false; app.classList.remove('sidebar-collapsed'); };
         modelTrigger.onclick = () => { modelPopover.hidden = !modelPopover.hidden; modelTrigger.setAttribute('aria-expanded', String(!modelPopover.hidden)); };
         document.addEventListener('click', (event) => { if (!modelPopover.hidden && !modelPopover.contains(event.target) && event.target !== modelTrigger) { modelPopover.hidden = true; modelTrigger.setAttribute('aria-expanded', 'false'); } });

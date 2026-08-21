@@ -1,4 +1,5 @@
 import { createReadStream, existsSync } from "node:fs";
+import { realpath, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
@@ -153,6 +154,21 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     }
     if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
       serveIndex(response, webRoot);
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/v1/workspaces/validate") {
+      const body = await readJson(request);
+      if (typeof body.workspaceRoot !== "string" || body.workspaceRoot.trim().length === 0) throw new HttpError(400, "workspaceRoot is required");
+      const requested = body.workspaceRoot.trim();
+      try {
+        const resolved = await realpath(requested);
+        const info = await stat(resolved);
+        if (!info.isDirectory()) throw new HttpError(400, "workspaceRoot must be a directory");
+        sendJson(response, 200, { valid: true, workspaceRoot: resolved, name: path.basename(resolved), isGitRepository: existsSync(path.join(resolved, ".git")) });
+      } catch (error) {
+        if (error instanceof HttpError) throw error;
+        throw new HttpError(400, "workspaceRoot directory does not exist or is not accessible");
+      }
       return;
     }
     if (request.method === "POST" && url.pathname === "/v1/sessions") {

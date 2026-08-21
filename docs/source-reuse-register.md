@@ -59,7 +59,7 @@ ID:
 
 本项目路径：`apps/web/index.html`
 
-范围：三栏 AppFrame 几何、sidebar rail、New session、hero/composer 空态、composer model popover、details panel、tool row 和 permission card 的信息分区与交互顺序。
+范围：三栏 AppFrame 几何、sidebar rail、New session、workspace picker、hero/composer 空态、composer model popover、details panel、tool row 和 permission card 的信息分区与交互顺序。
 
 改写部分：所有 DOM、CSS、事件渲染和 API 调用均适配本项目静态 Web shell、`/v1/*` API 和 SSE event contract；品牌、颜色、图标、文案和模型列表使用本项目内容。
 

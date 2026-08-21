@@ -50,6 +50,29 @@ describe("Phase 2 API", () => {
     expect(await shell.text()).toContain("Code Review Agent");
   });
 
+  it("validates a local workspace directory before creating a session", async () => {
+    const root = mkdtempSync(join(tmpdir(), "code-review-agent-workspace-"));
+    try {
+      const valid = await fetch(`${baseUrl}/v1/workspaces/validate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workspaceRoot: root }),
+      });
+      expect(valid.status).toBe(200);
+      expect(await valid.json()).toMatchObject({ valid: true, workspaceRoot: root, isGitRepository: false });
+
+      const invalid = await fetch(`${baseUrl}/v1/workspaces/validate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workspaceRoot: join(root, "missing") }),
+      });
+      expect(invalid.status).toBe(400);
+      expect(await invalid.json()).toMatchObject({ error: "workspaceRoot directory does not exist or is not accessible" });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("replays session events over SSE", async () => {
     const created = await fetch(`${baseUrl}/v1/sessions`, {
       method: "POST",
