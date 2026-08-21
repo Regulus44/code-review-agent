@@ -31,6 +31,8 @@ Phase 1 保留 in-memory store 作为测试实现，SQLite durable EventStore、
 
 - API CLI 启动入口新增本地 `.env` 加载；根目录 `.env` 已加入 Git 忽略，仓库只保留不含密钥的 `.env.example`；
 - `MODEL_PROVIDER=auto` 在存在 `DEEPSEEK_API_KEY` 时选择 DeepSeek，否则保持 Echo，避免测试和无密钥开发被真实网络调用阻塞；
+- DeepSeek 默认模型改为 `deepseek-v4-flash`，并登记 `deepseek-v4-flash`、`deepseek-v4-pro`、`deepseek-v4-flash-vision-exp` 三个可选模型；
+- API 新增 `GET /v1/models` 和 `POST /v1/models`，Web 顶栏提供模型下拉切换；切换只影响后续 turn，重启后回到 `.env` 中的 `DEEPSEEK_MODEL`；
 - `MODEL_PROVIDER=deepseek` 在缺少 Key 时快速失败，错误不会回显 Key；
 - API `/health` 仅返回 provider、model、base URL 和 `configured` 状态，不返回 API Key；
 - API 测试使用 fake fetch 验证 Authorization header 和真实流式消息路径，未使用真实凭据。
@@ -40,6 +42,7 @@ Phase 1 保留 in-memory store 作为测试实现，SQLite durable EventStore、
 - `pnpm typecheck` 通过；
 - `pnpm test` 通过；
 - DeepSeek-compatible SSE adapter、无 Key fallback、显式缺 Key 错误、Key 不进入请求体/health/events 均有测试。
+- 模型目录、合法切换、后续 turn 使用新模型和非法模型拒绝均有 API 测试。
 
 ### 使用方式
 

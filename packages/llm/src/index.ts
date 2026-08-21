@@ -11,6 +11,15 @@ export interface OpenAICompatibleOptions {
 
 export type ConfiguredModelProvider = "echo" | "deepseek";
 
+export const DEEPSEEK_MODELS = [
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+  "deepseek-v4-flash-vision-exp",
+] as const;
+
+export type DeepSeekModel = (typeof DEEPSEEK_MODELS)[number];
+export const DEFAULT_DEEPSEEK_MODEL: DeepSeekModel = "deepseek-v4-flash";
+
 /** Safe model metadata intended for health checks and diagnostics. It never contains credentials. */
 export interface ModelConfigView {
   readonly provider: ConfiguredModelProvider;
@@ -136,7 +145,7 @@ export function createConfiguredChatModel(env: NodeJS.ProcessEnv = process.env):
   const baseUrl = env["DEEPSEEK_BASE_URL"]?.trim() || "https://api.deepseek.com";
   validateHttpUrl(baseUrl, "DEEPSEEK_BASE_URL");
   const safeBaseUrl = publicBaseUrl(baseUrl);
-  const model = env["DEEPSEEK_MODEL"]?.trim() || "deepseek-chat";
+  const model = env["DEEPSEEK_MODEL"]?.trim() || DEFAULT_DEEPSEEK_MODEL;
   return {
     model: new OpenAICompatibleChatModel({ baseUrl: safeBaseUrl, model, ...(apiKey === undefined ? {} : { apiKey }) }),
     config: { provider: "deepseek", model, baseUrl: safeBaseUrl, configured: true },

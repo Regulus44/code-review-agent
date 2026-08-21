@@ -5,8 +5,13 @@ import { fileURLToPath, URL } from "node:url";
 import { sessionId, AgentHost, turnId } from "@code-review-agent/runtime";
 import { SqliteEventStore } from "@code-review-agent/storage";
 import { brand, type AgentEvent, type ChatModel, type PermissionId, type SessionEventStore } from "@code-review-agent/contracts";
-import { createConfiguredChatModel, type ModelConfigView } from "@code-review-agent/llm";
+import { createConfiguredChatModel, DEEPSEEK_MODELS, type ModelConfigView } from "@code-review-agent/llm";
 import { McpConnectionManager, type McpServerConfig } from "@code-review-agent/mcp-client";
+
+export interface ModelSelection {
+  readonly model: ChatModel;
+  readonly config: ModelConfigView;
+}
 
 export interface ApiServerOptions {
   readonly store?: SessionEventStore;
@@ -14,6 +19,8 @@ export interface ApiServerOptions {
   readonly host?: AgentHost;
   readonly model?: ChatModel;
   readonly modelInfo?: ModelConfigView;
+  readonly availableModels?: readonly string[];
+  readonly modelSelector?: (model: string) => ModelSelection;
   readonly mcp?: McpConnectionManager;
   readonly webRoot?: string;
 }
@@ -22,13 +29,18 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
   const ownsStore = options.store === undefined && options.host === undefined;
   const store = options.store ?? (options.host === undefined ? new SqliteEventStore(options.databasePath === undefined ? {} : { databasePath: options.databasePath }) : undefined);
   const host = options.host ?? new AgentHost({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }) });
+  const modelRuntime: ModelRuntimeState = {
+    availableModels: options.availableModels ?? [],
+    ...(options.modelInfo === undefined ? {} : { info: options.modelInfo }),
+    ...(options.modelSelector === undefined ? {} : { selector: options.modelSelector }),
+  };
   const ownsMcp = options.mcp === undefined;
   const mcp = options.mcp ?? new McpConnectionManager(store === undefined ? { registry: host.toolRegistry() } : { registry: host.toolRegistry(), store });
   void mcp.startConfigured();
   const persistence = store instanceof SqliteEventStore ? "sqlite" : "custom";
   const webRoot = options.webRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web");
   const server = createServer((request, response) => {
-    void handleRequest(request, response, host, mcp, webRoot, persistence, options.modelInfo);
+    void handleRequest(request, response, host, mcp, webRoot, persistence, modelRuntime);
   });
   if (ownsStore && store instanceof SqliteEventStore) server.on("close", () => store.close());
   if (ownsMcp) server.on("close", () => { void mcp.close(); });
@@ -39,10 +51,32 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
 export function createConfiguredApiServer(options: ApiServerOptions = {}): Server {
   if (options.host !== undefined || options.model !== undefined) return createApiServer(options);
   const configured = createConfiguredChatModel();
-  return createApiServer({ ...options, model: configured.model, modelInfo: options.modelInfo ?? configured.config });
+  const switchOptions: ApiServerOptions = configured.config.provider === "deepseek" ? {
+    ...(options.availableModels === undefined ? { availableModels: DEEPSEEK_MODELS } : { availableModels: options.availableModels }),
+    ...(options.modelSelector === undefined ? {
+      modelSelector: (model: string) => {
+        const selected = createConfiguredChatModel({ ...process.env, MODEL_PROVIDER: "deepseek", DEEPSEEK_MODEL: model });
+        return { model: selected.model, config: selected.config };
+      },
+    } : { modelSelector: options.modelSelector }),
+  } : {
+    ...(options.availableModels === undefined ? { availableModels: [] } : { availableModels: options.availableModels }),
+  };
+  return createApiServer({
+    ...options,
+    model: configured.model,
+    modelInfo: options.modelInfo ?? configured.config,
+    ...switchOptions,
+  });
 }
 
-async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, mcp: McpConnectionManager, webRoot: string, persistence: string, modelInfo?: ModelConfigView): Promise<void> {
+interface ModelRuntimeState {
+  info?: ModelConfigView;
+  readonly availableModels: readonly string[];
+  readonly selector?: (model: string) => ModelSelection;
+}
+
+async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, mcp: McpConnectionManager, webRoot: string, persistence: string, modelRuntime: ModelRuntimeState): Promise<void> {
   response.setHeader("access-control-allow-origin", "*");
   response.setHeader("access-control-allow-headers", "content-type, idempotency-key, last-event-id");
   response.setHeader("access-control-allow-methods", "GET,POST,DELETE,OPTIONS");
@@ -53,7 +87,27 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
   try {
     if (request.method === "GET" && url.pathname === "/health") {
-      sendJson(response, 200, { ok: true, service: "code-review-agent", runtime: "typescript", persistence, ...(modelInfo === undefined ? {} : { model: modelInfo }) });
+      sendJson(response, 200, { ok: true, service: "code-review-agent", runtime: "typescript", persistence, ...(modelRuntime.info === undefined ? {} : { model: modelRuntime.info }) });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/v1/models") {
+      sendJson(response, 200, {
+        provider: modelRuntime.info?.provider ?? "custom",
+        current: modelRuntime.info?.model ?? "custom",
+        configured: modelRuntime.info?.configured ?? false,
+        models: modelRuntime.availableModels,
+      });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/v1/models") {
+      if (modelRuntime.selector === undefined) throw new HttpError(409, "model switching is not configured");
+      const body = await readJson(request);
+      if (typeof body.model !== "string" || body.model.length === 0) throw new HttpError(400, "model is required");
+      if (!modelRuntime.availableModels.includes(body.model)) throw new HttpError(400, "unsupported model");
+      const selected = modelRuntime.selector(body.model);
+      host.setModel(selected.model);
+      modelRuntime.info = selected.config;
+      sendJson(response, 200, { model: selected.config });
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/tools") {
@@ -194,7 +248,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     throw new HttpError(404, "not found");
   } catch (error) {
     const code = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : "";
-    const status = error instanceof HttpError ? error.status : code === "INVALID_TOOL_INPUT" ? 400 : code === "TOOL_NOT_FOUND" ? 404 : code === "TOOL_DISABLED" ? 409 : 500;
+    const status = error instanceof HttpError ? error.status : code === "INVALID_TOOL_INPUT" ? 400 : code === "TOOL_NOT_FOUND" ? 404 : code === "TOOL_DISABLED" ? 409 : code === "MODEL_CONFIGURATION_ERROR" ? 400 : 500;
     const message = error instanceof Error ? error.message : String(error);
     if (!response.headersSent) sendJson(response, status, { error: message });
     else response.end();

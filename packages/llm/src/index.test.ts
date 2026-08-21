@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { EchoChatModel, ModelConfigurationError, OpenAICompatibleChatModel, createConfiguredChatModel } from "./index.js";
+import { DEFAULT_DEEPSEEK_MODEL, DEEPSEEK_MODELS, EchoChatModel, ModelConfigurationError, OpenAICompatibleChatModel, createConfiguredChatModel } from "./index.js";
 
 describe("EchoChatModel", () => {
   it("streams incremental text and a terminal marker", async () => {
@@ -54,7 +54,9 @@ describe("EchoChatModel", () => {
 
   it("selects Echo without a key and DeepSeek when auto configuration has a key", () => {
     expect(createConfiguredChatModel({ MODEL_PROVIDER: "auto" }).config).toEqual({ provider: "echo", model: "echo", configured: false });
+    expect(createConfiguredChatModel({ MODEL_PROVIDER: "auto", DEEPSEEK_API_KEY: "sk-test-only" }).config).toEqual({ provider: "deepseek", model: DEFAULT_DEEPSEEK_MODEL, baseUrl: "https://api.deepseek.com", configured: true });
     expect(createConfiguredChatModel({ MODEL_PROVIDER: "auto", DEEPSEEK_API_KEY: "sk-test-only", DEEPSEEK_MODEL: "deepseek-reasoner" }).config).toEqual({ provider: "deepseek", model: "deepseek-reasoner", baseUrl: "https://api.deepseek.com", configured: true });
+    expect(DEEPSEEK_MODELS).toEqual(["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"]);
     expect(createConfiguredChatModel({ MODEL_PROVIDER: "deepseek", DEEPSEEK_API_KEY: "sk-test-only", DEEPSEEK_BASE_URL: "https://example.test/v1?api_key=sk-test-only" }).config.baseUrl).toBe("https://example.test/v1");
   });
 

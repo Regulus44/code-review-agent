@@ -34,7 +34,7 @@ interface PendingTurn {
 
 /** Coordinates durable sessions, queued turns and model execution behind storage/model interfaces. */
 export class AgentHost {
-  private readonly model: ChatModel;
+  private model: ChatModel;
   private readonly systemPrompt: string;
   private readonly controllers = new Map<TurnId, AbortController>();
   private readonly activeTurns = new Map<SessionId, TurnId>();
@@ -49,6 +49,11 @@ export class AgentHost {
     if (options.toolRuntime === undefined) registry.registerMany(createBuiltinTools());
     this.toolRuntime = options.toolRuntime ?? new ToolRuntime({ store: options.store, registry });
     this.ready = this.restoreQueuedTurns();
+  }
+
+  /** Replaces the model used for turns that have not started yet. */
+  setModel(model: ChatModel): void {
+    this.model = model;
   }
 
   async createSession(workspaceRoot: string): Promise<SessionProjection> {

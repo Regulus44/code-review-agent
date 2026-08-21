@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { createApiServer } from "./server.js";
 import { InMemoryEventStore } from "@code-review-agent/storage";
 import { sessionId } from "@code-review-agent/runtime";
-import { OpenAICompatibleChatModel } from "@code-review-agent/llm";
+import { DEEPSEEK_MODELS, OpenAICompatibleChatModel } from "@code-review-agent/llm";
 
 describe("Phase 2 API", () => {
   let server: Server;
@@ -159,6 +159,49 @@ describe("Phase 2 API", () => {
       expect(projection!.messages.at(-1)?.content).toBe("real model response");
       expect(new Headers(requestInit?.headers).get("authorization")).toBe("Bearer sk-test-only");
       expect(String(requestInit?.body)).not.toContain("sk-test-only");
+    } finally {
+      await new Promise<void>((resolve, reject) => configured.close((error) => (error ? reject(error) : resolve())));
+    }
+  });
+
+  it("lists and switches the supported DeepSeek models for subsequent turns", async () => {
+    const makeModel = (name: string) => ({
+      async *stream() {
+        yield { type: "text_delta" as const, text: name };
+        yield { type: "done" as const };
+      },
+    });
+    const configured = createApiServer({
+      store: new InMemoryEventStore(),
+      model: makeModel("deepseek-v4-flash"),
+      modelInfo: { provider: "deepseek", model: "deepseek-v4-flash", baseUrl: "https://api.deepseek.com", configured: true },
+      availableModels: DEEPSEEK_MODELS,
+      modelSelector: (model) => ({
+        model: makeModel(model),
+        config: { provider: "deepseek", model, baseUrl: "https://api.deepseek.com", configured: true },
+      }),
+    });
+    await new Promise<void>((resolve) => configured.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = configured.address();
+      if (address === null || typeof address === "string") throw new Error("Model API did not bind");
+      const configuredUrl = `http://127.0.0.1:${address.port}`;
+      const models = await (await fetch(`${configuredUrl}/v1/models`)).json() as { current: string; models: string[] };
+      expect(models).toMatchObject({ current: "deepseek-v4-flash", models: [...DEEPSEEK_MODELS] });
+      const switched = await fetch(`${configuredUrl}/v1/models`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "deepseek-v4-pro" }) });
+      expect(switched.status).toBe(200);
+      expect(await switched.json()).toMatchObject({ model: { model: "deepseek-v4-pro" } });
+      const session = await (await fetch(`${configuredUrl}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: "D:/workspace" }) })).json() as { id: string };
+      await fetch(`${configuredUrl}/v1/sessions/${session.id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: "use selected model" }) });
+      let projection: { status: string; messages: { content: string }[] };
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        projection = await (await fetch(`${configuredUrl}/v1/sessions/${session.id}`)).json() as typeof projection;
+        if (projection.status === "idle") break;
+        await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      }
+      expect(projection!.messages.at(-1)?.content).toBe("deepseek-v4-pro");
+      const rejected = await fetch(`${configuredUrl}/v1/models`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "not-a-deepseek-model" }) });
+      expect(rejected.status).toBe(400);
     } finally {
       await new Promise<void>((resolve, reject) => configured.close((error) => (error ? reject(error) : resolve())));
     }
