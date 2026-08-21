@@ -7,7 +7,7 @@
 | 阶段 | 状态 | Checkpoint/证据 |
 |---|---|---|
 | Phase 0：TypeScript 基线与契约 | completed | `codex/phase-0-typescript-foundation`；workspace、strict TS、contracts、依赖图检查通过 |
-| Phase 1：Agentic Coding Core | in_progress（Phase 1A.6 smoke 已通过） | Tool-calling loop、P0/P1 TypeScript 工具、permission preset、重启恢复和真实 `read → edit → approve → test` 已通过；后续仍需整理 Phase 1 退出记录 |
+| Phase 1：Agentic Coding Core | completed（Phase 1A.0–1A.6 已完成） | Tool-calling loop、P0/P1 TypeScript 工具、permission preset、pending approval/terminal 恢复和真实 `read → edit → approve → test → summary` 已通过；本次 checkpoint 完成阶段退出记录 |
 | Phase 2：事件、持久化与恢复 | completed | `a7f636f` + `5d5a198`；SQLite reopen/recovery、projection replay、SSE replay、queue、幂等 command 和 model failure 通过 |
 | Phase 3：工具运行时与权限 | completed | `e1d3172`（替代 `5003dbd`）；工具禁用、显式覆盖、进程树终止、audit/modelView、权限过期/取消/重启恢复和 Web smoke 通过 |
 | Phase 4：MCP Client | completed | `5477f16`；官方 SDK stdio/SSE/Streamable HTTP、discovery、ToolRegistry bridge、权限/取消/重连、API/Web MCP 状态和 fixture 验证通过 |
@@ -18,7 +18,7 @@
 
 ## Phase 1 真实模型增强（2026-08-22）
 
-Phase 1 的 provider-neutral adapter 现在已接入 API CLI 启动路径：通过根目录本地 `.env` 配置 `DEEPSEEK_API_KEY`，`MODEL_PROVIDER=auto` 会选择 DeepSeek；没有 Key 时保留 Echo fallback。默认模型为 `deepseek-v4-flash`，并可在 API/Web 中切换到 `deepseek-v4-pro` 或 `deepseek-v4-flash-vision-exp`。`.env`、`.env.*`（`.env.example` 除外）均被 Git 忽略，API health、事件和 Web 响应只展示不含凭据的 provider/model/configured 信息。fake-fetch API/LLM 测试已证明真实流式路径和 Authorization header 行为；Phase 1A.1–1A.3 已完成第一批 tool-calling loop，但真实 DeepSeek Coding smoke 尚未完成。
+Phase 1 的 provider-neutral adapter 现在已接入 API CLI 启动路径：通过根目录本地 `.env` 配置 `DEEPSEEK_API_KEY`，`MODEL_PROVIDER=auto` 会选择 DeepSeek；没有 Key 时保留 Echo fallback。默认模型为 `deepseek-v4-flash`，并可在 API/Web 中切换到 `deepseek-v4-pro` 或 `deepseek-v4-flash-vision-exp`。`.env`、`.env.*`（`.env.example` 除外）均被 Git 忽略，API health、事件和 Web 响应只展示不含凭据的 provider/model/configured 信息。fake-fetch API/LLM 测试已证明真实流式路径和 Authorization header 行为，Phase 1A.1–1A.3 的 tool-calling loop 以及 Phase 1A.6 的真实 DeepSeek Coding smoke 均已完成。
 
 ## Phase 1 状态校正（2026-08-22）
 
@@ -26,9 +26,9 @@ Phase 1 的 provider-neutral adapter 现在已接入 API CLI 启动路径：通�
 
 - `packages/tools` 已有 9 个内置工具，`ToolRuntime` 已有 schema、workspace、权限、取消、超时、输出预算和审计能力；
 - `packages/mcp-client` 已能发现并桥接外部工具；
-- 第一批 `packages/contracts`、`packages/llm` 和 `packages/runtime` 已携带工具 schema、解析 `delta.tool_calls` 并执行 model → tool → model 循环；进程重启后的 pending turn continuation 仍未完成；
+- 第一批 `packages/contracts`、`packages/llm` 和 `packages/runtime` 已携带工具 schema、解析 `delta.tool_calls` 并执行 model → tool → model 循环；进程重启后的 pending approval/turn continuation 已在 Phase 1A.5 完成；
 - 当前 `packages/tools/src/builtin.ts` 的 9 个工具已经是 TypeScript 初版；旧 `src/code_review_agent/tools/` 仍是 Python legacy/reference，不进入新 Runtime 依赖图；
-- 因此当前阶段目标改为 `Phase 1A：Agentic Core + TypeScript Tool Pool`，先完成工具调用层，再补齐 Terminal、Plan/Todo、AskUser 等核心 Coding Agent 工具和真实垂直场景；
+- 因此当前阶段目标改为 `Phase 1A：Agentic Core + TypeScript Tool Pool`，该目标现已通过工具调用层、Terminal、Plan/Todo、AskUser、权限恢复和真实垂直场景门禁；
 - Phase 5 Subagent、Phase 6 A2A 和 Phase 8 高级能力的核心实现必须等待本门禁通过。
 
 执行计划：[phase-1-agentic-coding-core.zh-CN.md](phase-plans/phase-1-agentic-coding-core.zh-CN.md)。
@@ -57,7 +57,7 @@ Phase 1 的 provider-neutral adapter 现在已接入 API CLI 启动路径：通�
 
 验证证据：`packages/tools` 20 项测试、`packages/storage` 7 项测试、`apps/api` 11 项测试覆盖 terminal 生命周期、删除审计、Git 读取、interaction resume 和 projection replay。
 
-尚未完成：真实 DeepSeek `read → edit → approve → test` smoke。该 smoke 属于 Phase 1A.6；Phase 1A.5 的 permission preset、模型工具过滤、MCP 统一管线和恢复整合已完成。
+当时尚未完成的真实 DeepSeek `read → edit → approve → test` smoke 已在 Phase 1A.6 完成；Phase 1A.5 的 permission preset、模型工具过滤、MCP 统一管线和恢复整合均已完成。
 
 ## Phase 1A.5 权限与恢复整合（2026-08-22）
 

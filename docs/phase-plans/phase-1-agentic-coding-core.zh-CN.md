@@ -1,6 +1,6 @@
 # Phase 1：Agentic Coding Core（工具调用与真实 Coding Agent）
 
-状态：`in_progress`（重新打开 Phase 1 的产品门禁）
+状态：`completed`（Phase 1A.0–1A.6 退出门禁已通过，2026-08-22）
 
 ## 1. 为什么重新校正 Phase 1
 

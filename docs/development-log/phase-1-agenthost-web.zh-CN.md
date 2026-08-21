@@ -1,6 +1,6 @@
 # Phase 1：AgentHost 与 Web Shell 开发日志
 
-状态：`reopened`（Web Shell checkpoint 已完成；Agentic Coding Core 尚未完成）
+状态：`completed`（Web Shell 与 Phase 1A Agentic Coding Core 均已完成，2026-08-22）
 
 阶段计划：[phase-1-agenthost-web.zh-CN.md](../phase-plans/phase-1-agenthost-web.zh-CN.md)
 
@@ -139,3 +139,23 @@ Phase 1 不再以 Web Shell 完成为退出条件，改以 [Agentic Coding Core 
 - 明确 `src/code_review_agent/tools/` 仅为 Python legacy/reference，新 Runtime 只依赖 TypeScript `packages/tools`；
 - 新增 [tool-migration-matrix.zh-CN.md](../tool-migration-matrix.zh-CN.md)，登记 P0/P1 工具与 DSH/Claude Code 行为参考、权限/工作区/模型视图和安全边界；
 - 新增 `packages/tools/src/behavior-fixtures.ts` 及 registry 对齐测试，确保 9 个 P0 工具的风险、调度、审批和输出契约持续可验证。
+
+## 2026-08-22：Phase 1A 退出记录
+
+### 退出结论
+
+- Phase 1A.0–1A.6 的交付物、测试门禁和真实 Coding 垂直场景均已完成；
+- 真实 DeepSeek `read → edit → approve → test → summary` smoke 已在隔离 workspace 通过；
+- pending approval、terminal interrupted metadata、tool/permission/interaction/diff/step 事件均可从事件日志回放；
+- 新 Runtime 继续以 TypeScript/Node.js 为唯一后端基座，旧 Python 工具只保留为 legacy/reference；
+- Phase 1A 之后不得直接把 Subagent、A2A、LSP 或复杂 Worktree 作为未计划的核心实现引入，后续工作按阶段计划进入。
+
+### 验证证据
+
+```text
+pnpm typecheck   ✓
+pnpm test        ✓
+git diff --check ✓
+```
+
+本次阶段状态收口对应一个独立 Git checkpoint；后续阶段性更新仍必须遵守根目录 `AGENTS.md` 的“更新后立即 commit”规则。
