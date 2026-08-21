@@ -13,6 +13,7 @@
 ## 阶段日志
 
 - [Phase 1：AgentHost 与 Web Shell](phase-1-agenthost-web.zh-CN.md)
+- [Phase 1：Agentic Coding Core 校正记录](phase-1-agenthost-web.zh-CN.md#2026-08-22重新打开-phase-1-的-coding-agent-门禁)
 - [Phase 2：事件、持久化与恢复](phase-2-events-persistence-recovery.zh-CN.md)
 - [Phase 3：工具运行时与权限](phase-3-tools-permissions.zh-CN.md)
 - [Phase 4：MCP Client](phase-4-mcp-client.zh-CN.md)

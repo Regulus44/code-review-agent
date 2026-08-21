@@ -7,7 +7,7 @@
 | 阶段 | 状态 | Checkpoint/证据 |
 |---|---|---|
 | Phase 0：TypeScript 基线与契约 | completed | `codex/phase-0-typescript-foundation`；workspace、strict TS、contracts、依赖图检查通过 |
-| Phase 1：最小 AgentHost 与 Web Shell | completed | `pnpm typecheck`、`pnpm test`、HTTP/SSE smoke、浏览器 Read-only smoke、DeepSeek-compatible API 配置 smoke 通过 |
+| Phase 1：Agentic Coding Core | in_progress（重新打开） | Web Shell checkpoint 已通过；tool-calling loop、permission resume 和真实 `read → edit → approve → test` 尚未通过 |
 | Phase 2：事件、持久化与恢复 | completed | `a7f636f` + `5d5a198`；SQLite reopen/recovery、projection replay、SSE replay、queue、幂等 command 和 model failure 通过 |
 | Phase 3：工具运行时与权限 | completed | `e1d3172`（替代 `5003dbd`）；工具禁用、显式覆盖、进程树终止、audit/modelView、权限过期/取消/重启恢复和 Web smoke 通过 |
 | Phase 4：MCP Client | completed | `5477f16`；官方 SDK stdio/SSE/Streamable HTTP、discovery、ToolRegistry bridge、权限/取消/重连、API/Web MCP 状态和 fixture 验证通过 |
@@ -19,6 +19,19 @@
 ## Phase 1 真实模型增强（2026-08-22）
 
 Phase 1 的 provider-neutral adapter 现在已接入 API CLI 启动路径：通过根目录本地 `.env` 配置 `DEEPSEEK_API_KEY`，`MODEL_PROVIDER=auto` 会选择 DeepSeek；没有 Key 时保留 Echo fallback。默认模型为 `deepseek-v4-flash`，并可在 API/Web 中切换到 `deepseek-v4-pro` 或 `deepseek-v4-flash-vision-exp`。`.env`、`.env.*`（`.env.example` 除外）均被 Git 忽略，API health、事件和 Web 响应只展示不含凭据的 provider/model/configured 信息。fake-fetch API/LLM 测试已证明真实流式路径和 Authorization header 行为；尚未声称完成模型 tool-calling loop。
+
+## Phase 1 状态校正（2026-08-22）
+
+本次校正不是否定已完成的基础设施 checkpoint，而是把“产品可用”与“基础设施已存在”分开：
+
+- `packages/tools` 已有 9 个内置工具，`ToolRuntime` 已有 schema、workspace、权限、取消、超时、输出预算和审计能力；
+- `packages/mcp-client` 已能发现并桥接外部工具；
+- 但 `packages/contracts` 的 `ModelRequest` 尚未携带工具 schema，`packages/llm` 尚未解析 `delta.tool_calls`，`packages/runtime` 尚未执行 model → tool → model 循环；
+- 当前 `packages/tools/src/builtin.ts` 的 9 个工具已经是 TypeScript 初版；旧 `src/code_review_agent/tools/` 仍是 Python legacy/reference，不进入新 Runtime 依赖图；
+- 因此当前阶段目标改为 `Phase 1A：Agentic Core + TypeScript Tool Pool`，先完成工具调用层，再补齐 Terminal、Plan/Todo、AskUser 等核心 Coding Agent 工具和真实垂直场景；
+- Phase 5 Subagent、Phase 6 A2A 和 Phase 8 高级能力的核心实现必须等待本门禁通过。
+
+执行计划：[phase-1-agentic-coding-core.zh-CN.md](phase-plans/phase-1-agentic-coding-core.zh-CN.md)。
 
 ## Phase 4 验收证据
 

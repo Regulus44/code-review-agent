@@ -171,25 +171,30 @@ legacy-reference/
 - 旧 Python 测试仍能运行；新 TypeScript 包可以独立 typecheck/test；
 - 新 Runtime 的依赖图不包含 `src/code_review_agent`。
 
-### Phase 1：DSH 风格 Web shell + 最小 TypeScript Agent
+### Phase 1：Agentic Coding Core（DSH Web Shell + 真正工具调用）
 
-**目标**：网页上完成一次真实的“阅读 → 修改 → 测试 → 总结”。
+**目标**：网页上完成一次真实的“阅读 → 修改 → 测试 → 总结”，并且由模型自动发起工具调用，工具结果和权限状态能够回到同一个 Agent Loop。
+
+详细执行计划见：[Phase 1：Agentic Coding Core](phase-plans/phase-1-agentic-coding-core.zh-CN.md)。当前执行单元是 Phase 1A：同时恢复 model → tool → model 流程，并把文件、搜索、Shell、持久终端、计划、任务和用户交互工具补齐为 TypeScript 内置工具池。此前的 Web Shell 实现是可回滚的历史 checkpoint，不是本阶段的最终退出条件。
 
 范围：
 
 - DeepSeek/OpenAI-compatible streaming 接口；
+- OpenAI-compatible/DeepSeek tool-calling contract、参数增量和 tool result continuation；
 - `AgentHost`、Session、Turn、EventStore 的 TypeScript 最小实现；
-- Agent turn/step 事件化；
+- Agent turn/step 事件化和真正的 model → tool → model 循环；
 - SSE 事件流和断线重连；
 - `read_file`、`write_file`、`edit_file`、`glob`、`grep`；
 - `run_command` 的安全 workspace 模式；
 - diff presentation；
-- 基础权限确认；
+- 权限 preset、审批暂停/恢复和模型工具过滤；
 - Web UI 对话、工具卡片、diff 卡片、停止按钮。
+
+Phase 1A 的 TypeScript 工具迁移边界：旧 `src/code_review_agent/tools/` 只作 legacy/reference；新 Runtime 只依赖 `packages/tools`，不把 Python 工具重新接回后端。工具实现可以参考 DSH/Claude Code 的行为和结果形状，但必须经过本项目的 workspace、permission、event、cancel 和 output budget 管线。
 
 不包含：MCP、A2A、Subagent、LSP、Code Mode、Worktree。
 
-说明：本阶段就建立 DSH 风格的 Web shell 和 API 适配，不等待 Python 迁移完成。前端先使用最小依赖和稳定事件类型，后续再替换为更完整的 DSH 组件闭包。
+说明：本阶段的 Web shell 只服务于真实 Agent Loop 验收。前端可以沿用 DSH 信息架构，但不能用静态 UI 代替模型 tool call、permission 或 tool result。
 
 核心验收场景：
 
@@ -270,7 +275,7 @@ type ToolDefinition = {
 7. `git_diff`
 8. `run_command`
 9. `run_tests`
-10. `terminal_start` / `terminal_input` / `terminal_stop`
+10. `terminal_open` / `terminal_send` / `terminal_read` / `terminal_signal` / `terminal_close` / `terminal_list`
 
 安全要求：
 
@@ -322,6 +327,8 @@ ToolRegistry（命名、权限、presentation、事件）
 
 **目标**：让一个主 Agent 能安全地委派独立任务，并在网页上看到子任务。
 
+前置门禁：Phase 1 Agentic Coding Core 的真实 `read → edit → approve → test` 场景已经通过；Subagent 不能用来绕过主 Agent 的 tool-calling、permission 或 workspace 边界。
+
 先定义内部抽象，不立即做 A2A：
 
 ```text
@@ -365,6 +372,8 @@ created → queued → running → waiting → completed
 ### Phase 6：A2A 互操作层
 
 **目标**：允许外部 Agent 通过 A2A 调用本项目 Agent 或委派给本项目的 Agent。
+
+前置门禁：Phase 1 Agentic Coding Core、Phase 2 恢复契约和 Phase 5 parent/child lifecycle 均已通过。
 
 前置条件：
 

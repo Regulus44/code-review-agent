@@ -27,7 +27,8 @@ Phase 8  高级能力与产品化
 ## 文档入口
 
 - [Phase 0：TypeScript 基线和防漂移机制](../phase-0-checklist.zh-CN.md)
-- [Phase 1：最小 AgentHost 与 Web Shell](phase-1-agenthost-web.zh-CN.md)
+- [Phase 1：最小 AgentHost 与 Web Shell（历史 checkpoint）](phase-1-agenthost-web.zh-CN.md)
+- [Phase 1：Agentic Coding Core（当前执行计划）](phase-1-agentic-coding-core.zh-CN.md)
 - [Phase 2：事件、持久化与恢复](phase-2-events-recovery.zh-CN.md)
 - [Phase 3：工具运行时与权限](phase-3-tools-permissions.zh-CN.md)
 - [Phase 4：MCP Client](phase-4-mcp-client.zh-CN.md)
@@ -52,6 +53,7 @@ Phase 8  高级能力与产品化
 ## 状态规则
 
 - 阶段状态以 Git checkpoint 为准，不以“代码已经写了一部分”为准。
+- Phase 1 的 Web Shell checkpoint 不等于 Coding Agent 核心完成；当前以 [Agentic Coding Core 计划](phase-1-agentic-coding-core.zh-CN.md) 的 tool-calling exit gate 为准。
 - 前一阶段退出条件未满足，不进入后一阶段的核心实现。
 - 允许并行做文档、设计和 fixture，但不能绕过依赖提前合并协议或运行时能力。
 - 新需求必须先归属到一个阶段；无法归属时先更新 ADR，不直接扩张当前阶段。
