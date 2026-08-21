@@ -209,11 +209,13 @@ Phase 1A 是当前优先级最高的执行单元，必须同时交付 Agent Loop
 
 ### 1A.5：权限、MCP 和恢复整合
 
-- [ ] 增加 `read-only`、`workspace-write`、`ask-on-write`、`ask-on-execute`、`danger-full-access` preset；
-- [ ] 模型看到的工具列表先经过 deny/permission 过滤，执行时再做最终校验；
-- [ ] 内置工具和 MCP 工具共享同一 Agent Loop、ToolRuntime、审计、取消和输出预算；
-- [ ] 补齐 tool-call replay、pending approval replay、terminal session replay 和 interrupted recovery；
-- [ ] 重复批准、拒绝、取消保持幂等。
+- [x] 增加 `read-only`、`workspace-write`、`ask-on-write`、`ask-on-execute`、`danger-full-access` preset；
+- [x] 模型看到的工具列表先经过 deny/permission 过滤，执行时再做最终校验；
+- [x] 内置工具和 MCP 工具共享同一 Agent Loop、ToolRuntime、审计、取消和输出预算；
+- [x] 补齐 tool-call replay、pending approval replay、terminal session replay 和 interrupted recovery；
+- [x] 重复批准、拒绝、取消保持幂等。
+
+实现边界：终端 session 只回放 `terminalId`、workspace、cwd、命令、状态和缓冲字节等元数据；Node 进程重启后将旧的 `running` session 标记为 `interrupted`，不会尝试恢复或伪造旧子进程。
 
 ### 1A.6：真实 Coding 垂直切片
 

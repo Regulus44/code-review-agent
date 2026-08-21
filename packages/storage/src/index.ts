@@ -317,6 +317,7 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
       const initial: PermissionProjection = current ?? {
         id,
         toolCallId: brand<string, "ToolCallId">(rawToolCallId),
+        ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
         toolName: typeof event.payload["toolName"] === "string" ? event.payload["toolName"] : "unknown",
         status: "pending",
         riskLevel: (event.payload["riskLevel"] as ToolRiskLevel | undefined) ?? "write",

@@ -37,6 +37,7 @@ export type AgentEventType =
   | "permission/resolved"
   | "interaction/requested"
   | "interaction/resolved"
+  | "terminal/session"
   | "mcp/server"
   | "mcp/tool"
   | "agent/status"
@@ -254,6 +255,7 @@ export interface ToolCallProjection {
 export interface PermissionProjection {
   readonly id: PermissionId;
   readonly toolCallId: ToolCallId;
+  readonly turnId?: TurnId;
   readonly toolName: string;
   readonly status: PermissionStatus;
   readonly riskLevel: ToolRiskLevel;

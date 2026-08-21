@@ -7,7 +7,7 @@
 | 阶段 | 状态 | Checkpoint/证据 |
 |---|---|---|
 | Phase 0：TypeScript 基线与契约 | completed | `codex/phase-0-typescript-foundation`；workspace、strict TS、contracts、依赖图检查通过 |
-| Phase 1：Agentic Coding Core | in_progress（重新打开） | Web Shell checkpoint 已通过；tool-calling loop、permission resume 和真实 `read → edit → approve → test` 尚未通过 |
+| Phase 1：Agentic Coding Core | in_progress（1A.5 完成，1A.6 待验收） | Tool-calling loop、P0/P1 TypeScript 工具、permission preset、重启恢复已通过；真实 `read → edit → approve → test` 尚未通过 |
 | Phase 2：事件、持久化与恢复 | completed | `a7f636f` + `5d5a198`；SQLite reopen/recovery、projection replay、SSE replay、queue、幂等 command 和 model failure 通过 |
 | Phase 3：工具运行时与权限 | completed | `e1d3172`（替代 `5003dbd`）；工具禁用、显式覆盖、进程树终止、audit/modelView、权限过期/取消/重启恢复和 Web smoke 通过 |
 | Phase 4：MCP Client | completed | `5477f16`；官方 SDK stdio/SSE/Streamable HTTP、discovery、ToolRegistry bridge、权限/取消/重连、API/Web MCP 状态和 fixture 验证通过 |
@@ -57,7 +57,20 @@ Phase 1 的 provider-neutral adapter 现在已接入 API CLI 启动路径：通�
 
 验证证据：`packages/tools` 20 项测试、`packages/storage` 7 项测试、`apps/api` 11 项测试覆盖 terminal 生命周期、删除审计、Git 读取、interaction resume 和 projection replay。
 
-尚未完成：真实 DeepSeek `read → edit → approve → test` smoke、进程重启后的 pending turn continuation、P1 工具跨进程恢复，以及 Phase 1A.5 的 permission preset / 模型工具过滤 / MCP 与恢复整合。
+尚未完成：真实 DeepSeek `read → edit → approve → test` smoke。该 smoke 属于 Phase 1A.6；Phase 1A.5 的 permission preset、模型工具过滤、MCP 统一管线和恢复整合已完成。
+
+## Phase 1A.5 权限与恢复整合（2026-08-22）
+
+已完成：
+
+- `read-only`、`workspace-write`、`ask-on-write`、`ask-on-execute`、`danger-full-access` 五种 permission preset；
+- 模型发现阶段过滤 deny 工具，执行阶段再次进行 policy 校验；内置工具和 MCP 工具继续共享 ToolRuntime、审计、取消和输出预算；
+- SQLite/InMemory 事件回放后，pending permission 可在新 `AgentHost` 中恢复，并在所有审批解决后继续原 turn；重复批准/拒绝/取消保持幂等；
+- `PermissionProjection` 保留 `turnId`，确保 pending approval 能关联到 interrupted turn；
+- 新增 `terminal/session` 事件。重启后最近仍为 `running` 的终端只恢复元数据并标记为 `interrupted`，`terminal_list` 可展示该状态，发送输入不会伪造旧进程；
+- `waitForTurn` 等待真实 `turn/ended`，避免取消或重启恢复时因中间 `agent/status` 事件提前返回。
+
+验证证据：`packages/tools` 22 项测试、`packages/runtime` 9 项测试覆盖 preset、模型工具过滤、pending approval restart、terminal interrupted replay、取消和幂等恢复。
 
 ## Phase 4 验收证据
 

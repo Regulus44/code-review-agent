@@ -69,12 +69,12 @@ discover
 | `git_diff` | read | auto | 限制输出，避免泄露 workspace 外内容 |
 | `run_command` | execute | ask | argv 优先、超时、输出截断、进程树终止 |
 | `run_tests` | execute | ask | 复用 command policy，记录 exit/stdout/stderr |
-| `terminal_open` | execute | ask | 独立 session、固定 cwd、argv 或受控 shell、输出缓冲 |
+| `terminal_open` | execute | ask | 独立 session、固定 cwd、argv 或受控 shell、输出缓冲；生命周期写入 `terminal/session` |
 | `terminal_send` | execute | ask-on-execute | 只能写入当前 session 的 terminal，不能跨 workspace |
 | `terminal_read` | read | auto | 增量读取、等待上限和输出预算 |
 | `terminal_signal` | execute | ask | 仅允许 SIGINT/SIGTERM/SIGKILL，并终止进程树 |
 | `terminal_close` | execute | ask | 关闭进程并保留审计摘要 |
-| `terminal_list` | read | auto | 只列出当前 session/workspace 的 terminal |
+| `terminal_list` | read | auto | 只列出当前 session/workspace 的 terminal；重启遗留进程显示 `interrupted` |
 | `delete_file` | write | ask | 默认移动到 `.agent-trash`，永久删除必须显式确认 |
 | `git_log` | read | auto | 固定 workspace cwd、提交数量和路径边界 |
 | `git_show` | read | auto | 校验 ref、固定 workspace cwd、输出预算 |
@@ -118,3 +118,4 @@ type ToolResult = {
 - `parallel` 工具可以并行执行；`exclusive` 工具在同一 Session 内串行；
 - 批量工具默认在一个兄弟调用失败时取消仍在运行的兄弟工具；
 - ToolRegistry 支持 enable/disable，禁用工具仍保留定义和历史事件，但不会被发现或执行。
+- permission preset 在模型发现阶段过滤 deny 工具，在执行阶段再次校验；重启恢复的 terminal 只恢复摘要，不恢复不存在的进程。

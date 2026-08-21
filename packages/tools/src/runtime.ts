@@ -21,6 +21,7 @@ import { randomUUID } from "node:crypto";
 import { ToolRegistry } from "./registry.js";
 import { assertValidInput } from "./schema.js";
 import { DefaultPermissionPolicy, type PermissionPolicy } from "./permissions.js";
+import { TerminalManager } from "./builtin.js";
 
 export interface ToolRuntimeOptions {
   readonly store: EventStore;
@@ -29,6 +30,7 @@ export interface ToolRuntimeOptions {
   readonly defaultTimeoutMs?: number;
   readonly outputBudgetBytes?: number;
   readonly permissionTtlMs?: number;
+  readonly terminalManager?: TerminalManager;
 }
 
 export interface ExecuteToolInput {
@@ -97,7 +99,7 @@ export class ToolRuntime {
   }
 
   listTools(): readonly ToolDefinition[] {
-    return this.options.registry.list();
+    return this.options.registry.list().filter((definition) => this.policy.isVisible?.(definition) ?? true);
   }
 
   pendingPermissions(): readonly PermissionRequest[] {
@@ -109,6 +111,9 @@ export class ToolRuntime {
   }
 
   async restorePending(sessionId: SessionId, workspaceRoot: string, events: readonly AgentEvent[]): Promise<void> {
+    await this.options.terminalManager?.restore(sessionId, workspaceRoot, events, async (payload) => {
+      await this.options.store.append({ sessionId, type: "terminal/session", payload });
+    });
     const requests = new Map<string, PermissionRequest>();
     const resolved = new Set<string>();
     for (const event of events) {

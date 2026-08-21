@@ -21,7 +21,7 @@ import {
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { randomUUID } from "node:crypto";
-import { createBuiltinTools, ToolRegistry, ToolRuntime, type ExecuteToolOutput } from "@code-review-agent/tools";
+import { createBuiltinTools, DefaultPermissionPolicy, TerminalManager, ToolRegistry, ToolRuntime, type ExecuteToolOutput, type PermissionPreset } from "@code-review-agent/tools";
 
 export interface AgentHostOptions {
   readonly store: SessionEventStore;
@@ -30,6 +30,7 @@ export interface AgentHostOptions {
   readonly maxSteps?: number;
   readonly toolRuntime?: ToolRuntime;
   readonly toolRegistry?: ToolRegistry;
+  readonly permissionPreset?: PermissionPreset;
 }
 
 interface PendingTurn {
@@ -42,6 +43,12 @@ interface PendingTurn {
 interface PendingPermissionWaiter {
   readonly resolve: (output: ExecuteToolOutput) => void;
   readonly reject: (error: unknown) => void;
+}
+
+interface RecoveredPermissionTurn {
+  readonly sessionId: SessionId;
+  readonly turnId: TurnId;
+  readonly permissionIds: Set<PermissionId>;
 }
 
 interface CollectedModelResponse {
@@ -57,9 +64,12 @@ export class AgentHost {
   private readonly activeTurns = new Map<SessionId, TurnId>();
   private readonly queues = new Map<SessionId, PendingTurn[]>();
   private readonly permissionWaiters = new Map<PermissionId, PendingPermissionWaiter>();
+  private readonly recoveredPermissionTurns = new Map<TurnId, RecoveredPermissionTurn>();
+  private readonly recoveredPermissionIndex = new Map<PermissionId, TurnId>();
   private readonly maxSteps: number;
   private readonly ready: Promise<void>;
   private readonly toolRuntime: ToolRuntime;
+  private readonly terminalManager?: TerminalManager;
 
   constructor(private readonly options: AgentHostOptions) {
     this.model = options.model ?? new EchoChatModel();
@@ -67,8 +77,11 @@ export class AgentHost {
     this.maxSteps = options.maxSteps ?? 12;
     if (!Number.isInteger(this.maxSteps) || this.maxSteps < 1 || this.maxSteps > 100) throw new Error("maxSteps must be an integer between 1 and 100");
     const registry = options.toolRegistry ?? new ToolRegistry();
-    if (options.toolRuntime === undefined) registry.registerMany(createBuiltinTools());
-    this.toolRuntime = options.toolRuntime ?? new ToolRuntime({ store: options.store, registry });
+    if (options.toolRuntime === undefined) {
+      this.terminalManager = new TerminalManager();
+      registry.registerMany(createBuiltinTools({ terminalManager: this.terminalManager }));
+    }
+    this.toolRuntime = options.toolRuntime ?? new ToolRuntime({ store: options.store, registry, ...(this.terminalManager === undefined ? {} : { terminalManager: this.terminalManager }), ...(options.permissionPreset === undefined ? {} : { policy: new DefaultPermissionPolicy({ preset: options.permissionPreset }) }) });
     this.ready = this.restoreQueuedTurns();
   }
 
@@ -164,10 +177,12 @@ export class AgentHost {
       if (call === undefined) throw new Error(`Tool call ${permission.toolCallId} is not available`);
       const output = { toolCallId: call.id, status: call.status === "completed" ? "completed" : call.status === "cancelled" ? "cancelled" : call.status === "denied" ? "denied" : call.status === "awaiting_permission" ? "awaiting_permission" : "failed", ...(call.result === undefined ? {} : { result: call.result }) } as ExecuteToolOutput;
       this.settlePermissionWaiter(permissionId, output);
+      void this.maybeResumeRecoveredTurn(permissionId);
       return output;
     }
     const output = await this.toolRuntime.resolvePermission(permissionId, status);
     this.settlePermissionWaiter(permissionId, output);
+    void this.maybeResumeRecoveredTurn(permissionId);
     return output;
   }
 
@@ -358,7 +373,14 @@ export class AgentHost {
       for (const session of sessions) {
         const projection = await this.options.store.project(session.id);
         const turn = projection?.turns.find((item) => item.id === turnId);
-        if (turn !== undefined && turn.status !== "queued" && turn.status !== "running") return;
+        if (turn === undefined || turn.status === "queued" || turn.status === "running") continue;
+        // An interrupted turn with restored approvals is still live from the
+        // caller's perspective; it will become running once every approval is
+        // resolved and must not make waitForTurn return early.
+        if (turn.status === "interrupted" && (this.recoveredPermissionTurns.has(turnId) || this.activeTurns.get(session.id) === turnId)) continue;
+        const events = await this.options.store.list(session.id);
+        const ended = [...events].reverse().find((event) => event.turnId === turnId && event.type === "turn/ended");
+        if (ended !== undefined) return;
       }
       if (Date.now() - started > timeoutMs) throw new Error(`Timed out waiting for ${turnId}`);
       await new Promise<void>((resolve) => setTimeout(resolve, 5));
@@ -367,9 +389,11 @@ export class AgentHost {
 
   private async restoreQueuedTurns(): Promise<void> {
     for (const summary of await this.options.store.listSessions()) {
-      const projection = await this.options.store.project(summary.id);
+      let projection = await this.options.store.project(summary.id);
       if (projection === undefined) continue;
       await this.toolRuntime.restorePending(summary.id, projection.workspaceRoot, await this.options.store.list(summary.id));
+      projection = await this.options.store.project(summary.id);
+      if (projection === undefined) continue;
       for (const turn of projection.turns.filter((item) => item.status === "queued" && item.userMessage !== undefined)) {
         this.enqueue({
           sessionId: summary.id,
@@ -378,7 +402,33 @@ export class AgentHost {
           previousMessages: await this.conversationMessages(summary.id, turn.id),
         });
       }
+      for (const turn of projection.turns.filter((item) => item.status === "interrupted")) {
+        const permissionIds = new Set(projection.permissions.filter((permission) => permission.status === "pending" && permission.turnId === turn.id).map((permission) => permission.id));
+        if (permissionIds.size === 0) continue;
+        const recovered: RecoveredPermissionTurn = { sessionId: summary.id, turnId: turn.id, permissionIds };
+        this.recoveredPermissionTurns.set(turn.id, recovered);
+        for (const permissionId of permissionIds) this.recoveredPermissionIndex.set(permissionId, turn.id);
+      }
     }
+  }
+
+  private async maybeResumeRecoveredTurn(permissionId: PermissionId): Promise<void> {
+    const turnId = this.recoveredPermissionIndex.get(permissionId);
+    if (turnId === undefined) return;
+    const recovered = this.recoveredPermissionTurns.get(turnId);
+    if (recovered === undefined) return;
+    recovered.permissionIds.delete(permissionId);
+    this.recoveredPermissionIndex.delete(permissionId);
+    if (recovered.permissionIds.size > 0 || this.activeTurns.has(recovered.sessionId)) return;
+    this.recoveredPermissionTurns.delete(turnId);
+    const controller = new AbortController();
+    this.activeTurns.set(recovered.sessionId, recovered.turnId);
+    this.controllers.set(recovered.turnId, controller);
+    void this.runRecoveredTurn(recovered.sessionId, recovered.turnId, controller).finally(() => {
+      this.controllers.delete(recovered.turnId);
+      this.activeTurns.delete(recovered.sessionId);
+      void this.drainSession(recovered.sessionId);
+    });
   }
 
   private async conversationMessages(sessionId: SessionId, beforeTurnId?: TurnId): Promise<readonly ChatMessage[]> {
@@ -449,40 +499,54 @@ export class AgentHost {
         ...previousMessages,
         { role: "user", content },
       ];
-      for (let step = 1; step <= this.maxSteps; step += 1) {
-        if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
-        await this.options.store.append({ sessionId, turnId, type: "step/started", payload: { step } });
-        const response = await this.collectModelResponse(sessionId, turnId, controller, messages);
-        const assistantPayload = {
-          content: response.text,
-          ...(response.toolCalls.length === 0 ? {} : { toolCalls: response.toolCalls }),
-        };
-        await this.options.store.append({ sessionId, turnId, type: "assistant/message", payload: assistantPayload });
-        if (response.toolCalls.length === 0) {
-          await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "completed" } });
-          await this.options.store.append({ sessionId, turnId, type: "turn/ended", payload: { status: "completed" } });
-          return;
-        }
-
-        messages.push({ role: "assistant", content: response.text, toolCalls: response.toolCalls });
-        const outputs = await Promise.all(response.toolCalls.map((toolCall) => this.executeModelToolCall(sessionId, turnId, controller, toolCall)));
-        for (let index = 0; index < outputs.length; index += 1) {
-          const output = outputs[index];
-          const toolCall = response.toolCalls[index];
-          if (output === undefined || toolCall === undefined) throw new Error("TOOL_RESULT_MISMATCH: tool result count did not match tool call count");
-          messages.push({ role: "tool", toolCallId: toolCall.id, content: modelToolResult(output) });
-        }
-        await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "completed", toolCalls: response.toolCalls.length } });
-      }
-      throw new Error(`MAX_AGENT_STEPS_EXCEEDED: model did not produce a final response within ${this.maxSteps} steps`);
+      await this.runSteps(sessionId, turnId, controller, messages);
     } catch (error) {
-      if (controller.signal.aborted) {
-        await this.options.store.append({ sessionId, turnId, type: "turn/ended", payload: { status: "stopped" } });
-      } else {
-        const message = error instanceof Error ? error.message : String(error);
-        await this.options.store.append({ sessionId, turnId, type: "agent/error", payload: { message } });
-        await this.options.store.append({ sessionId, turnId, type: "turn/ended", payload: { status: "failed", message } });
+      await this.finishTurnAfterError(sessionId, turnId, controller, error);
+    }
+  }
+
+  private async runRecoveredTurn(sessionId: SessionId, turnId: TurnId, controller: AbortController): Promise<void> {
+    try {
+      await this.options.store.append({ sessionId, turnId, type: "agent/status", payload: { status: "running", reason: "permission_resolved_after_restart" } });
+      const messages: ChatMessage[] = [{ role: "system", content: this.systemPrompt }, ...(await this.conversationMessages(sessionId))];
+      await this.runSteps(sessionId, turnId, controller, messages);
+    } catch (error) {
+      await this.finishTurnAfterError(sessionId, turnId, controller, error);
+    }
+  }
+
+  private async runSteps(sessionId: SessionId, turnId: TurnId, controller: AbortController, messages: ChatMessage[]): Promise<void> {
+    for (let step = 1; step <= this.maxSteps; step += 1) {
+      if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
+      await this.options.store.append({ sessionId, turnId, type: "step/started", payload: { step } });
+      const response = await this.collectModelResponse(sessionId, turnId, controller, messages);
+      const assistantPayload = { content: response.text, ...(response.toolCalls.length === 0 ? {} : { toolCalls: response.toolCalls }) };
+      await this.options.store.append({ sessionId, turnId, type: "assistant/message", payload: assistantPayload });
+      if (response.toolCalls.length === 0) {
+        await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "completed" } });
+        await this.options.store.append({ sessionId, turnId, type: "turn/ended", payload: { status: "completed" } });
+        return;
       }
+      messages.push({ role: "assistant", content: response.text, toolCalls: response.toolCalls });
+      const outputs = await Promise.all(response.toolCalls.map((toolCall) => this.executeModelToolCall(sessionId, turnId, controller, toolCall)));
+      for (let index = 0; index < outputs.length; index += 1) {
+        const output = outputs[index];
+        const toolCall = response.toolCalls[index];
+        if (output === undefined || toolCall === undefined) throw new Error("TOOL_RESULT_MISMATCH: tool result count did not match tool call count");
+        messages.push({ role: "tool", toolCallId: toolCall.id, content: modelToolResult(output) });
+      }
+      await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "completed", toolCalls: response.toolCalls.length } });
+    }
+    throw new Error(`MAX_AGENT_STEPS_EXCEEDED: model did not produce a final response within ${this.maxSteps} steps`);
+  }
+
+  private async finishTurnAfterError(sessionId: SessionId, turnId: TurnId, controller: AbortController, error: unknown): Promise<void> {
+    if (controller.signal.aborted) {
+      await this.options.store.append({ sessionId, turnId, type: "turn/ended", payload: { status: "stopped" } });
+    } else {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.options.store.append({ sessionId, turnId, type: "agent/error", payload: { message } });
+      await this.options.store.append({ sessionId, turnId, type: "turn/ended", payload: { status: "failed", message } });
     }
   }
 

@@ -22,7 +22,7 @@ const string = { type: "string" as const };
 const boolean = { type: "boolean" as const };
 const integer = (minimum: number, maximum: number) => ({ type: "integer" as const, minimum, maximum });
 
-export type TerminalStatus = "running" | "exited" | "closed";
+export type TerminalStatus = "running" | "exited" | "closed" | "interrupted";
 
 export interface TerminalSummary {
   readonly terminalId: string;
@@ -40,7 +40,8 @@ interface ManagedTerminal extends Omit<TerminalSummary, "status" | "exitCode" | 
   status: TerminalStatus;
   exitCode: number | undefined;
   signal: string | undefined;
-  readonly child: ChildProcessWithoutNullStreams;
+  readonly child: ChildProcessWithoutNullStreams | undefined;
+  appendEvent?: (payload: Readonly<Record<string, unknown>>) => Promise<void>;
   output: string;
   readOffset: number;
   totalBytes: number;
@@ -50,7 +51,57 @@ interface ManagedTerminal extends Omit<TerminalSummary, "status" | "exitCode" | 
 export class TerminalManager {
   private readonly sessions = new Map<string, ManagedTerminal>();
 
-  async open(input: { sessionId: string; workspaceRoot: string; cwd?: string; executable?: string; args?: readonly string[]; env?: Readonly<Record<string, string>> }): Promise<ToolResult> {
+  /** Rebuild terminal metadata from durable events after a host restart. */
+  async restore(
+    sessionId: string,
+    workspaceRoot: string,
+    events: readonly { readonly type: string; readonly payload: Readonly<Record<string, unknown>> }[],
+    appendEvent: (payload: Readonly<Record<string, unknown>>) => Promise<void>,
+  ): Promise<void> {
+    const latest = new Map<string, Readonly<Record<string, unknown>>>();
+    for (const event of events) {
+      if (event.type !== "terminal/session") continue;
+      const eventSessionId = event.payload["sessionId"];
+      if (eventSessionId !== undefined && eventSessionId !== sessionId) continue;
+      const terminalId = event.payload["terminalId"];
+      if (typeof terminalId === "string") latest.set(terminalId, event.payload);
+    }
+    const resolvedRoot = path.resolve(workspaceRoot);
+    for (const payload of latest.values()) {
+      const terminalId = payload["terminalId"];
+      const terminalWorkspace = typeof payload["workspaceRoot"] === "string" ? path.resolve(payload["workspaceRoot"]) : resolvedRoot;
+      if (typeof terminalId !== "string" || terminalWorkspace !== resolvedRoot) continue;
+      const status = terminalStatus(payload["status"]);
+      const terminal: ManagedTerminal = {
+        terminalId,
+        sessionId,
+        workspaceRoot: terminalWorkspace,
+        cwd: typeof payload["cwd"] === "string" ? payload["cwd"] : terminalWorkspace,
+        command: typeof payload["command"] === "string" ? payload["command"] : "",
+        status: status === "running" ? "interrupted" : status,
+        exitCode: typeof payload["exitCode"] === "number" ? payload["exitCode"] : undefined,
+        signal: typeof payload["signal"] === "string" ? payload["signal"] : undefined,
+        child: undefined,
+        output: "",
+        readOffset: 0,
+        totalBytes: typeof payload["bufferedBytes"] === "number" ? payload["bufferedBytes"] : 0,
+      };
+      this.sessions.set(terminalId, terminal);
+      if (status === "running") {
+        await appendEvent({
+          action: "interrupted",
+          terminalId,
+          workspaceRoot: terminal.workspaceRoot,
+          cwd: terminal.cwd,
+          command: terminal.command,
+          status: "interrupted",
+          bufferedBytes: terminal.totalBytes,
+        });
+      }
+    }
+  }
+
+  async open(input: { sessionId: string; workspaceRoot: string; cwd?: string; executable?: string; args?: readonly string[]; env?: Readonly<Record<string, string>>; appendEvent?: (payload: Readonly<Record<string, unknown>>) => Promise<void> }): Promise<ToolResult> {
     const resolver = new WorkspaceResolver(input.workspaceRoot);
     const cwdPath = input.cwd === undefined ? resolver.rootPath : await resolver.resolveExisting(input.cwd);
     if (!(await stat(cwdPath)).isDirectory()) return fail("TERMINAL_CWD_INVALID", "Terminal cwd must be a directory");
@@ -76,6 +127,7 @@ export class TerminalManager {
       exitCode: undefined,
       signal: undefined,
       child,
+      ...(input.appendEvent === undefined ? {} : { appendEvent: input.appendEvent }),
       output: "",
       readOffset: 0,
       totalBytes: 0,
@@ -87,14 +139,16 @@ export class TerminalManager {
       terminal.status = "exited";
       terminal.exitCode = exitCode === null ? undefined : exitCode;
       terminal.signal = signal ?? undefined;
+      void terminal.appendEvent?.({ ...this.eventPayload(terminal), action: "exited" });
     });
     this.sessions.set(terminalId, terminal);
+    await terminal.appendEvent?.({ ...this.eventPayload(terminal), action: "opened" });
     return ok({ terminalId, cwd: cwdPath, command: terminal.command, status: terminal.status });
   }
 
   send(input: { sessionId: string; terminalId: string; text: string; appendNewline?: boolean }, signal: AbortSignal): ToolResult {
     const terminal = this.get(input.sessionId, input.terminalId);
-    if (terminal.status !== "running" || terminal.child.stdin.destroyed) return fail("TERMINAL_NOT_RUNNING", "Terminal is not running");
+    if (terminal.status !== "running" || terminal.child === undefined || terminal.child.stdin.destroyed) return fail(terminal.status === "interrupted" ? "TERMINAL_INTERRUPTED" : "TERMINAL_NOT_RUNNING", terminal.status === "interrupted" ? "Terminal process was interrupted by a host restart" : "Terminal is not running");
     if (signal.aborted) return fail("TERMINAL_CANCELLED", "Terminal input was cancelled");
     const text = input.appendNewline === false ? input.text : `${input.text}\n`;
     terminal.child.stdin.write(text);
@@ -117,9 +171,9 @@ export class TerminalManager {
     };
   }
 
-  signal(input: { sessionId: string; terminalId: string; signal?: "SIGINT" | "SIGTERM" | "SIGKILL" }): ToolResult {
+  async signal(input: { sessionId: string; terminalId: string; signal?: "SIGINT" | "SIGTERM" | "SIGKILL" }): Promise<ToolResult> {
     const terminal = this.get(input.sessionId, input.terminalId);
-    if (terminal.status !== "running") return ok({ terminalId: terminal.terminalId, status: terminal.status });
+    if (terminal.status !== "running" || terminal.child === undefined) return ok({ terminalId: terminal.terminalId, status: terminal.status });
     const signal = input.signal ?? "SIGINT";
     if (process.platform === "win32") {
       if (signal === "SIGKILL" || signal === "SIGTERM") terminateProcessTree(terminal.child);
@@ -127,17 +181,20 @@ export class TerminalManager {
     } else {
       try { process.kill(-(terminal.child.pid ?? 0), signal); } catch { terminal.child.kill(signal); }
     }
+    await terminal.appendEvent?.({ ...this.eventPayload(terminal), action: "signalled", signal });
     return ok({ terminalId: terminal.terminalId, status: "signalled", signal });
   }
 
-  async close(input: { sessionId: string; terminalId: string }): Promise<ToolResult> {
+  async close(input: { sessionId: string; terminalId: string; appendEvent?: (payload: Readonly<Record<string, unknown>>) => Promise<void> }): Promise<ToolResult> {
     const terminal = this.get(input.sessionId, input.terminalId);
-    if (terminal.status === "running") {
+    if (input.appendEvent !== undefined) terminal.appendEvent = input.appendEvent;
+    if (terminal.status === "running" && terminal.child !== undefined) {
       terminateProcessTree(terminal.child);
       await waitForChildClose(terminal.child, 1_000);
       await new Promise<void>((resolve) => setTimeout(resolve, 100));
     }
     terminal.status = "closed";
+    await terminal.appendEvent?.({ ...this.eventPayload(terminal), action: "closed" });
     return ok({ terminalId: terminal.terminalId, status: terminal.status, outputBytes: terminal.totalBytes });
   }
 
@@ -173,7 +230,20 @@ export class TerminalManager {
       status: terminal.status,
       ...(terminal.exitCode === undefined ? {} : { exitCode: terminal.exitCode }),
       ...(terminal.signal === undefined ? {} : { signal: terminal.signal }),
-      bufferedBytes: Buffer.byteLength(terminal.output, "utf8"),
+      bufferedBytes: terminal.child === undefined ? terminal.totalBytes : Buffer.byteLength(terminal.output, "utf8"),
+    };
+  }
+
+  private eventPayload(terminal: ManagedTerminal): Readonly<Record<string, unknown>> {
+    return {
+      terminalId: terminal.terminalId,
+      workspaceRoot: terminal.workspaceRoot,
+      cwd: terminal.cwd,
+      command: terminal.command,
+      status: terminal.status,
+      ...(terminal.exitCode === undefined ? {} : { exitCode: terminal.exitCode }),
+      ...(terminal.signal === undefined ? {} : { signal: terminal.signal }),
+      bufferedBytes: terminal.totalBytes,
     };
   }
 }
@@ -219,7 +289,7 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
     },
     {
       name: "terminal_open", description: "Open a persistent terminal process scoped to this session and workspace.", inputSchema: object({ cwd: string, executable: string, args: { type: "array" as const, items: string, maxItems: 32 }, env: { type: "object" as const, additionalProperties: true } }), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
-      execute: async (input, context) => terminals.open({ sessionId: context.sessionId, workspaceRoot: context.workspaceRoot, ...(typeof (input as { cwd?: unknown }).cwd === "string" ? { cwd: (input as { cwd: string }).cwd } : {}), ...(typeof (input as { executable?: unknown }).executable === "string" ? { executable: (input as { executable: string }).executable } : {}), ...((input as { args?: string[] }).args === undefined ? {} : { args: (input as { args: string[] }).args }), ...((input as { env?: Record<string, string> }).env === undefined ? {} : { env: (input as { env: Record<string, string> }).env }) }),
+      execute: async (input, context) => terminals.open({ sessionId: context.sessionId, workspaceRoot: context.workspaceRoot, ...(typeof (input as { cwd?: unknown }).cwd === "string" ? { cwd: (input as { cwd: string }).cwd } : {}), ...(typeof (input as { executable?: unknown }).executable === "string" ? { executable: (input as { executable: string }).executable } : {}), ...((input as { args?: string[] }).args === undefined ? {} : { args: (input as { args: string[] }).args }), ...((input as { env?: Record<string, string> }).env === undefined ? {} : { env: (input as { env: Record<string, string> }).env }), appendEvent: async (payload) => context.appendEvent("terminal/session", payload) }),
     },
     {
       name: "terminal_send", description: "Send input to a persistent terminal process.", inputSchema: object({ terminalId: string, text: string, appendNewline: boolean }, ["terminalId", "text"]), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
@@ -235,7 +305,7 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
     },
     {
       name: "terminal_close", description: "Close a persistent terminal process and retain its audit summary.", inputSchema: object({ terminalId: string }, ["terminalId"]), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
-      execute: async (input, context) => terminals.close({ sessionId: context.sessionId, terminalId: (input as { terminalId: string }).terminalId }),
+      execute: async (input, context) => terminals.close({ sessionId: context.sessionId, terminalId: (input as { terminalId: string }).terminalId, appendEvent: async (payload) => context.appendEvent("terminal/session", payload) }),
     },
     {
       name: "terminal_list", description: "List persistent terminal processes belonging to this session.", inputSchema: object({}), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
@@ -302,6 +372,7 @@ function terminateProcessTree(child: ChildProcessWithoutNullStreams | ReturnType
 function defaultShell(): string { return process.platform === "win32" ? (process.env["ComSpec"] ?? "cmd.exe") : (process.env["SHELL"] ?? "/bin/sh"); }
 function defaultShellArgs(): string[] { return process.platform === "win32" ? ["/d", "/q"] : ["-i"]; }
 function isAllowedExecutable(command: string): boolean { return /^[a-zA-Z0-9._-]+$/u.test(command) && ALLOWED_EXECUTABLES.has(command.toLowerCase()); }
+function terminalStatus(value: unknown): TerminalStatus { return value === "exited" || value === "closed" || value === "interrupted" ? value : "running"; }
 function waitForTerminalOutput(terminal: ManagedTerminal, waitMs: number, signal: AbortSignal): Promise<void> { return new Promise((resolve) => { const started = Date.now(); const timer = setInterval(() => { if (signal.aborted || terminal.readOffset < terminal.output.length || terminal.status !== "running" || Date.now() - started >= waitMs) { clearInterval(timer); resolve(); } }, 25); }); }
 function waitForChildClose(child: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<void> { if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(); return new Promise((resolve) => { let settled = false; const finish = () => { if (settled) return; settled = true; clearTimeout(timer); resolve(); }; const timer = setTimeout(finish, timeoutMs); child.once("close", finish); }); }
 function isMissingPathError(error: unknown): boolean { return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT"; }

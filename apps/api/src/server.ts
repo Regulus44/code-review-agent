@@ -8,6 +8,7 @@ import { SqliteEventStore } from "@code-review-agent/storage";
 import { brand, type AgentEvent, type ChatModel, type InteractionId, type PermissionId, type SessionEventStore } from "@code-review-agent/contracts";
 import { createConfiguredChatModel, DEEPSEEK_MODELS, type ModelConfigView } from "@code-review-agent/llm";
 import { McpConnectionManager, type McpServerConfig } from "@code-review-agent/mcp-client";
+import type { PermissionPreset } from "@code-review-agent/tools";
 
 export interface ModelSelection {
   readonly model: ChatModel;
@@ -22,6 +23,7 @@ export interface ApiServerOptions {
   readonly modelInfo?: ModelConfigView;
   readonly availableModels?: readonly string[];
   readonly modelSelector?: (model: string) => ModelSelection;
+  readonly permissionPreset?: PermissionPreset;
   readonly mcp?: McpConnectionManager;
   readonly webRoot?: string;
 }
@@ -29,7 +31,7 @@ export interface ApiServerOptions {
 export function createApiServer(options: ApiServerOptions = {}): Server {
   const ownsStore = options.store === undefined && options.host === undefined;
   const store = options.store ?? (options.host === undefined ? new SqliteEventStore(options.databasePath === undefined ? {} : { databasePath: options.databasePath }) : undefined);
-  const host = options.host ?? new AgentHost({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }) });
+  const host = options.host ?? new AgentHost({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), ...(options.permissionPreset === undefined ? {} : { permissionPreset: options.permissionPreset }) });
   const modelRuntime: ModelRuntimeState = {
     availableModels: options.availableModels ?? [],
     ...(options.modelInfo === undefined ? {} : { info: options.modelInfo }),

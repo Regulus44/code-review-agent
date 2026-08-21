@@ -3,9 +3,10 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { brand, type AgentEvent, type EventStore, type SessionId, type SessionProjection, type ToolDefinition } from "@code-review-agent/contracts";
-import { createBuiltinTools } from "./builtin.js";
+import { createBuiltinTools, TerminalManager } from "./builtin.js";
 import { ToolDisabledError, ToolRegistry } from "./registry.js";
 import { ToolRuntime } from "./runtime.js";
+import { DefaultPermissionPolicy } from "./permissions.js";
 import { assertValidInput, SchemaValidationError } from "./schema.js";
 
 class MemoryStore implements EventStore {
@@ -173,6 +174,16 @@ describe("ToolRuntime", () => {
     expect(store.events.map((event) => event.type)).toContain("plan/updated"); expect(store.events.map((event) => event.type)).toContain("todo/updated");
   });
 
+  it("applies permission presets to both model visibility and execution", async () => {
+    const sessionId = brand<string, "SessionId">("ses_policy"); const root = process.cwd();
+    const readOnlyRegistry = new ToolRegistry(); readOnlyRegistry.registerMany(createBuiltinTools()); const readOnly = new ToolRuntime({ store: new MemoryStore(), registry: readOnlyRegistry, policy: new DefaultPermissionPolicy({ preset: "read-only" }) });
+    expect(readOnly.listTools().map((tool) => tool.name)).toContain("read_file"); expect(readOnly.listTools().map((tool) => tool.name)).not.toContain("edit_file");
+    expect((await readOnly.execute({ sessionId, workspaceRoot: root, name: "edit_file", input: { path: "missing.txt", oldText: "a", newText: "b" } })).status).toBe("denied");
+    const workspaceWriteRegistry = new ToolRegistry(); workspaceWriteRegistry.registerMany(createBuiltinTools()); const workspaceWrite = new ToolRuntime({ store: new MemoryStore(), registry: workspaceWriteRegistry, policy: new DefaultPermissionPolicy({ preset: "workspace-write" }) });
+    const write = await workspaceWrite.execute({ sessionId, workspaceRoot: root, name: "write_file", input: { path: `.phase-policy-${Date.now()}.txt`, content: "ok" } }); expect(write.status).toBe("completed"); const written = (write.result?.output as { path?: string }).path; if (written !== undefined) await rm(path.join(root, written), { force: true });
+    const execute = await workspaceWrite.execute({ sessionId, workspaceRoot: root, name: "run_command", input: { executable: "node", args: ["-e", "process.stdout.write('ok')"] } }); expect(execute.status).toBe("awaiting_permission");
+  });
+
   it("keeps a terminal process alive across send/read calls and closes it", async () => {
     const root = process.cwd();
     try {
@@ -184,6 +195,23 @@ describe("ToolRuntime", () => {
       const read = await runtime.execute({ sessionId, workspaceRoot: root, name: "terminal_read", input: { terminalId, waitMs: 500 } }); expect(read.status).toBe("completed"); expect((read.result?.output as { output?: string }).output).toContain("persistent-output");
       const close = await runtime.execute({ sessionId, workspaceRoot: root, name: "terminal_close", input: { terminalId } }); expect(close.status).toBe("awaiting_permission"); expect((await runtime.resolvePermission(close.permission!.id, "approved")).status).toBe("completed");
     } finally { /* terminal cleanup is asserted by terminal_close; the repository cwd must not be removed */ }
+  });
+
+  it("replays a running terminal as interrupted without fabricating a child process", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-terminal-replay-"));
+    try {
+      const store = new MemoryStore(); const sessionId = brand<string, "SessionId">("ses_terminal_replay");
+      await store.append({ sessionId, type: "terminal/session", payload: { terminalId: "terminal_old", workspaceRoot: root, cwd: root, command: "node -e long-running", status: "running", bufferedBytes: 12 } });
+      const manager = new TerminalManager(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools({ terminalManager: manager }));
+      const runtime = new ToolRuntime({ store, registry, terminalManager: manager }); await runtime.restorePending(sessionId, root, store.events);
+      const listed = await runtime.execute({ sessionId, workspaceRoot: root, name: "terminal_list", input: {} });
+      expect(listed.result?.output).toMatchObject([{ terminalId: "terminal_old", status: "interrupted", command: "node -e long-running" }]);
+      const interruptedEvent = [...store.events].reverse().find((event) => event.type === "terminal/session");
+      expect(interruptedEvent?.payload).toMatchObject({ action: "interrupted", status: "interrupted" });
+      const send = await runtime.execute({ sessionId, workspaceRoot: root, name: "terminal_send", input: { terminalId: "terminal_old", text: "cannot resume" } });
+      expect(send.status).toBe("awaiting_permission"); const sendResult = await runtime.resolvePermission(send.permission!.id, "approved");
+      expect(sendResult.status).toBe("failed"); expect(sendResult.result?.error?.code).toBe("TERMINAL_INTERRUPTED");
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 
   it("moves deleted paths to workspace trash and exposes bounded git history", async () => {

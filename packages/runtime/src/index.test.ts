@@ -105,6 +105,21 @@ describe("AgentHost", () => {
     expect((await host.getSession(session.id))?.messages.at(-1)?.content).toBe("Write approved.");
   });
 
+  it("replays a pending approval after host restart and continues the interrupted turn", async () => {
+    const store = new InMemoryEventStore(); const registry = new ToolRegistry();
+    registry.register({ name: "write_fixture", description: "write", inputSchema: { type: "object", additionalProperties: false }, executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "block", execute: async () => ({ ok: true, output: { written: true }, modelView: { written: true } }) });
+    let calls = 0;
+    const model: ChatModel = { async *stream(): AsyncIterable<ModelStreamPart> { calls += 1; if (calls === 1) { yield { type: "tool_call_start", index: 0, id: "call_restart", name: "write_fixture" }; yield { type: "tool_call_delta", index: 0, arguments: "{}" }; } else yield { type: "text_delta", text: "Recovered and continued." }; yield { type: "done" }; } };
+    const first = new AgentHost({ store, model, toolRuntime: new ToolRuntime({ store, registry }) }); const session = await first.createSession("D:/workspace"); const turn = await first.sendMessage(session.id, "write after restart");
+    let permissionId: PermissionId | undefined;
+    for (let attempt = 0; attempt < 100 && permissionId === undefined; attempt += 1) { permissionId = (await first.getSession(session.id))?.permissions.find((permission) => permission.status === "pending")?.id; if (permissionId === undefined) await new Promise<void>((resolve) => setTimeout(resolve, 5)); }
+    expect(permissionId).toBeDefined(); await store.append({ sessionId: session.id, turnId: turn, type: "agent/status", payload: { status: "interrupted", reason: "process_restart" } });
+    const second = new AgentHost({ store, model, toolRuntime: new ToolRuntime({ store, registry }) }); expect((await second.getSession(session.id))?.status).toBe("interrupted");
+    const approved = await second.resolvePermission(session.id, permissionId!, "approved"); expect(approved.status).toBe("completed"); await second.waitForTurn(turn, 2_000);
+    expect((await second.getSession(session.id))?.messages.at(-1)?.content).toBe("Recovered and continued.");
+    expect((await second.events(session.id)).filter((event) => event.type === "agent/status").at(-1)?.payload["status"]).toBe("running");
+  });
+
   it("cancels a permission-paused turn without continuing the model", async () => {
     const store = new InMemoryEventStore();
     const registry = new ToolRegistry();

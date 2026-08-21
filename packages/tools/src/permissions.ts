@@ -7,9 +7,13 @@ export interface PermissionEvaluation {
 
 export interface PermissionPolicy {
   evaluate(definition: ToolDefinition): PermissionEvaluation;
+  isVisible?(definition: ToolDefinition): boolean;
 }
 
+export type PermissionPreset = "read-only" | "workspace-write" | "ask-on-write" | "ask-on-execute" | "danger-full-access";
+
 export interface DefaultPermissionPolicyOptions {
+  readonly preset?: PermissionPreset;
   readonly networkMode?: ToolApprovalMode;
   readonly writeMode?: ToolApprovalMode;
   readonly executeMode?: ToolApprovalMode;
@@ -18,12 +22,16 @@ export interface DefaultPermissionPolicyOptions {
 /** Default local policy: reads are automatic, writes/commands ask, network is denied. */
 export class DefaultPermissionPolicy implements PermissionPolicy {
   private readonly options: Required<DefaultPermissionPolicyOptions>;
+  readonly preset: PermissionPreset;
 
   constructor(options: DefaultPermissionPolicyOptions = {}) {
+    this.preset = options.preset ?? "ask-on-write";
+    const defaults = presetModes(this.preset);
     this.options = {
-      networkMode: options.networkMode ?? "deny",
-      writeMode: options.writeMode ?? "ask",
-      executeMode: options.executeMode ?? "ask",
+      preset: this.preset,
+      networkMode: options.networkMode ?? defaults.networkMode,
+      writeMode: options.writeMode ?? defaults.writeMode,
+      executeMode: options.executeMode ?? defaults.executeMode,
     };
   }
 
@@ -34,10 +42,22 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     return { mode, reason: mode === "ask" ? `${definition.riskLevel} tool requires approval` : `${definition.riskLevel} tools are disabled by policy` };
   }
 
+  isVisible(definition: ToolDefinition): boolean {
+    return this.evaluate(definition).mode !== "deny";
+  }
+
   private modeFor(risk: ToolRiskLevel): ToolApprovalMode {
     if (risk === "read") return "auto";
     if (risk === "write") return this.options.writeMode;
     if (risk === "execute") return this.options.executeMode;
     return this.options.networkMode;
   }
+}
+
+function presetModes(preset: PermissionPreset): { readonly networkMode: ToolApprovalMode; readonly writeMode: ToolApprovalMode; readonly executeMode: ToolApprovalMode } {
+  if (preset === "read-only") return { networkMode: "deny", writeMode: "deny", executeMode: "deny" };
+  if (preset === "workspace-write") return { networkMode: "deny", writeMode: "auto", executeMode: "ask" };
+  if (preset === "ask-on-execute") return { networkMode: "ask", writeMode: "auto", executeMode: "ask" };
+  if (preset === "danger-full-access") return { networkMode: "auto", writeMode: "auto", executeMode: "auto" };
+  return { networkMode: "deny", writeMode: "ask", executeMode: "ask" };
 }

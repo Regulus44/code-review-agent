@@ -38,6 +38,9 @@ importers:
       '@code-review-agent/storage':
         specifier: workspace:*
         version: link:../../packages/storage
+      '@code-review-agent/tools':
+        specifier: workspace:*
+        version: link:../../packages/tools
 
   apps/web: {}
 

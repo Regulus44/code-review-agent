@@ -95,3 +95,21 @@ Phase 1 不再以 Web Shell 完成为退出条件，改以 [Agentic Coding Core 
 - `packages/storage` 7 项测试通过；
 - `apps/api` 11 项测试通过，包含 ask_user → interaction answer → model continuation；
 - 尚未进行真实 DeepSeek `read → edit → approve → test` smoke，待 Phase 1A.5 的权限 preset、MCP/恢复整合稳定后执行。
+
+## 2026-08-22：Phase 1A.5 权限与恢复整合
+
+### 主要交付
+
+- 增加 `read-only`、`workspace-write`、`ask-on-write`、`ask-on-execute`、`danger-full-access` permission preset；工具列表在模型发现阶段进行 deny 过滤，执行时仍做最终 policy 校验；
+- AgentHost 重启时从事件恢复 pending permission，并把同一 turn 的审批关联起来；最后一个审批解决后继续原 turn，恢复上下文包含原 user message、assistant tool call 和 tool result；
+- 修复 `waitForTurn` 在取消/重启中间状态提前返回的问题，重复审批、拒绝和取消不重复启动恢复流程；
+- 新增 `terminal/session` 生命周期事件。重启时旧的 running terminal 只恢复 cwd、命令、workspace、状态和缓冲字节元数据，并追加 `interrupted`；不恢复不存在的 Node child process；
+- `PermissionProjection` 增加 `turnId`，使 pending approval 能从 projection 关联 interrupted turn；API workspace 对 `@code-review-agent/tools` 的类型依赖和 project reference 已补齐。
+
+### 验证
+
+- `pnpm typecheck` 通过；
+- `@code-review-agent/tools` 22 项测试通过；
+- `@code-review-agent/runtime` 9 项测试通过；
+- 覆盖 permission preset/模型可见过滤、重启后的 pending approval continuation、取消收尾、terminal interrupted replay 和无伪造进程；
+- 尚未进行真实 DeepSeek `read → edit → approve → test` smoke，该项移交 Phase 1A.6。
