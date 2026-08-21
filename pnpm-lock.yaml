@@ -54,12 +54,24 @@ importers:
       '@code-review-agent/storage':
         specifier: workspace:*
         version: link:../storage
+      '@code-review-agent/tools':
+        specifier: workspace:*
+        version: link:../tools
 
   packages/storage:
     dependencies:
       '@code-review-agent/contracts':
         specifier: workspace:*
         version: link:../contracts
+
+  packages/tools:
+    dependencies:
+      '@code-review-agent/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@code-review-agent/workspace':
+        specifier: workspace:*
+        version: link:../workspace
 
   packages/workspace:
     dependencies:

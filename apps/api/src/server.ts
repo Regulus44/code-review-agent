@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { sessionId, AgentHost, turnId } from "@code-review-agent/runtime";
 import { SqliteEventStore } from "@code-review-agent/storage";
-import type { AgentEvent, SessionEventStore } from "@code-review-agent/contracts";
+import { brand, type AgentEvent, type PermissionId, type SessionEventStore } from "@code-review-agent/contracts";
 
 export interface ApiServerOptions {
   readonly store?: SessionEventStore;
@@ -38,6 +38,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   try {
     if (request.method === "GET" && url.pathname === "/health") {
       sendJson(response, 200, { ok: true, service: "code-review-agent", runtime: "typescript", persistence });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/v1/tools") {
+      sendJson(response, 200, { tools: host.listTools() });
       return;
     }
     if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
@@ -74,6 +78,15 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       sendJson(response, 200, await host.resumeSession(id, commandId(request, body)));
       return;
     }
+    const permissionMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/permissions\/([^/]+)$/u);
+    if (request.method === "POST" && permissionMatch?.[1] !== undefined && permissionMatch[2] !== undefined) {
+      const id = sessionId(decodeURIComponent(permissionMatch[1]));
+      const body = await readJson(request);
+      const status = body.status;
+      if (status !== "approved" && status !== "denied" && status !== "cancelled") throw new HttpError(400, "status must be approved, denied, or cancelled");
+      sendJson(response, 200, await host.resolvePermission(id, brand<string, "PermissionId">(decodeURIComponent(permissionMatch[2])), status, commandId(request, body)));
+      return;
+    }
     const forkMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/fork$/u);
     if (request.method === "POST" && forkMatch?.[1] !== undefined) {
       const id = sessionId(decodeURIComponent(forkMatch[1]));
@@ -108,9 +121,19 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         return;
       }
     }
+    const toolsMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/tools$/u);
+    if (request.method === "POST" && toolsMatch?.[1] !== undefined) {
+      const id = sessionId(decodeURIComponent(toolsMatch[1]));
+      const body = await readJson(request);
+      if (typeof body.name !== "string") throw new HttpError(400, "name is required");
+      const result = await host.executeTool(id, body.name, body.input, typeof body.turnId === "string" ? turnId(body.turnId) : undefined, commandId(request, body));
+      sendJson(response, result.status === "awaiting_permission" ? 202 : 200, result);
+      return;
+    }
     throw new HttpError(404, "not found");
   } catch (error) {
-    const status = error instanceof HttpError ? error.status : 500;
+    const code = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : "";
+    const status = error instanceof HttpError ? error.status : code === "INVALID_TOOL_INPUT" ? 400 : code === "TOOL_NOT_FOUND" ? 404 : 500;
     const message = error instanceof Error ? error.message : String(error);
     if (!response.headersSent) sendJson(response, status, { error: message });
     else response.end();

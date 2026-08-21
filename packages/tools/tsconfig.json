@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "references": [{ "path": "../contracts" }, { "path": "../workspace" }],
+  "references": [{ "path": "../contracts" }, { "path": "../workspace" }],
+  "include": ["src/**/*.ts"]
+}

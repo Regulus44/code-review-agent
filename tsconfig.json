@@ -6,6 +6,7 @@
     { "path": "packages/storage" },
     { "path": "packages/runtime" },
     { "path": "packages/workspace" },
+    { "path": "packages/tools" },
     { "path": "apps/api" },
     { "path": "apps/web" }
   ]

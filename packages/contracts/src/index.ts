@@ -5,6 +5,7 @@ export type SessionId = Brand<string, "SessionId">;
 export type TurnId = Brand<string, "TurnId">;
 export type TaskId = Brand<string, "TaskId">;
 export type ToolCallId = Brand<string, "ToolCallId">;
+export type PermissionId = Brand<string, "PermissionId">;
 export type WorkspaceId = Brand<string, "WorkspaceId">;
 
 export function brand<Value, Name extends string>(value: Value): Brand<Value, Name> {
@@ -23,6 +24,12 @@ export type AgentEventType =
   | "task/created"
   | "task/updated"
   | "task/ended"
+  | "tool/call"
+  | "tool/progress"
+  | "tool/result"
+  | "diff/preview"
+  | "permission/requested"
+  | "permission/resolved"
   | "agent/status"
   | "agent/error";
 
@@ -81,6 +88,125 @@ export interface SessionProjection extends SessionSummary {
   }[];
   readonly turns: readonly TurnProjection[];
   readonly tasks: readonly TaskProjection[];
+  readonly toolCalls: readonly ToolCallProjection[];
+  readonly permissions: readonly PermissionProjection[];
+}
+
+export type ToolRiskLevel = "read" | "write" | "execute" | "network";
+export type ToolExecutionMode = "parallel" | "exclusive";
+export type ToolApprovalMode = "auto" | "ask" | "deny";
+export type ToolInterruptBehavior = "cancel" | "block";
+export type ToolCallStatus = "pending" | "awaiting_permission" | "running" | "completed" | "failed" | "cancelled" | "denied";
+export type PermissionStatus = "pending" | "approved" | "denied" | "cancelled";
+
+export interface JsonSchema {
+  readonly type?: "object" | "array" | "string" | "number" | "integer" | "boolean" | "null";
+  readonly properties?: Readonly<Record<string, JsonSchema>>;
+  readonly required?: readonly string[];
+  readonly additionalProperties?: boolean;
+  readonly items?: JsonSchema;
+  readonly enum?: readonly unknown[];
+  readonly minLength?: number;
+  readonly maxLength?: number;
+  readonly minimum?: number;
+  readonly maximum?: number;
+  readonly pattern?: string;
+  readonly minItems?: number;
+  readonly maxItems?: number;
+}
+
+export interface ToolError {
+  readonly code: string;
+  readonly message: string;
+  readonly remedy?: string;
+}
+
+export interface ToolDiff {
+  readonly path: string;
+  readonly before: string;
+  readonly after: string;
+  readonly truncated?: boolean;
+}
+
+export interface ToolUsage {
+  readonly bytes: number;
+  readonly truncated: boolean;
+}
+
+export interface ToolPresentation {
+  readonly kind: "tool" | "diff" | "terminal" | "permission";
+  readonly title: string;
+  readonly text?: string;
+  readonly data?: unknown;
+}
+
+export interface ToolResult {
+  readonly ok: boolean;
+  readonly output?: unknown;
+  readonly error?: ToolError;
+  readonly diff?: ToolDiff;
+  readonly usage?: ToolUsage;
+  readonly presentation?: ToolPresentation;
+}
+
+export interface ToolContext {
+  readonly sessionId: SessionId;
+  readonly turnId?: TurnId;
+  readonly toolCallId: ToolCallId;
+  readonly workspaceRoot: string;
+  readonly signal: AbortSignal;
+  readonly reportProgress: (payload: Readonly<Record<string, unknown>>) => Promise<void>;
+}
+
+export interface ToolDefinition {
+  readonly name: string;
+  readonly description: string;
+  readonly inputSchema: JsonSchema;
+  readonly executionMode: ToolExecutionMode;
+  readonly riskLevel: ToolRiskLevel;
+  readonly approvalMode: ToolApprovalMode;
+  readonly interruptBehavior: ToolInterruptBehavior;
+  readonly execute: (input: unknown, context: ToolContext) => Promise<ToolResult>;
+  readonly presentCall?: (input: unknown) => ToolPresentation;
+  readonly presentResult?: (result: ToolResult) => ToolPresentation;
+}
+
+export interface ToolCallProjection {
+  readonly id: ToolCallId;
+  readonly name: string;
+  readonly status: ToolCallStatus;
+  readonly riskLevel: ToolRiskLevel;
+  readonly approvalMode: ToolApprovalMode;
+  readonly turnId?: TurnId;
+  readonly input?: unknown;
+  readonly result?: ToolResult;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly lastSequence: number;
+}
+
+export interface PermissionProjection {
+  readonly id: PermissionId;
+  readonly toolCallId: ToolCallId;
+  readonly toolName: string;
+  readonly status: PermissionStatus;
+  readonly riskLevel: ToolRiskLevel;
+  readonly reason: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly lastSequence: number;
+}
+
+export interface PermissionRequest {
+  readonly id: PermissionId;
+  readonly sessionId: SessionId;
+  readonly turnId?: TurnId;
+  readonly toolCallId: ToolCallId;
+  readonly toolName: string;
+  readonly riskLevel: ToolRiskLevel;
+  readonly reason: string;
+  readonly input: unknown;
+  readonly createdAt: string;
 }
 
 export interface CreateSessionInput {

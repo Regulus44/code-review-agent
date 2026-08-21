@@ -8,14 +8,19 @@ import {
   type SessionProjection,
   type SessionSummary,
   type TurnId,
+  type PermissionId,
+  type PermissionRequest,
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { randomUUID } from "node:crypto";
+import { createBuiltinTools, ToolRegistry, ToolRuntime, type ExecuteToolOutput } from "@code-review-agent/tools";
 
 export interface AgentHostOptions {
   readonly store: SessionEventStore;
   readonly model?: ChatModel;
   readonly systemPrompt?: string;
+  readonly toolRuntime?: ToolRuntime;
+  readonly toolRegistry?: ToolRegistry;
 }
 
 interface PendingTurn {
@@ -33,10 +38,14 @@ export class AgentHost {
   private readonly activeTurns = new Map<SessionId, TurnId>();
   private readonly queues = new Map<SessionId, PendingTurn[]>();
   private readonly ready: Promise<void>;
+  private readonly toolRuntime: ToolRuntime;
 
   constructor(private readonly options: AgentHostOptions) {
     this.model = options.model ?? new EchoChatModel();
     this.systemPrompt = options.systemPrompt ?? "You are a helpful coding agent.";
+    const registry = options.toolRegistry ?? new ToolRegistry();
+    if (options.toolRuntime === undefined) registry.registerMany(createBuiltinTools());
+    this.toolRuntime = options.toolRuntime ?? new ToolRuntime({ store: options.store, registry });
     this.ready = this.restoreQueuedTurns();
   }
 
@@ -65,6 +74,63 @@ export class AgentHost {
 
   subscribe(sessionId: SessionId, listener: (event: AgentEvent) => void): () => void {
     return this.options.store.subscribe(sessionId, listener);
+  }
+
+  listTools() {
+    return this.toolRuntime.listTools().map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+      executionMode: tool.executionMode,
+      riskLevel: tool.riskLevel,
+      approvalMode: tool.approvalMode,
+      interruptBehavior: tool.interruptBehavior,
+    }));
+  }
+
+  async executeTool(sessionId: SessionId, name: string, input: unknown, turnId?: TurnId, commandId?: string, signal?: AbortSignal): Promise<ExecuteToolOutput> {
+    await this.ready;
+    const projection = await this.options.store.project(sessionId);
+    if (projection === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    const toolCallId = brand<string, "ToolCallId">(`tool_${randomUUID()}`);
+    const claim = await this.options.store.claimCommand({
+      sessionId,
+      commandId: commandId ?? `cmd_${randomUUID()}`,
+      kind: "execute_tool",
+      request: { name, input, turnId },
+      result: { toolCallId },
+    });
+    if (!claim.created) {
+      const saved = (claim.record.result as { toolCallId?: unknown }).toolCallId;
+      if (typeof saved !== "string") throw new Error(`Command ${claim.record.commandId} has an invalid tool result`);
+      const call = projection.toolCalls.find((item) => item.id === saved);
+      if (call === undefined) throw new Error(`Tool call ${saved} is not available`);
+      const permission = projection.permissions.find((item) => item.toolCallId === call.id && item.status === "pending");
+      return { toolCallId: call.id, status: call.status === "awaiting_permission" ? "awaiting_permission" : call.status === "completed" ? "completed" : call.status === "cancelled" ? "cancelled" : call.status === "denied" ? "denied" : "failed", ...(call.result === undefined ? {} : { result: call.result }), ...(permission === undefined ? {} : { permission: { id: permission.id, sessionId, toolCallId: permission.toolCallId, toolName: permission.toolName, riskLevel: permission.riskLevel, reason: permission.reason, input, createdAt: permission.createdAt } satisfies PermissionRequest }) };
+    }
+    return this.toolRuntime.execute({ sessionId, workspaceRoot: projection.workspaceRoot, name, input, ...(turnId === undefined ? {} : { turnId }), toolCallId, ...(commandId === undefined ? {} : { commandId }), ...(signal === undefined ? {} : { signal }) });
+  }
+
+  async resolvePermission(sessionId: SessionId, permissionId: PermissionId, status: "approved" | "denied" | "cancelled", commandId?: string): Promise<ExecuteToolOutput> {
+    await this.ready;
+    const projection = await this.options.store.project(sessionId);
+    if (projection === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    const permission = projection.permissions.find((item) => item.id === permissionId);
+    if (permission === undefined) throw new Error(`Unknown permission: ${permissionId}`);
+    const idempotencyKey = commandId ?? `cmd_${randomUUID()}`;
+    const claim = await this.options.store.claimCommand({
+      sessionId,
+      commandId: idempotencyKey,
+      kind: "resolve_permission",
+      request: { permissionId, status },
+      result: { permissionId, status },
+    });
+    if (!claim.created || permission.status !== "pending") {
+      const call = projection.toolCalls.find((item) => item.id === permission.toolCallId);
+      if (call === undefined) throw new Error(`Tool call ${permission.toolCallId} is not available`);
+      return { toolCallId: call.id, status: call.status === "completed" ? "completed" : call.status === "cancelled" ? "cancelled" : call.status === "denied" ? "denied" : call.status === "awaiting_permission" ? "awaiting_permission" : "failed", ...(call.result === undefined ? {} : { result: call.result }) };
+    }
+    return this.toolRuntime.resolvePermission(permissionId, status);
   }
 
   async sendMessage(sessionId: SessionId, content: string, commandId?: string): Promise<TurnId> {
@@ -218,6 +284,7 @@ export class AgentHost {
     for (const summary of await this.options.store.listSessions()) {
       const projection = await this.options.store.project(summary.id);
       if (projection === undefined) continue;
+      await this.toolRuntime.restorePending(summary.id, projection.workspaceRoot, await this.options.store.list(summary.id));
       for (const turn of projection.turns.filter((item) => item.status === "queued" && item.userMessage !== undefined)) {
         const messageIndex = projection.messages.findIndex((message) => message.turnId === turn.id && message.role === "user");
         this.enqueue({

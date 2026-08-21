@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Server } from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApiServer } from "./server.js";
@@ -70,6 +70,28 @@ describe("Phase 2 API", () => {
     expect(text).toContain("event: user/message");
     expect(text).not.toContain("event: session/created");
     await reader.cancel();
+  });
+
+  it("lists tools and completes an approved workspace edit", async () => {
+    const root = mkdtempSync(join(tmpdir(), "code-review-agent-tools-"));
+    writeFileSync(join(root, "note.txt"), "before", "utf8");
+    try {
+      const created = await fetch(`${baseUrl}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: root }) });
+      const session = (await created.json()) as { id: string };
+      const tools = await (await fetch(`${baseUrl}/v1/tools`)).json() as { tools: { name: string }[] };
+      expect(tools.tools.map((tool) => tool.name)).toContain("edit_file");
+      const read = await fetch(`${baseUrl}/v1/sessions/${session.id}/tools`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "tool-read-1" }, body: JSON.stringify({ name: "read_file", input: { path: "note.txt" } }) });
+      expect(read.status).toBe(200);
+      expect((await read.json()).result.output).toBe("before");
+      const edit = await fetch(`${baseUrl}/v1/sessions/${session.id}/tools`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "tool-edit-1" }, body: JSON.stringify({ name: "edit_file", input: { path: "note.txt", oldText: "before", newText: "after" } }) });
+      expect(edit.status).toBe(202);
+      const pending = await edit.json() as { permission: { id: string } };
+      const approved = await fetch(`${baseUrl}/v1/sessions/${session.id}/permissions/${pending.permission.id}`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "permission-edit-1" }, body: JSON.stringify({ status: "approved" }) });
+      expect(approved.status).toBe(200);
+      expect(readFileSync(join(root, "note.txt"), "utf8")).toBe("after");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("supports idempotent commands and session lifecycle endpoints", async () => {

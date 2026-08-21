@@ -1,5 +1,5 @@
 {
-  "name": "@code-review-agent/runtime",
+  "name": "@code-review-agent/tools",
   "version": "0.2.0-dev.1",
   "private": true,
   "type": "module",
@@ -13,9 +13,7 @@
   },
   "dependencies": {
     "@code-review-agent/contracts": "workspace:*",
-    "@code-review-agent/llm": "workspace:*",
-    "@code-review-agent/storage": "workspace:*",
-    "@code-review-agent/tools": "workspace:*"
+    "@code-review-agent/workspace": "workspace:*"
   },
   "scripts": {
     "test": "vitest run"

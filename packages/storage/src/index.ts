@@ -7,6 +7,9 @@ import {
   type CommandClaim,
   type CommandRecord,
   type EventListener,
+  type PermissionId,
+  type PermissionProjection,
+  type PermissionStatus,
   type SessionEventStore,
   type SessionId,
   type SessionProjection,
@@ -14,6 +17,12 @@ import {
   type SessionSummary,
   type TaskProjection,
   type TaskStatus,
+  type ToolApprovalMode,
+  type ToolCallId,
+  type ToolCallProjection,
+  type ToolCallStatus,
+  type ToolResult,
+  type ToolRiskLevel,
   type TurnProjection,
   type TurnStatus,
 } from "@code-review-agent/contracts";
@@ -47,6 +56,8 @@ function baseProjection(id: SessionId, workspaceRoot: string, timestamp = now())
     messages: [],
     turns: [],
     tasks: [],
+    toolCalls: [],
+    permissions: [],
   };
 }
 
@@ -68,6 +79,16 @@ function taskStatus(value: unknown, fallback: TaskStatus): TaskStatus {
   return value === "queued" || value === "running" || value === "waiting" || value === "completed" || value === "failed" || value === "cancelled" || value === "blocked"
     ? value
     : fallback;
+}
+
+function toolCallStatus(value: unknown, fallback: ToolCallStatus): ToolCallStatus {
+  return value === "pending" || value === "awaiting_permission" || value === "running" || value === "completed" || value === "failed" || value === "cancelled" || value === "denied"
+    ? value
+    : fallback;
+}
+
+function permissionStatus(value: unknown, fallback: PermissionStatus): PermissionStatus {
+  return value === "pending" || value === "approved" || value === "denied" || value === "cancelled" ? value : fallback;
 }
 
 function deriveActiveStatus(projection: SessionProjection): SessionStatus {
@@ -189,6 +210,80 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
         ...next,
         tasks: current === undefined ? [...next.tasks, task] : next.tasks.map((item) => (item.id === id ? task : item)),
       };
+    }
+  }
+
+  if (event.type === "tool/call" || event.type === "tool/progress" || event.type === "tool/result") {
+    const rawToolCallId = event.payload["toolCallId"];
+    if (typeof rawToolCallId === "string") {
+      const id = brand<string, "ToolCallId">(rawToolCallId);
+      const current = next.toolCalls.find((toolCall) => toolCall.id === id);
+      const input = event.payload["input"];
+      const initial: ToolCallProjection = current ?? {
+        id,
+        name: typeof event.payload["name"] === "string" ? event.payload["name"] : "unknown",
+        status: "pending",
+        riskLevel: (event.payload["riskLevel"] as ToolRiskLevel | undefined) ?? "read",
+        approvalMode: (event.payload["approvalMode"] as ToolApprovalMode | undefined) ?? "auto",
+        ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
+        ...(input === undefined ? {} : { input }),
+        createdAt: event.createdAt,
+        updatedAt: event.createdAt,
+        lastSequence: event.sequence,
+      };
+      const rawResult = event.payload["result"];
+      const result = rawResult !== undefined ? rawResult as ToolResult : undefined;
+      const status = event.type === "tool/call"
+        ? "pending"
+        : event.type === "tool/progress"
+          ? "running"
+          : toolCallStatus(event.payload["status"], result?.ok === true ? "completed" : "failed");
+      const updated: ToolCallProjection = {
+        ...initial,
+        updatedAt: event.createdAt,
+        lastSequence: event.sequence,
+        status,
+        ...(result === undefined ? {} : { result }),
+        ...(event.turnId === undefined || initial.turnId !== undefined ? {} : { turnId: event.turnId }),
+      };
+      next = {
+        ...next,
+        toolCalls: current === undefined ? [...next.toolCalls, updated] : next.toolCalls.map((item) => (item.id === id ? updated : item)),
+      };
+    }
+  }
+
+  if (event.type === "permission/requested" || event.type === "permission/resolved") {
+    const rawPermissionId = event.payload["permissionId"];
+    const rawToolCallId = event.payload["toolCallId"];
+    if (typeof rawPermissionId === "string" && typeof rawToolCallId === "string") {
+      const id = brand<string, "PermissionId">(rawPermissionId);
+      const current = next.permissions.find((permission) => permission.id === id);
+      const initial: PermissionProjection = current ?? {
+        id,
+        toolCallId: brand<string, "ToolCallId">(rawToolCallId),
+        toolName: typeof event.payload["toolName"] === "string" ? event.payload["toolName"] : "unknown",
+        status: "pending",
+        riskLevel: (event.payload["riskLevel"] as ToolRiskLevel | undefined) ?? "write",
+        reason: typeof event.payload["reason"] === "string" ? event.payload["reason"] : "Tool approval required",
+        createdAt: event.createdAt,
+        updatedAt: event.createdAt,
+        lastSequence: event.sequence,
+      };
+      const updated: PermissionProjection = {
+        ...initial,
+        updatedAt: event.createdAt,
+        lastSequence: event.sequence,
+        status: event.type === "permission/requested" ? "pending" : permissionStatus(event.payload["status"], "cancelled"),
+      };
+      next = {
+        ...next,
+        permissions: current === undefined ? [...next.permissions, updated] : next.permissions.map((item) => (item.id === id ? updated : item)),
+      };
+      const toolCall = next.toolCalls.find((item) => item.id === updated.toolCallId);
+      if (toolCall !== undefined && event.type === "permission/requested") {
+        next = { ...next, toolCalls: next.toolCalls.map((item) => (item.id === toolCall.id ? { ...item, status: "awaiting_permission", updatedAt: event.createdAt, lastSequence: event.sequence } : item)) };
+      }
     }
   }
 
