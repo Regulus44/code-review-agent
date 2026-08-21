@@ -3,113 +3,306 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f7f8fa" />
     <title>Code Review Agent</title>
     <style>
-      :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #111318; color: #e7e9ee; }
+      :root {
+        color-scheme: light;
+        --bg: #f7f8fa;
+        --surface: #ffffff;
+        --surface-subtle: #f1f3f5;
+        --surface-hover: #eef2f6;
+        --surface-active: #e7edf7;
+        --border: rgba(31, 35, 41, 0.1);
+        --border-strong: rgba(31, 35, 41, 0.16);
+        --text: #1f2329;
+        --text-secondary: #626a78;
+        --text-tertiary: #9299a5;
+        --blue: #4176e6;
+        --blue-hover: #3568d4;
+        --blue-soft: #edf3fe;
+        --green: #239b57;
+        --amber: #c78327;
+        --red: #d54444;
+        --shadow: 0 14px 40px rgba(30, 39, 55, 0.12);
+        --sidebar-width: 300px;
+        --details-width: 300px;
+        --rail-width: 56px;
+        --radius-lg: 22px;
+        --ease: cubic-bezier(0.4, 0, 0.2, 1);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
       * { box-sizing: border-box; }
-      body { margin: 0; min-height: 100vh; }
+      html, body { height: 100%; }
+      body { margin: 0; min-width: 320px; overflow: hidden; color: var(--text); background: var(--bg); }
       button, textarea { font: inherit; }
-      button { cursor: pointer; }
-      .app { display: grid; grid-template-columns: 260px 1fr; min-height: 100vh; }
-      .sidebar { border-right: 1px solid #2a2e38; background: #171920; padding: 18px 14px; }
-      .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; font-weight: 700; }
-      .brand-mark { width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; background: #6d5dfc; color: #fff; }
-      .section-label { color: #8e95a6; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; margin: 14px 8px 8px; }
-      .session-list { display: grid; gap: 6px; }
-      .session { width: 100%; border: 0; text-align: left; background: transparent; color: #d8dbe5; padding: 10px; border-radius: 8px; }
-      .session.active, .session:hover { background: #272b38; }
-      .mcp-list { display: grid; gap: 6px; }
-      .mcp-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: #c4c9d7; padding: 7px 8px; border-radius: 7px; background: #20232d; font-size: 12px; }
-      .mcp-row button { border: 0; border-radius: 5px; padding: 3px 6px; color: #dce2ff; background: #3a4050; font-size: 11px; }
-      .main { display: grid; grid-template-rows: auto 1fr auto; min-width: 0; }
-      .topbar { border-bottom: 1px solid #2a2e38; padding: 14px 22px; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
-      .status { color: #9ba3b5; font-size: 13px; }
-      .model-control { display: flex; align-items: center; gap: 8px; color: #9ba3b5; font-size: 12px; }
-      .model-control select { border: 1px solid #363b49; border-radius: 7px; background: #20232d; color: #e7e9ee; padding: 6px 8px; }
-      .conversation { overflow: auto; padding: 28px max(20px, calc((100vw - 900px) / 2)); }
-      .empty { color: #858c9c; text-align: center; margin-top: 18vh; }
-      .message { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; margin-bottom: 22px; }
-      .avatar { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: #2a2f3d; color: #aeb7ff; font-size: 12px; }
-      .message.user .avatar { background: #234b3c; color: #9af0c3; }
-      .message-body { white-space: pre-wrap; line-height: 1.55; overflow-wrap: anywhere; }
-      .event { color: #8e95a6; font-size: 12px; margin: 8px 0 8px 44px; }
-      .tool-card { margin: 10px 0 10px 44px; border: 1px solid #363b49; border-radius: 10px; padding: 10px 12px; background: #1c1f28; }
-      .tool-card strong { color: #c5caff; }
-      .tool-card pre { white-space: pre-wrap; overflow-wrap: anywhere; color: #b9c0d0; margin: 8px 0 0; font-size: 12px; }
-      .permission-actions { display: flex; gap: 8px; margin-top: 10px; }
-      .permission-actions button { border: 0; border-radius: 7px; padding: 6px 10px; color: #fff; background: #3b82f6; }
-      .permission-actions button.deny { background: #8b3d4b; }
-      .permission-actions button.cancel { background: #555d70; }
-      .composer { border-top: 1px solid #2a2e38; padding: 16px max(20px, calc((100vw - 900px) / 2)); background: #15171e; }
-      .composer form { display: flex; gap: 10px; }
-      textarea { flex: 1; resize: vertical; min-height: 54px; max-height: 180px; border: 1px solid #363b49; border-radius: 10px; background: #20232d; color: #f1f3f7; padding: 12px; }
-      .send { border: 0; border-radius: 10px; padding: 0 18px; background: #6d5dfc; color: white; font-weight: 600; }
-      .send:disabled { opacity: .5; cursor: wait; }
-      @media (max-width: 720px) { .app { grid-template-columns: 1fr; } .sidebar { display: none; } }
+      button { border: 0; cursor: pointer; color: inherit; }
+      button:disabled { cursor: wait; opacity: 0.55; }
+      .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+      .app-shell { display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--details-width); height: 100dvh; min-height: 560px; transition: grid-template-columns 0.2s var(--ease); }
+      .app-shell.sidebar-collapsed { grid-template-columns: var(--rail-width) minmax(0, 1fr) var(--details-width); }
+      .app-shell.details-collapsed { grid-template-columns: var(--sidebar-width) minmax(0, 1fr) 0; }
+      .app-shell.sidebar-collapsed.details-collapsed { grid-template-columns: var(--rail-width) minmax(0, 1fr) 0; }
+      .sidebar, .details-panel { min-width: 0; overflow: hidden; background: var(--surface); }
+      .sidebar { display: flex; flex-direction: column; border-right: 1px solid var(--border); }
+      .sidebar-header { display: flex; align-items: center; gap: 10px; height: 60px; padding: 0 16px; }
+      .brand { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; font-size: 14px; font-weight: 650; white-space: nowrap; }
+      .brand-mark { display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; border-radius: 10px; color: #fff; background: var(--blue); font-weight: 800; font-size: 16px; box-shadow: 0 4px 10px rgba(65,118,230,.25); }
+      .icon-button { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: var(--text-secondary); background: transparent; font-size: 17px; transition: background .15s var(--ease), color .15s var(--ease); }
+      .icon-button:hover { color: var(--text); background: var(--surface-hover); }
+      .collapse-symbol { transition: transform .2s var(--ease); }
+      .sidebar-collapsed .collapse-symbol { transform: rotate(180deg); }
+      .sidebar-content { flex: 1; min-height: 0; overflow: auto; padding: 0 12px 16px; }
+      .sidebar-collapsed .sidebar-content { padding-inline: 10px; }
+      .new-session { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 38px; margin: 4px 0 18px; border-radius: 12px; color: #fff; background: var(--blue); font-size: 13px; font-weight: 600; box-shadow: 0 5px 12px rgba(65,118,230,.18); transition: background .15s var(--ease), transform .15s var(--ease); }
+      .new-session:hover { background: var(--blue-hover); transform: translateY(-1px); }
+      .sidebar-collapsed .new-session { width: 36px; margin-inline: auto; font-size: 0; }
+      .sidebar-collapsed .new-session .plus { font-size: 20px; }
+      .section-label { margin: 16px 8px 8px; color: var(--text-tertiary); font-size: 11px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; }
+      .sidebar-collapsed .section-label, .sidebar-collapsed .session-copy, .sidebar-collapsed .mcp-copy, .sidebar-collapsed .sidebar-footer-copy { display: none; }
+      .session-list, .mcp-list { display: grid; gap: 4px; }
+      .session { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 38px; padding: 8px 10px; border-radius: 10px; text-align: left; color: var(--text-secondary); background: transparent; font-size: 12px; transition: background .15s var(--ease), color .15s var(--ease); }
+      .session:hover { color: var(--text); background: var(--surface-hover); }
+      .session.active { color: var(--text); background: var(--surface-active); }
+      .session-dot { flex: 0 0 7px; width: 7px; height: 7px; border-radius: 50%; background: #b4bcc8; }
+      .session.active .session-dot { background: var(--blue); box-shadow: 0 0 0 3px rgba(65,118,230,.14); }
+      .session-copy { overflow: hidden; min-width: 0; }
+      .session-name, .session-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .session-name { font-weight: 550; }
+      .session-path { margin-top: 2px; color: var(--text-tertiary); font-size: 11px; }
+      .mcp-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 34px; padding: 6px 8px; border-radius: 9px; color: var(--text-secondary); background: var(--surface-subtle); font-size: 11px; }
+      .mcp-copy { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .mcp-actions { display: flex; gap: 2px; }
+      .mcp-actions button { padding: 3px 4px; border-radius: 6px; color: var(--text-tertiary); background: transparent; font-size: 10px; }
+      .mcp-actions button:hover { color: var(--blue); background: var(--blue-soft); }
+      .mcp-status { display: inline-flex; align-items: center; gap: 4px; }
+      .mcp-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+      .mcp-status.disabled::before, .mcp-status.error::before { background: var(--red); }
+      .sidebar-footer { padding: 12px; border-top: 1px solid var(--border); }
+      .sidebar-footer button { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px; border-radius: 9px; color: var(--text-secondary); background: transparent; text-align: left; font-size: 12px; }
+      .sidebar-footer button:hover { background: var(--surface-hover); color: var(--text); }
+      .sidebar-collapsed .sidebar-footer button { justify-content: center; padding-inline: 0; }
+      .workspace { display: grid; grid-template-rows: 60px minmax(0, 1fr) auto; min-width: 0; background: var(--bg); }
+      .workspace-header { display: flex; align-items: center; gap: 10px; padding: 0 22px; border-bottom: 1px solid var(--border); background: rgba(247,248,250,.82); backdrop-filter: blur(12px); }
+      .mobile-menu { display: none; }
+      .session-heading { min-width: 0; flex: 1; }
+      .session-heading strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 650; }
+      .session-heading span { display: block; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-tertiary); font-size: 11px; }
+      .connection-state { display: inline-flex; align-items: center; gap: 6px; margin-right: 4px; color: var(--text-secondary); font-size: 11px; }
+      .connection-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+      .connection-state.disconnected::before { background: var(--amber); }
+      .conversation { position: relative; min-height: 0; overflow: auto; scroll-behavior: smooth; }
+      .conversation::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 50% 20%, rgba(65,118,230,.07), transparent 38%); opacity: .75; }
+      .conversation-body { position: relative; width: min(748px, calc(100% - 40px)); min-height: 100%; margin: 0 auto; padding: 34px 0 28px; }
+      .hero { display: grid; place-items: center; min-height: calc(100% - 20px); padding: 9vh 0 26vh; text-align: center; }
+      .hero-inner { width: min(560px, 100%); }
+      .hero-mark { display: grid; place-items: center; width: 52px; height: 52px; margin: 0 auto 16px; border-radius: 17px; color: #fff; background: var(--blue); font-size: 25px; font-weight: 800; box-shadow: 0 10px 24px rgba(65,118,230,.22); }
+      .hero h1 { margin: 0; font-size: clamp(25px, 3vw, 34px); letter-spacing: -.03em; font-weight: 680; }
+      .hero p { margin: 10px auto 18px; color: var(--text-secondary); font-size: 14px; line-height: 1.65; }
+      .workspace-chip { display: inline-flex; align-items: center; gap: 7px; padding: 7px 11px; border: 1px solid var(--border); border-radius: 99px; color: var(--text-secondary); background: rgba(255,255,255,.72); font-size: 11px; }
+      .workspace-chip::before { content: "⌘"; color: var(--blue); font-size: 13px; }
+      .message { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; margin-bottom: 24px; }
+      .avatar { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; color: #fff; background: var(--text); font-size: 10px; font-weight: 700; }
+      .message.user .avatar { color: #fff; background: var(--blue); }
+      .message-body { min-width: 0; padding-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; font-size: 14px; }
+      .message.user .message-body { padding: 11px 14px; border-radius: 4px 16px 16px 16px; background: var(--surface); box-shadow: 0 1px 2px rgba(31,35,41,.03); }
+      .event-row { display: flex; align-items: center; gap: 8px; margin: 13px 0 13px 40px; color: var(--text-tertiary); font-size: 11px; }
+      .event-row::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--border-strong); }
+      .tool-row { margin: 10px 0 14px 40px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: rgba(255,255,255,.72); }
+      .tool-summary { display: flex; align-items: center; gap: 9px; width: 100%; padding: 10px 12px; background: transparent; text-align: left; }
+      .tool-summary:hover { background: var(--surface-hover); }
+      .tool-icon { display: grid; place-items: center; flex: 0 0 22px; width: 22px; height: 22px; border-radius: 7px; color: var(--blue); background: var(--blue-soft); font-size: 11px; }
+      .tool-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
+      .tool-status { color: var(--text-tertiary); font-size: 11px; }
+      .tool-chevron { color: var(--text-tertiary); transition: transform .15s var(--ease); }
+      .tool-row.open .tool-chevron { transform: rotate(180deg); }
+      .tool-details { display: none; padding: 0 12px 12px 43px; }
+      .tool-row.open .tool-details { display: block; }
+      .tool-details pre { margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary); font: 11px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
+      .permission-card { margin: 12px 0 16px 40px; padding: 13px; border: 1px solid rgba(199,131,39,.28); border-radius: 13px; background: #fffaf0; }
+      .permission-card strong { display: block; color: #8f5c13; font-size: 12px; }
+      .permission-card pre { margin: 8px 0 0; color: #765d35; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
+      .permission-actions { display: flex; gap: 7px; margin-top: 11px; }
+      .permission-actions button { padding: 6px 10px; border-radius: 8px; color: #fff; background: var(--blue); font-size: 11px; font-weight: 600; }
+      .permission-actions .deny { background: var(--red); }
+      .permission-actions .cancel { color: var(--text-secondary); background: #eceff3; }
+      .composer-shell { position: relative; z-index: 2; padding: 0 20px 20px; background: linear-gradient(to bottom, transparent, var(--bg) 25%); }
+      .composer-card { position: relative; width: min(780px, 100%); margin: 0 auto; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow); }
+      .composer-card textarea { display: block; width: 100%; min-height: 64px; max-height: 220px; padding: 16px 17px 8px; border: 0; outline: 0; resize: none; color: var(--text); background: transparent; line-height: 1.5; font-size: 14px; }
+      .composer-card textarea::placeholder { color: var(--text-tertiary); }
+      .composer-toolbar { display: flex; align-items: center; gap: 5px; min-height: 43px; padding: 5px 9px 9px; }
+      .toolbar-button { display: inline-flex; align-items: center; gap: 6px; height: 29px; padding: 0 9px; border-radius: 8px; color: var(--text-secondary); background: transparent; font-size: 11px; }
+      .toolbar-button:hover { color: var(--text); background: var(--surface-hover); }
+      .toolbar-spacer { flex: 1; }
+      .model-trigger { max-width: 194px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .context-meter { color: var(--text-tertiary); font-size: 10px; }
+      .send-button { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; color: #fff; background: var(--blue); font-size: 15px; transition: background .15s var(--ease), transform .15s var(--ease); }
+      .send-button:hover { background: var(--blue-hover); transform: translateY(-1px); }
+      .send-button:disabled { opacity: .5; transform: none; }
+      .model-popover { position: absolute; right: 43px; bottom: 49px; z-index: 5; width: 250px; padding: 7px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface); box-shadow: var(--shadow); }
+      .model-popover[hidden] { display: none; }
+      .popover-label { padding: 7px 9px 6px; color: var(--text-tertiary); font-size: 10px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
+      .model-option { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px; border-radius: 9px; color: var(--text-secondary); background: transparent; text-align: left; font-size: 12px; }
+      .model-option:hover { background: var(--surface-hover); color: var(--text); }
+      .model-option.selected { color: var(--text); background: var(--blue-soft); }
+      .model-check { width: 14px; color: var(--blue); font-weight: 700; }
+      .model-meta { display: block; margin-top: 2px; color: var(--text-tertiary); font-size: 10px; }
+      .details-panel { display: flex; flex-direction: column; border-left: 1px solid var(--border); transition: opacity .2s var(--ease); }
+      .details-collapsed .details-panel { opacity: 0; pointer-events: none; }
+      .details-header { display: flex; align-items: center; justify-content: space-between; height: 60px; padding: 0 14px 0 18px; border-bottom: 1px solid var(--border); }
+      .details-header strong { font-size: 13px; }
+      .details-content { flex: 1; overflow: auto; padding: 14px; }
+      .detail-section { padding: 12px 0; border-bottom: 1px solid var(--border); }
+      .detail-section:first-child { padding-top: 3px; }
+      .detail-label { margin-bottom: 8px; color: var(--text-tertiary); font-size: 10px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; }
+      .detail-value { color: var(--text); font-size: 12px; line-height: 1.5; }
+      .detail-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; color: var(--text-secondary); font-size: 11px; }
+      .detail-line strong { max-width: 165px; overflow: hidden; color: var(--text); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+      .status-pill { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border-radius: 99px; color: var(--green); background: #edf9f1; font-size: 10px; }
+      .status-pill::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+      .tool-list { display: grid; gap: 5px; }
+      .tool-list-item { display: flex; align-items: center; gap: 7px; padding: 5px 0; color: var(--text-secondary); font-size: 11px; }
+      .tool-list-item::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--blue); }
+      .empty-detail { color: var(--text-tertiary); font-size: 11px; line-height: 1.5; }
+      @media (max-width: 1120px) { :root { --details-width: 260px; } }
+      @media (max-width: 900px) {
+        .app-shell, .app-shell.sidebar-collapsed { grid-template-columns: var(--rail-width) minmax(0, 1fr) 0; }
+        .sidebar .brand, .sidebar .collapse-symbol { display: none; }
+        .sidebar-header { justify-content: center; padding-inline: 0; }
+        .sidebar-collapsed .brand { display: flex; }
+        .sidebar-collapsed .sidebar-header { justify-content: space-between; padding-inline: 13px; }
+        .sidebar-collapsed .brand span:last-child, .sidebar-collapsed .section-label, .sidebar-collapsed .session-copy, .sidebar-collapsed .mcp-copy, .sidebar-collapsed .sidebar-footer-copy { display: none; }
+        .mobile-menu { display: grid; }
+        .workspace-header { padding-inline: 12px; }
+        .details-toggle { display: none; }
+      }
+      @media (max-width: 600px) {
+        .app-shell, .app-shell.sidebar-collapsed { grid-template-columns: 1fr 0 0; }
+        .sidebar, .details-panel { display: none; }
+        .workspace-header { height: 54px; }
+        .conversation-body { width: min(100% - 24px, 748px); padding-top: 20px; }
+        .hero { padding: 5vh 0 28vh; }
+        .composer-shell { padding: 0 10px 10px; }
+        .composer-toolbar { flex-wrap: wrap; }
+        .context-meter { display: none; }
+        .model-trigger { max-width: 150px; }
+        .model-popover { right: 43px; bottom: 74px; }
+      }
     </style>
   </head>
   <body>
-    <div class="app">
-      <aside class="sidebar">
-        <div class="brand"><span class="brand-mark">⌁</span><span>Code Review Agent</span></div>
-        <div class="section-label">Sessions</div>
-        <div id="session-list" class="session-list"></div>
-        <div class="section-label">MCP servers</div>
-        <div id="mcp-list" class="mcp-list"></div>
+    <div id="app" class="app-shell">
+      <aside class="sidebar" aria-label="Sessions and MCP">
+        <div class="sidebar-header">
+          <div class="brand"><span class="brand-mark">⌁</span><span>Code Review Agent</span></div>
+          <button id="sidebar-toggle" class="icon-button" type="button" aria-label="Collapse sidebar"><span class="collapse-symbol">‹</span></button>
+        </div>
+        <div class="sidebar-content">
+          <button id="new-session" class="new-session" type="button"><span class="plus">＋</span><span>New session</span></button>
+          <div class="section-label">Sessions</div>
+          <div id="session-list" class="session-list"></div>
+          <div class="section-label">MCP servers</div>
+          <div id="mcp-list" class="mcp-list"></div>
+        </div>
+        <div class="sidebar-footer"><button id="settings-button" type="button"><span>⚙</span><span class="sidebar-footer-copy">Workspace settings</span></button></div>
       </aside>
-      <main class="main">
-        <header class="topbar"><strong id="session-title">New coding session</strong><span class="model-control"><label for="model-select">Model</label><select id="model-select" disabled><option>Loading…</option></select></span><span id="status" class="status">Connecting…</span></header>
-        <section id="conversation" class="conversation"><div class="empty">Ask the agent to inspect a repository or explain a file.</div></section>
-        <footer class="composer"><form id="composer"><textarea id="input" placeholder="Describe what you want the coding agent to do…"></textarea><button class="send" type="submit">Send</button></form></footer>
+      <main class="workspace">
+        <header class="workspace-header">
+          <button id="mobile-menu" class="icon-button mobile-menu" type="button" aria-label="Open sidebar">☰</button>
+          <div class="session-heading"><strong id="session-title">New coding session</strong><span id="session-path">Workspace · .</span></div>
+          <span id="status" class="connection-state disconnected">Connecting…</span>
+          <button id="details-toggle" class="icon-button details-toggle" type="button" aria-label="Toggle details panel">☷</button>
+        </header>
+        <section id="conversation" class="conversation" aria-live="polite"></section>
+        <footer class="composer-shell">
+          <form id="composer" class="composer-card">
+            <label class="sr-only" for="input">Message</label>
+            <textarea id="input" rows="1" placeholder="Ask Code Review Agent to inspect, explain, or change your code…"></textarea>
+            <div class="composer-toolbar">
+              <button class="toolbar-button" type="button" title="Attach files">＋ <span>Attach</span></button>
+              <button class="toolbar-button" type="button" title="Plan mode">☷ <span>Plan</span></button>
+              <button class="toolbar-button" type="button" title="Read-only mode">◉ <span>Read-only</span></button>
+              <span class="toolbar-spacer"></span>
+              <button id="model-trigger" class="toolbar-button model-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">Model · Loading…</button>
+              <span class="context-meter">Context · —</span>
+              <button id="send" class="send-button" type="submit" aria-label="Send message">↑</button>
+            </div>
+            <div id="model-popover" class="model-popover" hidden></div>
+          </form>
+        </footer>
       </main>
+      <aside class="details-panel" aria-label="Session details">
+        <div class="details-header"><strong>Session details</strong><button id="details-close" class="icon-button" type="button" aria-label="Close details">›</button></div>
+        <div id="details-content" class="details-content"></div>
+      </aside>
     </div>
     <script>
       (() => {
-        const state = { session: null, events: new Map(), source: null, tools: new Map(), mcp: [], models: null };
+        const state = { session: null, events: new Map(), source: null, tools: new Map(), mcp: [], models: null, sidebarCollapsed: false, detailsOpen: true };
+        const app = document.querySelector('#app');
         const list = document.querySelector('#session-list');
         const mcpList = document.querySelector('#mcp-list');
         const conversation = document.querySelector('#conversation');
         const status = document.querySelector('#status');
         const title = document.querySelector('#session-title');
-        const modelSelect = document.querySelector('#model-select');
+        const path = document.querySelector('#session-path');
         const input = document.querySelector('#input');
-        const send = document.querySelector('.send');
+        const send = document.querySelector('#send');
+        const modelTrigger = document.querySelector('#model-trigger');
+        const modelPopover = document.querySelector('#model-popover');
+        const details = document.querySelector('#details-content');
         const api = async (url, options) => { const response = await fetch(url, options); if (!response.ok) throw new Error(await response.text()); return response.json(); };
-        const addEvent = (event) => { state.events.set(event.sequence, event); render(); };
+        const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+        const currentModel = () => state.models?.current || state.models?.defaultModel || 'deepseek-v4-flash';
+        const setStatus = (text, connected = true) => { status.textContent = text; status.classList.toggle('disconnected', !connected); };
+        const addEvent = (event) => { if (!event || state.events.has(event.sequence)) return; state.events.set(event.sequence, event); render(); };
+        const orderedEvents = () => [...state.events.values()].sort((a, b) => a.sequence - b.sequence);
+        const addEventRow = (parent, text) => { const row = document.createElement('div'); row.className = 'event-row'; row.textContent = text; parent.append(row); };
+        const appendMessage = (parent, role, content) => { const row = document.createElement('div'); row.className = `message ${role}`; const avatar = document.createElement('div'); avatar.className = 'avatar'; avatar.textContent = role === 'user' ? 'You' : 'AI'; const body = document.createElement('div'); body.className = 'message-body'; body.textContent = content; row.append(avatar, body); parent.append(row); return body; };
+        const appendTool = (parent, name, text, statusText = 'Completed') => { const row = document.createElement('div'); row.className = 'tool-row'; const summary = document.createElement('button'); summary.className = 'tool-summary'; summary.type = 'button'; const icon = document.createElement('span'); icon.className = 'tool-icon'; icon.textContent = '⌘'; const heading = document.createElement('span'); heading.className = 'tool-title'; const source = state.tools.get(name)?.source; heading.textContent = source?.kind === 'mcp' ? `MCP · ${source.serverName} · ${source.rawName}` : `Tool · ${name}`; const toolStatus = document.createElement('span'); toolStatus.className = 'tool-status'; toolStatus.textContent = statusText; const chevron = document.createElement('span'); chevron.className = 'tool-chevron'; chevron.textContent = '⌄'; const body = document.createElement('div'); body.className = 'tool-details'; const pre = document.createElement('pre'); pre.textContent = text; body.append(pre); summary.append(icon, heading, toolStatus, chevron); summary.onclick = () => row.classList.toggle('open'); row.append(summary, body); parent.append(row); };
+        const appendPermission = (parent, payload) => { const row = document.createElement('div'); row.className = 'permission-card'; const heading = document.createElement('strong'); heading.textContent = `Approval required · ${payload.toolName || 'tool'}`; const body = document.createElement('pre'); body.textContent = `${payload.reason || 'This tool needs permission'}\ncaller: ${payload.caller || 'agent'}\nworkspace: ${payload.workspaceRoot || state.session?.workspaceRoot || '.'}\nexpires: ${payload.expiresAt || 'unknown'}\n${JSON.stringify(payload.input || {}, null, 2)}`; const actions = document.createElement('div'); actions.className = 'permission-actions'; for (const [label, value, className] of [['Approve','approved',''],['Deny','denied','deny'],['Cancel','cancelled','cancel']]) { const button = document.createElement('button'); button.type = 'button'; button.textContent = label; if (className) button.className = className; button.onclick = async () => { button.disabled = true; try { await api(`/v1/sessions/${encodeURIComponent(state.session.id)}/permissions/${encodeURIComponent(payload.permissionId)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: value }) }); } catch (error) { setStatus(error.message, false); button.disabled = false; } }; actions.append(button); } row.append(heading, body, actions); parent.append(row); };
         const render = () => {
-          const events = [...state.events.values()].sort((a, b) => a.sequence - b.sequence);
           conversation.innerHTML = '';
-          let hasMessage = false;
-          const assistant = new Map();
-          const permissions = new Map();
-          for (const event of events) {
-            if (event.type === 'user/message') { hasMessage = true; addMessage('user', event.payload.content); }
-            if (event.type === 'assistant/chunk') { hasMessage = true; const key = event.turnId || 'assistant'; if (!assistant.has(key)) assistant.set(key, addMessage('assistant', '')); assistant.get(key).textContent += event.payload.text; }
-            if (event.type === 'assistant/message') { hasMessage = true; const key = event.turnId || 'assistant'; if (!assistant.has(key)) assistant.set(key, addMessage('assistant', event.payload.content)); else assistant.get(key).textContent = event.payload.content; }
-            if (event.type === 'tool/call') addTool(event.payload.name || 'tool', `${event.payload.caller || 'agent'} · ${event.payload.workspaceRoot || ''}\nrequested · ${JSON.stringify(event.payload.input || {})}`);
-            if (event.type === 'tool/progress') addTool(event.payload.toolCallId || 'tool', `${event.payload.phase || event.payload.status || 'running'}${event.payload.text ? ` · ${event.payload.text}` : ''}`);
-            if (event.type === 'tool/result') { const result = event.payload.result || {}; const view = { ...result, output: result.modelView ?? result.output, audit: undefined, modelView: undefined }; addTool(event.payload.toolCallId || 'tool', `${event.payload.status || 'completed'} · ${JSON.stringify(view)}`); }
-            if (event.type === 'permission/requested') permissions.set(event.payload.permissionId, event.payload);
-            if (event.type === 'permission/resolved' && permissions.has(event.payload.permissionId)) permissions.get(event.payload.permissionId).status = event.payload.status;
-            if (event.type === 'diff/preview') addTool('diff', JSON.stringify(event.payload.diff || {}));
-            if (event.type === 'mcp/server') { const row = document.createElement('div'); row.className = 'event'; row.textContent = `MCP ${event.payload.serverName || 'server'} · ${event.payload.status || 'updated'}`; conversation.append(row); }
-            if (event.type !== 'session/created' && !event.type.startsWith('assistant/') && !event.type.startsWith('user/') && !event.type.startsWith('tool/') && !event.type.startsWith('permission/') && !event.type.startsWith('mcp/') && event.type !== 'diff/preview') { const row = document.createElement('div'); row.className = 'event'; row.textContent = `${event.type} · #${event.sequence}`; conversation.append(row); }
+          const ordered = orderedEvents();
+          const hasMessage = ordered.some((event) => event.type === 'user/message' || event.type === 'assistant/chunk' || event.type === 'assistant/message');
+          if (!hasMessage) { const hero = document.createElement('div'); hero.className = 'hero'; hero.innerHTML = `<div class="hero-inner"><div class="hero-mark">⌁</div><h1>Ready to review your code</h1><p>Ask the agent to inspect a repository, explain a file, or help you plan the next change.</p><span class="workspace-chip">${esc(state.session?.workspaceRoot || '.')}</span></div>`; conversation.append(hero); }
+          else {
+            const body = document.createElement('div'); body.className = 'conversation-body'; conversation.append(body); const assistant = new Map(); const permissions = new Map();
+            for (const event of ordered) {
+              if (event.type === 'user/message') appendMessage(body, 'user', event.payload?.content || '');
+              else if (event.type === 'assistant/chunk') { const key = event.turnId || 'assistant'; if (!assistant.has(key)) assistant.set(key, appendMessage(body, 'assistant', '')); assistant.get(key).textContent += event.payload?.text || ''; }
+              else if (event.type === 'assistant/message') { const key = event.turnId || 'assistant'; if (!assistant.has(key)) assistant.set(key, appendMessage(body, 'assistant', event.payload?.content || '')); else assistant.get(key).textContent = event.payload?.content || ''; }
+              else if (event.type === 'tool/call') { const payload = event.payload || {}; appendTool(body, payload.name || 'tool', `${payload.caller || 'agent'} · ${payload.workspaceRoot || ''}\n${JSON.stringify(payload.input || {}, null, 2)}`, 'Running'); }
+              else if (event.type === 'tool/progress') { const payload = event.payload || {}; addEventRow(body, `${payload.toolCallId || 'tool'} · ${payload.phase || payload.status || 'running'}${payload.text ? ` · ${payload.text}` : ''}`); }
+              else if (event.type === 'tool/result') { const payload = event.payload || {}; const result = payload.result || {}; appendTool(body, payload.toolCallId || 'tool', JSON.stringify({ ...result, output: result.modelView ?? result.output, audit: undefined, modelView: undefined }, null, 2), payload.status || 'Completed'); }
+              else if (event.type === 'permission/requested') permissions.set(event.payload?.permissionId, event.payload);
+              else if (event.type === 'permission/resolved' && permissions.has(event.payload?.permissionId)) permissions.get(event.payload.permissionId).status = event.payload.status;
+              else if (event.type === 'diff/preview') appendTool(body, 'diff', JSON.stringify(event.payload?.diff || {}, null, 2), 'Preview');
+              else if (event.type === 'mcp/server') addEventRow(body, `MCP ${event.payload?.serverName || 'server'} · ${event.payload?.status || 'updated'}`);
+              else if (event.type !== 'session/created' && !event.type.startsWith('assistant/') && !event.type.startsWith('user/') && !event.type.startsWith('tool/') && !event.type.startsWith('permission/') && !event.type.startsWith('mcp/') && event.type !== 'diff/preview') addEventRow(body, `${event.type} · #${event.sequence}`);
+            }
+            for (const permission of permissions.values()) if (!permission.status || permission.status === 'pending') appendPermission(body, permission);
           }
-          for (const permission of permissions.values()) if (permission.status === undefined || permission.status === 'pending') addPermission(permission);
-          if (!hasMessage) { const empty = document.createElement('div'); empty.className = 'empty'; empty.textContent = 'Ask the agent to inspect a repository or explain a file.'; conversation.append(empty); }
-          conversation.scrollTop = conversation.scrollHeight;
+          conversation.scrollTop = conversation.scrollHeight; renderDetails();
         };
-        const addMessage = (role, content) => { const row = document.createElement('div'); row.className = `message ${role}`; const avatar = document.createElement('div'); avatar.className = 'avatar'; avatar.textContent = role === 'user' ? 'You' : 'AI'; const body = document.createElement('div'); body.className = 'message-body'; body.textContent = content; row.append(avatar, body); conversation.append(row); return body; };
-        const addTool = (name, text) => { const row = document.createElement('div'); row.className = 'tool-card'; const heading = document.createElement('strong'); const source = state.tools.get(name)?.source; heading.textContent = source?.kind === 'mcp' ? `MCP · ${source.serverName} · ${source.rawName}` : `Tool · ${name}`; const body = document.createElement('pre'); body.textContent = text; row.append(heading, body); conversation.append(row); };
-        const addPermission = (payload) => { const row = document.createElement('div'); row.className = 'tool-card'; const heading = document.createElement('strong'); heading.textContent = `Approval required · ${payload.toolName}`; const body = document.createElement('pre'); body.textContent = `${payload.reason || 'This tool needs permission'}\ncaller: ${payload.caller || 'agent'}\nworkspace: ${payload.workspaceRoot || state.session.workspaceRoot}\nexpires: ${payload.expiresAt || 'unknown'}\n${JSON.stringify(payload.input || {}, null, 2)}`; const actions = document.createElement('div'); actions.className = 'permission-actions'; for (const [label, value, className] of [['Approve', 'approved', ''], ['Deny', 'denied', 'deny'], ['Cancel', 'cancelled', 'cancel']]) { const button = document.createElement('button'); button.textContent = label; if (className) button.className = className; button.onclick = async () => { button.disabled = true; await api(`/v1/sessions/${encodeURIComponent(state.session.id)}/permissions/${encodeURIComponent(payload.permissionId)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: value }) }); }; actions.append(button); } row.append(heading, body, actions); conversation.append(row); };
-        const showSessions = (payload) => { const sessions = Array.isArray(payload) ? payload : payload.sessions; list.innerHTML = ''; for (const session of sessions) { const button = document.createElement('button'); button.className = `session ${state.session && state.session.id === session.id ? 'active' : ''}`; button.textContent = session.workspaceRoot; button.onclick = () => openSession(session.id); list.append(button); } };
-        const renderMcp = () => { mcpList.innerHTML = ''; for (const server of state.mcp) { const row = document.createElement('div'); row.className = 'mcp-row'; const label = document.createElement('span'); label.textContent = `${server.config.name} · ${server.status}`; const actions = document.createElement('span'); const reconnect = document.createElement('button'); reconnect.textContent = 'Reconnect'; reconnect.onclick = async () => { reconnect.disabled = true; try { await api(`/v1/mcp/servers/${encodeURIComponent(server.config.name)}/reconnect`, { method: 'POST' }); state.mcp = (await api('/v1/mcp/servers')).servers; renderMcp(); } finally { reconnect.disabled = false; } }; const toggle = document.createElement('button'); toggle.textContent = server.status === 'disabled' ? 'Enable' : 'Disable'; toggle.onclick = async () => { await api(`/v1/mcp/servers/${encodeURIComponent(server.config.name)}/${server.status === 'disabled' ? 'enable' : 'disable'}`, { method: 'POST' }); state.mcp = (await api('/v1/mcp/servers')).servers; renderMcp(); }; actions.append(reconnect, toggle); row.append(label, actions); mcpList.append(row); } };
-        const renderModels = (payload) => { state.models = payload; modelSelect.innerHTML = ''; const models = Array.isArray(payload.models) ? payload.models : []; for (const model of models) { const option = document.createElement('option'); option.value = model; option.textContent = model; modelSelect.append(option); } if (payload.current && models.includes(payload.current)) modelSelect.value = payload.current; modelSelect.disabled = models.length === 0; };
-        const openSession = async (id) => { if (state.source) state.source.close(); state.session = await api(`/v1/sessions/${encodeURIComponent(id)}`); title.textContent = state.session.workspaceRoot; state.events.clear(); const events = await api(`/v1/sessions/${encodeURIComponent(id)}/events?format=json`); events.forEach(addEvent); state.source = new EventSource(`/v1/sessions/${encodeURIComponent(id)}/events?after_sequence=${state.session.lastSequence}`); const eventTypes = ['session/created', 'session/updated', 'user/message', 'turn/queued', 'turn/started', 'turn/ended', 'assistant/chunk', 'assistant/message', 'task/created', 'task/updated', 'task/ended', 'tool/call', 'tool/progress', 'tool/result', 'diff/preview', 'permission/requested', 'permission/resolved', 'mcp/server', 'mcp/tool', 'agent/status', 'agent/error']; eventTypes.forEach((type) => state.source.addEventListener(type, (message) => addEvent(JSON.parse(message.data)))); state.source.onerror = () => { status.textContent = 'Reconnecting…'; }; state.source.onopen = () => { status.textContent = 'Connected'; }; showSessions(await api('/v1/sessions')); };
-        const boot = async () => { const result = await api('/v1/sessions'); const tools = await api('/v1/tools'); state.tools = new Map(tools.tools.map((tool) => [tool.name, tool])); renderModels(await api('/v1/models')); state.mcp = (await api('/v1/mcp/servers')).servers; renderMcp(); if (result.sessions.length) await openSession(result.sessions[0].id); else { state.session = await api('/v1/sessions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspaceRoot: '.' }) }); await openSession(state.session.id); } };
-        modelSelect.addEventListener('change', async () => { const selected = modelSelect.value; modelSelect.disabled = true; try { await api('/v1/models', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: selected }) }); renderModels(await api('/v1/models')); status.textContent = `Model: ${selected}`; } catch (error) { status.textContent = error.message; if (state.models) renderModels(state.models); } });
-        document.querySelector('#composer').addEventListener('submit', async (event) => { event.preventDefault(); const content = input.value.trim(); if (!content || !state.session) return; send.disabled = true; input.value = ''; try { await api(`/v1/sessions/${encodeURIComponent(state.session.id)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content }) }); } finally { send.disabled = false; input.focus(); } });
-        boot().catch((error) => { status.textContent = error.message; });
+        const showSessions = (payload) => { const sessions = Array.isArray(payload) ? payload : payload.sessions || []; list.innerHTML = ''; for (const session of sessions) { const button = document.createElement('button'); button.className = `session ${state.session?.id === session.id ? 'active' : ''}`; button.type = 'button'; const name = session.title || session.workspaceRoot?.split(/[\\/]/).filter(Boolean).pop() || 'New session'; button.innerHTML = `<span class="session-dot"></span><span class="session-copy"><span class="session-name">${esc(name)}</span><span class="session-path">${esc(session.workspaceRoot || '.')}</span></span>`; button.onclick = () => openSession(session.id); list.append(button); } };
+        const renderMcp = () => { mcpList.innerHTML = ''; for (const server of state.mcp) { const name = server.config?.name || server.name; const row = document.createElement('div'); row.className = 'mcp-row'; const label = document.createElement('span'); label.className = `mcp-copy mcp-status ${server.status === 'disabled' ? 'disabled' : server.status === 'error' ? 'error' : ''}`; label.textContent = `${name} · ${server.status}`; const actions = document.createElement('span'); actions.className = 'mcp-actions'; const reconnect = document.createElement('button'); reconnect.type = 'button'; reconnect.textContent = '↻'; reconnect.title = 'Reconnect'; reconnect.onclick = async () => { reconnect.disabled = true; try { await api(`/v1/mcp/servers/${encodeURIComponent(name)}/reconnect`, { method: 'POST' }); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); renderDetails(); } finally { reconnect.disabled = false; } }; const toggle = document.createElement('button'); toggle.type = 'button'; toggle.textContent = server.status === 'disabled' ? '＋' : '−'; toggle.title = server.status === 'disabled' ? 'Enable' : 'Disable'; toggle.onclick = async () => { await api(`/v1/mcp/servers/${encodeURIComponent(name)}/${server.status === 'disabled' ? 'enable' : 'disable'}`, { method: 'POST' }); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); renderDetails(); }; actions.append(reconnect, toggle); row.append(label, actions); mcpList.append(row); } if (!state.mcp.length) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = 'No MCP servers configured.'; mcpList.append(empty); } };
+        const renderModels = (payload) => { state.models = payload; modelTrigger.textContent = `Model · ${currentModel()}`; modelPopover.innerHTML = '<div class="popover-label">Choose a model</div>'; for (const model of payload?.models || []) { const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${model === currentModel() ? 'selected' : ''}`; option.innerHTML = `<span class="model-check">${model === currentModel() ? '✓' : ''}</span><span>${esc(model)}<span class="model-meta">DeepSeek API</span></span>`; option.onclick = async () => { modelPopover.hidden = true; modelTrigger.setAttribute('aria-expanded', 'false'); modelTrigger.disabled = true; try { await api('/v1/models', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }) }); renderModels(await api('/v1/models')); setStatus(`Model · ${model}`); renderDetails(); } catch (error) { setStatus(error.message, false); } finally { modelTrigger.disabled = false; } }; modelPopover.append(option); } };
+        const renderDetails = () => { const connected = state.mcp.filter((server) => server.status !== 'disabled' && server.status !== 'error').length; details.innerHTML = `<div class="detail-section"><div class="detail-label">Model</div><div class="detail-value">${esc(currentModel())}</div><div class="detail-line"><span>Provider</span><strong>${esc(state.models?.provider || 'DeepSeek-compatible')}</strong></div><div class="detail-line"><span>Default</span><strong>${esc(state.models?.defaultModel || 'deepseek-v4-flash')}</strong></div></div><div class="detail-section"><div class="detail-label">Session</div><div class="detail-line"><span>Status</span><span class="status-pill">Connected</span></div><div class="detail-line"><span>Events</span><strong>${state.events.size}</strong></div><div class="detail-line"><span>Workspace</span><strong title="${esc(state.session?.workspaceRoot || '.')}">${esc(state.session?.workspaceRoot || '.')}</strong></div></div><div class="detail-section"><div class="detail-label">MCP</div><div class="detail-line"><span>Servers</span><strong>${connected}/${state.mcp.length}</strong></div><div class="detail-line"><span>Tools</span><strong>${state.tools.size}</strong></div></div><div class="detail-section"><div class="detail-label">Tools</div><div id="detail-tools" class="tool-list"></div></div><div class="detail-section"><div class="detail-label">Permissions</div><div class="empty-detail">Tool approvals appear here when a turn needs confirmation.</div></div>`; const toolList = details.querySelector('#detail-tools'); const names = [...state.tools.keys()].slice(0, 8); if (!names.length) toolList.innerHTML = '<div class="empty-detail">No tools discovered.</div>'; else names.forEach((name) => { const row = document.createElement('div'); row.className = 'tool-list-item'; row.textContent = name; toolList.append(row); }); };
+        const openSession = async (id) => { if (state.source) state.source.close(); state.session = await api(`/v1/sessions/${encodeURIComponent(id)}`); title.textContent = state.session.title || 'Coding session'; path.textContent = `Workspace · ${state.session.workspaceRoot || '.'}`; state.events.clear(); const history = await api(`/v1/sessions/${encodeURIComponent(id)}/events?format=json`); for (const event of history) addEvent(event); state.source = new EventSource(`/v1/sessions/${encodeURIComponent(id)}/events?after_sequence=${state.session.lastSequence || 0}`); const types = ['session/created','session/updated','user/message','turn/queued','turn/started','turn/ended','assistant/chunk','assistant/message','task/created','task/updated','task/ended','tool/call','tool/progress','tool/result','diff/preview','permission/requested','permission/resolved','mcp/server','mcp/tool','agent/status','agent/error']; types.forEach((type) => state.source.addEventListener(type, (message) => addEvent(JSON.parse(message.data)))); state.source.onerror = () => setStatus('Reconnecting…', false); state.source.onopen = () => setStatus('Connected', true); showSessions(await api('/v1/sessions')); render(); };
+        const newSession = async () => { const session = await api('/v1/sessions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspaceRoot: '.' }) }); await openSession(session.id); };
+        const boot = async () => { const result = await api('/v1/sessions'); const tools = await api('/v1/tools'); state.tools = new Map((tools.tools || []).map((tool) => [tool.name, tool])); renderModels(await api('/v1/models')); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); if (result.sessions?.length) await openSession(result.sessions[0].id); else await newSession(); };
+        document.querySelector('#sidebar-toggle').onclick = () => { state.sidebarCollapsed = !state.sidebarCollapsed; app.classList.toggle('sidebar-collapsed', state.sidebarCollapsed); };
+        document.querySelector('#details-toggle').onclick = () => { state.detailsOpen = !state.detailsOpen; app.classList.toggle('details-collapsed', !state.detailsOpen); };
+        document.querySelector('#details-close').onclick = () => { state.detailsOpen = false; app.classList.add('details-collapsed'); };
+        document.querySelector('#new-session').onclick = () => newSession().catch((error) => setStatus(error.message, false));
+        document.querySelector('#mobile-menu').onclick = () => { state.sidebarCollapsed = false; app.classList.remove('sidebar-collapsed'); };
+        modelTrigger.onclick = () => { modelPopover.hidden = !modelPopover.hidden; modelTrigger.setAttribute('aria-expanded', String(!modelPopover.hidden)); };
+        document.addEventListener('click', (event) => { if (!modelPopover.hidden && !modelPopover.contains(event.target) && event.target !== modelTrigger) { modelPopover.hidden = true; modelTrigger.setAttribute('aria-expanded', 'false'); } });
+        input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 220)}px`; });
+        input.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); document.querySelector('#composer').requestSubmit(); } });
+        document.querySelector('#composer').addEventListener('submit', async (event) => { event.preventDefault(); const content = input.value.trim(); if (!content || !state.session) return; send.disabled = true; input.value = ''; input.style.height = 'auto'; try { await api(`/v1/sessions/${encodeURIComponent(state.session.id)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content }) }); } catch (error) { setStatus(error.message, false); } finally { send.disabled = false; input.focus(); } });
+        boot().catch((error) => { setStatus(error.message, false); conversation.innerHTML = `<div class="hero"><div class="hero-inner"><div class="hero-mark">!</div><h1>Unable to connect</h1><p>${esc(error.message)}</p></div></div>`; });
       })();
     </script>
   </body>

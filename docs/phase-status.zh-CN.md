@@ -13,7 +13,7 @@
 | Phase 4：MCP Client | completed | `5477f16`；官方 SDK stdio/SSE/Streamable HTTP、discovery、ToolRegistry bridge、权限/取消/重连、API/Web MCP 状态和 fixture 验证通过 |
 | Phase 5：内部 Subagent / 多 Agent | pending | 等 Phase 4 MCP 和 Task contract 稳定 |
 | Phase 6：A2A | pending | 等 Phase 5 parent/child lifecycle 稳定 |
-| Phase 7：DSH Web 前端收敛 | pending | 先保持 Phase 1 最小 Shell，后续逐项移植 |
+| Phase 7：DSH Web 前端收敛 | in_progress | DSH 风格三栏 Web 垂直切片；`pnpm typecheck`、`pnpm test`、浏览器 smoke 通过 |
 | Phase 8：高级能力与产品化 | pending | 等前置阶段完成 |
 
 ## Phase 1 真实模型增强（2026-08-22）
