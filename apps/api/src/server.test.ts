@@ -85,10 +85,23 @@ describe("Phase 2 API", () => {
       expect((await read.json()).result.output).toBe("before");
       const edit = await fetch(`${baseUrl}/v1/sessions/${session.id}/tools`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "tool-edit-1" }, body: JSON.stringify({ name: "edit_file", input: { path: "note.txt", oldText: "before", newText: "after" } }) });
       expect(edit.status).toBe(202);
-      const pending = await edit.json() as { permission: { id: string } };
+      const pending = await edit.json() as { toolCallId: string; permission: { id: string } };
+      const repeatedEdit = await fetch(`${baseUrl}/v1/sessions/${session.id}/tools`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "tool-edit-1" }, body: JSON.stringify({ name: "edit_file", input: { path: "note.txt", oldText: "before", newText: "after" } }) });
+      expect(await repeatedEdit.json()).toMatchObject({ toolCallId: pending.toolCallId, permission: { id: pending.permission.id } });
       const approved = await fetch(`${baseUrl}/v1/sessions/${session.id}/permissions/${pending.permission.id}`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "permission-edit-1" }, body: JSON.stringify({ status: "approved" }) });
       expect(approved.status).toBe(200);
+      const repeatedApproval = await fetch(`${baseUrl}/v1/sessions/${session.id}/permissions/${pending.permission.id}`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "permission-edit-1" }, body: JSON.stringify({ status: "approved" }) });
+      expect(await repeatedApproval.json()).toMatchObject({ toolCallId: pending.toolCallId, status: "completed" });
       expect(readFileSync(join(root, "note.txt"), "utf8")).toBe("after");
+      const cancelCandidate = await fetch(`${baseUrl}/v1/sessions/${session.id}/tools`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "tool-edit-cancel-1" }, body: JSON.stringify({ name: "edit_file", input: { path: "note.txt", oldText: "after", newText: "cancelled" } }) });
+      const cancelBody = await cancelCandidate.json() as { toolCallId: string };
+      const cancelled = await fetch(`${baseUrl}/v1/sessions/${session.id}/tools/${cancelBody.toolCallId}/cancel`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "cancel-tool-1" }, body: "{}" });
+      expect(cancelled.status).toBe(200); expect((await cancelled.json()).cancelled).toBe(true);
+      const repeatedCancel = await fetch(`${baseUrl}/v1/sessions/${session.id}/tools/${cancelBody.toolCallId}/cancel`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "cancel-tool-1" }, body: "{}" });
+      expect((await repeatedCancel.json()).cancelled).toBe(true); expect(readFileSync(join(root, "note.txt"), "utf8")).toBe("after");
+      const projection = await (await fetch(`${baseUrl}/v1/sessions/${session.id}`)).json() as { toolCalls: { id: string; status: string; caller?: string; workspaceRoot?: string }[]; permissions: { toolCallId: string; status: string }[] };
+      expect(projection.toolCalls.find((call) => call.id === cancelBody.toolCallId)).toMatchObject({ status: "cancelled", caller: "user", workspaceRoot: root });
+      expect(projection.permissions.find((permission) => permission.toolCallId === cancelBody.toolCallId)?.status).toBe("cancelled");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -164,6 +177,28 @@ describe("Phase 2 API", () => {
     const restored = await (await fetch(`http://127.0.0.1:${secondAddress.port}/v1/sessions/${session.id}`)).json() as { workspaceRoot: string; lastSequence: number };
     expect(restored.workspaceRoot).toBe("D:/restart");
     expect(restored.lastSequence).toBe(1);
+    await new Promise<void>((resolve, reject) => second.close((error) => (error ? reject(error) : resolve())));
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  it("restores a pending tool permission after an API restart", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-permission-recovery-"));
+    const databasePath = join(directory, "agent.sqlite");
+    const first = createApiServer({ databasePath });
+    await new Promise<void>((resolve) => first.listen(0, "127.0.0.1", resolve));
+    const firstAddress = first.address();
+    if (firstAddress === null || typeof firstAddress === "string") throw new Error("API did not bind");
+    const firstUrl = `http://127.0.0.1:${firstAddress.port}`;
+    const session = await (await fetch(`${firstUrl}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: directory }) })).json() as { id: string };
+    const pending = await (await fetch(`${firstUrl}/v1/sessions/${session.id}/tools`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "restart-write-1" }, body: JSON.stringify({ name: "write_file", input: { path: "restored.txt", content: "restored" } }) })).json() as { permission: { id: string } };
+    await new Promise<void>((resolve, reject) => first.close((error) => (error ? reject(error) : resolve())));
+
+    const second = createApiServer({ databasePath });
+    await new Promise<void>((resolve) => second.listen(0, "127.0.0.1", resolve));
+    const secondAddress = second.address();
+    if (secondAddress === null || typeof secondAddress === "string") throw new Error("API did not bind");
+    const approved = await fetch(`http://127.0.0.1:${secondAddress.port}/v1/sessions/${session.id}/permissions/${pending.permission.id}`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "restart-approve-1" }, body: JSON.stringify({ status: "approved" }) });
+    expect(approved.status).toBe(200); expect(readFileSync(join(directory, "restored.txt"), "utf8")).toBe("restored");
     await new Promise<void>((resolve, reject) => second.close((error) => (error ? reject(error) : resolve())));
     rmSync(directory, { recursive: true, force: true });
   });

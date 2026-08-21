@@ -96,8 +96,9 @@ export type ToolRiskLevel = "read" | "write" | "execute" | "network";
 export type ToolExecutionMode = "parallel" | "exclusive";
 export type ToolApprovalMode = "auto" | "ask" | "deny";
 export type ToolInterruptBehavior = "cancel" | "block";
+export type ToolCaller = "agent" | "user" | "system";
 export type ToolCallStatus = "pending" | "awaiting_permission" | "running" | "completed" | "failed" | "cancelled" | "denied";
-export type PermissionStatus = "pending" | "approved" | "denied" | "cancelled";
+export type PermissionStatus = "pending" | "approved" | "denied" | "cancelled" | "expired";
 
 export interface JsonSchema {
   readonly type?: "object" | "array" | "string" | "number" | "integer" | "boolean" | "null";
@@ -143,6 +144,10 @@ export interface ToolPresentation {
 export interface ToolResult {
   readonly ok: boolean;
   readonly output?: unknown;
+  /** Complete result retained for audit/replay; callers may prefer modelView for presentation. */
+  readonly audit?: unknown;
+  /** Budgeted view safe to place in a model/UI context. */
+  readonly modelView?: unknown;
   readonly error?: ToolError;
   readonly diff?: ToolDiff;
   readonly usage?: ToolUsage;
@@ -154,6 +159,7 @@ export interface ToolContext {
   readonly turnId?: TurnId;
   readonly toolCallId: ToolCallId;
   readonly workspaceRoot: string;
+  readonly caller: ToolCaller;
   readonly signal: AbortSignal;
   readonly reportProgress: (payload: Readonly<Record<string, unknown>>) => Promise<void>;
 }
@@ -178,6 +184,8 @@ export interface ToolCallProjection {
   readonly riskLevel: ToolRiskLevel;
   readonly approvalMode: ToolApprovalMode;
   readonly turnId?: TurnId;
+  readonly caller?: ToolCaller;
+  readonly workspaceRoot?: string;
   readonly input?: unknown;
   readonly result?: ToolResult;
   readonly createdAt: string;
@@ -192,6 +200,9 @@ export interface PermissionProjection {
   readonly status: PermissionStatus;
   readonly riskLevel: ToolRiskLevel;
   readonly reason: string;
+  readonly caller?: ToolCaller;
+  readonly workspaceRoot?: string;
+  readonly expiresAt?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly lastSequence: number;
@@ -206,7 +217,10 @@ export interface PermissionRequest {
   readonly riskLevel: ToolRiskLevel;
   readonly reason: string;
   readonly input: unknown;
+  readonly caller: ToolCaller;
+  readonly workspaceRoot: string;
   readonly createdAt: string;
+  readonly expiresAt: string;
 }
 
 export interface CreateSessionInput {

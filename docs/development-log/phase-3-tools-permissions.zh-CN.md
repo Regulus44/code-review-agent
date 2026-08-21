@@ -118,3 +118,40 @@ pnpm test
 ### Phase 3 checkpoint 前结论
 
 阶段核心退出条件已满足：所有内置工具均经过统一 ToolRuntime，路径/命令/权限边界有测试，Read/Edit/Test 可从事件恢复。跨平台进程树终止和更细粒度 presentation/model view 预算仍列为后续增强项，不阻塞当前 checkpoint。
+
+## 2026-08-21：Phase 3 安全与恢复硬化
+
+### 审计结论
+
+继续审计 `5003dbd` 后发现，上一 checkpoint 仍有四项与阶段计划不完全一致：`write_file` 可隐式覆盖、取消只终止顶层进程、完整审计结果与展示视图未分离、审批过期/取消和 Registry 禁用缺少完整测试。因此 Phase 3 继续推进，不把旧 checkpoint 当作最终退出点。
+
+### 变更范围
+
+- `write_file` 默认拒绝已有目标，只有显式 `overwrite=true` 才覆盖，并生成 diff；
+- read/glob/grep 增加文件大小、结果数量和默认输出边界；
+- 进程工具使用 argv + `shell:false`，取消时按平台终止进程树；完整 audit 分离记录 stdout、stderr、exitCode、signal；
+- ToolResult 保留完整 `audit/output`，另生成受预算限制的 `modelView`，Web 不再渲染完整 audit；
+- ToolRegistry 增加 enable/disable；ToolRuntime 增加 parallel/exclusive 验证和批量兄弟失败取消；
+- tool/permission 事件增加 caller、workspaceRoot，审批增加 expiresAt；过期审批返回 `PERMISSION_EXPIRED`；
+- pending permission 取消会追加 `permission/resolved` 与 terminal `tool/result`；重复审批和取消保持幂等；
+- API 增加 `POST /v1/sessions/:id/tools/:toolCallId/cancel`，并增加 SQLite API 重启后恢复 pending permission 的测试；
+- Windows 使用 directory junction 完成 symlink escape 测试，不再跳过该安全门禁；
+- Web 审批卡片显示 caller/workspace/expiry，并提供 Approve、Deny、Cancel。
+
+### 自动化验证
+
+```text
+pnpm typecheck
+pnpm test
+```
+
+当前结果：contracts、llm、storage、workspace、tools、runtime、api 全部通过；workspace 4/4、storage 6 项、tools 16 项、API 6 项。网页 Cancel 与刷新恢复 smoke 已在下方完成，下一步生成新的 Phase 3 checkpoint。
+
+### 网页 Cancel 与恢复 smoke
+
+- 创建以 `packages/tools` 为 workspace 的 Session，触发显式覆盖 `write_file(package.json)`；
+- 网页正确显示 caller、workspace、expiresAt 和 Approve/Deny/Cancel；
+- 点击 Cancel 后产生 `permission/resolved(cancelled)` 与 terminal `tool/result(PERMISSION_CANCELLED)`；
+- 刷新页面后 pending 卡片不再出现，取消结果仍从事件回放；
+- 随后通过 `read_file(package.json)` 验证内容仍为 `@code-review-agent/tools`，确认取消没有文件副作用；
+- 本地 API 已停止，没有留下运行中的开发服务。

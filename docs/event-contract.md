@@ -34,6 +34,7 @@ assistant/message
 tool/call
 tool/progress
 tool/result
+diff/preview
 permission/requested
 permission/resolved
 agent/status
@@ -51,6 +52,7 @@ task/ended
 - 任何到达模型请求的输入，都能从 Session 事件重建；
 - 任何工具调用都先产生 `tool/call`，再产生 `tool/progress` 或 `tool/result`；
 - 需要用户决定的动作必须产生 `permission/requested`，结果必须产生 `permission/resolved`；
+- permission 事件必须记录 caller、workspace、toolCall、创建时间和过期时间；过期、拒绝、取消都必须有 terminal tool/result；
 - 事件先落盘，再推送 SSE；
 - 重复发送消息、重复批准、重复取消必须幂等；
 - 客户端可以用 `Last-Event-ID` 或 `after_sequence` 补发事件；

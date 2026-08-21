@@ -10,6 +10,8 @@ import {
   type TurnId,
   type PermissionId,
   type PermissionRequest,
+  type ToolCaller,
+  type ToolCallId,
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { randomUUID } from "node:crypto";
@@ -88,7 +90,7 @@ export class AgentHost {
     }));
   }
 
-  async executeTool(sessionId: SessionId, name: string, input: unknown, turnId?: TurnId, commandId?: string, signal?: AbortSignal): Promise<ExecuteToolOutput> {
+  async executeTool(sessionId: SessionId, name: string, input: unknown, turnId?: TurnId, commandId?: string, signal?: AbortSignal, caller: ToolCaller = "user"): Promise<ExecuteToolOutput> {
     await this.ready;
     const projection = await this.options.store.project(sessionId);
     if (projection === undefined) throw new Error(`Unknown session: ${sessionId}`);
@@ -106,9 +108,9 @@ export class AgentHost {
       const call = projection.toolCalls.find((item) => item.id === saved);
       if (call === undefined) throw new Error(`Tool call ${saved} is not available`);
       const permission = projection.permissions.find((item) => item.toolCallId === call.id && item.status === "pending");
-      return { toolCallId: call.id, status: call.status === "awaiting_permission" ? "awaiting_permission" : call.status === "completed" ? "completed" : call.status === "cancelled" ? "cancelled" : call.status === "denied" ? "denied" : "failed", ...(call.result === undefined ? {} : { result: call.result }), ...(permission === undefined ? {} : { permission: { id: permission.id, sessionId, toolCallId: permission.toolCallId, toolName: permission.toolName, riskLevel: permission.riskLevel, reason: permission.reason, input, createdAt: permission.createdAt } satisfies PermissionRequest }) };
+      return { toolCallId: call.id, status: call.status === "awaiting_permission" ? "awaiting_permission" : call.status === "completed" ? "completed" : call.status === "cancelled" ? "cancelled" : call.status === "denied" ? "denied" : "failed", ...(call.result === undefined ? {} : { result: call.result }), ...(permission === undefined ? {} : { permission: { id: permission.id, sessionId, toolCallId: permission.toolCallId, toolName: permission.toolName, riskLevel: permission.riskLevel, reason: permission.reason, input, caller: permission.caller ?? caller, workspaceRoot: permission.workspaceRoot ?? projection.workspaceRoot, createdAt: permission.createdAt, expiresAt: permission.expiresAt ?? new Date(Date.parse(permission.createdAt) + 15 * 60_000).toISOString() } satisfies PermissionRequest }) };
     }
-    return this.toolRuntime.execute({ sessionId, workspaceRoot: projection.workspaceRoot, name, input, ...(turnId === undefined ? {} : { turnId }), toolCallId, ...(commandId === undefined ? {} : { commandId }), ...(signal === undefined ? {} : { signal }) });
+    return this.toolRuntime.execute({ sessionId, workspaceRoot: projection.workspaceRoot, name, input, ...(turnId === undefined ? {} : { turnId }), toolCallId, ...(commandId === undefined ? {} : { commandId }), ...(signal === undefined ? {} : { signal }), caller });
   }
 
   async resolvePermission(sessionId: SessionId, permissionId: PermissionId, status: "approved" | "denied" | "cancelled", commandId?: string): Promise<ExecuteToolOutput> {
@@ -131,6 +133,25 @@ export class AgentHost {
       return { toolCallId: call.id, status: call.status === "completed" ? "completed" : call.status === "cancelled" ? "cancelled" : call.status === "denied" ? "denied" : call.status === "awaiting_permission" ? "awaiting_permission" : "failed", ...(call.result === undefined ? {} : { result: call.result }) };
     }
     return this.toolRuntime.resolvePermission(permissionId, status);
+  }
+
+  async cancelTool(sessionId: SessionId, toolCallId: ToolCallId, commandId?: string): Promise<boolean> {
+    await this.ready;
+    const projection = await this.options.store.project(sessionId);
+    if (projection === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    const call = projection.toolCalls.find((item) => item.id === toolCallId);
+    if (call === undefined) throw new Error(`Unknown tool call: ${toolCallId}`);
+    const cancellable = call.status === "pending" || call.status === "awaiting_permission" || call.status === "running";
+    const idempotencyKey = commandId ?? `cmd_${randomUUID()}`;
+    const claim = await this.options.store.claimCommand({
+      sessionId,
+      commandId: idempotencyKey,
+      kind: "cancel_tool",
+      request: { toolCallId },
+      result: { cancelled: cancellable },
+    });
+    if (!claim.created) return Boolean((claim.record.result as { cancelled?: unknown }).cancelled);
+    return cancellable ? this.toolRuntime.cancel(toolCallId) : false;
   }
 
   async sendMessage(sessionId: SessionId, content: string, commandId?: string): Promise<TurnId> {

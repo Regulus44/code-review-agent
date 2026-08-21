@@ -35,6 +35,8 @@ discover
 
 任何工具都必须支持稳定的 `toolCallId`、超时、取消、错误 code、可选进度和结构化结果。MCP 工具不能因为来自外部 server 就绕过这些步骤。
 
+每次调用和审批还必须绑定 `caller`、`sessionId`、可选 `turnId`、`toolCallId` 和 `workspaceRoot`。审批具有 `expiresAt`，过期后不能再执行副作用。
+
 ## 第一批内置工具
 
 | 工具 | 风险 | 默认执行 | 关键安全规则 |
@@ -43,7 +45,7 @@ discover
 | `glob` | read | auto | 只返回 workspace 内匹配结果，限制数量 |
 | `grep` | read | auto | 限制目录、文件大小和输出 |
 | `edit_file` | write | ask | 以 old/new 或 patch 为输入，返回 diff |
-| `write_file` | write | ask | 禁止隐式覆盖，返回 diff/摘要 |
+| `write_file` | write | ask | 默认只创建新文件；显式 `overwrite=true` 才允许覆盖，并返回 diff/摘要 |
 | `git_status` | read | auto | 固定 cwd，结构化输出 |
 | `git_diff` | read | auto | 限制输出，避免泄露 workspace 外内容 |
 | `run_command` | execute | ask | argv 优先、超时、输出截断、进程树终止 |
@@ -54,7 +56,11 @@ discover
 ```ts
 type ToolResult = {
   ok: boolean;
+  // 完整工具输出，进入 durable audit event
   output?: unknown;
+  audit?: unknown;
+  // 经过预算控制、可进入模型或 UI 的视图
+  modelView?: unknown;
   error?: {
     code: string;
     message: string;
@@ -73,3 +79,11 @@ type ToolResult = {
 ```
 
 工具结果进入上下文前必须经过预算控制；完整 stdout/stderr、diff 和审计字段进入事件存储，模型只接收符合预算的视图。
+
+进程工具的 `audit` 至少记录 `stdout`、`stderr`、`exitCode` 和终止 signal。取消或超时必须终止进程树，而不仅是顶层 shell/child process。
+
+## 调度与禁用
+
+- `parallel` 工具可以并行执行；`exclusive` 工具在同一 Session 内串行；
+- 批量工具默认在一个兄弟调用失败时取消仍在运行的兄弟工具；
+- ToolRegistry 支持 enable/disable，禁用工具仍保留定义和历史事件，但不会被发现或执行。

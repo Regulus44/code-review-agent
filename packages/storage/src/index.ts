@@ -88,7 +88,7 @@ function toolCallStatus(value: unknown, fallback: ToolCallStatus): ToolCallStatu
 }
 
 function permissionStatus(value: unknown, fallback: PermissionStatus): PermissionStatus {
-  return value === "pending" || value === "approved" || value === "denied" || value === "cancelled" ? value : fallback;
+  return value === "pending" || value === "approved" || value === "denied" || value === "cancelled" || value === "expired" ? value : fallback;
 }
 
 function deriveActiveStatus(projection: SessionProjection): SessionStatus {
@@ -225,6 +225,8 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
         status: "pending",
         riskLevel: (event.payload["riskLevel"] as ToolRiskLevel | undefined) ?? "read",
         approvalMode: (event.payload["approvalMode"] as ToolApprovalMode | undefined) ?? "auto",
+        ...(event.payload["caller"] === "agent" || event.payload["caller"] === "user" || event.payload["caller"] === "system" ? { caller: event.payload["caller"] } : {}),
+        ...(typeof event.payload["workspaceRoot"] === "string" ? { workspaceRoot: event.payload["workspaceRoot"] } : {}),
         ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
         ...(input === undefined ? {} : { input }),
         createdAt: event.createdAt,
@@ -266,6 +268,9 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
         status: "pending",
         riskLevel: (event.payload["riskLevel"] as ToolRiskLevel | undefined) ?? "write",
         reason: typeof event.payload["reason"] === "string" ? event.payload["reason"] : "Tool approval required",
+        ...(event.payload["caller"] === "agent" || event.payload["caller"] === "user" || event.payload["caller"] === "system" ? { caller: event.payload["caller"] } : {}),
+        ...(typeof event.payload["workspaceRoot"] === "string" ? { workspaceRoot: event.payload["workspaceRoot"] } : {}),
+        ...(typeof event.payload["expiresAt"] === "string" ? { expiresAt: event.payload["expiresAt"] } : {}),
         createdAt: event.createdAt,
         updatedAt: event.createdAt,
         lastSequence: event.sequence,

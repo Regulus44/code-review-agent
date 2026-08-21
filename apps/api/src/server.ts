@@ -87,6 +87,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       sendJson(response, 200, await host.resolvePermission(id, brand<string, "PermissionId">(decodeURIComponent(permissionMatch[2])), status, commandId(request, body)));
       return;
     }
+    const cancelToolMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/tools\/([^/]+)\/cancel$/u);
+    if (request.method === "POST" && cancelToolMatch?.[1] !== undefined && cancelToolMatch[2] !== undefined) {
+      const id = sessionId(decodeURIComponent(cancelToolMatch[1]));
+      const body = await readJson(request);
+      const toolCallId = brand<string, "ToolCallId">(decodeURIComponent(cancelToolMatch[2]));
+      sendJson(response, 200, { cancelled: await host.cancelTool(id, toolCallId, commandId(request, body)) });
+      return;
+    }
     const forkMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/fork$/u);
     if (request.method === "POST" && forkMatch?.[1] !== undefined) {
       const id = sessionId(decodeURIComponent(forkMatch[1]));
@@ -133,7 +141,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     throw new HttpError(404, "not found");
   } catch (error) {
     const code = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : "";
-    const status = error instanceof HttpError ? error.status : code === "INVALID_TOOL_INPUT" ? 400 : code === "TOOL_NOT_FOUND" ? 404 : 500;
+    const status = error instanceof HttpError ? error.status : code === "INVALID_TOOL_INPUT" ? 400 : code === "TOOL_NOT_FOUND" ? 404 : code === "TOOL_DISABLED" ? 409 : 500;
     const message = error instanceof Error ? error.message : String(error);
     if (!response.headersSent) sendJson(response, status, { error: message });
     else response.end();
