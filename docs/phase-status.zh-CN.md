@@ -7,7 +7,7 @@
 | 阶段 | 状态 | Checkpoint/证据 |
 |---|---|---|
 | Phase 0：TypeScript 基线与契约 | completed | `codex/phase-0-typescript-foundation`；workspace、strict TS、contracts、依赖图检查通过 |
-| Phase 1：最小 AgentHost 与 Web Shell | completed | 当前 checkpoint；`pnpm typecheck`、`pnpm test`、HTTP/SSE smoke、浏览器 Read-only smoke 通过 |
+| Phase 1：最小 AgentHost 与 Web Shell | completed | `pnpm typecheck`、`pnpm test`、HTTP/SSE smoke、浏览器 Read-only smoke、DeepSeek-compatible API 配置 smoke 通过 |
 | Phase 2：事件、持久化与恢复 | completed | `a7f636f` + `5d5a198`；SQLite reopen/recovery、projection replay、SSE replay、queue、幂等 command 和 model failure 通过 |
 | Phase 3：工具运行时与权限 | completed | `e1d3172`（替代 `5003dbd`）；工具禁用、显式覆盖、进程树终止、audit/modelView、权限过期/取消/重启恢复和 Web smoke 通过 |
 | Phase 4：MCP Client | completed | `5477f16`；官方 SDK stdio/SSE/Streamable HTTP、discovery、ToolRegistry bridge、权限/取消/重连、API/Web MCP 状态和 fixture 验证通过 |
@@ -15,6 +15,10 @@
 | Phase 6：A2A | pending | 等 Phase 5 parent/child lifecycle 稳定 |
 | Phase 7：DSH Web 前端收敛 | pending | 先保持 Phase 1 最小 Shell，后续逐项移植 |
 | Phase 8：高级能力与产品化 | pending | 等前置阶段完成 |
+
+## Phase 1 真实模型增强（2026-08-22）
+
+Phase 1 的 provider-neutral adapter 现在已接入 API CLI 启动路径：通过根目录本地 `.env` 配置 `DEEPSEEK_API_KEY`，`MODEL_PROVIDER=auto` 会选择 DeepSeek；没有 Key 时保留 Echo fallback。`.env`、`.env.*`（`.env.example` 除外）均被 Git 忽略，API health、事件和 Web 响应只展示不含凭据的 provider/model/configured 信息。fake-fetch API/LLM 测试已证明真实流式路径和 Authorization header 行为；尚未声称完成模型 tool-calling loop。
 
 ## Phase 4 验收证据
 
@@ -29,7 +33,7 @@ git diff --check ✓
 Phase 4 新增证据：
 
 - `packages/mcp-client`：5 项测试，覆盖真实 stdio 子进程、Streamable HTTP、配置 secret 脱敏、tools/resources/prompts discovery、namespace/schema bridge、MCP error、ToolRuntime approval/cancel、统一事件和断线重连；
-- `apps/api`：7 项测试，覆盖 MCP server 配置、列表、disable/delete、`/v1/tools` 来源字段和既有 Session/工具回归；
+- `apps/api`：8 项测试，覆盖 MCP server 配置、列表、disable/delete、`/v1/tools` 来源字段、真实模型适配注入和既有 Session/工具回归；
 - `apps/web`：MCP server 状态侧栏、Reconnect/Enable/Disable 操作、MCP tool 来源卡片和 `mcp/*` 事件回放；
 - 连接失败只影响对应 server，MCP provider 可以全部关闭，内置工具和既有 Session 保持可用。
 

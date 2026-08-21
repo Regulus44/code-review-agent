@@ -6,12 +6,13 @@
   "main": "dist/server.js",
   "types": "dist/server.d.ts",
   "scripts": {
-    "dev": "tsx src/server.ts",
-    "start": "node dist/server.js",
+    "dev": "node --env-file-if-exists=../../.env --import tsx src/server.ts",
+    "start": "node --env-file-if-exists=../../.env dist/server.js",
     "test": "vitest run"
   },
   "dependencies": {
     "@code-review-agent/contracts": "workspace:*",
+    "@code-review-agent/llm": "workspace:*",
     "@code-review-agent/mcp-client": "workspace:*",
     "@code-review-agent/runtime": "workspace:*",
     "@code-review-agent/storage": "workspace:*"

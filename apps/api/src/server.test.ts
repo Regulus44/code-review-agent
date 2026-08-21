@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { createApiServer } from "./server.js";
 import { InMemoryEventStore } from "@code-review-agent/storage";
 import { sessionId } from "@code-review-agent/runtime";
+import { OpenAICompatibleChatModel } from "@code-review-agent/llm";
 
 describe("Phase 2 API", () => {
   let server: Server;
@@ -123,6 +124,44 @@ describe("Phase 2 API", () => {
     expect((await disabled.json()).status).toBe("disabled");
     const removed = await fetch(`${baseUrl}/v1/mcp/servers/api-fixture`, { method: "DELETE" });
     expect((await removed.json()).removed).toBe(true);
+  });
+
+  it("runs an explicitly configured DeepSeek-compatible model without exposing its key", async () => {
+    let requestInit: RequestInit | undefined;
+    const modelFetch: typeof fetch = async (_input, init) => {
+      requestInit = init;
+      return new Response("data: {\"choices\":[{\"delta\":{\"content\":\"real model response\"}}]}\n\ndata: [DONE]\n\n", {
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+    const configured = createApiServer({
+      store: new InMemoryEventStore(),
+      model: new OpenAICompatibleChatModel({ baseUrl: "https://api.deepseek.com", model: "deepseek-chat", apiKey: "sk-test-only", fetch: modelFetch }),
+      modelInfo: { provider: "deepseek", model: "deepseek-chat", baseUrl: "https://api.deepseek.com", configured: true },
+    });
+    await new Promise<void>((resolve) => configured.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = configured.address();
+      if (address === null || typeof address === "string") throw new Error("Configured API did not bind");
+      const configuredUrl = `http://127.0.0.1:${address.port}`;
+      const health = await (await fetch(`${configuredUrl}/health`)).json() as { model: Record<string, unknown> };
+      expect(health.model).toEqual({ provider: "deepseek", model: "deepseek-chat", baseUrl: "https://api.deepseek.com", configured: true });
+      expect(JSON.stringify(health)).not.toContain("sk-test-only");
+
+      const session = await (await fetch(`${configuredUrl}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: "D:/workspace" }) })).json() as { id: string };
+      await fetch(`${configuredUrl}/v1/sessions/${session.id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: "hello" }) });
+      let projection: { status: string; messages: { content: string }[] };
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        projection = await (await fetch(`${configuredUrl}/v1/sessions/${session.id}`)).json() as typeof projection;
+        if (projection.status === "idle") break;
+        await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      }
+      expect(projection!.messages.at(-1)?.content).toBe("real model response");
+      expect(new Headers(requestInit?.headers).get("authorization")).toBe("Bearer sk-test-only");
+      expect(String(requestInit?.body)).not.toContain("sk-test-only");
+    } finally {
+      await new Promise<void>((resolve, reject) => configured.close((error) => (error ? reject(error) : resolve())));
+    }
   });
 
   it("supports idempotent commands and session lifecycle endpoints", async () => {

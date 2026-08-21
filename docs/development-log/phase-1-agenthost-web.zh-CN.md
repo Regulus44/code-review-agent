@@ -24,3 +24,23 @@
 ### 后续移交
 
 Phase 1 保留 in-memory store 作为测试实现，SQLite durable EventStore、projection 重建、重启恢复和幂等 command 移交 Phase 2。
+
+## 2026-08-22：真实模型配置接入
+
+### 变更
+
+- API CLI 启动入口新增本地 `.env` 加载；根目录 `.env` 已加入 Git 忽略，仓库只保留不含密钥的 `.env.example`；
+- `MODEL_PROVIDER=auto` 在存在 `DEEPSEEK_API_KEY` 时选择 DeepSeek，否则保持 Echo，避免测试和无密钥开发被真实网络调用阻塞；
+- `MODEL_PROVIDER=deepseek` 在缺少 Key 时快速失败，错误不会回显 Key；
+- API `/health` 仅返回 provider、model、base URL 和 `configured` 状态，不返回 API Key；
+- API 测试使用 fake fetch 验证 Authorization header 和真实流式消息路径，未使用真实凭据。
+
+### 验证
+
+- `pnpm typecheck` 通过；
+- `pnpm test` 通过；
+- DeepSeek-compatible SSE adapter、无 Key fallback、显式缺 Key 错误、Key 不进入请求体/health/events 均有测试。
+
+### 使用方式
+
+在仓库根目录执行 `Copy-Item .env.example .env`，只在本机 `.env` 中填写 `DEEPSEEK_API_KEY`，然后运行 `pnpm dev:api`。真实 Key 不需要也不应该发送到 Web API。

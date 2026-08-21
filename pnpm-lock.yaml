@@ -26,6 +26,9 @@ importers:
       '@code-review-agent/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@code-review-agent/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
       '@code-review-agent/mcp-client':
         specifier: workspace:*
         version: link:../../packages/mcp-client

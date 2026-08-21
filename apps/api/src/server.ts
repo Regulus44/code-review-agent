@@ -4,13 +4,16 @@ import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { sessionId, AgentHost, turnId } from "@code-review-agent/runtime";
 import { SqliteEventStore } from "@code-review-agent/storage";
-import { brand, type AgentEvent, type PermissionId, type SessionEventStore } from "@code-review-agent/contracts";
+import { brand, type AgentEvent, type ChatModel, type PermissionId, type SessionEventStore } from "@code-review-agent/contracts";
+import { createConfiguredChatModel, type ModelConfigView } from "@code-review-agent/llm";
 import { McpConnectionManager, type McpServerConfig } from "@code-review-agent/mcp-client";
 
 export interface ApiServerOptions {
   readonly store?: SessionEventStore;
   readonly databasePath?: string;
   readonly host?: AgentHost;
+  readonly model?: ChatModel;
+  readonly modelInfo?: ModelConfigView;
   readonly mcp?: McpConnectionManager;
   readonly webRoot?: string;
 }
@@ -18,21 +21,28 @@ export interface ApiServerOptions {
 export function createApiServer(options: ApiServerOptions = {}): Server {
   const ownsStore = options.store === undefined && options.host === undefined;
   const store = options.store ?? (options.host === undefined ? new SqliteEventStore(options.databasePath === undefined ? {} : { databasePath: options.databasePath }) : undefined);
-  const host = options.host ?? new AgentHost({ store: store as SessionEventStore });
+  const host = options.host ?? new AgentHost({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }) });
   const ownsMcp = options.mcp === undefined;
   const mcp = options.mcp ?? new McpConnectionManager(store === undefined ? { registry: host.toolRegistry() } : { registry: host.toolRegistry(), store });
   void mcp.startConfigured();
   const persistence = store instanceof SqliteEventStore ? "sqlite" : "custom";
   const webRoot = options.webRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web");
   const server = createServer((request, response) => {
-    void handleRequest(request, response, host, mcp, webRoot, persistence);
+    void handleRequest(request, response, host, mcp, webRoot, persistence, options.modelInfo);
   });
   if (ownsStore && store instanceof SqliteEventStore) server.on("close", () => store.close());
   if (ownsMcp) server.on("close", () => { void mcp.close(); });
   return server;
 }
 
-async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, mcp: McpConnectionManager, webRoot: string, persistence: string): Promise<void> {
+/** CLI/runtime entry that opts into local `.env` model configuration. Tests stay deterministic via createApiServer(). */
+export function createConfiguredApiServer(options: ApiServerOptions = {}): Server {
+  if (options.host !== undefined || options.model !== undefined) return createApiServer(options);
+  const configured = createConfiguredChatModel();
+  return createApiServer({ ...options, model: configured.model, modelInfo: options.modelInfo ?? configured.config });
+}
+
+async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, mcp: McpConnectionManager, webRoot: string, persistence: string, modelInfo?: ModelConfigView): Promise<void> {
   response.setHeader("access-control-allow-origin", "*");
   response.setHeader("access-control-allow-headers", "content-type, idempotency-key, last-event-id");
   response.setHeader("access-control-allow-methods", "GET,POST,DELETE,OPTIONS");
@@ -43,7 +53,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
   try {
     if (request.method === "GET" && url.pathname === "/health") {
-      sendJson(response, 200, { ok: true, service: "code-review-agent", runtime: "typescript", persistence });
+      sendJson(response, 200, { ok: true, service: "code-review-agent", runtime: "typescript", persistence, ...(modelInfo === undefined ? {} : { model: modelInfo }) });
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/tools") {
@@ -283,7 +293,7 @@ class HttpError extends Error {
 
 if (process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number.parseInt(process.env["PORT"] ?? "3210", 10);
-  createApiServer().listen(port, "127.0.0.1", () => {
+  createConfiguredApiServer().listen(port, "127.0.0.1", () => {
     console.log(`Code Review Agent API listening on http://127.0.0.1:${port}`);
   });
 }
