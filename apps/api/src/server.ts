@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { sessionId, AgentHost, turnId } from "@code-review-agent/runtime";
 import { SqliteEventStore } from "@code-review-agent/storage";
-import { brand, type AgentEvent, type ChatModel, type PermissionId, type SessionEventStore } from "@code-review-agent/contracts";
+import { brand, type AgentEvent, type ChatModel, type InteractionId, type PermissionId, type SessionEventStore } from "@code-review-agent/contracts";
 import { createConfiguredChatModel, DEEPSEEK_MODELS, type ModelConfigView } from "@code-review-agent/llm";
 import { McpConnectionManager, type McpServerConfig } from "@code-review-agent/mcp-client";
 
@@ -208,6 +208,16 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const status = body.status;
       if (status !== "approved" && status !== "denied" && status !== "cancelled") throw new HttpError(400, "status must be approved, denied, or cancelled");
       sendJson(response, 200, await host.resolvePermission(id, brand<string, "PermissionId">(decodeURIComponent(permissionMatch[2])), status, commandId(request, body)));
+      return;
+    }
+    const interactionMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/interactions\/([^/]+)$/u);
+    if (request.method === "POST" && interactionMatch?.[1] !== undefined && interactionMatch[2] !== undefined) {
+      const id = sessionId(decodeURIComponent(interactionMatch[1]));
+      const body = await readJson(request);
+      const status = body.status ?? "answered";
+      if (status !== "answered" && status !== "cancelled") throw new HttpError(400, "status must be answered or cancelled");
+      if (status === "answered" && typeof body.answer !== "string") throw new HttpError(400, "answer is required when status is answered");
+      sendJson(response, 200, await host.resolveInteraction(id, brand<string, "InteractionId">(decodeURIComponent(interactionMatch[2])), status, typeof body.answer === "string" ? body.answer : undefined, commandId(request, body)));
       return;
     }
     const cancelToolMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/tools\/([^/]+)\/cancel$/u);

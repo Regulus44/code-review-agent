@@ -2,6 +2,8 @@ import {
   brand,
   type AgentEvent,
   type EventStore,
+  type InteractionId,
+  type InteractionOption,
   type PermissionId,
   type PermissionRequest,
   type PermissionStatus,
@@ -11,6 +13,9 @@ import {
   type ToolDefinition,
   type ToolResult,
   type TurnId,
+  type UserInteractionAnswer,
+  type UserInteractionInput,
+  type UserInteractionRequest,
 } from "@code-review-agent/contracts";
 import { randomUUID } from "node:crypto";
 import { ToolRegistry } from "./registry.js";
@@ -40,9 +45,10 @@ export interface ExecuteToolInput {
 
 export interface ExecuteToolOutput {
   readonly toolCallId: ToolCallId;
-  readonly status: "completed" | "failed" | "cancelled" | "denied" | "awaiting_permission";
+  readonly status: "completed" | "failed" | "cancelled" | "denied" | "awaiting_permission" | "awaiting_interaction";
   readonly result?: ToolResult;
   readonly permission?: PermissionRequest;
+  readonly interaction?: UserInteractionRequest;
 }
 
 export interface ExecuteToolBatchOptions {
@@ -56,6 +62,13 @@ interface PendingExecution {
   readonly controller: AbortController;
 }
 
+interface PendingInteraction {
+  readonly request: UserInteractionRequest;
+  readonly controller: AbortController;
+  readonly resolve: (answer: UserInteractionAnswer) => void;
+  readonly reject: (error: unknown) => void;
+}
+
 /** Durable tool execution pipeline: discover, validate, policy, approval, execute, result. */
 export class ToolRuntime {
   private readonly policy: PermissionPolicy;
@@ -63,9 +76,12 @@ export class ToolRuntime {
   private readonly outputBudgetBytes: number;
   private readonly permissionTtlMs: number;
   private readonly pending = new Map<PermissionId, PendingExecution>();
+  private readonly pendingInteractions = new Map<InteractionId, PendingInteraction>();
+  private readonly resolvedInteractions = new Map<InteractionId, UserInteractionAnswer>();
   private readonly running = new Map<ToolCallId, AbortController>();
   private readonly resolved = new Map<PermissionId, ExecuteToolOutput>();
   private readonly expiryTimers = new Map<PermissionId, NodeJS.Timeout>();
+  private readonly interactionExpiryTimers = new Map<InteractionId, NodeJS.Timeout>();
   private readonly activeExclusive = new Map<SessionId, Promise<unknown>>();
 
   constructor(private readonly options: ToolRuntimeOptions) {
@@ -86,6 +102,10 @@ export class ToolRuntime {
 
   pendingPermissions(): readonly PermissionRequest[] {
     return [...this.pending.values()].map((item) => item.permission);
+  }
+
+  pendingUserInteractions(): readonly UserInteractionRequest[] {
+    return [...this.pendingInteractions.values()].map((item) => item.request);
   }
 
   async restorePending(sessionId: SessionId, workspaceRoot: string, events: readonly AgentEvent[]): Promise<void> {
@@ -257,6 +277,46 @@ export class ToolRuntime {
     return false;
   }
 
+  async resolveInteraction(interactionId: InteractionId, status: "answered" | "cancelled" | "expired", answer?: string): Promise<UserInteractionAnswer> {
+    const pending = this.pendingInteractions.get(interactionId);
+    if (pending === undefined) {
+      const previous = this.resolvedInteractions.get(interactionId);
+      if (previous !== undefined) return previous;
+      throw new Error(`Unknown or already resolved interaction: ${interactionId}`);
+    }
+    this.pendingInteractions.delete(interactionId);
+    const expiryTimer = this.interactionExpiryTimers.get(interactionId);
+    if (expiryTimer !== undefined) clearTimeout(expiryTimer);
+    this.interactionExpiryTimers.delete(interactionId);
+    const resolved: UserInteractionAnswer = status === "answered"
+      ? { interactionId, status, ...(answer === undefined ? {} : { answer }) }
+      : { interactionId, status };
+    await this.options.store.append({
+      sessionId: pending.request.sessionId,
+      ...(pending.request.turnId === undefined ? {} : { turnId: pending.request.turnId }),
+      type: "interaction/resolved",
+      payload: {
+        interactionId,
+        toolCallId: pending.request.toolCallId,
+        question: pending.request.question,
+        options: pending.request.options,
+        allowFreeform: pending.request.allowFreeform,
+        status,
+        ...(answer === undefined ? {} : { answer }),
+      },
+    });
+    this.resolvedInteractions.set(interactionId, resolved);
+    if (status === "answered") {
+      pending.resolve(resolved);
+    } else {
+      const error = new Error(`User interaction ${status}`);
+      Object.assign(error, { code: status === "cancelled" ? "INTERACTION_CANCELLED" : "INTERACTION_EXPIRED" });
+      pending.controller.abort(error);
+      pending.reject(error);
+    }
+    return resolved;
+  }
+
   private async runApproved(toolCallId: ToolCallId, definition: ToolDefinition, request: ExecuteToolInput): Promise<ExecuteToolOutput> {
     const controller = new AbortController();
     this.running.set(toolCallId, controller);
@@ -280,6 +340,8 @@ export class ToolRuntime {
           caller: request.caller ?? "agent",
           signal: controller.signal,
           reportProgress: async (payload) => this.append(request, "tool/progress", { toolCallId, ...payload }),
+          appendEvent: async (type, payload) => this.append(request, type, payload),
+          requestUserInput: async (input) => this.requestUserInput(request, toolCallId, input, controller),
         });
         if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
         const bounded = boundResult(result, this.outputBudgetBytes);
@@ -310,6 +372,54 @@ export class ToolRuntime {
 
   private async append(input: ExecuteToolInput, type: AgentEvent["type"], payload: Record<string, unknown>): Promise<void> {
     await this.options.store.append({ sessionId: input.sessionId, ...(input.turnId === undefined ? {} : { turnId: input.turnId }), ...(input.commandId === undefined ? {} : { correlationId: input.commandId }), type, payload });
+  }
+
+  private async requestUserInput(
+    request: ExecuteToolInput,
+    toolCallId: ToolCallId,
+    input: UserInteractionInput,
+    controller: AbortController,
+  ): Promise<UserInteractionAnswer> {
+    const question = input.question.trim();
+    if (question.length === 0) throw new Error("INTERACTION_QUESTION_REQUIRED");
+    const options: readonly InteractionOption[] = (input.options ?? []).map((option) => ({ label: option.label.trim(), value: option.value.trim() })).filter((option) => option.label.length > 0 && option.value.length > 0);
+    const interactionId = brand<string, "InteractionId">(`interaction_${randomUUID()}`);
+    const interaction: UserInteractionRequest = {
+      id: interactionId,
+      sessionId: request.sessionId,
+      ...(request.turnId === undefined ? {} : { turnId: request.turnId }),
+      toolCallId,
+      question,
+      options,
+      allowFreeform: input.allowFreeform ?? true,
+      caller: request.caller ?? "agent",
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + this.permissionTtlMs).toISOString(),
+    };
+    const pendingAnswer = new Promise<UserInteractionAnswer>((resolve, reject) => {
+      this.pendingInteractions.set(interactionId, { request: interaction, controller, resolve, reject });
+      const onAbort = () => {
+        controller.signal.removeEventListener("abort", onAbort);
+        void this.resolveInteraction(interactionId, "cancelled").catch(() => undefined);
+      };
+      if (controller.signal.aborted) onAbort(); else controller.signal.addEventListener("abort", onAbort, { once: true });
+      const timer = setTimeout(() => {
+        void this.resolveInteraction(interactionId, "expired").catch(() => undefined);
+      }, this.permissionTtlMs);
+      timer.unref();
+      this.interactionExpiryTimers.set(interactionId, timer);
+    });
+    await this.append(request, "interaction/requested", {
+      interactionId,
+      toolCallId,
+      question,
+      options,
+      allowFreeform: interaction.allowFreeform,
+      caller: interaction.caller,
+      createdAt: interaction.createdAt,
+      expiresAt: interaction.expiresAt,
+    });
+    return pendingAnswer;
   }
 
   private errorResult(code: string, message: string): ToolResult {

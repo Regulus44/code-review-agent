@@ -6,6 +6,7 @@ export type TurnId = Brand<string, "TurnId">;
 export type TaskId = Brand<string, "TaskId">;
 export type ToolCallId = Brand<string, "ToolCallId">;
 export type PermissionId = Brand<string, "PermissionId">;
+export type InteractionId = Brand<string, "InteractionId">;
 export type WorkspaceId = Brand<string, "WorkspaceId">;
 
 export function brand<Value, Name extends string>(value: Value): Brand<Value, Name> {
@@ -26,12 +27,16 @@ export type AgentEventType =
   | "task/created"
   | "task/updated"
   | "task/ended"
+  | "plan/updated"
+  | "todo/updated"
   | "tool/call"
   | "tool/progress"
   | "tool/result"
   | "diff/preview"
   | "permission/requested"
   | "permission/resolved"
+  | "interaction/requested"
+  | "interaction/resolved"
   | "mcp/server"
   | "mcp/tool"
   | "agent/status"
@@ -84,6 +89,46 @@ export interface TaskProjection {
   readonly lastSequence: number;
 }
 
+export type PlanStatus = "draft" | "active" | "approved" | "rejected" | "cleared";
+
+export interface PlanProjection {
+  readonly content: string;
+  readonly status: PlanStatus;
+  readonly updatedAt: string;
+  readonly lastSequence: number;
+}
+
+export type TodoStatus = "pending" | "in_progress" | "completed" | "cancelled";
+
+export interface TodoItem {
+  readonly id: string;
+  readonly content: string;
+  readonly status: TodoStatus;
+  readonly activeForm?: string;
+}
+
+export type InteractionStatus = "pending" | "answered" | "cancelled" | "expired";
+
+export interface InteractionOption {
+  readonly label: string;
+  readonly value: string;
+}
+
+export interface InteractionProjection {
+  readonly id: InteractionId;
+  readonly toolCallId: ToolCallId;
+  readonly turnId?: TurnId;
+  readonly question: string;
+  readonly options: readonly InteractionOption[];
+  readonly allowFreeform: boolean;
+  readonly status: InteractionStatus;
+  readonly answer?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly expiresAt: string;
+  readonly lastSequence: number;
+}
+
 export interface SessionProjection extends SessionSummary {
   readonly messages: readonly {
     readonly role: "user" | "assistant";
@@ -92,6 +137,9 @@ export interface SessionProjection extends SessionSummary {
   }[];
   readonly turns: readonly TurnProjection[];
   readonly tasks: readonly TaskProjection[];
+  readonly plan: PlanProjection;
+  readonly todos: readonly TodoItem[];
+  readonly interactions: readonly InteractionProjection[];
   readonly toolCalls: readonly ToolCallProjection[];
   readonly permissions: readonly PermissionProjection[];
 }
@@ -169,6 +217,8 @@ export interface ToolContext {
   readonly caller: ToolCaller;
   readonly signal: AbortSignal;
   readonly reportProgress: (payload: Readonly<Record<string, unknown>>) => Promise<void>;
+  readonly appendEvent: (type: AgentEventType, payload: Readonly<Record<string, unknown>>) => Promise<void>;
+  readonly requestUserInput: (input: UserInteractionInput) => Promise<UserInteractionAnswer>;
 }
 
 export interface ToolDefinition {
@@ -229,6 +279,28 @@ export interface PermissionRequest {
   readonly workspaceRoot: string;
   readonly createdAt: string;
   readonly expiresAt: string;
+}
+
+export interface UserInteractionInput {
+  readonly question: string;
+  readonly options?: readonly InteractionOption[];
+  readonly allowFreeform?: boolean;
+}
+
+export interface UserInteractionRequest extends UserInteractionInput {
+  readonly id: InteractionId;
+  readonly sessionId: SessionId;
+  readonly turnId?: TurnId;
+  readonly toolCallId: ToolCallId;
+  readonly caller: ToolCaller;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+}
+
+export interface UserInteractionAnswer {
+  readonly interactionId: InteractionId;
+  readonly status: "answered" | "cancelled" | "expired";
+  readonly answer?: string;
 }
 
 export interface CreateSessionInput {

@@ -10,11 +10,14 @@ import {
   type SessionProjection,
   type SessionSummary,
   type TurnId,
+  type InteractionId,
   type PermissionId,
   type PermissionRequest,
   type ToolCaller,
   type ToolCallId,
   type ToolResult,
+  type UserInteractionAnswer,
+  type UserInteractionRequest,
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { randomUUID } from "node:crypto";
@@ -166,6 +169,34 @@ export class AgentHost {
     const output = await this.toolRuntime.resolvePermission(permissionId, status);
     this.settlePermissionWaiter(permissionId, output);
     return output;
+  }
+
+  pendingUserInteractions(sessionId: SessionId): readonly UserInteractionRequest[] {
+    return this.toolRuntime.pendingUserInteractions().filter((interaction) => interaction.sessionId === sessionId);
+  }
+
+  async resolveInteraction(sessionId: SessionId, interactionId: InteractionId, status: "answered" | "cancelled", answer?: string, commandId?: string): Promise<UserInteractionAnswer> {
+    await this.ready;
+    const projection = await this.options.store.project(sessionId);
+    if (projection === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    const interaction = projection.interactions.find((item) => item.id === interactionId);
+    if (interaction === undefined) throw new Error(`Unknown interaction: ${interactionId}`);
+    const idempotencyKey = commandId ?? `cmd_${randomUUID()}`;
+    const claim = await this.options.store.claimCommand({
+      sessionId,
+      commandId: idempotencyKey,
+      kind: "resolve_interaction",
+      request: { interactionId, status, answer },
+      result: { interactionId, status, ...(answer === undefined ? {} : { answer }) },
+    });
+    if (!claim.created || interaction.status !== "pending") {
+      const saved = claim.record.result as { status?: unknown; answer?: unknown };
+      const resolvedStatus = interaction.status === "answered" || interaction.status === "cancelled" || interaction.status === "expired" ? interaction.status : saved.status;
+      if (resolvedStatus !== "answered" && resolvedStatus !== "cancelled" && resolvedStatus !== "expired") throw new Error(`Interaction ${interactionId} has not been resolved`);
+      const resolvedAnswer = typeof interaction.answer === "string" ? interaction.answer : typeof saved.answer === "string" ? saved.answer : undefined;
+      return { interactionId, status: resolvedStatus, ...(resolvedAnswer === undefined ? {} : { answer: resolvedAnswer }) };
+    }
+    return this.toolRuntime.resolveInteraction(interactionId, status, answer);
   }
 
   async cancelTool(sessionId: SessionId, toolCallId: ToolCallId, commandId?: string): Promise<boolean> {

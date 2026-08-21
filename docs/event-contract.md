@@ -45,11 +45,15 @@ queue/changed
 task/created
 task/updated
 task/ended
+plan/updated
+todo/updated
+interaction/requested
+interaction/resolved
 mcp/server
 mcp/tool
 ```
 
-`step/started` / `step/ended` 标记一个 turn 内的模型请求和工具执行边界。`assistant/message` 的 payload 可以包含 `toolCalls`，每个元素至少包含 `id`、`name` 和 JSON `arguments`；后续 `tool/result` 通过 `toolCallId` 关联到该调用。工具、权限和 queue 事件保留在公共契约中，分别由后续 Phase 实现；Phase 1A 开始将 tool-calling 事件正式接入模型上下文和 SSE 回放。
+`step/started` / `step/ended` 标记一个 turn 内的模型请求和工具执行边界。`assistant/message` 的 payload 可以包含 `toolCalls`，每个元素至少包含 `id`、`name` 和 JSON `arguments`；后续 `tool/result` 通过 `toolCallId` 关联到该调用。`plan/updated` 是当前实施计划的全量替换事件，`todo/updated` 是当前待办列表的全量替换事件。`interaction/requested` / `interaction/resolved` 表示 `ask_user` 暂停和恢复，不等同于工具权限审批。工具、权限、交互和 queue 事件都必须经过同一事件存储和 SSE 回放管线。
 
 MCP 生命周期事件只携带 `serverName`、状态、动作和脱敏错误；env/header/token 等配置秘密不得进入 payload。MCP 工具调用本身仍使用公共 `tool/*` 和 `permission/*` 事件。
 
@@ -58,6 +62,8 @@ MCP 生命周期事件只携带 `serverName`、状态、动作和脱敏错误；
 - 任何到达模型请求的输入，都能从 Session 事件重建；
 - 任何工具调用都先产生 `tool/call`，再产生 `tool/progress` 或 `tool/result`；
 - 需要用户决定的动作必须产生 `permission/requested`，结果必须产生 `permission/resolved`；
+- `ask_user` 必须产生 `interaction/requested`，回答、取消或过期必须产生 `interaction/resolved`，并通过 `interactionId` 幂等；
+- `plan/updated` 和 `todo/updated` 的 payload 必须是可回放的全量状态，不能只依赖内存镜像；
 - permission 事件必须记录 caller、workspace、toolCall、创建时间和过期时间；过期、拒绝、取消都必须有 terminal tool/result；
 - 事件先落盘，再推送 SSE；
 - 重复发送消息、重复批准、重复取消必须幂等；

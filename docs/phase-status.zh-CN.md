@@ -44,7 +44,20 @@ Phase 1 的 provider-neutral adapter 现在已接入 API CLI 启动路径：通�
 - 多工具上下文、tool-call replay 基础和 API/Web SSE step 事件订阅已补齐；
 - 新增 LLM、Runtime、多 step、权限恢复和历史 tool context 测试。
 
-尚未完成：真实 DeepSeek `read → edit → approve → test` smoke、进程重启后的 pending turn continuation，以及 Phase 1A.4 的 Terminal、AskUser、Plan/Todo、delete/git read 工具扩展。
+## Phase 1A.4 P1 工具闭包（2026-08-22）
+
+已完成并接入统一 ToolRuntime：
+
+- `terminal_open/send/read/signal/close/list`：TypeScript 持久 terminal manager，按 Session + workspace 隔离 cwd、环境、进程、输出缓冲、增量读取和进程树终止；
+- `delete_file`：workspace 内路径校验，默认移动到 `.agent-trash`，永久删除必须显式 `permanent=true` 并经过写权限审批；
+- `git_log` / `git_show`：固定 workspace cwd、ref/path 校验、提交结构化解析和输出预算；
+- `ask_user`：`interaction/requested` / `interaction/resolved` 事件、API answer endpoint 和 Agent Loop 暂停/恢复；
+- `plan` / `todo_write`：`plan/updated` / `todo/updated` 全量 projection 事件，刷新、SSE 和回放不依赖内存镜像；
+- Web 已增加 interaction card 和回答控件，P1 事件进入 SSE 订阅。
+
+验证证据：`packages/tools` 20 项测试、`packages/storage` 7 项测试、`apps/api` 11 项测试覆盖 terminal 生命周期、删除审计、Git 读取、interaction resume 和 projection replay。
+
+尚未完成：真实 DeepSeek `read → edit → approve → test` smoke、进程重启后的 pending turn continuation、P1 工具跨进程恢复，以及 Phase 1A.5 的 permission preset / 模型工具过滤 / MCP 与恢复整合。
 
 ## Phase 4 验收证据
 

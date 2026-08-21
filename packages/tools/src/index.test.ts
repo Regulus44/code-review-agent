@@ -162,4 +162,44 @@ describe("ToolRuntime", () => {
     await Promise.all([runtime.execute({ ...base, name: "parallel_test" }), runtime.execute({ ...base, name: "parallel_test" })]); expect(parallelMax).toBe(2);
     const batch = await runtime.executeMany([{ ...base, name: "wait_test" }, { ...base, name: "fail_test" }]); expect(batch.map((result) => result.status).sort()).toEqual(["cancelled", "failed"]);
   });
+
+  it("registers the P1 coding-agent tool closure and records plan/todo events", async () => {
+    const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools());
+    const runtime = new ToolRuntime({ store, registry }); const sessionId = brand<string, "SessionId">("ses_p1_state");
+    const names = runtime.listTools().map((tool) => tool.name);
+    expect(names).toEqual(expect.arrayContaining(["terminal_open", "terminal_send", "terminal_read", "terminal_signal", "terminal_close", "terminal_list", "delete_file", "git_log", "git_show", "ask_user", "plan", "todo_write"]));
+    expect((await runtime.execute({ sessionId, workspaceRoot: process.cwd(), name: "plan", input: { content: "Inspect, edit, test", status: "active" } })).status).toBe("completed");
+    expect((await runtime.execute({ sessionId, workspaceRoot: process.cwd(), name: "todo_write", input: { todos: [{ content: "Inspect", status: "completed" }, { content: "Test", status: "pending" }] } })).status).toBe("completed");
+    expect(store.events.map((event) => event.type)).toContain("plan/updated"); expect(store.events.map((event) => event.type)).toContain("todo/updated");
+  });
+
+  it("keeps a terminal process alive across send/read calls and closes it", async () => {
+    const root = process.cwd();
+    try {
+      const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools()); const runtime = new ToolRuntime({ store, registry }); const sessionId = brand<string, "SessionId">("ses_terminal");
+      const opened = await runtime.execute({ sessionId, workspaceRoot: root, name: "terminal_open", input: { executable: "node", args: ["-e", "process.stdin.setEncoding('utf8');process.stdin.on('data',d=>process.stdout.write(d));"] } });
+      expect(opened.status).toBe("awaiting_permission"); const approved = await runtime.resolvePermission(opened.permission!.id, "approved"); expect(approved.status).toBe("completed");
+      const terminalId = (approved.result?.output as { terminalId?: string }).terminalId; expect(terminalId).toEqual(expect.any(String));
+      const sent = await runtime.execute({ sessionId, workspaceRoot: root, name: "terminal_send", input: { terminalId, text: "persistent-output" } }); const sentResult = sent.status === "awaiting_permission" ? await runtime.resolvePermission(sent.permission!.id, "approved") : sent; expect(sentResult.status).toBe("completed");
+      const read = await runtime.execute({ sessionId, workspaceRoot: root, name: "terminal_read", input: { terminalId, waitMs: 500 } }); expect(read.status).toBe("completed"); expect((read.result?.output as { output?: string }).output).toContain("persistent-output");
+      const close = await runtime.execute({ sessionId, workspaceRoot: root, name: "terminal_close", input: { terminalId } }); expect(close.status).toBe("awaiting_permission"); expect((await runtime.resolvePermission(close.permission!.id, "approved")).status).toBe("completed");
+    } finally { /* terminal cleanup is asserted by terminal_close; the repository cwd must not be removed */ }
+  });
+
+  it("moves deleted paths to workspace trash and exposes bounded git history", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-delete-"));
+    try {
+      await writeFile(path.join(root, "remove.txt"), "remove", "utf8"); const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools()); const runtime = new ToolRuntime({ store, registry }); const sessionId = brand<string, "SessionId">("ses_delete");
+      const pending = await runtime.execute({ sessionId, workspaceRoot: root, name: "delete_file", input: { path: "remove.txt" } }); const deleted = await runtime.resolvePermission(pending.permission!.id, "approved"); expect(deleted.status).toBe("completed"); expect(deleted.result?.output).toMatchObject({ permanent: false, trashedTo: expect.stringContaining(".agent-trash") }); await expect(readFile(path.join(root, "remove.txt"), "utf8")).rejects.toThrow();
+      const history = await new ToolRuntime({ store: new MemoryStore(), registry }).execute({ sessionId, workspaceRoot: process.cwd(), name: "git_log", input: { maxCount: 1 } }); expect(history.status).toBe("completed"); expect((history.result?.output as { commits?: unknown[] }).commits).toHaveLength(1);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("pauses ask_user until an answer is resolved and then returns the answer", async () => {
+    const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools()); const runtime = new ToolRuntime({ store, registry, permissionTtlMs: 5_000 }); const sessionId = brand<string, "SessionId">("ses_interaction");
+    const running = runtime.execute({ sessionId, workspaceRoot: process.cwd(), name: "ask_user", input: { question: "Continue?", options: [{ label: "Yes", value: "yes" }] } });
+    let interactionId: string | undefined;
+    for (let attempt = 0; attempt < 100 && interactionId === undefined; attempt += 1) { interactionId = store.events.find((event) => event.type === "interaction/requested")?.payload["interactionId"] as string | undefined; if (interactionId === undefined) await new Promise<void>((resolve) => setTimeout(resolve, 5)); }
+    expect(interactionId).toEqual(expect.any(String)); const answer = await runtime.resolveInteraction(brand<string, "InteractionId">(interactionId!), "answered", "yes"); expect(answer).toMatchObject({ status: "answered", answer: "yes" }); expect((await running).result?.output).toMatchObject({ answer: "yes" }); expect(store.events.map((event) => event.type)).toEqual(expect.arrayContaining(["interaction/requested", "interaction/resolved"]));
+  });
 });

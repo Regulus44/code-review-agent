@@ -34,6 +34,16 @@ describe("InMemoryEventStore", () => {
     const projection = await store.project(sessionId); expect(projection?.toolCalls[0]).toMatchObject({ status: "denied", caller: "agent", workspaceRoot: "D:/workspace", result: { error: { code: "PERMISSION_EXPIRED" } } }); expect(projection?.permissions[0]).toMatchObject({ status: "expired", expiresAt });
   });
 
+  it("projects plan, todo, and user interaction state from events", async () => {
+    const store = new InMemoryEventStore(); const sessionId = await store.createSession("D:/workspace");
+    await store.append({ sessionId, type: "plan/updated", payload: { content: "Read then edit", status: "active" } });
+    await store.append({ sessionId, type: "todo/updated", payload: { todos: [{ id: "todo_1", content: "Read", status: "completed" }, { id: "todo_2", content: "Edit", status: "pending" }] } });
+    await store.append({ sessionId, type: "interaction/requested", payload: { interactionId: "interaction_1", toolCallId: "tool_1", question: "Continue?", options: [{ label: "Yes", value: "yes" }], allowFreeform: false, createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString() } });
+    await store.append({ sessionId, type: "interaction/resolved", payload: { interactionId: "interaction_1", toolCallId: "tool_1", question: "Continue?", status: "answered", answer: "yes" } });
+    const projection = await store.project(sessionId);
+    expect(projection?.plan).toMatchObject({ content: "Read then edit", status: "active" }); expect(projection?.todos).toHaveLength(2); expect(projection?.interactions[0]).toMatchObject({ status: "answered", answer: "yes" });
+  });
+
   it("persists events, projections, commands, and schema across reopen", async () => {
     const directory = mkdtempSync(join(tmpdir(), "code-review-agent-"));
     const databasePath = join(directory, "agent.sqlite");

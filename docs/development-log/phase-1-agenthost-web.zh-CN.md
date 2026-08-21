@@ -76,3 +76,22 @@ Phase 1 不再以 Web Shell 完成为退出条件，改以 [Agentic Coding Core 
 ### 使用方式
 
 在仓库根目录执行 `Copy-Item .env.example .env`，只在本机 `.env` 中填写 `DEEPSEEK_API_KEY`，然后运行 `pnpm dev:api`。真实 Key 不需要也不应该发送到 Web API。
+
+## 2026-08-22：Phase 1A.4 P1 工具闭包
+
+### 主要交付
+
+- 重构 `packages/tools/src/builtin.ts`，保留 P0 文件、搜索、Git 状态/差异和 argv 命令工具，并补齐 TypeScript P1 工具池；
+- 新增 `TerminalManager`，支持独立 terminal session、固定 workspace/cwd、环境、增量输出读取、信号、关闭和列表；
+- 新增 `delete_file`、`git_log`、`git_show`，删除默认进入 `.agent-trash`，Git 工具限制 ref/path 和输出预算；
+- `ToolContext` 增加受 Runtime 控制的 `appendEvent` 与 `requestUserInput`，`ask_user` 通过 interaction 事件暂停并在 API/Web 回答后恢复同一个 turn；
+- 新增 `plan/updated`、`todo/updated`、`interaction/requested`、`interaction/resolved` 事件和 projection；Web SSE 增加 interaction card；
+- API 新增 `POST /v1/sessions/{sessionId}/interactions/{interactionId}`，支持 answer/cancel 和幂等 command。
+
+### 验证
+
+- `pnpm typecheck` 通过；
+- `packages/tools` 20 项测试通过；
+- `packages/storage` 7 项测试通过；
+- `apps/api` 11 项测试通过，包含 ask_user → interaction answer → model continuation；
+- 尚未进行真实 DeepSeek `read → edit → approve → test` smoke，待 Phase 1A.5 的权限 preset、MCP/恢复整合稳定后执行。

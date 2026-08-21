@@ -34,6 +34,8 @@ type ToolDefinition = {
 };
 ```
 
+`ToolContext` 还提供两个受 Runtime 控制的协作入口：`appendEvent(type, payload)` 用于 `plan` / `todo_write` 这类 session projection 工具，`requestUserInput(input)` 用于 `ask_user`。工具不能自行写数据库、绕过 workspace 或直接操作 SSE；这两个入口最终仍由 ToolRuntime 追加事件。
+
 MCP 工具使用 `mcp__<server>__<tool>` 的稳定 namespace；原始 MCP 名称只用于 wire call，不从 public name 反解析。`source` 只用于 API/Web 展示，执行仍由本地 ToolRuntime 负责。
 
 ## 统一执行流程
@@ -67,6 +69,18 @@ discover
 | `git_diff` | read | auto | 限制输出，避免泄露 workspace 外内容 |
 | `run_command` | execute | ask | argv 优先、超时、输出截断、进程树终止 |
 | `run_tests` | execute | ask | 复用 command policy，记录 exit/stdout/stderr |
+| `terminal_open` | execute | ask | 独立 session、固定 cwd、argv 或受控 shell、输出缓冲 |
+| `terminal_send` | execute | ask-on-execute | 只能写入当前 session 的 terminal，不能跨 workspace |
+| `terminal_read` | read | auto | 增量读取、等待上限和输出预算 |
+| `terminal_signal` | execute | ask | 仅允许 SIGINT/SIGTERM/SIGKILL，并终止进程树 |
+| `terminal_close` | execute | ask | 关闭进程并保留审计摘要 |
+| `terminal_list` | read | auto | 只列出当前 session/workspace 的 terminal |
+| `delete_file` | write | ask | 默认移动到 `.agent-trash`，永久删除必须显式确认 |
+| `git_log` | read | auto | 固定 workspace cwd、提交数量和路径边界 |
+| `git_show` | read | auto | 校验 ref、固定 workspace cwd、输出预算 |
+| `ask_user` | read | auto | 追加 interaction 事件并暂停当前 turn |
+| `plan` | read | auto | 全量写入可回放的计划 projection |
+| `todo_write` | read | auto | 全量替换可回放的 todo projection |
 
 ## 工具结果
 

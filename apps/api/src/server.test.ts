@@ -131,6 +131,39 @@ describe("Phase 2 API", () => {
     }
   });
 
+  it("pauses a model turn for ask_user and resumes through the interaction API", async () => {
+    const interactionStore = new InMemoryEventStore(); let modelCalls = 0;
+    const interactionServer = createApiServer({
+      store: interactionStore,
+      model: {
+        async *stream() {
+          if (modelCalls++ === 0) {
+            yield { type: "tool_call_start" as const, index: 0, id: "call_ask", name: "ask_user" };
+            yield { type: "tool_call_delta" as const, index: 0, arguments: JSON.stringify({ question: "Continue?", options: [{ label: "Yes", value: "yes" }] }) };
+            yield { type: "done" as const };
+          } else {
+            yield { type: "text_delta" as const, text: "Continuing with your answer." };
+            yield { type: "done" as const };
+          }
+        },
+      },
+    });
+    await new Promise<void>((resolve) => interactionServer.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = interactionServer.address(); if (address === null || typeof address === "string") throw new Error("Interaction API did not bind"); const url = `http://127.0.0.1:${address.port}`;
+      const session = await (await fetch(`${url}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: process.cwd() }) })).json() as { id: string };
+      await fetch(`${url}/v1/sessions/${session.id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: "Ask me before continuing" }) });
+      let interaction: { id: string } | undefined;
+      for (let attempt = 0; attempt < 100 && interaction === undefined; attempt += 1) { const projection = await (await fetch(`${url}/v1/sessions/${session.id}`)).json() as { interactions?: { id: string; status: string }[] }; const pending = projection.interactions?.find((item) => item.status === "pending"); if (pending !== undefined) interaction = pending; else await new Promise<void>((resolve) => setTimeout(resolve, 5)); }
+      expect(interaction).toBeDefined();
+      const answered = await fetch(`${url}/v1/sessions/${session.id}/interactions/${interaction!.id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "answered", answer: "yes" }) });
+      expect(answered.status).toBe(200); expect((await answered.json()).status).toBe("answered");
+      let projection: { messages: { content: string }[] } = { messages: [] };
+      for (let attempt = 0; attempt < 100; attempt += 1) { projection = await (await fetch(`${url}/v1/sessions/${session.id}`)).json() as typeof projection; if (projection.messages.some((message) => message.content.includes("Continuing"))) break; await new Promise<void>((resolve) => setTimeout(resolve, 5)); }
+      expect(projection.messages.some((message) => message.content.includes("Continuing"))).toBe(true);
+    } finally { await new Promise<void>((resolve, reject) => interactionServer.close((error) => (error ? reject(error) : resolve()))); }
+  });
+
   it("exposes MCP server configuration without leaking secrets", async () => {
     const created = await fetch(`${baseUrl}/v1/mcp/servers`, {
       method: "POST",

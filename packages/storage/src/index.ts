@@ -7,6 +7,9 @@ import {
   type CommandClaim,
   type CommandRecord,
   type EventListener,
+  type InteractionProjection,
+  type InteractionStatus,
+  type InteractionOption,
   type PermissionId,
   type PermissionProjection,
   type PermissionStatus,
@@ -15,6 +18,7 @@ import {
   type SessionProjection,
   type SessionStatus,
   type SessionSummary,
+  type PlanStatus,
   type TaskProjection,
   type TaskStatus,
   type ToolApprovalMode,
@@ -23,6 +27,8 @@ import {
   type ToolCallStatus,
   type ToolResult,
   type ToolRiskLevel,
+  type TodoItem,
+  type TodoStatus,
   type TurnProjection,
   type TurnStatus,
 } from "@code-review-agent/contracts";
@@ -56,6 +62,9 @@ function baseProjection(id: SessionId, workspaceRoot: string, timestamp = now())
     messages: [],
     turns: [],
     tasks: [],
+    plan: { content: "", status: "cleared", updatedAt: timestamp, lastSequence: 0 },
+    todos: [],
+    interactions: [],
     toolCalls: [],
     permissions: [],
   };
@@ -81,6 +90,27 @@ function taskStatus(value: unknown, fallback: TaskStatus): TaskStatus {
     : fallback;
 }
 
+function planStatus(value: unknown, fallback: PlanStatus): PlanStatus {
+  return value === "draft" || value === "active" || value === "approved" || value === "rejected" || value === "cleared" ? value : fallback;
+}
+
+function todoStatus(value: unknown, fallback: TodoStatus): TodoStatus {
+  return value === "pending" || value === "in_progress" || value === "completed" || value === "cancelled" ? value : fallback;
+}
+
+function interactionStatus(value: unknown, fallback: InteractionStatus): InteractionStatus {
+  return value === "pending" || value === "answered" || value === "cancelled" || value === "expired" ? value : fallback;
+}
+
+function interactionOptions(value: unknown): readonly InteractionOption[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): InteractionOption[] => {
+    if (typeof item !== "object" || item === null) return [];
+    const option = item as Record<string, unknown>;
+    return typeof option["label"] === "string" && typeof option["value"] === "string" ? [{ label: option["label"], value: option["value"] }] : [];
+  });
+}
+
 function toolCallStatus(value: unknown, fallback: ToolCallStatus): ToolCallStatus {
   return value === "pending" || value === "awaiting_permission" || value === "running" || value === "completed" || value === "failed" || value === "cancelled" || value === "denied"
     ? value
@@ -100,6 +130,9 @@ function deriveActiveStatus(projection: SessionProjection): SessionStatus {
 function applyEvent(projection: SessionProjection, event: AgentEvent): SessionProjection {
   let next: SessionProjection = {
     ...projection,
+    plan: projection.plan ?? { content: "", status: "cleared", updatedAt: event.createdAt, lastSequence: 0 },
+    todos: projection.todos ?? [],
+    interactions: projection.interactions ?? [],
     updatedAt: event.createdAt,
     lastSequence: event.sequence,
   };
@@ -213,6 +246,26 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
     }
   }
 
+  if (event.type === "plan/updated") {
+    const content = typeof event.payload["content"] === "string" ? event.payload["content"] : next.plan.content;
+    const status = planStatus(event.payload["status"], next.plan.status);
+    next = { ...next, plan: { content, status, updatedAt: event.createdAt, lastSequence: event.sequence } };
+  }
+
+  if (event.type === "todo/updated") {
+    const rawTodos = event.payload["todos"];
+    if (Array.isArray(rawTodos)) {
+      const todos: TodoItem[] = rawTodos.flatMap((item): TodoItem[] => {
+        if (typeof item !== "object" || item === null) return [];
+        const value = item as Record<string, unknown>;
+        if (typeof value["id"] !== "string" || typeof value["content"] !== "string") return [];
+        const status = todoStatus(value["status"], "pending");
+        return [{ id: value["id"], content: value["content"], status, ...(typeof value["activeForm"] === "string" ? { activeForm: value["activeForm"] } : {}) }];
+      });
+      next = { ...next, todos };
+    }
+  }
+
   if (event.type === "tool/call" || event.type === "tool/progress" || event.type === "tool/result") {
     const rawToolCallId = event.payload["toolCallId"];
     if (typeof rawToolCallId === "string") {
@@ -289,6 +342,38 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
       if (toolCall !== undefined && event.type === "permission/requested") {
         next = { ...next, toolCalls: next.toolCalls.map((item) => (item.id === toolCall.id ? { ...item, status: "awaiting_permission", updatedAt: event.createdAt, lastSequence: event.sequence } : item)) };
       }
+    }
+  }
+
+  if (event.type === "interaction/requested" || event.type === "interaction/resolved") {
+    const rawInteractionId = event.payload["interactionId"];
+    const rawToolCallId = event.payload["toolCallId"];
+    const question = event.payload["question"];
+    if (typeof rawInteractionId === "string" && typeof rawToolCallId === "string" && typeof question === "string") {
+      const options = interactionOptions(event.payload["options"]);
+      const current = next.interactions.find((interaction) => interaction.id === rawInteractionId);
+      const initial: InteractionProjection = current ?? {
+        id: brand<string, "InteractionId">(rawInteractionId),
+        toolCallId: brand<string, "ToolCallId">(rawToolCallId),
+        ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
+        question,
+        options,
+        allowFreeform: event.payload["allowFreeform"] !== false,
+        status: "pending",
+        createdAt: typeof event.payload["createdAt"] === "string" ? event.payload["createdAt"] : event.createdAt,
+        updatedAt: event.createdAt,
+        expiresAt: typeof event.payload["expiresAt"] === "string" ? event.payload["expiresAt"] : new Date(Date.parse(event.createdAt) + 15 * 60_000).toISOString(),
+        lastSequence: event.sequence,
+      };
+      const status = event.type === "interaction/requested" ? "pending" : interactionStatus(event.payload["status"], "cancelled");
+      const updated: InteractionProjection = {
+        ...initial,
+        updatedAt: event.createdAt,
+        lastSequence: event.sequence,
+        status,
+        ...(typeof event.payload["answer"] === "string" ? { answer: event.payload["answer"] } : {}),
+      };
+      next = { ...next, interactions: current === undefined ? [...next.interactions, updated] : next.interactions.map((item) => (item.id === updated.id ? updated : item)) };
     }
   }
 

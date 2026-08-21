@@ -193,19 +193,19 @@ Phase 1A 是当前优先级最高的执行单元，必须同时交付 Agent Loop
 
 #### P0：先完成并接入 Loop
 
-- [ ] `read_file`、`glob`、`grep`：窗口、编码、忽略规则、输出预算和 workspace 边界；
-- [ ] `edit_file`、`write_file`：读取前置、旧内容校验、diff、覆盖策略和幂等；
-- [ ] `git_status`、`git_diff`：固定 workspace cwd、结构化结果和输出限制；
-- [ ] `run_command`、`run_tests`：argv 优先、超时、进程树终止、stdout/stderr/exit code 审计；
-- [ ] 每个工具都提供模型描述、JSON Schema、modelView、presentation 和错误 remedy。
+- [x] `read_file`、`glob`、`grep`：窗口、编码、忽略规则、输出预算和 workspace 边界；
+- [x] `edit_file`、`write_file`：读取前置、旧内容校验、diff、覆盖策略和幂等；
+- [x] `git_status`、`git_diff`：固定 workspace cwd、结构化结果和输出限制；
+- [x] `run_command`、`run_tests`：argv 优先、超时、进程树终止、stdout/stderr/exit code 审计；
+- [x] 每个工具都提供模型描述、JSON Schema、modelView、presentation 和错误 remedy。
 
 #### P1：完成基础 Coding Agent 工具闭包
 
-- [ ] `terminal_open`、`terminal_send`、`terminal_read`、`terminal_signal`、`terminal_close`、`terminal_list`：维护独立 session、cwd、环境、输出缓冲和取消；
-- [ ] `delete_file`：workspace 内删除、默认 ask、可恢复/明确审计；
-- [ ] `git_log`、`git_show`：只读、结构化、输出预算；
-- [ ] `ask_user`：暂停当前 turn，等待用户回答后恢复；
-- [ ] `plan`、`todo_write`：写入事件和 projection，不能伪造已完成状态。
+- [x] `terminal_open`、`terminal_send`、`terminal_read`、`terminal_signal`、`terminal_close`、`terminal_list`：维护独立 session、cwd、环境、输出缓冲和取消；
+- [x] `delete_file`：workspace 内删除、默认 ask、可恢复/明确审计；
+- [x] `git_log`、`git_show`：只读、结构化、输出预算；
+- [x] `ask_user`：暂停当前 turn，等待用户回答后恢复；
+- [x] `plan`、`todo_write`：写入事件和 projection，不能伪造已完成状态。
 
 ### 1A.5：权限、MCP 和恢复整合
 
