@@ -144,26 +144,7 @@ discover → schema validate → workspace/policy check → approval
 
 如果这七个问题无法回答，不要直接开始大范围编码。
 
-## 7. 当前 Phase 2 的允许范围
-
-允许：
-
-- SQLite-backed EventStore 和 schema version；
-- Session/Turn/Message/Task projection；
-- SSE `Last-Event-ID`/`after_sequence` replay、resume、cancel、queue 和幂等 command；
-- 进程重启、断线、重复请求和事件回放测试；
-- 与 Phase 1 保持兼容的 API/Web 修复。
-
-暂不允许：
-
-- 把 Python 代码翻译成新 Runtime 的直接底层实现；
-- MCP Server、A2A endpoint、Subagent scheduler；
-- 任意 shell、Code Mode、LSP 或 Worktree；
-- 复制整个 DSH monorepo 或整个 Claude Code 仓库；
-- 没有事件/权限契约的 UI 大规模实现；
-- 没有安全测试的路径或命令工具。
-
-## 8. 质量和安全门禁
+## 7. 质量和安全门禁
 
 每个阶段至少覆盖：
 
@@ -187,7 +168,7 @@ pnpm test
 
 不要因为旧 Python 测试通过，就声称 TypeScript Runtime 已完成；也不要因为 TypeScript 编译通过，就跳过 workspace 安全和事件恢复测试。
 
-## 9. Web 开发规则
+## 8. Web 开发规则
 
 - Web 信息架构尽量沿用 DSH：Session sidebar、Conversation、Tool row、Diff、Permission、Terminal、Plan、Subagent、Settings。
 - 可以改名称、图标、logo、颜色、文案和 API client；不要复制 DSH 品牌标识或产品文案。
@@ -195,7 +176,7 @@ pnpm test
 - Web 不得成为事实来源；刷新、重连和回放后必须得到同样状态。
 - 没有后端事件支持的 UI 能力只能作为明确标记的占位，不得伪造成功状态。
 
-## 10. 目录级 AGENTS.md 策略
+## 9. 目录级 AGENTS.md 策略
 
 当前阶段只保留根目录这一份 `AGENTS.md`，避免在尚未建立 TypeScript workspace 前复制重复规则。
 
@@ -211,7 +192,7 @@ pnpm test
 
 子目录 AGENTS.md 只能补充根规则，不能降低根目录的安全、事件、许可证和阶段门禁。出现冲突时，以根目录和 `docs/architecture-decisions.md` 为准。
 
-## 11. 禁止的目标漂移信号
+## 10. 禁止的目标漂移信号
 
 看到以下情况时暂停实现并记录决策：
 
@@ -225,7 +206,7 @@ pnpm test
 - 没有回归测试就放宽 shell、路径或输出安全策略；
 - 一个 PR 同时跨越多个未完成 Phase，且没有 ADR 解释依赖关系。
 
-## 12. 完成标准
+## 11. 完成标准
 
 一个阶段只有在以下条件全部满足时才能标记完成：
 
