@@ -8,7 +8,7 @@
 |---|---|---|
 | Phase 0：TypeScript 基线与契约 | completed | `codex/phase-0-typescript-foundation`；workspace、strict TS、contracts、依赖图检查通过 |
 | Phase 1：最小 AgentHost 与 Web Shell | completed | 当前 checkpoint；`pnpm typecheck`、`pnpm test`、HTTP/SSE smoke、浏览器 Read-only smoke 通过 |
-| Phase 2：事件、持久化与恢复 | completed | 当前 Phase 2 checkpoint；SQLite reopen/recovery、projection replay、SSE replay、queue 和幂等 command 通过 |
+| Phase 2：事件、持久化与恢复 | completed | `a7f636f` + `5d5a198`；SQLite reopen/recovery、projection replay、SSE replay、queue、幂等 command 和 model failure 通过 |
 | Phase 3：工具运行时与权限 | next | 等 Phase 2 退出条件满足；下一步是 ToolRegistry、内置文件工具和 PermissionPolicy |
 | Phase 4：MCP Client | pending | 等 Phase 3 ToolRegistry/Permission 稳定 |
 | Phase 5：内部 Subagent / 多 Agent | pending | 等 Phase 4 MCP 和 Task contract 稳定 |
