@@ -1,0 +1,76 @@
+# 上游参考与复用登记
+
+每次直接复制、改编或大量依赖上游代码时，在本文件登记一条记录。只读参考、不产生代码来源关系的阅读不需要登记。
+
+## 登记格式
+
+```text
+ID:
+来源仓库:
+来源路径:
+复用方式: copy | adapt | behavior-reference
+许可证/来源证据:
+本项目路径:
+删除或改写的部分:
+新增测试:
+```
+
+## 当前登记
+
+### DSH-001
+
+来源仓库：`D:/Develop/deepseek-harness-fork`
+
+来源路径：`packages/client`、`apps/web`
+
+复用方式：`adapt`
+
+许可证/来源证据：根仓库和 Web package 声明 MIT。
+
+本项目路径：未来的 `apps/web`。
+
+范围：复用 Shell、Session sidebar、Conversation、Tool row、Diff、Permission、Terminal 和 Settings 的信息架构；先剥离 Cordis、DSH 专有 API 和无关插件依赖。
+
+要求：保留 MIT notice；所有 API/event 类型改为本项目 `packages/contracts`；补充本项目的 SSE 重连和权限测试。
+
+### DSH-002
+
+来源仓库：`D:/Develop/deepseek-harness-fork`
+
+来源路径：`packages/core/agent-loop/src/agent.ts`、`packages/core/agent-loop/src/tool-calls.ts`
+
+复用方式：`behavior-reference`，必要时在确认具体 package license 后再局部 `adapt`。
+
+许可证/来源证据：根仓库 MIT；具体复制前检查目标 package 的 notice。
+
+本项目路径：未来的 `packages/runtime`、`packages/tools`。
+
+范围：turn/step、parallel/exclusive、取消、兄弟工具失败、结果顺序和 progress 语义。
+
+### CC-001
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`src/query.ts`、`src/services/tools/StreamingToolExecutor.ts`、`src/tools.ts`。
+
+复用方式：`behavior-reference`；只有具体文件或 package 的许可证明确兼容时才 `adapt`。
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；仓库描述为 reverse-engineered/decompiled。
+
+本项目路径：未来的 `packages/runtime`、`packages/tools`、`packages/llm`。
+
+范围：流式 turn、工具调度、工具目录、权限前置检查、错误合成和恢复路径。不得默认整段复制实现。
+
+### CC-002
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`packages/builtin-tools/src/tools`、`src/services/contextCollapse`、`src/coordinator`。
+
+复用方式：`behavior-reference`。
+
+许可证/来源证据：按目录逐文件核实；无明确许可时只复刻接口和行为。
+
+本项目路径：未来的 `packages/tools`、`packages/context`、`packages/agents`。
+
+范围：Read/Edit/Write/Glob/Grep/Bash/Task 的用户体验，上下文压缩、父子任务和报告模型。

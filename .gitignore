@@ -10,4 +10,6 @@ htmlcov/
 runtime.db*
 tmp/
 docs/
+!docs/
+!docs/coding-agent-migration-plan.zh-CN.md
 .claude/settings.local.json
