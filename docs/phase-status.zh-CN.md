@@ -10,11 +10,35 @@
 | Phase 1：最小 AgentHost 与 Web Shell | completed | 当前 checkpoint；`pnpm typecheck`、`pnpm test`、HTTP/SSE smoke、浏览器 Read-only smoke 通过 |
 | Phase 2：事件、持久化与恢复 | completed | `a7f636f` + `5d5a198`；SQLite reopen/recovery、projection replay、SSE replay、queue、幂等 command 和 model failure 通过 |
 | Phase 3：工具运行时与权限 | completed | `e1d3172`（替代 `5003dbd`）；工具禁用、显式覆盖、进程树终止、audit/modelView、权限过期/取消/重启恢复和 Web smoke 通过 |
-| Phase 4：MCP Client | in_progress | `docs/phase-plans/phase-4-mcp-client.zh-CN.md`；开始实现官方 SDK transport、配置、发现与 ToolRegistry bridge |
+| Phase 4：MCP Client | completed | `5477f16`；官方 SDK stdio/SSE/Streamable HTTP、discovery、ToolRegistry bridge、权限/取消/重连、API/Web MCP 状态和 fixture 验证通过 |
 | Phase 5：内部 Subagent / 多 Agent | pending | 等 Phase 4 MCP 和 Task contract 稳定 |
 | Phase 6：A2A | pending | 等 Phase 5 parent/child lifecycle 稳定 |
 | Phase 7：DSH Web 前端收敛 | pending | 先保持 Phase 1 最小 Shell，后续逐项移植 |
 | Phase 8：高级能力与产品化 | pending | 等前置阶段完成 |
+
+## Phase 4 验收证据
+
+### 自动化检查
+
+```text
+pnpm typecheck   ✓
+pnpm test        ✓
+git diff --check ✓
+```
+
+Phase 4 新增证据：
+
+- `packages/mcp-client`：5 项测试，覆盖真实 stdio 子进程、Streamable HTTP、配置 secret 脱敏、tools/resources/prompts discovery、namespace/schema bridge、MCP error、ToolRuntime approval/cancel、统一事件和断线重连；
+- `apps/api`：7 项测试，覆盖 MCP server 配置、列表、disable/delete、`/v1/tools` 来源字段和既有 Session/工具回归；
+- `apps/web`：MCP server 状态侧栏、Reconnect/Enable/Disable 操作、MCP tool 来源卡片和 `mcp/*` 事件回放；
+- 连接失败只影响对应 server，MCP provider 可以全部关闭，内置工具和既有 Session 保持可用。
+
+### Phase 4 退出条件对照
+
+- 至少一个 MCP server 可配置、发现、调用、取消和重连：真实 stdio/HTTP fixture 与 ToolRuntime 测试通过；
+- MCP 工具与内置工具共享统一审计和事件：`tool/*`、`permission/*`、`mcp/*` 事件及 API/Web 回放通过；
+- 外部工具不能绕过权限、超时、取消和输出预算：MCP approval/error/cancel 测试通过，默认未知 MCP 风险为 `network` 并由本地 policy 拒绝；
+- 关闭所有 MCP provider 不影响现有功能：无 MCP 配置的 API/runtime 全量回归通过。
 
 ## Phase 2 验收证据
 

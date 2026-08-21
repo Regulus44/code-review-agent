@@ -2,7 +2,7 @@
 
 ## 状态
 
-`in_progress`
+`completed`
 
 本日志只记录 Phase 4 的实际实现与验证，不替代根目录 `AGENTS.md` 的长期治理规则。
 
@@ -39,23 +39,23 @@
 
 ### M2：连接与发现
 
-- [ ] stdio transport；
-- [ ] Streamable HTTP transport；
-- [ ] 启动、停止、重连、断线和超时；
-- [ ] tools/list、resources/list、prompts/list 及 list-changed 重同步。
+- [x] stdio transport；
+- [x] SSE 兼容与 Streamable HTTP transport；
+- [x] 启动、停止、重连、断线和超时；
+- [x] tools/list、resources/list、prompts/list 及 list-changed 重同步。
 
 ### M3：统一工具管线
 
-- [ ] namespace、schema 转换和来源元数据；
-- [ ] MCP tool 通过 `ToolRuntime` 执行；
-- [ ] permission、cancel、progress、result/modelView、audit 和错误分类测试。
+- [x] namespace、schema 转换和来源元数据；
+- [x] MCP tool 通过 `ToolRuntime` 执行；
+- [x] permission、cancel、progress、result/modelView、audit 和错误分类测试。
 
 ### M4：API/Web 与验收
 
-- [ ] MCP server 列表、disable/reconnect API；
-- [ ] `/v1/tools` 返回 built-in/MCP 来源；
-- [ ] fixture MCP server 完成发现、调用、取消和重连 smoke；
-- [ ] 更新本日志、阶段状态和 checkpoint。
+- [x] MCP server 列表、disable/reconnect API；
+- [x] `/v1/tools` 返回 built-in/MCP 来源；
+- [x] fixture MCP server 完成发现、调用、取消和重连 smoke；
+- [x] 更新本日志、阶段状态和 checkpoint。
 
 ## 验证命令
 
@@ -74,4 +74,41 @@ git diff --check
 
 ## 下一步
 
-实现 `packages/mcp-client`，随后把 manager 接入 `AgentHost`/API，并补齐 fixture contract、权限和恢复测试。
+实现 `packages/mcp-client`，随后把 manager 接入 `AgentHost`/API，并补齐 fixture contract、权限和恢复测试（已在本日志的实现 checkpoint 完成）。
+
+## 2026-08-21：MCP Client 最终 checkpoint
+
+### 变更范围
+
+- 新增 `packages/mcp-client`，基于官方 `@modelcontextprotocol/sdk` 实现 `McpConfigStore`、`McpConnectionManager`、stdio/SSE/Streamable HTTP transport、discovery、tool/resource/prompt adapter；
+- MCP 工具通过 `mcp__<server>__<tool>` namespace 注册到共享 `ToolRegistry`，保留 `source` 元数据并使用 schema/risk/permission/timeout/cancel/progress/result/audit 统一管线；
+- 新增 `mcp/server`、`mcp/tool` 事件，生命周期事件只保存 server identity、状态和脱敏错误；
+- API 增加 MCP server 配置、列表、删除、enable/disable/reconnect、resource read 和 prompt get 路由；
+- `/v1/tools` 和 Web 工具卡片展示 built-in/MCP 来源，侧栏展示 MCP 状态和恢复操作；
+- API/契约测试覆盖 secret redaction，MCP package 覆盖真实 stdio fixture、Streamable HTTP fixture、tool discovery、resources/prompts discovery、schema bridge、MCP error、取消、reconnect 和统一事件审计。
+
+### 失败与修复
+
+- 首版 HTTP fixture 复用了有状态 transport，导致 Streamable HTTP client 在第二个请求上失败；按 SDK/DSH 的 stateless 模式改为每个 HTTP 请求创建 server + transport，并让 SDK 自己读取 request body；
+- 首版 reconnect 在每次失败时重置 attempt counter，可能无限重启；拆分 manual start 与 reconnect start，只有人工 reconnect/首次启动重置预算；
+- `ToolRuntime` 原本把 MCP adapter 错误统一成 `TOOL_EXECUTION_FAILED`，现保留安全格式的 adapter error code（例如 `MCP_TOOL_ERROR`、`MCP_REQUEST_FAILED`）。
+
+### 验证
+
+```text
+pnpm typecheck
+pnpm test
+git diff --check
+```
+
+MCP package 当前 5 个测试通过；全 workspace 回归和 API MCP route 测试通过。真实 stdio 与 Streamable HTTP fixture 均已连接并发现工具，ToolRuntime 取消和 MCP error 均有结果事件。
+
+最终实现 checkpoint：`5477f16 feat: add phase four mcp client`。
+
+### 未包含与风险
+
+- 配置持久化、独立 Settings 页面和资源/Prompt 的 Web 消费仍是后续增强；当前已提供 manager/API adapter 和 discovery contract；
+- MCP provider 可完全 disabled，关闭所有 provider 不影响 built-in tools 或既有 Session；
+- 外部 server 的实际副作用仍由 server 自己负责，默认未知工具使用 `network` 风险并被本地 policy 拒绝；显式降低风险级别必须由用户配置并经过现有审批策略。
+
+Phase 4 退出条件已满足：至少一个 MCP fixture server 可以配置、发现、调用、取消和重连；stdio 与 Streamable HTTP 均有真实 transport 测试；MCP 工具和内置工具共享 schema、policy、approval、timeout、cancel、progress、structured result、audit 和事件模型；关闭 MCP provider 不影响既有 built-in tools 和 Session。
