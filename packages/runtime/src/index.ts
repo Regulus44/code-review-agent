@@ -87,7 +87,13 @@ export class AgentHost {
       riskLevel: tool.riskLevel,
       approvalMode: tool.approvalMode,
       interruptBehavior: tool.interruptBehavior,
+      source: tool.source ?? { kind: "builtin" },
     }));
+  }
+
+  /** Exposes the shared registry to optional protocol adapters such as MCP. */
+  toolRegistry(): ToolRegistry {
+    return this.toolRuntime.registry;
   }
 
   async executeTool(sessionId: SessionId, name: string, input: unknown, turnId?: TurnId, commandId?: string, signal?: AbortSignal, caller: ToolCaller = "user"): Promise<ExecuteToolOutput> {

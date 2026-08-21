@@ -75,6 +75,11 @@ export class ToolRuntime {
     this.permissionTtlMs = options.permissionTtlMs ?? 15 * 60_000;
   }
 
+  /** The registry is shared with optional adapters that register external tools. */
+  get registry(): ToolRegistry {
+    return this.options.registry;
+  }
+
   listTools(): readonly ToolDefinition[] {
     return this.options.registry.list();
   }
@@ -285,7 +290,8 @@ export class ToolRuntime {
         const reason = controller.signal.reason;
         const timedOut = reason instanceof Error && reason.message === "Tool execution timed out";
         const cancelled = controller.signal.aborted && !timedOut;
-        const result = this.errorResult(timedOut ? "TOOL_TIMEOUT" : cancelled ? "TOOL_CANCELLED" : "TOOL_EXECUTION_FAILED", error instanceof Error ? error.message : String(error));
+        const errorCode = timedOut ? "TOOL_TIMEOUT" : cancelled ? "TOOL_CANCELLED" : errorCodeOf(error) ?? "TOOL_EXECUTION_FAILED";
+        const result = this.errorResult(errorCode, error instanceof Error ? error.message : String(error));
         await this.append(request, "tool/result", { toolCallId, status: cancelled ? "cancelled" : "failed", result });
         return { toolCallId, status: cancelled ? "cancelled" : "failed", result };
       } finally {
@@ -316,6 +322,12 @@ export class ToolRuntime {
     timer.unref();
     this.expiryTimers.set(permissionId, timer);
   }
+}
+
+function errorCodeOf(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null || !("code" in error)) return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && /^[A-Z][A-Z0-9_]{2,63}$/u.test(code) ? code : undefined;
 }
 
 function boundResult(result: ToolResult, budget: number): ToolResult {

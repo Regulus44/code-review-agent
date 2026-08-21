@@ -30,6 +30,8 @@ export type AgentEventType =
   | "diff/preview"
   | "permission/requested"
   | "permission/resolved"
+  | "mcp/server"
+  | "mcp/tool"
   | "agent/status"
   | "agent/error";
 
@@ -99,6 +101,9 @@ export type ToolInterruptBehavior = "cancel" | "block";
 export type ToolCaller = "agent" | "user" | "system";
 export type ToolCallStatus = "pending" | "awaiting_permission" | "running" | "completed" | "failed" | "cancelled" | "denied";
 export type PermissionStatus = "pending" | "approved" | "denied" | "cancelled" | "expired";
+export type ToolSource =
+  | { readonly kind: "builtin" }
+  | { readonly kind: "mcp"; readonly serverName: string; readonly rawName: string };
 
 export interface JsonSchema {
   readonly type?: "object" | "array" | "string" | "number" | "integer" | "boolean" | "null";
@@ -172,6 +177,7 @@ export interface ToolDefinition {
   readonly riskLevel: ToolRiskLevel;
   readonly approvalMode: ToolApprovalMode;
   readonly interruptBehavior: ToolInterruptBehavior;
+  readonly source?: ToolSource;
   readonly execute: (input: unknown, context: ToolContext) => Promise<ToolResult>;
   readonly presentCall?: (input: unknown) => ToolPresentation;
   readonly presentResult?: (result: ToolResult) => ToolPresentation;

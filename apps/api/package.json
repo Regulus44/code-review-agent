@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@code-review-agent/contracts": "workspace:*",
+    "@code-review-agent/mcp-client": "workspace:*",
     "@code-review-agent/runtime": "workspace:*",
     "@code-review-agent/storage": "workspace:*"
   }

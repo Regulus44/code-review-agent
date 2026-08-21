@@ -5,11 +5,13 @@ import { fileURLToPath, URL } from "node:url";
 import { sessionId, AgentHost, turnId } from "@code-review-agent/runtime";
 import { SqliteEventStore } from "@code-review-agent/storage";
 import { brand, type AgentEvent, type PermissionId, type SessionEventStore } from "@code-review-agent/contracts";
+import { McpConnectionManager, type McpServerConfig } from "@code-review-agent/mcp-client";
 
 export interface ApiServerOptions {
   readonly store?: SessionEventStore;
   readonly databasePath?: string;
   readonly host?: AgentHost;
+  readonly mcp?: McpConnectionManager;
   readonly webRoot?: string;
 }
 
@@ -17,19 +19,23 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
   const ownsStore = options.store === undefined && options.host === undefined;
   const store = options.store ?? (options.host === undefined ? new SqliteEventStore(options.databasePath === undefined ? {} : { databasePath: options.databasePath }) : undefined);
   const host = options.host ?? new AgentHost({ store: store as SessionEventStore });
+  const ownsMcp = options.mcp === undefined;
+  const mcp = options.mcp ?? new McpConnectionManager(store === undefined ? { registry: host.toolRegistry() } : { registry: host.toolRegistry(), store });
+  void mcp.startConfigured();
   const persistence = store instanceof SqliteEventStore ? "sqlite" : "custom";
   const webRoot = options.webRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web");
   const server = createServer((request, response) => {
-    void handleRequest(request, response, host, webRoot, persistence);
+    void handleRequest(request, response, host, mcp, webRoot, persistence);
   });
   if (ownsStore && store instanceof SqliteEventStore) server.on("close", () => store.close());
+  if (ownsMcp) server.on("close", () => { void mcp.close(); });
   return server;
 }
 
-async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, webRoot: string, persistence: string): Promise<void> {
+async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, mcp: McpConnectionManager, webRoot: string, persistence: string): Promise<void> {
   response.setHeader("access-control-allow-origin", "*");
   response.setHeader("access-control-allow-headers", "content-type, idempotency-key, last-event-id");
-  response.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
+  response.setHeader("access-control-allow-methods", "GET,POST,DELETE,OPTIONS");
   if (request.method === "OPTIONS") {
     response.writeHead(204).end();
     return;
@@ -42,6 +48,43 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     }
     if (request.method === "GET" && url.pathname === "/v1/tools") {
       sendJson(response, 200, { tools: host.listTools() });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/v1/mcp/servers") {
+      sendJson(response, 200, { servers: mcp.list() });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/v1/mcp/servers") {
+      const body = await readJson(request);
+      const { start, ...configBody } = body;
+      sendJson(response, 201, await mcp.add(configBody as unknown as McpServerConfig, start !== false));
+      return;
+    }
+    const mcpMatch = url.pathname.match(/^\/v1\/mcp\/servers\/([^/]+)$/u);
+    const mcpResourceMatch = url.pathname.match(/^\/v1\/mcp\/servers\/([^/]+)\/resources$/u);
+    if (mcpResourceMatch?.[1] !== undefined && request.method === "GET") {
+      const uri = url.searchParams.get("uri");
+      if (uri === null || uri.length === 0) throw new HttpError(400, "uri is required");
+      sendJson(response, 200, await mcp.readResource(decodeURIComponent(mcpResourceMatch[1]), uri));
+      return;
+    }
+    const mcpPromptMatch = url.pathname.match(/^\/v1\/mcp\/servers\/([^/]+)\/prompts$/u);
+    if (mcpPromptMatch?.[1] !== undefined && request.method === "POST") {
+      const body = await readJson(request);
+      if (typeof body.name !== "string") throw new HttpError(400, "name is required");
+      sendJson(response, 200, await mcp.getPrompt(decodeURIComponent(mcpPromptMatch[1]), body.name, body.arguments as Record<string, string> | undefined));
+      return;
+    }
+    if (mcpMatch?.[1] !== undefined && request.method === "DELETE") {
+      sendJson(response, 200, { removed: await mcp.remove(decodeURIComponent(mcpMatch[1])) });
+      return;
+    }
+    const mcpActionMatch = url.pathname.match(/^\/v1\/mcp\/servers\/([^/]+)\/(reconnect|enable|disable)$/u);
+    if (mcpActionMatch?.[1] !== undefined && mcpActionMatch[2] !== undefined && request.method === "POST") {
+      const name = decodeURIComponent(mcpActionMatch[1]);
+      const action = mcpActionMatch[2];
+      const result = action === "reconnect" ? await mcp.reconnect(name) : await mcp.setEnabled(name, action === "enable");
+      sendJson(response, 200, result);
       return;
     }
     if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {

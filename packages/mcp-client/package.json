@@ -1,0 +1,23 @@
+{
+  "name": "@code-review-agent/mcp-client",
+  "version": "0.2.0-dev.1",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@code-review-agent/contracts": "workspace:*",
+    "@code-review-agent/storage": "workspace:*",
+    "@code-review-agent/tools": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.30.0"
+  },
+  "scripts": {
+    "test": "vitest run"
+  }
+}

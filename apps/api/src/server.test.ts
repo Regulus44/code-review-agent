@@ -107,6 +107,24 @@ describe("Phase 2 API", () => {
     }
   });
 
+  it("exposes MCP server configuration without leaking secrets", async () => {
+    const created = await fetch(`${baseUrl}/v1/mcp/servers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "api-fixture", scope: "user", transport: "stdio", command: "fixture", env: { AUTH_TOKEN: "secret-value" }, start: false }),
+    });
+    expect(created.status).toBe(201);
+    const server = await created.json() as { config: { env?: Record<string, string> }; status: string };
+    expect(server.status).toBe("stopped");
+    expect(server.config.env?.AUTH_TOKEN).toBe("[redacted]");
+    const listed = await (await fetch(`${baseUrl}/v1/mcp/servers`)).json() as { servers: { config: { name: string } }[] };
+    expect(listed.servers.some((item) => item.config.name === "api-fixture")).toBe(true);
+    const disabled = await fetch(`${baseUrl}/v1/mcp/servers/api-fixture/disable`, { method: "POST" });
+    expect((await disabled.json()).status).toBe("disabled");
+    const removed = await fetch(`${baseUrl}/v1/mcp/servers/api-fixture`, { method: "DELETE" });
+    expect((await removed.json()).removed).toBe(true);
+  });
+
   it("supports idempotent commands and session lifecycle endpoints", async () => {
     const created = await fetch(`${baseUrl}/v1/sessions`, {
       method: "POST",
