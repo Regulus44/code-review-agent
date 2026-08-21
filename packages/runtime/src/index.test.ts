@@ -54,4 +54,22 @@ describe("AgentHost", () => {
     expect((await host.getSession(forked))?.status).toBe("idle");
     expect((await host.getSession(forked))?.messages.at(-1)?.content).toBe("Echo: history");
   });
+
+  it("records explainable model failures", async () => {
+    const store = new InMemoryEventStore();
+    const failingModel = {
+      async *stream(): AsyncIterable<{ type: "done" }> {
+        throw new Error("provider unavailable");
+      },
+    };
+    const host = new AgentHost({ store, model: failingModel });
+    const session = await host.createSession("D:/workspace");
+    const turn = await host.sendMessage(session.id, "fail me");
+    await host.waitForTurn(turn);
+    const events = await host.events(session.id);
+    expect(events.find((event) => event.type === "agent/error")?.payload["message"]).toBe("provider unavailable");
+    expect(events.at(-1)?.type).toBe("turn/ended");
+    expect(events.at(-1)?.payload["status"]).toBe("failed");
+    expect((await host.getSession(session.id))?.status).toBe("failed");
+  });
 });
