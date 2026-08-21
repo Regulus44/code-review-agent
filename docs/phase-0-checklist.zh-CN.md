@@ -4,7 +4,7 @@ Phase 0 的目标不是开始迁移旧 Python 模块，而是把新的 TypeScrip
 
 ## 0.1 仓库基线
 
-- [ ] 根目录 `AGENTS.md` 已建立，并在阶段切换时同步当前状态和门禁。
+- [ ] 根目录 `AGENTS.md` 已建立并明确治理级别；阶段切换的当前状态和门禁记录在 `docs/phase-status.zh-CN.md`，不要求例行修改 `AGENTS.md`。
 - [ ] 根目录增加 `package.json`、`pnpm-workspace.yaml` 和 TypeScript solution 配置。
 - [ ] 建立 `packages/*` 与 `apps/*` 的最小 workspace；新包全部使用 ESM 和 strict TypeScript。
 - [ ] 定义 `typecheck`、`test`、`lint`、`dev` 和最小 API smoke 命令。
