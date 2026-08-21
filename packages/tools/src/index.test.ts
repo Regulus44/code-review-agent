@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { brand, type AgentEvent, type EventStore, type SessionId, type SessionProjection, type ToolDefinition } from "@code-review-agent/contracts";
 import { createBuiltinTools, TerminalManager } from "./builtin.js";
+import { P0_TOOL_FIXTURES } from "./behavior-fixtures.js";
 import { ToolDisabledError, ToolRegistry } from "./registry.js";
 import { ToolRuntime } from "./runtime.js";
 import { DefaultPermissionPolicy } from "./permissions.js";
@@ -24,6 +25,17 @@ class MemoryStore implements EventStore {
 describe("ToolRuntime", () => {
   it("validates schemas and rejects extra fields", () => {
     expect(() => assertValidInput({ type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false }, { path: "a", extra: true })).toThrow(SchemaValidationError);
+  });
+
+  it("keeps the P0 behavior fixture matrix aligned with the TypeScript registry", () => {
+    const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools());
+    expect(P0_TOOL_FIXTURES).toHaveLength(9);
+    for (const fixture of P0_TOOL_FIXTURES) {
+      const definition = registry.get(fixture.name);
+      expect(definition).toMatchObject({ name: fixture.name, riskLevel: fixture.riskLevel, executionMode: fixture.executionMode, approvalMode: fixture.approvalMode });
+      expect(fixture.expectedOutput.length).toBeGreaterThan(0);
+      expect(fixture.safety.length).toBeGreaterThan(0);
+    }
   });
 
   it("executes read tools and emits progress/result events", async () => {

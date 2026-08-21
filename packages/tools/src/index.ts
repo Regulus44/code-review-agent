@@ -1,4 +1,5 @@
 export * from "./builtin.js";
+export * from "./behavior-fixtures.js";
 export * from "./permissions.js";
 export * from "./registry.js";
 export * from "./runtime.js";

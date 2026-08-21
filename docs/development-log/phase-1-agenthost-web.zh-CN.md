@@ -133,3 +133,9 @@ Phase 1 不再以 Web Shell 完成为退出条件，改以 [Agentic Coding Core 
 - 真实 provider、工具 schema、Agent Loop、用户交互、权限审批和工具结果 continuation 全部连通；
 - `read → edit → approve → test → summary` smoke 通过；
 - 本次 smoke 不改变仓库源码，自动化测试继续使用 fake/local model，避免测试依赖网络和真实凭据。
+
+## 2026-08-22：Phase 1A.0 迁移边界与工具矩阵收尾
+
+- 明确 `src/code_review_agent/tools/` 仅为 Python legacy/reference，新 Runtime 只依赖 TypeScript `packages/tools`；
+- 新增 [tool-migration-matrix.zh-CN.md](../tool-migration-matrix.zh-CN.md)，登记 P0/P1 工具与 DSH/Claude Code 行为参考、权限/工作区/模型视图和安全边界；
+- 新增 `packages/tools/src/behavior-fixtures.ts` 及 registry 对齐测试，确保 9 个 P0 工具的风险、调度、审批和输出契约持续可验证。

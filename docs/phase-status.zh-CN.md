@@ -84,6 +84,10 @@ Phase 1 的 provider-neutral adapter 现在已接入 API CLI 启动路径：通�
 
 该 smoke 证明真实 provider 已能驱动本项目的 model → tool → approval → tool → summary 闭环；自动化测试仍保持 fake/local model，不依赖网络或真实凭据。
 
+## Phase 1A.0 迁移边界收尾（2026-08-22）
+
+新增 [工具迁移矩阵](tool-migration-matrix.zh-CN.md)，明确 Python legacy/reference 边界、DSH/Claude Code 行为参考、P0/P1 工具的 source/risk/execution/approval/workspace contract，以及行为 fixture 和安全回归索引。`packages/tools/src/behavior-fixtures.ts` 提供跨平台的 P0 contract fixture，新增 registry 对齐测试。
+
 ## Phase 4 验收证据
 
 ### 自动化检查

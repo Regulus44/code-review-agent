@@ -162,11 +162,13 @@ Phase 1A 是当前优先级最高的执行单元，必须同时交付 Agent Loop
 
 ### 1A.0：迁移边界和工具清点
 
-- [ ] 将 `src/code_review_agent/tools/` 标记为 legacy/reference，不被新 Runtime import；
-- [ ] 为当前 TypeScript 9 个工具建立行为 fixture、输入/输出快照和安全回归清单；
-- [ ] 对照 DSH `packages/fs`、`packages/shell`、`packages/terminal`、`packages/plan`、`packages/todo`、`packages/interaction` 与 Claude Code `packages/builtin-tools/src/tools` 建立工具映射；
-- [ ] 明确每个工具的 source、risk、executionMode、approvalMode、workspace 规则和模型可见结果；
-- [ ] 禁止直接复制无许可或与本项目边界不兼容的上游实现；只复用已登记、可追溯的行为模式或兼容代码。
+- [x] 将 `src/code_review_agent/tools/` 标记为 legacy/reference，不被新 Runtime import；
+- [x] 为当前 TypeScript 9 个工具建立行为 fixture、输入/输出快照和安全回归清单；
+- [x] 对照 DSH `packages/fs`、`packages/shell`、`packages/terminal`、`packages/plan`、`packages/todo`、`packages/interaction` 与 Claude Code `packages/builtin-tools/src/tools` 建立工具映射；
+- [x] 明确每个工具的 source、risk、executionMode、approvalMode、workspace 规则和模型可见结果；
+- [x] 禁止直接复制无许可或与本项目边界不兼容的上游实现；只复用已登记、可追溯的行为模式或兼容代码。
+
+详细矩阵、行为 fixture 索引和安全回归要求见 [tool-migration-matrix.zh-CN.md](../tool-migration-matrix.zh-CN.md)。
 
 ### 1A.1：Tool-calling Contract
 
