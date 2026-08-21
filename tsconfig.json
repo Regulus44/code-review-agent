@@ -1,0 +1,12 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/contracts" },
+    { "path": "packages/llm" },
+    { "path": "packages/storage" },
+    { "path": "packages/runtime" },
+    { "path": "packages/workspace" },
+    { "path": "apps/api" },
+    { "path": "apps/web" }
+  ]
+}

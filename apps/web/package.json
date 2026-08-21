@@ -1,0 +1,9 @@
+{
+  "name": "@code-review-agent/web",
+  "version": "0.2.0-dev.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "echo Web shell is served by @code-review-agent/api"
+  }
+}

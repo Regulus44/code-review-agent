@@ -18,16 +18,16 @@
 
 ## 2. 当前状态和当前阶段
 
-当前阶段是 **Phase 0：TypeScript 基线和防漂移机制**。
+Phase 0 和 Phase 1 已完成；当前工作应按 **Phase 2：事件、持久化与恢复** 推进。
 
 - `src/code_review_agent` 是旧 Python 原型，只作为行为、数据和测试参考；
-- 新 TypeScript Runtime 尚未建立，不能把 Python 模块作为新 Runtime 的 import dependency；
+- 新 TypeScript Runtime 已建立并通过 Phase 1 验收；不能把 Python 模块作为新 Runtime 的 import dependency；
 - 详细总计划位于 `docs/coding-agent-migration-plan.zh-CN.md`；
 - 阶段索引位于 `docs/phase-plans/README.zh-CN.md`；
-- Phase 0 执行清单位于 `docs/phase-0-checklist.zh-CN.md`；
+- Phase 0 执行清单位于 `docs/phase-0-checklist.zh-CN.md`，当前阶段状态和验收证据位于 `docs/phase-status.zh-CN.md`；
 - 架构、协议、事件、工具和上游复用规则位于 `docs/architecture-decisions.md`、`docs/protocol-boundaries.md`、`docs/event-contract.md`、`docs/tool-contract.md` 和 `docs/source-reuse-register.md`。
 
-完成 Phase 0 前，不要把 MCP、A2A、Subagent、LSP、Worktree 或复杂工作流作为核心实现提前引入。
+完成 Phase 2 前，不要把 MCP、A2A、Subagent、LSP、Worktree 或复杂工作流作为核心实现提前引入；Phase 3 工具和权限也必须等待 Phase 2 的恢复契约稳定。
 
 ## 3. 架构裁决顺序
 
@@ -130,16 +130,15 @@ discover → schema validate → workspace/policy check → approval
 
 如果这七个问题无法回答，不要直接开始大范围编码。
 
-## 7. 当前 Phase 0 的允许范围
+## 7. 当前 Phase 2 的允许范围
 
 允许：
 
-- TypeScript workspace、Node.js 入口和 strict 编译配置；
-- `packages/contracts`、`packages/llm`、`packages/storage`、`packages/runtime` 的最小接口；
-- `apps/api` 的最小 health/Session/SSE 入口；
-- `apps/web` 的最小 DSH 风格 Shell；
-- 文档、事件 fixture、mock model 和 contract tests；
-- 许可证、依赖闭包和上游来源审计。
+- SQLite-backed EventStore 和 schema version；
+- Session/Turn/Message/Task projection；
+- SSE `Last-Event-ID`/`after_sequence` replay、resume、cancel、queue 和幂等 command；
+- 进程重启、断线、重复请求和事件回放测试；
+- 与 Phase 1 保持兼容的 API/Web 修复。
 
 暂不允许：
 

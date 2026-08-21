@@ -1,0 +1,22 @@
+{
+  "name": "@code-review-agent/runtime",
+  "version": "0.2.0-dev.1",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@code-review-agent/contracts": "workspace:*",
+    "@code-review-agent/llm": "workspace:*",
+    "@code-review-agent/storage": "workspace:*"
+  },
+  "scripts": {
+    "test": "vitest run"
+  }
+}

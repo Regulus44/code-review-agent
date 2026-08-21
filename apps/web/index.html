@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Code Review Agent</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #111318; color: #e7e9ee; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; }
+      button, textarea { font: inherit; }
+      button { cursor: pointer; }
+      .app { display: grid; grid-template-columns: 260px 1fr; min-height: 100vh; }
+      .sidebar { border-right: 1px solid #2a2e38; background: #171920; padding: 18px 14px; }
+      .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; font-weight: 700; }
+      .brand-mark { width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; background: #6d5dfc; color: #fff; }
+      .section-label { color: #8e95a6; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; margin: 14px 8px 8px; }
+      .session-list { display: grid; gap: 6px; }
+      .session { width: 100%; border: 0; text-align: left; background: transparent; color: #d8dbe5; padding: 10px; border-radius: 8px; }
+      .session.active, .session:hover { background: #272b38; }
+      .main { display: grid; grid-template-rows: auto 1fr auto; min-width: 0; }
+      .topbar { border-bottom: 1px solid #2a2e38; padding: 14px 22px; display: flex; justify-content: space-between; align-items: center; }
+      .status { color: #9ba3b5; font-size: 13px; }
+      .conversation { overflow: auto; padding: 28px max(20px, calc((100vw - 900px) / 2)); }
+      .empty { color: #858c9c; text-align: center; margin-top: 18vh; }
+      .message { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; margin-bottom: 22px; }
+      .avatar { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: #2a2f3d; color: #aeb7ff; font-size: 12px; }
+      .message.user .avatar { background: #234b3c; color: #9af0c3; }
+      .message-body { white-space: pre-wrap; line-height: 1.55; overflow-wrap: anywhere; }
+      .event { color: #8e95a6; font-size: 12px; margin: 8px 0 8px 44px; }
+      .composer { border-top: 1px solid #2a2e38; padding: 16px max(20px, calc((100vw - 900px) / 2)); background: #15171e; }
+      .composer form { display: flex; gap: 10px; }
+      textarea { flex: 1; resize: vertical; min-height: 54px; max-height: 180px; border: 1px solid #363b49; border-radius: 10px; background: #20232d; color: #f1f3f7; padding: 12px; }
+      .send { border: 0; border-radius: 10px; padding: 0 18px; background: #6d5dfc; color: white; font-weight: 600; }
+      .send:disabled { opacity: .5; cursor: wait; }
+      @media (max-width: 720px) { .app { grid-template-columns: 1fr; } .sidebar { display: none; } }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand"><span class="brand-mark">⌁</span><span>Code Review Agent</span></div>
+        <div class="section-label">Sessions</div>
+        <div id="session-list" class="session-list"></div>
+      </aside>
+      <main class="main">
+        <header class="topbar"><strong id="session-title">New coding session</strong><span id="status" class="status">Connecting…</span></header>
+        <section id="conversation" class="conversation"><div class="empty">Ask the agent to inspect a repository or explain a file.</div></section>
+        <footer class="composer"><form id="composer"><textarea id="input" placeholder="Describe what you want the coding agent to do…"></textarea><button class="send" type="submit">Send</button></form></footer>
+      </main>
+    </div>
+    <script>
+      (() => {
+        const state = { session: null, events: new Map(), source: null };
+        const list = document.querySelector('#session-list');
+        const conversation = document.querySelector('#conversation');
+        const status = document.querySelector('#status');
+        const title = document.querySelector('#session-title');
+        const input = document.querySelector('#input');
+        const send = document.querySelector('.send');
+        const api = async (url, options) => { const response = await fetch(url, options); if (!response.ok) throw new Error(await response.text()); return response.json(); };
+        const addEvent = (event) => { state.events.set(event.sequence, event); render(); };
+        const render = () => {
+          const events = [...state.events.values()].sort((a, b) => a.sequence - b.sequence);
+          conversation.innerHTML = '';
+          let hasMessage = false;
+          const assistant = new Map();
+          for (const event of events) {
+            if (event.type === 'user/message') { hasMessage = true; addMessage('user', event.payload.content); }
+            if (event.type === 'assistant/chunk') { hasMessage = true; const key = event.turnId || 'assistant'; if (!assistant.has(key)) assistant.set(key, addMessage('assistant', '')); assistant.get(key).textContent += event.payload.text; }
+            if (event.type === 'assistant/message') { hasMessage = true; const key = event.turnId || 'assistant'; if (!assistant.has(key)) assistant.set(key, addMessage('assistant', event.payload.content)); else assistant.get(key).textContent = event.payload.content; }
+            if (event.type !== 'session/created' && !event.type.startsWith('assistant/') && !event.type.startsWith('user/')) { const row = document.createElement('div'); row.className = 'event'; row.textContent = `${event.type} · #${event.sequence}`; conversation.append(row); }
+          }
+          if (!hasMessage) { const empty = document.createElement('div'); empty.className = 'empty'; empty.textContent = 'Ask the agent to inspect a repository or explain a file.'; conversation.append(empty); }
+          conversation.scrollTop = conversation.scrollHeight;
+        };
+        const addMessage = (role, content) => { const row = document.createElement('div'); row.className = `message ${role}`; const avatar = document.createElement('div'); avatar.className = 'avatar'; avatar.textContent = role === 'user' ? 'You' : 'AI'; const body = document.createElement('div'); body.className = 'message-body'; body.textContent = content; row.append(avatar, body); conversation.append(row); return body; };
+        const showSessions = (payload) => { const sessions = Array.isArray(payload) ? payload : payload.sessions; list.innerHTML = ''; for (const session of sessions) { const button = document.createElement('button'); button.className = `session ${state.session && state.session.id === session.id ? 'active' : ''}`; button.textContent = session.workspaceRoot; button.onclick = () => openSession(session.id); list.append(button); } };
+        const openSession = async (id) => { if (state.source) state.source.close(); state.session = await api(`/v1/sessions/${encodeURIComponent(id)}`); title.textContent = state.session.workspaceRoot; state.events.clear(); const events = await api(`/v1/sessions/${encodeURIComponent(id)}/events?format=json`); events.forEach(addEvent); state.source = new EventSource(`/v1/sessions/${encodeURIComponent(id)}/events?after_sequence=${state.session.lastSequence}`); const eventTypes = ['session/created', 'session/updated', 'user/message', 'turn/started', 'turn/ended', 'assistant/chunk', 'assistant/message', 'agent/status', 'agent/error']; eventTypes.forEach((type) => state.source.addEventListener(type, (message) => addEvent(JSON.parse(message.data)))); state.source.onerror = () => { status.textContent = 'Reconnecting…'; }; state.source.onopen = () => { status.textContent = 'Connected'; }; showSessions(await api('/v1/sessions')); };
+        const boot = async () => { const result = await api('/v1/sessions'); if (result.sessions.length) await openSession(result.sessions[0].id); else { state.session = await api('/v1/sessions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspaceRoot: '.' }) }); await openSession(state.session.id); } };
+        document.querySelector('#composer').addEventListener('submit', async (event) => { event.preventDefault(); const content = input.value.trim(); if (!content || !state.session) return; send.disabled = true; input.value = ''; try { await api(`/v1/sessions/${encodeURIComponent(state.session.id)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content }) }); } finally { send.disabled = false; input.focus(); } });
+        boot().catch((error) => { status.textContent = error.message; });
+      })();
+    </script>
+  </body>
+</html>

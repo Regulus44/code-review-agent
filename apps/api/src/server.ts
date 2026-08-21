@@ -1,0 +1,157 @@
+import { createReadStream, existsSync } from "node:fs";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import path from "node:path";
+import { fileURLToPath, URL } from "node:url";
+import { sessionId, AgentHost, turnId } from "@code-review-agent/runtime";
+import { InMemoryEventStore } from "@code-review-agent/storage";
+import type { SessionEventStore } from "@code-review-agent/contracts";
+
+export interface ApiServerOptions {
+  readonly store?: SessionEventStore;
+  readonly host?: AgentHost;
+  readonly webRoot?: string;
+}
+
+export function createApiServer(options: ApiServerOptions = {}): Server {
+  const store = options.store ?? new InMemoryEventStore();
+  const host = options.host ?? new AgentHost({ store });
+  const webRoot = options.webRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web");
+  return createServer((request, response) => {
+    void handleRequest(request, response, host, webRoot);
+  });
+}
+
+async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, webRoot: string): Promise<void> {
+  response.setHeader("access-control-allow-origin", "*");
+  response.setHeader("access-control-allow-headers", "content-type, last-event-id");
+  response.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
+  if (request.method === "OPTIONS") {
+    response.writeHead(204).end();
+    return;
+  }
+  const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+  try {
+    if (request.method === "GET" && url.pathname === "/health") {
+      sendJson(response, 200, { ok: true, service: "code-review-agent", runtime: "typescript" });
+      return;
+    }
+    if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
+      serveIndex(response, webRoot);
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/v1/sessions") {
+      const body = await readJson(request);
+      const workspaceRoot = typeof body.workspaceRoot === "string" && body.workspaceRoot.length > 0 ? body.workspaceRoot : process.cwd();
+      sendJson(response, 201, await host.createSession(workspaceRoot));
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/v1/sessions") {
+      sendJson(response, 200, { sessions: await host.listSessions() });
+      return;
+    }
+    const eventsMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/events$/u);
+    if (request.method === "GET" && eventsMatch?.[1] !== undefined) {
+      const id = sessionId(decodeURIComponent(eventsMatch[1]));
+      const after = parseSequence(url.searchParams.get("after_sequence") ?? request.headers["last-event-id"]);
+      const session = await host.getSession(id);
+      if (session === undefined) throw new HttpError(404, "session not found");
+      if (url.searchParams.get("format") === "json") {
+        sendJson(response, 200, await host.events(id, after));
+        return;
+      }
+      response.writeHead(200, {
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+        "content-type": "text/event-stream; charset=utf-8",
+      });
+      response.write(": connected\n\n");
+      const historical = await host.events(id, after);
+      for (const event of historical) writeEvent(response, event);
+      const unsubscribe = host.subscribe(id, (event) => writeEvent(response, event));
+      request.on("close", unsubscribe);
+      return;
+    }
+    const cancelMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/cancel$/u);
+    if (request.method === "POST" && cancelMatch?.[1] !== undefined) {
+      const id = sessionId(decodeURIComponent(cancelMatch[1]));
+      const body = await readJson(request);
+      const rawTurnId = body.turnId;
+      if (typeof rawTurnId !== "string") throw new HttpError(400, "turnId is required");
+      sendJson(response, 200, { cancelled: await host.cancelTurn(id, turnId(rawTurnId)) });
+      return;
+    }
+    const sessionMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)$/u);
+    if (sessionMatch?.[1] !== undefined) {
+      const id = sessionId(decodeURIComponent(sessionMatch[1]));
+      if (request.method === "POST") {
+        const body = await readJson(request);
+        const content = body.content;
+        if (typeof content !== "string") throw new HttpError(400, "content is required");
+        sendJson(response, 202, { turnId: await host.sendMessage(id, content) });
+        return;
+      }
+      if (request.method === "GET") {
+        const projection = await host.getSession(id);
+        if (projection === undefined) throw new HttpError(404, "session not found");
+        sendJson(response, 200, projection);
+        return;
+      }
+    }
+    throw new HttpError(404, "not found");
+  } catch (error) {
+    const status = error instanceof HttpError ? error.status : 500;
+    const message = error instanceof Error ? error.message : String(error);
+    if (!response.headersSent) sendJson(response, status, { error: message });
+    else response.end();
+  }
+}
+
+function serveIndex(response: ServerResponse, webRoot: string): void {
+  const file = path.join(webRoot, "index.html");
+  if (!existsSync(file)) throw new HttpError(404, "web shell not found");
+  response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+  createReadStream(file).pipe(response);
+}
+
+function writeEvent(response: ServerResponse, event: { sequence: number; type: string; payload: unknown }): void {
+  if (response.destroyed) return;
+  response.write(`id: ${event.sequence}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+}
+
+function sendJson(response: ServerResponse, status: number, body: unknown): void {
+  const content = JSON.stringify(body);
+  response.writeHead(status, { "content-type": "application/json; charset=utf-8", "content-length": Buffer.byteLength(content) });
+  response.end(content);
+}
+
+async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    if (Buffer.concat(chunks).byteLength > 1_048_576) throw new HttpError(413, "request body too large");
+  }
+  if (chunks.length === 0) return {};
+  const value: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new HttpError(400, "JSON object required");
+  return value as Record<string, unknown>;
+}
+
+function parseSequence(value: string | string[] | null | undefined): number {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (raw === null || raw === undefined || raw === "") return 0;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+class HttpError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+  }
+}
+
+if (process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const port = Number.parseInt(process.env["PORT"] ?? "3210", 10);
+  createApiServer().listen(port, "127.0.0.1", () => {
+    console.log(`Code Review Agent API listening on http://127.0.0.1:${port}`);
+  });
+}

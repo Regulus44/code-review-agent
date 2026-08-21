@@ -159,6 +159,7 @@ legacy-reference/
 - `docs/source-reuse-register.md`：记录从 DSH/Claude Code 直接复用或改编的代码来源、许可证和测试；
 - `docs/phase-0-checklist.zh-CN.md`：把 Phase 0 拆成可执行任务和退出门禁；
 - `docs/phase-plans/README.zh-CN.md`：各阶段的详细开发计划、参考入口和验收标准；
+- `docs/phase-status.zh-CN.md`：当前阶段状态和实际验收证据；
 - 每个阶段使用独立 feature branch；
 - 为每个阶段建立最小 e2e smoke 场景。
 

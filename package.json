@@ -1,0 +1,25 @@
+{
+  "name": "code-review-agent",
+  "version": "0.2.0-dev.1",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "test": "pnpm -r --if-present test",
+    "test:contracts": "pnpm --filter @code-review-agent/contracts test",
+    "test:storage": "pnpm --filter @code-review-agent/storage test",
+    "dev:api": "pnpm --filter @code-review-agent/api dev",
+    "dev:web": "pnpm --filter @code-review-agent/web dev"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

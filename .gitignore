@@ -11,5 +11,9 @@ runtime.db*
 tmp/
 docs/
 !docs/
-!docs/coding-agent-migration-plan.zh-CN.md
+!docs/**
 .claude/settings.local.json
+node_modules/
+dist/
+*.tsbuildinfo
+.pnpm-debug.log

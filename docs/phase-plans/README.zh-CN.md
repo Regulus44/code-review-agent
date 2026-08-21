@@ -35,6 +35,7 @@ Phase 8  高级能力与产品化
 - [Phase 6：A2A 互操作层](phase-6-a2a.zh-CN.md)
 - [Phase 7：DSH Web 前端收敛](phase-7-web-convergence.zh-CN.md)
 - [Phase 8：高级能力与产品化](phase-8-productization.zh-CN.md)
+- [当前阶段状态与验收证据](../phase-status.zh-CN.md)
 
 ## 每个阶段的固定结构
 
