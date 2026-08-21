@@ -11,14 +11,14 @@ type AgentEvent = {
   schemaVersion: 1;
   sessionId: string;
   turnId?: string;
-  taskId?: string;
   type: AgentEventType;
   createdAt: string;
+  correlationId?: string;
   payload: Record<string, unknown>;
 };
 ```
 
-`sequence` 在一个 Session 内严格单调递增。`eventId` 用于幂等，`schemaVersion` 只在 wire/durable 格式发生不兼容变化时递增。
+`sequence` 在一个 Session 内严格单调递增。`eventId` 用于唯一标识事件，command id 单独写入 `commands` 表用于请求幂等；`schemaVersion` 只在 wire/durable 格式发生不兼容变化时递增。
 
 ## 第一版事件集合
 
@@ -26,10 +26,9 @@ type AgentEvent = {
 session/created
 session/updated
 user/message
+turn/queued
 turn/started
 turn/ended
-step/started
-step/ended
 assistant/chunk
 assistant/message
 tool/call
@@ -42,8 +41,10 @@ agent/error
 queue/changed
 task/created
 task/updated
-task/report
+task/ended
 ```
+
+工具、权限和 queue 事件保留在公共契约中，分别由后续 Phase 实现；Phase 2 当前落地的是 Session/Turn/Message/Task projection 所需的事件子集。
 
 ## 不变量
 
