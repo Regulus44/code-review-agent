@@ -43,9 +43,13 @@ queue/changed
 task/created
 task/updated
 task/ended
+mcp/server
+mcp/tool
 ```
 
 工具、权限和 queue 事件保留在公共契约中，分别由后续 Phase 实现；Phase 2 当前落地的是 Session/Turn/Message/Task projection 所需的事件子集。
+
+MCP 生命周期事件只携带 `serverName`、状态、动作和脱敏错误；env/header/token 等配置秘密不得进入 payload。MCP 工具调用本身仍使用公共 `tool/*` 和 `permission/*` 事件。
 
 ## 不变量
 

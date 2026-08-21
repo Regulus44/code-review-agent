@@ -13,11 +13,16 @@ type ToolDefinition = {
   riskLevel: "read" | "write" | "execute" | "network";
   approvalMode: "auto" | "ask" | "deny";
   interruptBehavior: "cancel" | "block";
+  source?:
+    | { kind: "builtin" }
+    | { kind: "mcp"; serverName: string; rawName: string };
   execute(input: unknown, context: ToolContext): Promise<ToolResult>;
   presentCall?(input: unknown): ToolPresentation;
   presentResult?(result: ToolResult): ToolPresentation;
 };
 ```
+
+MCP 工具使用 `mcp__<server>__<tool>` 的稳定 namespace；原始 MCP 名称只用于 wire call，不从 public name 反解析。`source` 只用于 API/Web 展示，执行仍由本地 ToolRuntime 负责。
 
 ## 统一执行流程
 

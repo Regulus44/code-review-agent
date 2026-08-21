@@ -21,7 +21,7 @@ Claude Code：
 ## 交付物
 
 - `McpConfigStore`：server 配置、scope、enabled/disabled；
-- `McpConnectionManager`：stdio、SSE/HTTP、连接状态、重连和超时；
+- `McpConnectionManager`：stdio、SSE 兼容 transport、Streamable HTTP、连接状态、重连和超时；
 - `McpDiscovery`：tools/list、resources/list、prompts/list；
 - `McpToolAdapter` 和 resource/prompt adapter；
 - 工具名称隔离、来源标识、schema 转换和错误分类；

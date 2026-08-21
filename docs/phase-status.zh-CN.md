@@ -10,7 +10,7 @@
 | Phase 1：最小 AgentHost 与 Web Shell | completed | 当前 checkpoint；`pnpm typecheck`、`pnpm test`、HTTP/SSE smoke、浏览器 Read-only smoke 通过 |
 | Phase 2：事件、持久化与恢复 | completed | `a7f636f` + `5d5a198`；SQLite reopen/recovery、projection replay、SSE replay、queue、幂等 command 和 model failure 通过 |
 | Phase 3：工具运行时与权限 | completed | `e1d3172`（替代 `5003dbd`）；工具禁用、显式覆盖、进程树终止、audit/modelView、权限过期/取消/重启恢复和 Web smoke 通过 |
-| Phase 4：MCP Client | pending | 等 Phase 3 ToolRegistry/Permission 稳定 |
+| Phase 4：MCP Client | in_progress | `docs/phase-plans/phase-4-mcp-client.zh-CN.md`；开始实现官方 SDK transport、配置、发现与 ToolRegistry bridge |
 | Phase 5：内部 Subagent / 多 Agent | pending | 等 Phase 4 MCP 和 Task contract 稳定 |
 | Phase 6：A2A | pending | 等 Phase 5 parent/child lifecycle 稳定 |
 | Phase 7：DSH Web 前端收敛 | pending | 先保持 Phase 1 最小 Shell，后续逐项移植 |
