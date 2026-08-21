@@ -1,6 +1,6 @@
 # Phase 3：工具运行时与权限开发日志
 
-状态：`in_progress`
+状态：`completed`
 
 阶段计划：[phase-3-tools-permissions.zh-CN.md](../phase-plans/phase-3-tools-permissions.zh-CN.md)
 
@@ -155,3 +155,17 @@ pnpm test
 - 刷新页面后 pending 卡片不再出现，取消结果仍从事件回放；
 - 随后通过 `read_file(package.json)` 验证内容仍为 `@code-review-agent/tools`，确认取消没有文件副作用；
 - 本地 API 已停止，没有留下运行中的开发服务。
+
+## 2026-08-21：最终 checkpoint
+
+- 实现 checkpoint：`e1d3172 feat: harden phase three tools and permissions`；
+- 自动化门禁：`pnpm typecheck`、`pnpm test`、`git diff --check` 全部通过；
+- 测试证据：workspace 4/4、storage 6、tools 16、runtime 5、API 6；
+- Read-only：read_file、glob、grep、git_status、git_diff 经过 workspace、预算和事件管线；
+- Edit：edit_file 与显式 overwrite write_file 经过审批、diff、取消和刷新回放；
+- Test：run_tests/run_command 经过 argv 白名单、审批、timeout、输出截断和进程树终止；
+- Permission：approve/deny/cancel/expire/repeat/restart recovery 均有事件和测试；
+- 审计：tool caller、workspace、输入、完整 audit、modelView、结果和副作用均能从事件解释；
+- 本阶段没有引入 MCP、Subagent、A2A、Code Mode 或旧 Python Runtime 依赖。
+
+Phase 3 退出条件至此满足；后续工具扩展必须继续复用本阶段 ToolRegistry、PermissionPolicy、WorkspaceResolver 和 EventStore 管线。
