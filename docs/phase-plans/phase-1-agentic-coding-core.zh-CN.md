@@ -179,7 +179,7 @@ Phase 1A 是当前优先级最高的执行单元，必须同时交付 Agent Loop
 - [x] 请求中发送当前启用的 TypeScript 工具 schema 和 tool choice；
 - [x] 解析 `delta.tool_calls` 的 index、id、function name 和 arguments 增量；
 - [x] fake fetch 覆盖文本、单工具、多工具、混合流和 malformed JSON；
-- [ ] 真实 API 只做最小 smoke，不在自动测试中依赖网络或真实凭据。
+- [x] 真实 API 只做最小 smoke，不在自动测试中依赖网络或真实凭据。
 
 ### 1A.3：Agent Loop
 
@@ -219,6 +219,8 @@ Phase 1A 是当前优先级最高的执行单元，必须同时交付 Agent Loop
 
 ### 1A.6：真实 Coding 垂直切片
 
+状态：已完成（2026-08-22）。
+
 使用真实 DeepSeek API（默认 `deepseek-v4-flash`）验收：
 
 1. 创建并选择 workspace；
@@ -229,6 +231,8 @@ Phase 1A 是当前优先级最高的执行单元，必须同时交付 Agent Loop
 6. Agent 调用 `git_diff` 和 `run_tests`；
 7. Agent 返回总结；
 8. 刷新/断线后仍能看到完整 tool trajectory。
+
+验收记录：使用本地 `.env` 的 DeepSeek 配置和隔离 workspace 完成真实 smoke。模型实际调用 `read_file`、`ask_user`、`edit_file`、`run_command`、`git_diff`，用户分别批准交互和写入/执行权限；`node fixture.js` 返回修改后的字符串，事件 replay 保留 tool、interaction、permission、diff、step 和最终 summary，事件内容未包含 API key。
 
 ## 5. 测试和退出门禁
 

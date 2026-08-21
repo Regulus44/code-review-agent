@@ -113,3 +113,23 @@ Phase 1 不再以 Web Shell 完成为退出条件，改以 [Agentic Coding Core 
 - `@code-review-agent/runtime` 9 项测试通过；
 - 覆盖 permission preset/模型可见过滤、重启后的 pending approval continuation、取消收尾、terminal interrupted replay 和无伪造进程；
 - 尚未进行真实 DeepSeek `read → edit → approve → test` smoke，该项移交 Phase 1A.6。
+
+## 2026-08-22：Phase 1A.6 真实 Coding 垂直切片
+
+### 验收场景
+
+在隔离 workspace 中使用本地 `.env` 的真实 DeepSeek 配置（`deepseek-v4-flash`）完成：
+
+1. 创建 Session 并绑定 workspace；
+2. Agent 调用 `read_file` 读取 `fixture.js`；
+3. Agent 通过 `ask_user` 请求变更确认；
+4. 用户批准后，Agent 生成 `edit_file`，再经 permission approval 写入并产生 `diff/preview`；
+5. Agent 调用 `run_command` 执行 `node fixture.js`，stdout 为修改后的字符串，exit code 为 0；
+6. Agent 调用 `git_diff` 并返回最终 summary；
+7. 拉取事件 JSON replay，确认完整 tool/interaction/permission/diff/step trajectory 且没有 API key。
+
+### 结果
+
+- 真实 provider、工具 schema、Agent Loop、用户交互、权限审批和工具结果 continuation 全部连通；
+- `read → edit → approve → test → summary` smoke 通过；
+- 本次 smoke 不改变仓库源码，自动化测试继续使用 fake/local model，避免测试依赖网络和真实凭据。

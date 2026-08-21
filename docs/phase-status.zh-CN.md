@@ -7,7 +7,7 @@
 | 阶段 | 状态 | Checkpoint/证据 |
 |---|---|---|
 | Phase 0：TypeScript 基线与契约 | completed | `codex/phase-0-typescript-foundation`；workspace、strict TS、contracts、依赖图检查通过 |
-| Phase 1：Agentic Coding Core | in_progress（1A.5 完成，1A.6 待验收） | Tool-calling loop、P0/P1 TypeScript 工具、permission preset、重启恢复已通过；真实 `read → edit → approve → test` 尚未通过 |
+| Phase 1：Agentic Coding Core | in_progress（Phase 1A.6 smoke 已通过） | Tool-calling loop、P0/P1 TypeScript 工具、permission preset、重启恢复和真实 `read → edit → approve → test` 已通过；后续仍需整理 Phase 1 退出记录 |
 | Phase 2：事件、持久化与恢复 | completed | `a7f636f` + `5d5a198`；SQLite reopen/recovery、projection replay、SSE replay、queue、幂等 command 和 model failure 通过 |
 | Phase 3：工具运行时与权限 | completed | `e1d3172`（替代 `5003dbd`）；工具禁用、显式覆盖、进程树终止、audit/modelView、权限过期/取消/重启恢复和 Web smoke 通过 |
 | Phase 4：MCP Client | completed | `5477f16`；官方 SDK stdio/SSE/Streamable HTTP、discovery、ToolRegistry bridge、权限/取消/重连、API/Web MCP 状态和 fixture 验证通过 |
@@ -71,6 +71,18 @@ Phase 1 的 provider-neutral adapter 现在已接入 API CLI 启动路径：通�
 - `waitForTurn` 等待真实 `turn/ended`，避免取消或重启恢复时因中间 `agent/status` 事件提前返回。
 
 验证证据：`packages/tools` 22 项测试、`packages/runtime` 9 项测试覆盖 preset、模型工具过滤、pending approval restart、terminal interrupted replay、取消和幂等恢复。
+
+## Phase 1A.6 真实 Coding 垂直切片（2026-08-22）
+
+已使用真实 DeepSeek 配置完成隔离 workspace smoke：
+
+- API health 确认 provider 为 `deepseek`、模型为 `deepseek-v4-flash`，只返回脱敏配置状态；
+- Agent 先调用 `read_file`，通过 `ask_user` 请求用户确认，再生成 `edit_file`；
+- 用户批准 `edit_file` 写权限后，Agent 调用 `run_command` 执行 `node fixture.js`，返回修改后的 stdout 和 exit code 0；
+- Agent 调用 `git_diff` 并返回单行 diff 总结；
+- 通过事件 JSON replay 检查 `tool/*`、`interaction/*`、`permission/*`、`diff/preview`、`step/*` 和 `turn/ended`，未发现 API key 或 Authorization 内容。
+
+该 smoke 证明真实 provider 已能驱动本项目的 model → tool → approval → tool → summary 闭环；自动化测试仍保持 fake/local model，不依赖网络或真实凭据。
 
 ## Phase 4 验收证据
 
