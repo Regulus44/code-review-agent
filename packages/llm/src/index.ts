@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatModel, ModelRequest, ModelStreamPart } from "@code-review-agent/contracts";
+import type { ChatMessage, ChatModel, ModelRequest, ModelStreamPart, ModelToolCall } from "@code-review-agent/contracts";
 
 export interface OpenAICompatibleOptions {
   readonly baseUrl: string;
@@ -75,8 +75,23 @@ export class OpenAICompatibleChatModel implements ChatModel {
       headers,
       body: JSON.stringify({
         model: this.options.model,
-        messages: request.messages,
+        messages: request.messages.map(toWireMessage),
         stream: true,
+        ...(request.tools === undefined ? {} : {
+          tools: request.tools.map((tool) => ({
+            type: "function",
+            function: {
+              name: tool.name,
+              description: tool.description,
+              parameters: tool.parameters,
+            },
+          })),
+        }),
+        ...(request.toolChoice === undefined ? {} : {
+          tool_choice: typeof request.toolChoice === "string"
+            ? request.toolChoice
+            : { type: "function", function: { name: request.toolChoice.name } },
+        }),
       }),
       ...(request.signal === undefined ? {} : { signal: request.signal }),
     });
@@ -89,6 +104,7 @@ export class OpenAICompatibleChatModel implements ChatModel {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    const openToolIndices = new Set<number>();
     while (true) {
       const chunk = await reader.read();
       buffer += decoder.decode(chunk.value ?? new Uint8Array(), { stream: !chunk.done });
@@ -96,26 +112,17 @@ export class OpenAICompatibleChatModel implements ChatModel {
       buffer = lines.pop() ?? "";
       for (const line of lines) {
         const parsed = parseSseLine(line);
-        if (parsed === SSE_DONE) {
-          yield { type: "done" };
-          return;
-        }
-        if (parsed !== undefined) {
-          yield { type: "text_delta", text: parsed };
-        }
+        for (const part of partsForParsedSse(parsed, openToolIndices)) yield part;
+        if (parsed?.kind === "done") return;
       }
       if (chunk.done) {
         const parsed = parseSseLine(buffer);
-        if (parsed === SSE_DONE) {
-          yield { type: "done" };
-          return;
-        }
-        if (parsed !== undefined) {
-          yield { type: "text_delta", text: parsed };
-        }
+        for (const part of partsForParsedSse(parsed, openToolIndices)) yield part;
+        if (parsed?.kind === "done") return;
         break;
       }
     }
+    for (const index of openToolIndices) yield { type: "tool_call_end", index };
     yield { type: "done" };
   }
 }
@@ -152,16 +159,61 @@ export function createConfiguredChatModel(env: NodeJS.ProcessEnv = process.env):
   };
 }
 
-const SSE_DONE = Symbol("sse_done");
+interface ParsedToolCallDelta {
+  readonly index: number;
+  readonly id?: string;
+  readonly name?: string;
+  readonly arguments?: string;
+}
 
-function parseSseLine(line: string): string | typeof SSE_DONE | undefined {
+interface ParsedSseDelta {
+  readonly kind: "delta";
+  readonly text?: string;
+  readonly toolCalls: readonly ParsedToolCallDelta[];
+  readonly finishReason?: string;
+}
+
+interface ParsedSseDone {
+  readonly kind: "done";
+}
+
+type ParsedSse = ParsedSseDelta | ParsedSseDone | undefined;
+
+function parseSseLine(line: string): ParsedSse {
   const data = line.trim();
   if (!data.startsWith("data:")) return undefined;
   const payload = data.slice(5).trim();
   if (payload.length === 0) return undefined;
-  if (payload === "[DONE]") return SSE_DONE;
+  if (payload === "[DONE]") return { kind: "done" };
   const parsed: unknown = JSON.parse(payload);
-  return extractDeltaText(parsed);
+  return extractDelta(parsed);
+}
+
+function partsForParsedSse(parsed: ParsedSse, openToolIndices: Set<number>): readonly ModelStreamPart[] {
+  if (parsed === undefined) return [];
+  if (parsed.kind === "done") {
+    const parts: ModelStreamPart[] = [...[...openToolIndices].map((index) => ({ type: "tool_call_end", index } as const)), { type: "done" }];
+    openToolIndices.clear();
+    return parts;
+  }
+  const parts: ModelStreamPart[] = [];
+  if (parsed.text !== undefined && parsed.text.length > 0) parts.push({ type: "text_delta", text: parsed.text });
+  for (const toolCall of parsed.toolCalls) {
+    if (!openToolIndices.has(toolCall.index)) {
+      openToolIndices.add(toolCall.index);
+      parts.push({ type: "tool_call_start", index: toolCall.index, ...(toolCall.id === undefined ? {} : { id: toolCall.id }), ...(toolCall.name === undefined ? {} : { name: toolCall.name }) });
+    }
+    if (toolCall.arguments !== undefined && toolCall.arguments.length > 0) {
+      parts.push({ type: "tool_call_delta", index: toolCall.index, arguments: toolCall.arguments });
+    }
+  }
+  if (parsed.finishReason === "tool_calls") {
+    for (const index of openToolIndices) {
+      parts.push({ type: "tool_call_end", index });
+    }
+    openToolIndices.clear();
+  }
+  return parts;
 }
 
 function validateHttpUrl(value: string, name: string): void {
@@ -179,16 +231,53 @@ function publicBaseUrl(value: string): string {
   return `${url.origin}${pathname}`;
 }
 
-function extractDeltaText(value: unknown): string | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
+function extractDelta(value: unknown): ParsedSseDelta {
+  if (typeof value !== "object" || value === null) return { kind: "delta", toolCalls: [] };
   const choices = (value as { choices?: unknown }).choices;
-  if (!Array.isArray(choices) || choices.length === 0) return undefined;
+  if (!Array.isArray(choices) || choices.length === 0) return { kind: "delta", toolCalls: [] };
   const first = choices[0];
-  if (typeof first !== "object" || first === null) return undefined;
+  if (typeof first !== "object" || first === null) return { kind: "delta", toolCalls: [] };
   const delta = (first as { delta?: unknown }).delta;
-  if (typeof delta !== "object" || delta === null) return undefined;
-  const content = (delta as { content?: unknown }).content;
-  return typeof content === "string" ? content : undefined;
+  const finishReason = (first as { finish_reason?: unknown }).finish_reason;
+  const content = typeof delta === "object" && delta !== null ? (delta as { content?: unknown }).content : undefined;
+  const rawToolCalls = typeof delta === "object" && delta !== null ? (delta as { tool_calls?: unknown }).tool_calls : undefined;
+  const toolCalls: ParsedToolCallDelta[] = [];
+  if (Array.isArray(rawToolCalls)) {
+    for (const raw of rawToolCalls) {
+      if (typeof raw !== "object" || raw === null) continue;
+      const index = (raw as { index?: unknown }).index;
+      if (typeof index !== "number" || !Number.isInteger(index) || index < 0) continue;
+      const id = (raw as { id?: unknown }).id;
+      const functionValue = (raw as { function?: unknown }).function;
+      const name = typeof functionValue === "object" && functionValue !== null ? (functionValue as { name?: unknown }).name : undefined;
+      const args = typeof functionValue === "object" && functionValue !== null ? (functionValue as { arguments?: unknown }).arguments : undefined;
+      toolCalls.push({ index, ...(typeof id === "string" ? { id } : {}), ...(typeof name === "string" ? { name } : {}), ...(typeof args === "string" ? { arguments: args } : {}) });
+    }
+  }
+  return {
+    kind: "delta",
+    ...(typeof content === "string" ? { text: content } : {}),
+    toolCalls,
+    ...(typeof finishReason === "string" ? { finishReason } : {}),
+  };
+}
+
+function toWireMessage(message: ChatMessage): unknown {
+  if (message.role === "assistant" && message.toolCalls !== undefined) {
+    return {
+      role: "assistant",
+      content: message.content.length === 0 ? null : message.content,
+      tool_calls: message.toolCalls.map((toolCall: ModelToolCall) => ({
+        id: toolCall.id,
+        type: "function",
+        function: { name: toolCall.name, arguments: toolCall.arguments },
+      })),
+    };
+  }
+  if (message.role === "tool") {
+    return { role: "tool", tool_call_id: message.toolCallId, content: message.content };
+  }
+  return message;
 }
 
 export function userMessage(content: string): ChatMessage {

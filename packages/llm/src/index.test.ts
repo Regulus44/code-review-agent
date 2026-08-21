@@ -52,6 +52,50 @@ describe("EchoChatModel", () => {
     expect(JSON.stringify(requestInit?.body)).not.toContain("sk-test-only");
   });
 
+  it("serializes tool schemas and parses streamed tool calls", async () => {
+    let requestInit: RequestInit | undefined;
+    const modelFetch: typeof fetch = async (_input, init) => {
+      requestInit = init;
+      const frames = [
+        { choices: [{ delta: { tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "read_file", arguments: "{\"path\":\"" } }] } }] },
+        { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "src/main.ts\"}" } }] } }] },
+        { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+      ];
+      return new Response(
+        frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join("") + "data: [DONE]\n\n",
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    };
+    const parts = [];
+    for await (const part of new OpenAICompatibleChatModel({ baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash", fetch: modelFetch }).stream({
+      messages: [{ role: "user", content: "read the file" }],
+      tools: [{ name: "read_file", description: "Read a file", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } }],
+      toolChoice: "auto",
+    })) {
+      parts.push(part);
+    }
+    const request = JSON.parse(String(requestInit?.body)) as { tools?: unknown; tool_choice?: unknown; messages?: unknown[] };
+    expect(request.tools).toEqual([{ type: "function", function: { name: "read_file", description: "Read a file", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } } }]);
+    expect(request.tool_choice).toBe("auto");
+    expect(parts).toEqual([
+      { type: "tool_call_start", index: 0, id: "call_1", name: "read_file" },
+      { type: "tool_call_delta", index: 0, arguments: "{\"path\":\"" },
+      { type: "tool_call_delta", index: 0, arguments: "src/main.ts\"}" },
+      { type: "tool_call_end", index: 0 },
+      { type: "done" },
+    ]);
+  });
+
+  it("rejects malformed provider SSE JSON instead of silently dropping a tool call", async () => {
+    const modelFetch: typeof fetch = async () => new Response("data: {not-json}\n\n", { headers: { "content-type": "text/event-stream" } });
+    const stream = new OpenAICompatibleChatModel({ baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash", fetch: modelFetch }).stream({ messages: [{ role: "user", content: "read" }] });
+    await expect((async () => {
+      for await (const _part of stream) {
+        // Consume the stream to surface the parser error.
+      }
+    })()).rejects.toThrow(SyntaxError);
+  });
+
   it("selects Echo without a key and DeepSeek when auto configuration has a key", () => {
     expect(createConfiguredChatModel({ MODEL_PROVIDER: "auto" }).config).toEqual({ provider: "echo", model: "echo", configured: false });
     expect(createConfiguredChatModel({ MODEL_PROVIDER: "auto", DEEPSEEK_API_KEY: "sk-test-only" }).config).toEqual({ provider: "deepseek", model: DEFAULT_DEEPSEEK_MODEL, baseUrl: "https://api.deepseek.com", configured: true });

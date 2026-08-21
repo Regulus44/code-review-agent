@@ -38,13 +38,21 @@ Phase 1 保留 in-memory store 作为测试实现，SQLite durable EventStore、
 
 Phase 1 不再以 Web Shell 完成为退出条件，改以 [Agentic Coding Core 计划](../phase-plans/phase-1-agentic-coding-core.zh-CN.md) 的 Phase 1A.0–1A.6 门禁为准。下一步先做 contracts → DeepSeek tool-call adapter → Agent Loop → P0 TypeScript 工具池 → permission resume，再完成真实 `read → edit → approve → test` smoke；Terminal、Plan/Todo、AskUser 已提升为 Phase 1A 的 P1，Subagent/A2A 暂不进入核心实现。
 
+### 2026-08-22：Phase 1A.1–1A.3 首批实现
+
+- `packages/contracts` 增加 tool call、tool result、model tool schema、content message 和 step event contract；
+- `packages/llm` 支持发送工具 schema并解析 OpenAI/DeepSeek-compatible `delta.tool_calls` 参数增量；
+- `packages/runtime` 支持多 step model → tool → model、并行工具调用、tool result continuation、max steps 和 malformed tool call；
+- permission ask 会等待用户批准/拒绝后继续同一个 turn；
+- 多轮上下文会从事件重建 assistant tool call 和 tool result；
+- Web SSE 订阅 `step/started` / `step/ended`，并保留既有 tool/permission 展示。
+
 ### 当前未完成
 
-- `ModelRequest.tools` 和 content blocks；
-- DeepSeek/OpenAI-compatible `delta.tool_calls` parser；
-- 多 step Agent Loop 和 tool result continuation；
-- permission pending turn 的暂停/恢复；
-- 真实 API 下的 Coding Agent 垂直验收。
+- 真实 DeepSeek API 下的 `read → edit → approve → test` 垂直验收；
+- 进程重启后的 pending turn continuation；
+- Phase 1A.4 的持久 Terminal、AskUser、Plan/Todo、delete/git read 工具扩展；
+- P1 工具的完整行为 fixture 和 DSH/Claude Code 对照回归。
 
 ## 2026-08-22：真实模型配置接入
 

@@ -170,7 +170,7 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
   }
   if (event.type === "assistant/message") {
     const content = event.payload["content"];
-    if (typeof content === "string") {
+    if (typeof content === "string" && content.length > 0) {
       next = {
         ...next,
         messages: [

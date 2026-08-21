@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import type { ChatModel, ModelRequest, ModelStreamPart, PermissionId, ToolDefinition } from "@code-review-agent/contracts";
 import { InMemoryEventStore } from "@code-review-agent/storage";
+import { ToolRegistry, ToolRuntime } from "@code-review-agent/tools";
 import { AgentHost } from "./index.js";
 
 describe("AgentHost", () => {
@@ -12,6 +14,131 @@ describe("AgentHost", () => {
     expect(events.map((event) => event.type)).toContain("assistant/chunk");
     expect(events.at(-1)?.type).toBe("turn/ended");
     expect((await host.getSession(session.id))?.messages.at(-1)?.content).toBe("Echo: inspect this repository");
+  });
+
+  it("runs a model tool call, executes the tool, and continues with the tool result", async () => {
+    const store = new InMemoryEventStore();
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "read_fixture",
+      description: "Read a deterministic fixture.",
+      inputSchema: { type: "object", additionalProperties: false },
+      executionMode: "parallel",
+      riskLevel: "read",
+      approvalMode: "auto",
+      interruptBehavior: "cancel",
+      execute: async () => ({ ok: true, output: { content: "fixture content" }, modelView: "fixture content" }),
+    });
+    const requests: ModelRequest[] = [];
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        requests.push(request);
+        if (requests.length === 1) {
+          yield { type: "tool_call_start", index: 0, id: "call_fixture", name: "read_fixture" };
+          yield { type: "tool_call_delta", index: 0, arguments: "{}" };
+          yield { type: "tool_call_end", index: 0 };
+        } else {
+          yield { type: "text_delta", text: "The fixture is available." };
+        }
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store, model, toolRuntime: new ToolRuntime({ store, registry }) });
+    const session = await host.createSession("D:/workspace");
+    const turn = await host.sendMessage(session.id, "read the fixture");
+    await host.waitForTurn(turn);
+    const events = await host.events(session.id);
+    expect(requests[0]?.tools?.some((tool) => tool.name === "read_fixture")).toBe(true);
+    expect(requests[1]?.messages.at(-1)).toMatchObject({ role: "tool", toolCallId: "call_fixture", content: "fixture content" });
+    expect(events.filter((event) => event.type === "tool/call")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "tool/result")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "step/started")).toHaveLength(2);
+    expect((await host.getSession(session.id))?.messages.at(-1)?.content).toBe("The fixture is available.");
+    const secondTurn = await host.sendMessage(session.id, "repeat the result");
+    await host.waitForTurn(secondTurn);
+    expect(requests[2]?.messages.some((message) => message.role === "assistant" && message.toolCalls?.some((toolCall) => toolCall.id === "call_fixture"))).toBe(true);
+    expect(requests[2]?.messages.some((message) => message.role === "tool" && message.toolCallId === "call_fixture")).toBe(true);
+  });
+
+  it("pauses a turn for permission and resumes the same turn after approval", async () => {
+    const store = new InMemoryEventStore();
+    const registry = new ToolRegistry();
+    const writeTool: ToolDefinition = {
+      name: "write_fixture",
+      description: "Write a deterministic fixture.",
+      inputSchema: { type: "object", additionalProperties: false },
+      executionMode: "exclusive",
+      riskLevel: "write",
+      approvalMode: "ask",
+      interruptBehavior: "block",
+      execute: async () => ({ ok: true, output: { written: true }, modelView: { written: true } }),
+    };
+    registry.register(writeTool);
+    const requests: ModelRequest[] = [];
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        requests.push(request);
+        if (requests.length === 1) {
+          yield { type: "tool_call_start", index: 0, id: "call_write", name: "write_fixture" };
+          yield { type: "tool_call_delta", index: 0, arguments: "{}" };
+        } else {
+          yield { type: "text_delta", text: "Write approved." };
+        }
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store, model, toolRuntime: new ToolRuntime({ store, registry }) });
+    const session = await host.createSession("D:/workspace");
+    const turn = await host.sendMessage(session.id, "write the fixture");
+    let permissionId: PermissionId | undefined;
+    for (let attempt = 0; attempt < 100 && permissionId === undefined; attempt += 1) {
+      const projection = await host.getSession(session.id);
+      permissionId = projection?.permissions.find((permission) => permission.status === "pending")?.id;
+      if (permissionId === undefined) await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    }
+    expect(permissionId).toBeDefined();
+    const approved = await host.resolvePermission(session.id, permissionId!, "approved");
+    expect(approved.status).toBe("completed");
+    await host.waitForTurn(turn);
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.messages.at(-1)?.role).toBe("tool");
+    expect((await host.getSession(session.id))?.messages.at(-1)?.content).toBe("Write approved.");
+  });
+
+  it("cancels a permission-paused turn without continuing the model", async () => {
+    const store = new InMemoryEventStore();
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "write_fixture",
+      description: "Write a deterministic fixture.",
+      inputSchema: { type: "object", additionalProperties: false },
+      executionMode: "exclusive",
+      riskLevel: "write",
+      approvalMode: "ask",
+      interruptBehavior: "block",
+      execute: async () => ({ ok: true, output: { written: true } }),
+    });
+    const requests: ModelRequest[] = [];
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        requests.push(request);
+        yield { type: "tool_call_start", index: 0, id: "call_cancel", name: "write_fixture" };
+        yield { type: "tool_call_delta", index: 0, arguments: "{}" };
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store, model, toolRuntime: new ToolRuntime({ store, registry }) });
+    const session = await host.createSession("D:/workspace");
+    const turn = await host.sendMessage(session.id, "cancel the write");
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const projection = await host.getSession(session.id);
+      if (projection?.permissions.some((permission) => permission.status === "pending")) break;
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    }
+    expect(await host.cancelTurn(session.id, turn)).toBe(true);
+    await host.waitForTurn(turn);
+    expect(requests).toHaveLength(1);
+    expect((await host.events(session.id)).at(-1)?.payload["status"]).toBe("stopped");
   });
 
   it("cancels a running turn", async () => {

@@ -28,6 +28,8 @@ session/updated
 user/message
 turn/queued
 turn/started
+step/started
+step/ended
 turn/ended
 assistant/chunk
 assistant/message
@@ -47,7 +49,7 @@ mcp/server
 mcp/tool
 ```
 
-工具、权限和 queue 事件保留在公共契约中，分别由后续 Phase 实现；Phase 2 当前落地的是 Session/Turn/Message/Task projection 所需的事件子集。
+`step/started` / `step/ended` 标记一个 turn 内的模型请求和工具执行边界。`assistant/message` 的 payload 可以包含 `toolCalls`，每个元素至少包含 `id`、`name` 和 JSON `arguments`；后续 `tool/result` 通过 `toolCallId` 关联到该调用。工具、权限和 queue 事件保留在公共契约中，分别由后续 Phase 实现；Phase 1A 开始将 tool-calling 事件正式接入模型上下文和 SSE 回放。
 
 MCP 生命周期事件只携带 `serverName`、状态、动作和脱敏错误；env/header/token 等配置秘密不得进入 payload。MCP 工具调用本身仍使用公共 `tool/*` 和 `permission/*` 事件。
 

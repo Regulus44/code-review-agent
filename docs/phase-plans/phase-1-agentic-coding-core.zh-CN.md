@@ -170,24 +170,24 @@ Phase 1A 是当前优先级最高的执行单元，必须同时交付 Agent Loop
 
 ### 1A.1：Tool-calling Contract
 
-- [ ] 增加 tool call/content block 类型和事件 payload；
-- [ ] 增加 LLM stream part 和 `ModelRequest.tools`；
-- [ ] 增加单工具、多工具、混合文本、参数增量、错误和 tool result continuation 合同测试。
+- [x] 增加 tool call/content block 类型和事件 payload；
+- [x] 增加 LLM stream part 和 `ModelRequest.tools`；
+- [x] 增加单工具、多工具、混合文本、参数增量、错误和 tool result continuation 合同测试。
 
 ### 1A.2：DeepSeek/OpenAI-compatible Adapter
 
-- [ ] 请求中发送当前启用的 TypeScript 工具 schema 和 tool choice；
-- [ ] 解析 `delta.tool_calls` 的 index、id、function name 和 arguments 增量；
-- [ ] fake fetch 覆盖文本、单工具、多工具、混合流和 malformed JSON；
+- [x] 请求中发送当前启用的 TypeScript 工具 schema 和 tool choice；
+- [x] 解析 `delta.tool_calls` 的 index、id、function name 和 arguments 增量；
+- [x] fake fetch 覆盖文本、单工具、多工具、混合流和 malformed JSON；
 - [ ] 真实 API 只做最小 smoke，不在自动测试中依赖网络或真实凭据。
 
 ### 1A.3：Agent Loop
 
-- [ ] 把 `AgentHost.runTurn` 从单次文本流改为 model → tools → model；
-- [ ] tool result 作为 `role=tool` 或等价 content block 回到下一次 request；
-- [ ] 增加 step lifecycle、max steps、unknown tool、duplicate call 和 malformed call 处理；
-- [ ] 同一步内按 `parallel`/`exclusive` 调度，结果按模型调用顺序回传；
-- [ ] permission pending 不能结束 turn，批准后必须恢复同一个 turn。
+- [x] 把 `AgentHost.runTurn` 从单次文本流改为 model → tools → model；
+- [x] tool result 作为 `role=tool` 或等价 content block 回到下一次 request；
+- [x] 增加 step lifecycle、max steps、unknown tool、duplicate call 和 malformed call 处理；
+- [x] 同一步内按 `parallel`/`exclusive` 调度，结果按模型调用顺序回传；
+- [x] permission pending 不能结束 turn，批准后必须恢复同一个 turn。
 
 ### 1A.4：内置 TypeScript 工具池
 

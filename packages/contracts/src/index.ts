@@ -18,6 +18,8 @@ export type AgentEventType =
   | "user/message"
   | "turn/queued"
   | "turn/started"
+  | "step/started"
+  | "step/ended"
   | "turn/ended"
   | "assistant/chunk"
   | "assistant/message"
@@ -237,18 +239,37 @@ export interface SendMessageInput {
   readonly content: string;
 }
 
-export interface ChatMessage {
-  readonly role: "system" | "user" | "assistant";
-  readonly content: string;
+export interface ModelToolCall {
+  readonly id: string;
+  readonly name: string;
+  /** JSON arguments as emitted by the provider. */
+  readonly arguments: string;
 }
+
+export interface ModelToolDefinition {
+  readonly name: string;
+  readonly description: string;
+  readonly parameters: JsonSchema;
+}
+
+export type ChatMessage =
+  | { readonly role: "system" | "user"; readonly content: string }
+  | { readonly role: "assistant"; readonly content: string; readonly toolCalls?: readonly ModelToolCall[] }
+  | { readonly role: "tool"; readonly content: string; readonly toolCallId: string };
 
 export interface ModelRequest {
   readonly messages: readonly ChatMessage[];
+  readonly tools?: readonly ModelToolDefinition[];
+  readonly toolChoice?: "auto" | "none" | "required" | { readonly type: "function"; readonly name: string };
   readonly signal?: AbortSignal;
 }
 
 export type ModelStreamPart =
   | { readonly type: "text_delta"; readonly text: string }
+  | { readonly type: "tool_call_start"; readonly index: number; readonly id?: string; readonly name?: string }
+  | { readonly type: "tool_call_delta"; readonly index: number; readonly arguments: string }
+  | { readonly type: "tool_call_end"; readonly index: number }
+  | { readonly type: "error"; readonly code: string; readonly message: string }
   | { readonly type: "done" };
 
 export interface ChatModel {

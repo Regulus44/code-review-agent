@@ -18,7 +18,7 @@
 
 ## Phase 1 真实模型增强（2026-08-22）
 
-Phase 1 的 provider-neutral adapter 现在已接入 API CLI 启动路径：通过根目录本地 `.env` 配置 `DEEPSEEK_API_KEY`，`MODEL_PROVIDER=auto` 会选择 DeepSeek；没有 Key 时保留 Echo fallback。默认模型为 `deepseek-v4-flash`，并可在 API/Web 中切换到 `deepseek-v4-pro` 或 `deepseek-v4-flash-vision-exp`。`.env`、`.env.*`（`.env.example` 除外）均被 Git 忽略，API health、事件和 Web 响应只展示不含凭据的 provider/model/configured 信息。fake-fetch API/LLM 测试已证明真实流式路径和 Authorization header 行为；尚未声称完成模型 tool-calling loop。
+Phase 1 的 provider-neutral adapter 现在已接入 API CLI 启动路径：通过根目录本地 `.env` 配置 `DEEPSEEK_API_KEY`，`MODEL_PROVIDER=auto` 会选择 DeepSeek；没有 Key 时保留 Echo fallback。默认模型为 `deepseek-v4-flash`，并可在 API/Web 中切换到 `deepseek-v4-pro` 或 `deepseek-v4-flash-vision-exp`。`.env`、`.env.*`（`.env.example` 除外）均被 Git 忽略，API health、事件和 Web 响应只展示不含凭据的 provider/model/configured 信息。fake-fetch API/LLM 测试已证明真实流式路径和 Authorization header 行为；Phase 1A.1–1A.3 已完成第一批 tool-calling loop，但真实 DeepSeek Coding smoke 尚未完成。
 
 ## Phase 1 状态校正（2026-08-22）
 
@@ -26,12 +26,25 @@ Phase 1 的 provider-neutral adapter 现在已接入 API CLI 启动路径：通�
 
 - `packages/tools` 已有 9 个内置工具，`ToolRuntime` 已有 schema、workspace、权限、取消、超时、输出预算和审计能力；
 - `packages/mcp-client` 已能发现并桥接外部工具；
-- 但 `packages/contracts` 的 `ModelRequest` 尚未携带工具 schema，`packages/llm` 尚未解析 `delta.tool_calls`，`packages/runtime` 尚未执行 model → tool → model 循环；
+- 第一批 `packages/contracts`、`packages/llm` 和 `packages/runtime` 已携带工具 schema、解析 `delta.tool_calls` 并执行 model → tool → model 循环；进程重启后的 pending turn continuation 仍未完成；
 - 当前 `packages/tools/src/builtin.ts` 的 9 个工具已经是 TypeScript 初版；旧 `src/code_review_agent/tools/` 仍是 Python legacy/reference，不进入新 Runtime 依赖图；
 - 因此当前阶段目标改为 `Phase 1A：Agentic Core + TypeScript Tool Pool`，先完成工具调用层，再补齐 Terminal、Plan/Todo、AskUser 等核心 Coding Agent 工具和真实垂直场景；
 - Phase 5 Subagent、Phase 6 A2A 和 Phase 8 高级能力的核心实现必须等待本门禁通过。
 
 执行计划：[phase-1-agentic-coding-core.zh-CN.md](phase-plans/phase-1-agentic-coding-core.zh-CN.md)。
+
+## Phase 1A 实现进展（2026-08-22）
+
+本次 checkpoint 已完成 Phase 1A.1–1A.3 的第一批实现：
+
+- `packages/contracts` 增加 provider-neutral tool call、tool result、tool schema、step event 和 content message 类型；
+- `packages/llm` 请求会发送工具 schema，并解析 OpenAI/DeepSeek-compatible `delta.tool_calls`、参数增量和结束事件；
+- `packages/runtime` 已能执行多 step model → tool → model 循环，工具结果会作为下一次模型上下文；
+- permission ask 会暂停当前 turn，批准/拒绝后继续同一个 turn；
+- 多工具上下文、tool-call replay 基础和 API/Web SSE step 事件订阅已补齐；
+- 新增 LLM、Runtime、多 step、权限恢复和历史 tool context 测试。
+
+尚未完成：真实 DeepSeek `read → edit → approve → test` smoke、进程重启后的 pending turn continuation，以及 Phase 1A.4 的 Terminal、AskUser、Plan/Todo、delete/git read 工具扩展。
 
 ## Phase 4 验收证据
 

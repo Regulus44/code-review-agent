@@ -2,6 +2,18 @@
 
 内置工具、MCP 工具和未来的 Subagent 工具都进入同一个 ToolRegistry。Agent Loop 不区分工具来源，只依赖统一的定义、权限和结果类型。
 
+模型侧的工具描述由 `ToolDefinition` 映射为 provider-neutral 的 `ModelToolDefinition`：
+
+```ts
+type ModelToolDefinition = {
+  name: string;
+  description: string;
+  parameters: JsonSchema;
+};
+```
+
+每次模型请求都可以携带当前经过权限过滤的工具列表。模型返回的 tool call 先在模型适配层解析为稳定的 `id`、`name` 和 JSON `arguments`，再交给 `ToolRuntime`；执行后的 `ToolResult.modelView` 以 `role=tool` 或等价 content block 进入下一次模型请求。模型适配器不得直接执行工具，也不得绕过 `ToolRegistry`。
+
 ## ToolDefinition
 
 ```ts
