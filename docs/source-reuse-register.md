@@ -208,3 +208,19 @@ ID:
 范围：多文件 unified patch 的 hunk 解析、上下文/删除校验、stale/conflict 停止、变更前后 diff 展示、apply/reject/rollback 语义和结构化错误。
 
 适配方式：使用本项目自有 parser、WorkspaceResolver、ToolRuntime、审批和 `patch/*` 事件；不复用 DSH runtime、Cordis 或外部 diff 包。新增测试覆盖 create/update/delete、多文件、stale、冲突、审批和回滚。
+
+### DSH-010
+
+来源仓库：`D:/Develop/deepseek-harness-fork`
+
+来源路径：`packages/mcp/mcp-client/src/index.ts`、`connection.ts`、`tools.ts`、`transport.ts`。
+
+复用方式：`behavior-reference`。
+
+许可证/来源证据：`D:/Develop/deepseek-harness-fork/LICENSE` 为 MIT；本批没有复制 DSH 实现。
+
+本项目路径：`packages/mcp-client/src/{config,manager,bridge,transport}.ts`、`packages/tools/src/registry.ts`。
+
+范围：server namespace reservation、per-generation client/transport、generation guard、串行 discovery、registry atomic swap、重连预算/稳定窗口、stdio argv/env 清理和 close 顺序。
+
+改写部分：配置事实来源改为本项目 SQLite；credential 只使用 opaque reference；scope visibility、ToolRuntime、EventStore、resource/prompt trust boundary 和 Web projection 使用本项目 contract。

@@ -23,6 +23,21 @@ export class ToolRegistry {
     for (const definition of definitions) this.register(definition);
   }
 
+  /** Replaces one owned generation without exposing a half-registered registry. */
+  replace(ownedNames: readonly string[], definitions: readonly ToolDefinition[]): void {
+    const owned = new Set(ownedNames);
+    const nextNames = new Set<string>();
+    for (const definition of definitions) {
+      if (definition.name.trim() === "") throw new Error("Tool name cannot be empty");
+      if (nextNames.has(definition.name)) throw new Error(`Tool already registered: ${definition.name}`);
+      if (this.definitions.has(definition.name) && !owned.has(definition.name)) throw new Error(`Tool already registered: ${definition.name}`);
+      nextNames.add(definition.name);
+    }
+    for (const name of owned) this.definitions.delete(name);
+    for (const definition of definitions) this.definitions.set(definition.name, definition);
+    for (const name of owned) this.disabled.delete(name);
+  }
+
   unregister(name: string): boolean {
     this.disabled.delete(name);
     return this.definitions.delete(name);

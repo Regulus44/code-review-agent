@@ -111,4 +111,29 @@ describe("InMemoryEventStore", () => {
     expect((await store.list(sessionId)).map((event) => event.sequence)).toEqual(Array.from({ length: 21 }, (_, index) => index + 1));
     store.close();
   });
+
+  it("persists scrubbed scoped MCP configuration and credential references", () => {
+    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-mcp-config-"));
+    const databasePath = join(directory, "agent.sqlite");
+    const first = new SqliteEventStore({ databasePath });
+    const stored = first.upsertMcpConfig({
+      name: "review-server",
+      scope: "project",
+      ownerId: "owner-1",
+      workspaceRoot: "D:/workspace",
+      enabled: true,
+      revision: 7,
+      credentialRef: { id: "cred-1", kind: "oauth", label: "Review OAuth" },
+      config: { transport: "streamable-http", url: "https://example.test/mcp", headers: { "x-safe": "ok" } },
+      createdAt: "2026-08-23T00:00:00.000Z",
+      updatedAt: "2026-08-23T00:00:01.000Z",
+    });
+    expect(stored.revision).toBe(7);
+    expect(first.listMcpConfigs()).toEqual([stored]);
+    first.close();
+    const second = new SqliteEventStore({ databasePath });
+    expect(second.listMcpConfigs()).toEqual([stored]);
+    second.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
 });

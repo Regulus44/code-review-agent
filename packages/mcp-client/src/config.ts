@@ -1,6 +1,7 @@
-import type { ToolRiskLevel } from "@code-review-agent/contracts";
+import type { McpConfigBackend, McpConfigRecord, McpCredentialReference, ToolApprovalMode, ToolRiskLevel } from "@code-review-agent/contracts";
 
-export type McpServerScope = "user" | "project" | "session";
+export type { McpServerScope } from "@code-review-agent/contracts";
+import type { McpServerScope } from "@code-review-agent/contracts";
 export type McpTransportKind = "stdio" | "sse" | "streamable-http";
 export type McpServerStatus = "pending" | "connected" | "failed" | "needs_auth" | "disabled" | "stopped";
 
@@ -11,9 +12,30 @@ export interface McpReconnectPolicy {
   readonly maxAttempts?: number;
 }
 
+export interface McpToolPolicy {
+  readonly enabled?: boolean;
+  readonly riskLevel?: ToolRiskLevel;
+  readonly approvalMode?: ToolApprovalMode;
+}
+
+export interface McpToolCatalogEntry {
+  readonly name: string;
+  readonly rawName: string;
+  readonly generation: number;
+  readonly riskLevel: ToolRiskLevel;
+  readonly approvalMode: ToolApprovalMode;
+  readonly enabled: boolean;
+  readonly disabledReason?: string;
+  readonly schemaWarning?: string;
+}
+
 export interface McpServerConfig {
   readonly name: string;
   readonly scope: McpServerScope;
+  readonly ownerId?: string;
+  readonly workspaceRoot?: string;
+  readonly sessionId?: string;
+  readonly revision?: number;
   readonly transport: McpTransportKind;
   readonly enabled?: boolean;
   readonly command?: string;
@@ -22,6 +44,9 @@ export interface McpServerConfig {
   readonly env?: Readonly<Record<string, string>>;
   readonly url?: string;
   readonly headers?: Readonly<Record<string, string>>;
+  readonly credentialRef?: McpCredentialReference;
+  readonly toolAllowlist?: readonly string[];
+  readonly toolPolicies?: Readonly<Record<string, McpToolPolicy>>;
   /** Conservative default is network; callers may explicitly choose read/write/execute. */
   readonly riskLevel?: ToolRiskLevel;
   readonly toolCallTimeoutMs?: number;
@@ -42,6 +67,10 @@ export interface McpServerRecord {
   readonly discoveredAt?: string;
   readonly lastError?: string;
   readonly reconnectAttempt: number;
+  readonly revision: number;
+  readonly generation: number;
+  readonly catalog: readonly McpToolCatalogEntry[];
+  readonly retry?: { readonly nextAttemptAt?: string; readonly maxAttempts: number };
 }
 
 const SECRET_KEY = /(token|secret|password|passwd|api[-_]?key|authorization|cookie|credential)/iu;
@@ -59,25 +88,30 @@ function sanitizeMap(value: Readonly<Record<string, string>> | undefined): Recor
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, SECRET_KEY.test(key) ? "[redacted]" : item]));
 }
 
-/** In-memory config registry. It never exposes credential values through public views or event payloads. */
+/** Config registry with an optional durable backend. Secrets stay process-local and public views are scrubbed. */
 export class McpConfigStore {
   private readonly configs = new Map<string, McpServerConfig>();
 
-  constructor(initial: readonly McpServerConfig[] = []) {
+  constructor(initial: readonly McpServerConfig[] = [], private readonly backend?: McpConfigBackend) {
+    const durable = backend?.listMcpConfigs() ?? [];
+    for (const record of durable) this.configs.set(record.name, fromRecord(record));
     for (const config of initial) this.upsert(config);
   }
 
   upsert(config: McpServerConfig): McpServerConfig {
     validateName(config.name);
     validateConfig(config);
+    const existing = this.configs.get(config.name);
     const normalized: McpServerConfig = {
       ...config,
       enabled: config.enabled ?? true,
+      revision: config.revision ?? (existing !== undefined && sameConfig(existing, config) ? existing.revision ?? 1 : (existing?.revision ?? 0) + 1),
       ...(config.args === undefined ? {} : { args: [...config.args] }),
       ...(config.env === undefined ? {} : { env: cloneMap(config.env) as Record<string, string> }),
       ...(config.headers === undefined ? {} : { headers: cloneMap(config.headers) as Record<string, string> }),
     };
     this.configs.set(config.name, normalized);
+    this.persist(normalized);
     return normalized;
   }
 
@@ -92,14 +126,18 @@ export class McpConfigStore {
   }
 
   remove(name: string): boolean {
-    return this.configs.delete(name);
+    const removed = this.configs.delete(name);
+    if (removed) this.backend?.deleteMcpConfig(name);
+    return removed;
   }
 
   setEnabled(name: string, enabled: boolean): McpServerConfig {
     const existing = this.configs.get(name);
     if (existing === undefined) throw new Error(`Unknown MCP server: ${name}`);
-    const next = { ...existing, enabled };
+    const revision = existing.revision === undefined ? 1 : existing.enabled === enabled ? existing.revision : existing.revision + 1;
+    const next = { ...existing, enabled, revision };
     this.configs.set(name, next);
+    this.persist(next);
     return next;
   }
 
@@ -111,10 +149,66 @@ export class McpConfigStore {
       ...(headers === undefined ? {} : { headers: sanitizeMap(headers) as Record<string, string> }),
     };
   }
+
+  private persist(config: McpServerConfig): void {
+    if (this.backend === undefined) return;
+    const timestamp = new Date().toISOString();
+    const record: McpConfigRecord = {
+      name: config.name,
+      scope: config.scope,
+      ...(config.ownerId === undefined ? {} : { ownerId: config.ownerId }),
+      ...(config.workspaceRoot === undefined ? {} : { workspaceRoot: config.workspaceRoot }),
+      ...(config.sessionId === undefined ? {} : { sessionId: config.sessionId }),
+      enabled: config.enabled !== false,
+      revision: config.revision ?? 1,
+      ...(config.credentialRef === undefined ? {} : { credentialRef: config.credentialRef }),
+      config: scrubPersistedConfig(config),
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    this.backend.upsertMcpConfig(record);
+  }
 }
 
 export function redactConfig(config: McpServerConfig): McpServerPublicConfig {
   return new McpConfigStore().publicView(config);
+}
+
+function scrubPersistedConfig(config: McpServerConfig): Record<string, unknown> {
+  const scrubMap = (value: Readonly<Record<string, string>> | undefined): Record<string, string> | undefined => {
+    if (value === undefined) return undefined;
+    return Object.fromEntries(Object.entries(value).filter(([key]) => !SECRET_KEY.test(key)));
+  };
+  return {
+    ...config,
+    ...(scrubMap(config.env) === undefined ? {} : { env: scrubMap(config.env) }),
+    ...(scrubMap(config.headers) === undefined ? {} : { headers: scrubMap(config.headers) }),
+  };
+}
+
+function fromRecord(record: McpConfigRecord): McpServerConfig {
+  const config = { ...record.config, name: record.name, scope: record.scope, enabled: record.enabled, revision: record.revision } as unknown as McpServerConfig;
+  return {
+    ...config,
+    ...(record.ownerId === undefined ? {} : { ownerId: record.ownerId }),
+    ...(record.workspaceRoot === undefined ? {} : { workspaceRoot: record.workspaceRoot }),
+    ...(record.sessionId === undefined ? {} : { sessionId: record.sessionId }),
+    ...(record.credentialRef === undefined ? {} : { credentialRef: record.credentialRef }),
+  };
+}
+
+function sameConfig(left: McpServerConfig, right: McpServerConfig): boolean {
+  const strip = (value: McpServerConfig): Record<string, unknown> => {
+    const { revision: _revision, enabled: _enabled, ...rest } = value;
+    return rest as Record<string, unknown>;
+  };
+  return JSON.stringify(stable(strip(left))) === JSON.stringify(stable(strip(right))) && (left.enabled !== false) === (right.enabled !== false);
+}
+
+function stable(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stable);
+  if (typeof value !== "object" || value === null) return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, stable(item)]));
 }
 
 function validateConfig(config: McpServerConfig): void {

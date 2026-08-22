@@ -73,6 +73,39 @@ describe("Phase 2 API", () => {
     }
   });
 
+  it("persists scoped MCP settings and exposes catalog diagnostics without secrets", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-api-mcp-"));
+    const databasePath = join(directory, "agent.sqlite");
+    let owned: Server | undefined;
+    try {
+      owned = createApiServer({ databasePath });
+      await new Promise<void>((resolve) => owned!.listen(0, "127.0.0.1", resolve));
+      const address = owned.address();
+      if (address === null || typeof address === "string") throw new Error("MCP API did not bind");
+      const url = `http://127.0.0.1:${address.port}`;
+      const created = await fetch(`${url}/v1/mcp/servers`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "api-durable", scope: "project", workspaceRoot: "D:/workspace", transport: "stdio", command: "fixture", enabled: false, start: false, env: { AUTH_TOKEN: "must-not-leak", SAFE_VALUE: "ok" }, credentialRef: { id: "cred-api", kind: "oauth" } }) });
+      expect(created.status).toBe(201);
+      const body = await created.json() as { revision: number; config: { env?: Record<string, string>; credentialRef?: { id: string } } };
+      expect(body.revision).toBe(1);
+      expect(body.config.env?.AUTH_TOKEN).toBe("[redacted]");
+      expect(body.config.credentialRef?.id).toBe("cred-api");
+      await new Promise<void>((resolve, reject) => owned!.close((error) => error ? reject(error) : resolve()));
+      owned = undefined;
+
+      const reopened = createApiServer({ databasePath });
+      await new Promise<void>((resolve) => reopened.listen(0, "127.0.0.1", resolve));
+      const reopenedAddress = reopened.address();
+      if (reopenedAddress === null || typeof reopenedAddress === "string") throw new Error("reopened MCP API did not bind");
+      const listed = await (await fetch(`http://127.0.0.1:${reopenedAddress.port}/v1/mcp/servers`)).json() as { servers: { config: { credentialRef?: { id: string }; env?: Record<string, string> }; revision: number }[] };
+      expect(listed.servers[0]).toMatchObject({ revision: 1, config: { credentialRef: { id: "cred-api" } } });
+      expect(listed.servers[0]?.config.env?.AUTH_TOKEN).toBeUndefined();
+      await new Promise<void>((resolve, reject) => reopened.close((error) => error ? reject(error) : resolve()));
+    } finally {
+      if (owned?.listening) await new Promise<void>((resolve) => owned!.close(() => resolve()));
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("creates, switches, archives, and restores a session work mode", async () => {
     const created = await fetch(`${baseUrl}/v1/sessions`, {
       method: "POST",

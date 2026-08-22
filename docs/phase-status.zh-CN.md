@@ -12,6 +12,7 @@
 | Phase 3：工具运行时与权限 | completed | `e1d3172`（替代 `5003dbd`）；工具禁用、显式覆盖、进程树终止、audit/modelView、权限过期/取消/重启恢复和 Web smoke 通过 |
 | Phase 3B：Coding Agent 工具池与工具 Prompt 强化 | completed（2026-08-22） | 3B.0–3B.5、patch/diff、LSP 生命周期/恢复、job spill/恢复和 Web presentation 已闭合；隔离本地长任务与真实 DeepSeek long-task smoke 通过。普通基线测试未重复执行 |
 | Phase 4：MCP Client | completed | `5477f16`；官方 SDK stdio/SSE/Streamable HTTP、discovery、ToolRegistry bridge、权限/取消/重连、API/Web MCP 状态和 fixture 验证通过 |
+| Phase 4B：MCP 加固 | completed（2026-08-23） | 本 checkpoint；4B.0–4B.6、focused tests、API restart persistence 和 MCP browser smoke 通过；普通 baseline 未重复执行 |
 | Phase 5：内部 Subagent / 多 Agent | pending | 等 Phase 4 MCP 和 Task contract 稳定 |
 | Phase 6：A2A | pending | 等 Phase 5 parent/child lifecycle 稳定 |
 | Phase 7：DSH Web 前端收敛 | in_progress | DSH 三栏 Web 垂直切片 + Workspace Picker + Workspace→Session 树 + Session mode/archive/delete；类型检查、API 测试、浏览器交互和真实 DeepSeek 只读工具 smoke 通过 |
@@ -28,6 +29,19 @@ Phase 4B MCP 加固
 ```
 
 计划明确了 DSH R0/R1/R2 参考等级。下一步先完成 MCP contract audit、持久化 scope/credential 设计、连接 generation fixture 和 ADR；A2A HTTP endpoint 等内部 Task/Subagent contract 稳定后再实现。
+
+## Phase 4B 加固进展（2026-08-23）
+
+已完成 4B.0–4B.5 的实现切片：
+
+- 新增 [MCP 4B 契约审计](mcp-4b-contract-audit.zh-CN.md)，冻结 DSH R0 对照、scope visibility、credential reference、generation 和 hostile fixture 矩阵；
+- SQLite schema v2 增加 durable MCP config、scope/binding、enabled、revision、credential reference 和 scrubbed config；API 启动时自动恢复 enabled config；
+- manager 增加 per-server generation guard、list-changed debounce/serialized sync、ToolRegistry atomic replace、稳定窗口 retry diagnostics 和 scoped event projection；
+- MCP schema 保留组合字段，public namespace 使用 SHA-256 identity；server/tool policy 支持 allowlist、risk、approval 和 catalog disabled reason；
+- resource/prompt adapter 增加 timeout/cancel、bounded modelView、untrusted trust marker 和 `mcp/resource`/`mcp/prompt` 脱敏事件；
+- Web MCP panel 展示 scope、revision、generation、auth、retry 和 catalog 统计。
+
+最终验证：`pnpm typecheck`、`packages/storage` 9 项测试、`packages/mcp-client` 9 项测试、`apps/api` 14 项测试、`git diff --check` 和 MCP browser smoke 通过；普通 workspace baseline 未重复执行。独立 checkpoint 提交后才开放 Phase 5。
 
 ## Phase 7 Web Coding 工作模式修复（2026-08-22）
 

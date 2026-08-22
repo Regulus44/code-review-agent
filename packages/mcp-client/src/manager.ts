@@ -1,18 +1,20 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
-import type { SessionEventStore } from "@code-review-agent/contracts";
+import type { McpConfigBackend, SessionEventStore } from "@code-review-agent/contracts";
 import { ToolRegistry } from "@code-review-agent/tools";
-import { McpConfigStore, type McpServerConfig, type McpServerRecord, type McpServerStatus } from "./config.js";
-import { createMcpToolRegistrations, registerMcpTools, unregisterMcpTools } from "./bridge.js";
+import { McpConfigStore, type McpServerConfig, type McpServerRecord, type McpServerStatus, type McpToolCatalogEntry } from "./config.js";
+import { createMcpToolRegistrations, replaceMcpTools, unregisterMcpTools } from "./bridge.js";
 import { discover, type McpDiscoverySnapshot } from "./discovery.js";
 import { McpPromptAdapter, McpResourceAdapter } from "./adapters.js";
-import { createMcpTransport, type McpTransportFactory } from "./transport.js";
+import { createMcpTransport, type McpCredentialResolver, type McpTransportFactory } from "./transport.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
 export interface McpConnectionManagerOptions {
   readonly registry: ToolRegistry;
   readonly store?: SessionEventStore;
   readonly configStore?: McpConfigStore;
+  readonly configBackend?: McpConfigBackend;
+  readonly credentialResolver?: McpCredentialResolver;
   readonly transportFactory?: McpTransportFactory;
   readonly clientName?: string;
   readonly clientVersion?: string;
@@ -31,6 +33,11 @@ interface RuntimeState {
   reconnectTimer: NodeJS.Timeout | undefined;
   generation: number;
   intentionalClose: boolean;
+  catalog: McpToolCatalogEntry[];
+  syncChain: Promise<void>;
+  listChangedTimer: NodeJS.Timeout | undefined;
+  nextRetryAt: string | undefined;
+  connectedAt: number | undefined;
 }
 
 const DEFAULT_RECONNECT = Object.freeze({ enabled: true, initialDelayMs: 500, maxDelayMs: 30_000, maxAttempts: 10 });
@@ -43,9 +50,11 @@ export class McpConnectionManager {
   private readonly clientName: string;
   private readonly clientVersion: string;
   private closed = false;
+  private readonly listChangedDebounceMs = 50;
+  private readonly stableWindowMs = 5_000;
 
   constructor(private readonly options: McpConnectionManagerOptions) {
-    this.configs = options.configStore ?? new McpConfigStore();
+    this.configs = options.configStore ?? new McpConfigStore([], options.configBackend);
     this.transportFactory = options.transportFactory ?? createMcpTransport;
     this.clientName = options.clientName ?? "code-review-agent";
     this.clientVersion = options.clientVersion ?? "0.2.0-dev.1";
@@ -65,14 +74,18 @@ export class McpConnectionManager {
     return this.states.get(name)?.discovery;
   }
 
-  async readResource(name: string, uri: string): Promise<Awaited<ReturnType<Client["readResource"]>>> {
+  async readResource(name: string, uri: string, signal?: AbortSignal): Promise<Awaited<ReturnType<Client["readResource"]>>> {
     const client = this.requireClient(name);
-    return new McpResourceAdapter(client).read(uri, this.configs.get(name)?.toolCallTimeoutMs ?? 120_000);
+    const result = await new McpResourceAdapter(client).read(uri, this.configs.get(name)?.toolCallTimeoutMs ?? 120_000, signal);
+    await this.emit("mcp/resource", { serverName: name, action: "read", uri, bytes: result.usage.bytes, truncated: result.usage.truncated });
+    return result;
   }
 
-  async getPrompt(name: string, promptName: string, args?: Readonly<Record<string, string>>): Promise<Awaited<ReturnType<Client["getPrompt"]>>> {
+  async getPrompt(name: string, promptName: string, args?: Readonly<Record<string, string>>, signal?: AbortSignal): Promise<Awaited<ReturnType<Client["getPrompt"]>>> {
     const client = this.requireClient(name);
-    return new McpPromptAdapter(client).get(promptName, args, this.configs.get(name)?.toolCallTimeoutMs ?? 120_000);
+    const result = await new McpPromptAdapter(client).get(promptName, args, this.configs.get(name)?.toolCallTimeoutMs ?? 120_000, signal);
+    await this.emit("mcp/prompt", { serverName: name, action: "get", promptName, bytes: result.usage.bytes, truncated: result.usage.truncated, trust: result.trust });
+    return result;
   }
 
   async add(config: McpServerConfig, start = true): Promise<McpServerRecord> {
@@ -177,6 +190,11 @@ export class McpConnectionManager {
       reconnectTimer: undefined,
       generation: 0,
       intentionalClose: false,
+      catalog: [],
+      syncChain: Promise.resolve(),
+      listChangedTimer: undefined,
+      nextRetryAt: undefined,
+      connectedAt: undefined,
     };
     this.states.set(config.name, state);
     return state;
@@ -190,7 +208,10 @@ export class McpConnectionManager {
 
   private async connectGeneration(state: RuntimeState, config: McpServerConfig, generation: number): Promise<void> {
     const client = new Client({ name: this.clientName, version: this.clientVersion }, { capabilities: {} });
-    const transport = await this.transportFactory(config);
+    const transportConfig = config.credentialRef === undefined || this.options.credentialResolver === undefined
+      ? config
+      : mergeCredential(config, await this.options.credentialResolver(config.credentialRef));
+    const transport = await this.transportFactory(transportConfig);
     state.client = client;
     state.transport = transport;
     client.onclose = () => {
@@ -199,6 +220,7 @@ export class McpConnectionManager {
       state.transport = undefined;
       state.status = "failed";
       state.lastError = "MCP transport closed";
+      state.connectedAt = undefined;
       unregisterMcpTools(this.options.registry, state.toolNames);
       state.toolNames = [];
       void this.emitServer(state, "failed", state.lastError);
@@ -209,26 +231,59 @@ export class McpConnectionManager {
     };
     client.setNotificationHandler(ToolListChangedNotificationSchema, async () => {
       if (state.generation !== generation || state.client !== client || state.intentionalClose) return;
-      try { await this.refreshTools(state, config, client); } catch (error) {
-        state.lastError = safeMessage(error);
-        await this.emitServer(state, "failed", state.lastError);
-      }
+      this.queueRefresh(state, config, client, generation);
     });
     await client.connect(transport);
     if (state.generation !== generation || state.intentionalClose) return;
-    await this.refreshTools(state, config, client);
+    await this.refreshTools(state, config, client, generation);
     state.status = "connected";
     state.lastError = undefined;
-    state.reconnectAttempt = 0;
+    state.connectedAt = Date.now();
+    state.nextRetryAt = undefined;
+    const stableTimer = setTimeout(() => {
+      if (state.generation === generation && state.status === "connected" && state.connectedAt !== undefined && Date.now() - state.connectedAt >= this.stableWindowMs) state.reconnectAttempt = 0;
+    }, this.stableWindowMs);
+    stableTimer.unref();
     await this.emitServer(state, "connected");
   }
 
-  private async refreshTools(state: RuntimeState, config: McpServerConfig, client: Client): Promise<void> {
+  private queueRefresh(state: RuntimeState, config: McpServerConfig, client: Client, generation: number): void {
+    if (state.listChangedTimer !== undefined) clearTimeout(state.listChangedTimer);
+    state.listChangedTimer = setTimeout(() => {
+      state.listChangedTimer = undefined;
+      state.syncChain = state.syncChain.then(async () => {
+        if (state.generation !== generation || state.client !== client || state.intentionalClose) return;
+        try {
+          await this.refreshTools(state, config, client, generation);
+        } catch (error) {
+          state.lastError = safeMessage(error);
+          await this.emitServer(state, "failed", state.lastError);
+        }
+      }).catch(() => undefined);
+    }, this.listChangedDebounceMs);
+    state.listChangedTimer.unref();
+  }
+
+  private async refreshTools(state: RuntimeState, config: McpServerConfig, client: Client, generation: number): Promise<void> {
     const next = await discover(client);
+    if (state.generation !== generation || state.client !== client || state.intentionalClose) return;
     const registrations = createMcpToolRegistrations(client, config.name, config, next.tools);
-    unregisterMcpTools(this.options.registry, state.toolNames);
-    const toolNames = registerMcpTools(this.options.registry, registrations);
+    const toolNames = replaceMcpTools(this.options.registry, state.toolNames, registrations);
     state.toolNames = [...toolNames];
+    state.catalog = next.tools.map((tool) => {
+      const registration = registrations.find((item) => item.rawName === tool.name);
+      const policy = config.toolPolicies?.[tool.name];
+      return {
+        name: registration?.definition.name ?? `mcp__${config.name}__${tool.name}`.replace(/[^A-Za-z0-9_-]/gu, "_").slice(0, 64),
+        rawName: tool.name,
+        generation,
+        riskLevel: registration?.definition.riskLevel ?? (policy?.riskLevel ?? config.riskLevel ?? "network"),
+        approvalMode: registration?.definition.approvalMode ?? (policy?.approvalMode ?? "ask"),
+        enabled: registration !== undefined,
+        ...(registration === undefined ? { disabledReason: policy?.enabled === false ? "tool-policy-disabled" : "server-allowlist" } : {}),
+        ...(registration?.schemaWarning === undefined ? {} : { schemaWarning: registration.schemaWarning }),
+      } satisfies McpToolCatalogEntry;
+    });
     state.discovery = next;
     state.discoveredAt = new Date().toISOString();
     for (const item of registrations) await this.emitTool(state, "discovered", item.definition.name, item.rawName);
@@ -236,11 +291,19 @@ export class McpConnectionManager {
 
   private async stopRuntime(state: RuntimeState, intentional: boolean): Promise<void> {
     state.intentionalClose = intentional;
+    if (state.listChangedTimer !== undefined) {
+      clearTimeout(state.listChangedTimer);
+      state.listChangedTimer = undefined;
+    }
     if (state.reconnectTimer !== undefined) {
       clearTimeout(state.reconnectTimer);
       state.reconnectTimer = undefined;
     }
+    const sync = state.syncChain;
     state.generation += 1;
+    state.connectedAt = undefined;
+    state.nextRetryAt = undefined;
+    await sync;
     unregisterMcpTools(this.options.registry, state.toolNames);
     state.toolNames = [];
     const client = state.client;
@@ -254,11 +317,17 @@ export class McpConnectionManager {
   private scheduleReconnect(state: RuntimeState, config: McpServerConfig): void {
     const policy = { ...DEFAULT_RECONNECT, ...(config.reconnect ?? {}) };
     if (!policy.enabled || state.intentionalClose || this.closed || config.enabled === false) return;
-    if (state.reconnectAttempt >= policy.maxAttempts) return;
+    if (state.reconnectAttempt >= policy.maxAttempts) {
+      state.lastError = "MCP reconnect budget exhausted";
+      void this.emitServer(state, "failed", state.lastError);
+      return;
+    }
     const delay = Math.min(policy.maxDelayMs, policy.initialDelayMs * (2 ** state.reconnectAttempt));
     state.reconnectAttempt += 1;
+    state.nextRetryAt = new Date(Date.now() + delay).toISOString();
     state.reconnectTimer = setTimeout(() => {
       state.reconnectTimer = undefined;
+      state.nextRetryAt = undefined;
       void this.startInternal(state.name, false).catch(() => undefined);
     }, delay);
     state.reconnectTimer.unref();
@@ -274,6 +343,10 @@ export class McpConnectionManager {
       ...(state.discoveredAt === undefined ? {} : { discoveredAt: state.discoveredAt }),
       ...(state.lastError === undefined ? {} : { lastError: state.lastError }),
       reconnectAttempt: state.reconnectAttempt,
+      revision: config.revision ?? 1,
+      generation: state.generation,
+      catalog: [...state.catalog],
+      ...(state.nextRetryAt === undefined ? {} : { retry: { nextAttemptAt: state.nextRetryAt, maxAttempts: config.reconnect?.maxAttempts ?? DEFAULT_RECONNECT.maxAttempts } }),
     };
   }
 
@@ -285,12 +358,29 @@ export class McpConnectionManager {
     await this.emit("mcp/tool", { serverName: state.name, action, name, rawName });
   }
 
-  private async emit(type: "mcp/server" | "mcp/tool", payload: Record<string, unknown>): Promise<void> {
+  private async emit(type: "mcp/server" | "mcp/tool" | "mcp/resource" | "mcp/prompt", payload: Record<string, unknown>): Promise<void> {
     if (this.options.store === undefined) return;
     for (const session of await this.options.store.listSessions()) {
+      const config = this.configs.get(String(payload["serverName"]));
+      if (config !== undefined && !isVisibleToSession(config, session)) continue;
       await this.options.store.append({ sessionId: session.id, type, payload });
     }
   }
+}
+
+function isVisibleToSession(config: McpServerConfig, session: { id: unknown; workspaceRoot: string }): boolean {
+  if (config.scope === "session") return config.sessionId === undefined || config.sessionId === session.id;
+  if (config.scope === "project") return config.workspaceRoot === undefined || config.workspaceRoot === session.workspaceRoot;
+  return true;
+}
+
+function mergeCredential(config: McpServerConfig, material: { readonly env?: Readonly<Record<string, string>>; readonly headers?: Readonly<Record<string, string>> } | undefined): McpServerConfig {
+  if (material === undefined) return config;
+  return {
+    ...config,
+    ...(material.env === undefined ? {} : { env: { ...(config.env ?? {}), ...material.env } }),
+    ...(material.headers === undefined ? {} : { headers: { ...(config.headers ?? {}), ...material.headers } }),
+  };
 }
 
 function classifyStatus(error: unknown): McpServerStatus {

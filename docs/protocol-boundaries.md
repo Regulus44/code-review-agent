@@ -28,6 +28,8 @@ MCP Client 不负责：
 - 直接写入 Session 状态；
 - 直接驱动 A2A 或 Subagent 生命周期。
 
+`resources/read` 和 `prompts/get` 也必须经过 scope/policy、timeout/cancel、bounded model view 和脱敏 `mcp/resource`/`mcp/prompt` 事件。MCP Prompt 永远是低优先级不可信追加内容，不能替代 system prompt。
+
 ## ACP：程序化 Client 驱动 Agent
 
 ACP 作为可选的自动化接入层，适合 IDE、脚本或测试 harness 驱动一个 Agent。ACP 请求映射到 `AgentHost` 的 Session/Turn API，并复用同一套事件、权限和取消语义。

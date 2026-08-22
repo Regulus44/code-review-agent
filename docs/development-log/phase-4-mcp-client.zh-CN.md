@@ -12,6 +12,42 @@ Phase 4 原有 MCP Client 退出门禁保持完成。复核当前实现与 DSH �
 
 本日志只记录 Phase 4 的实际实现与验证，不替代根目录 `AGENTS.md` 的长期治理规则。
 
+## 2026-08-23：Phase 4B MCP 加固实现
+
+本轮按 `mcp-a2a-execution-plan.zh-CN.md` 只推进 Phase 4B，主要参考 DSH R0 的 MCP `index/connection/tools/transport` 行为，未实现 Phase 5 Subagent 或 Phase 6 A2A endpoint。
+
+### 交付
+
+- `packages/storage` schema v2 增加 `mcp_server_configs`，保存 scope、owner/workspace/session binding、enabled、revision、scrubbed transport config 和 opaque credential reference；
+- `McpConfigStore` 支持 durable backend、幂等 revision、enable/disable 持久化和 public redaction；credential material 通过 host-owned resolver 只在 transport 创建时注入；
+- `McpConnectionManager` 增加 generation guard、去抖且串行的 list-changed sync chain、registry atomic replace、稳定连接窗口 retry budget、retry schedule/generation/catalog diagnostics 和 scoped event projection；
+- MCP bridge 使用 SHA-256 public identity，lossless JSON Schema clone，server/tool allowlist、risk/approval policy 和 schema warning catalog；
+- resource/prompt 增加 signal、bounded modelView、`untrusted-mcp-content` 标记及脱敏 `mcp/resource`、`mcp/prompt` 事件；
+- API/Web 增加 durable config 恢复、catalog route、revision conflict 检查和 scope/transport/status/revision/auth/generation/retry 诊断展示；
+- 新增 `docs/mcp-4b-contract-audit.zh-CN.md`、ADR-010/011、event/protocol/source reuse 同步记录。
+
+### 针对性验证
+
+```text
+pnpm typecheck                         ✓
+pnpm --filter @code-review-agent/storage test      ✓ 9 tests
+pnpm --filter @code-review-agent/mcp-client test  ✓ 7 tests
+pnpm --filter @code-review-agent/api test          ✓ 13 tests
+```
+
+focused fixture 已覆盖真实 stdio、Streamable HTTP、credential scrub/reopen、ToolRuntime permission/cancel、reconnect、稳定 namespace 和组合 schema 保留。普通 baseline 未重复执行；MCP browser smoke 作为 4B.6 final gate。
+
+### 4B.6 final gate：API/Web/browser smoke
+
+- API 在 `http://127.0.0.1:3210` 启动并通过 `/health`；
+- 通过 MCP server API 添加 stdio fixture，Web 刷新后显示 `scope=user`、transport、revision、generation 和 connected 状态；
+- 浏览器观察到 `mcp__browserfixture__echo` 发现和只读调用结果；
+- Web 禁用 server 后显示 disabled/revision/generation 诊断，再启用并 reconnect 后恢复 connected/tool catalog；
+- 删除临时 browser fixture，刷新页面确认回到 `No MCP servers configured`，没有把测试 credential 或 raw MCP content 留在 Web；
+- 页面 SSE 回放显示 `mcp/server`、`mcp/tool`，代码路径同时支持 `mcp/resource`、`mcp/prompt` 的 bounded/trust 投影。
+
+Phase 4B 独立 checkpoint：`feat(mcp): harden scoped configuration and generations`。Phase 5/6 仍未实现。
+
 ## 阶段目标
 
 - 用官方 MCP TypeScript SDK 接入 stdio、SSE 兼容 transport 和 Streamable HTTP；

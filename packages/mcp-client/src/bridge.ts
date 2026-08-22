@@ -1,4 +1,5 @@
-import type { ToolDefinition, ToolResult, JsonSchema, ToolRiskLevel } from "@code-review-agent/contracts";
+import { createHash } from "node:crypto";
+import type { ToolApprovalMode, ToolDefinition, ToolResult, JsonSchema, ToolRiskLevel } from "@code-review-agent/contracts";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { ToolRegistry } from "@code-review-agent/tools";
@@ -11,16 +12,15 @@ const INVALID_NAME_CHARS = /[^A-Za-z0-9_-]/gu;
 export interface McpToolRegistration {
   readonly definition: ToolDefinition;
   readonly rawName: string;
+  readonly schemaWarning?: string;
 }
 
 export function publicToolName(serverName: string, rawName: string): string {
   const identity = `mcp__${serverName}__${rawName}`;
   const normalized = identity.replace(INVALID_NAME_CHARS, "_");
   if (normalized === identity && normalized.length <= MAX_PUBLIC_NAME_LENGTH) return normalized;
-  // Stable, bounded collision suffix without exposing raw secrets in the name.
-  let hash = 0;
-  for (const char of `${serverName}\u0000${rawName}`) hash = (hash * 31 + char.codePointAt(0)!) >>> 0;
-  const suffix = hash.toString(16).padStart(8, "0");
+  // DSH-aligned deterministic identity: stable across processes and runtimes.
+  const suffix = createHash("sha256").update(`${serverName}\u0000${rawName}`).digest("hex").slice(0, 12);
   return `${normalized.slice(0, MAX_PUBLIC_NAME_LENGTH - suffix.length - 1)}_${suffix}`;
 }
 
@@ -31,7 +31,9 @@ export function createMcpToolRegistrations(
   tools: readonly McpToolDescriptor[],
 ): readonly McpToolRegistration[] {
   const names = new Set<string>();
-  return tools.map((tool) => {
+  return tools.flatMap((tool) => {
+    if (config.toolAllowlist !== undefined && !config.toolAllowlist.includes(tool.name)) return [];
+    if (config.toolPolicies?.[tool.name]?.enabled === false) return [];
     const name = publicToolName(serverName, tool.name);
     if (names.has(name)) throw new Error(`MCP server ${serverName} has duplicate tool identity: ${tool.name}`);
     names.add(name);
@@ -41,12 +43,13 @@ export function createMcpToolRegistrations(
       inputSchema: normalizeJsonSchema(tool.inputSchema),
       executionMode: "parallel",
       riskLevel: resolveRisk(config, tool),
-      approvalMode: "auto",
+      approvalMode: resolveApproval(config, tool),
       interruptBehavior: "cancel",
       source: { kind: "mcp", serverName, rawName: tool.name },
       execute: async (input, context) => executeMcpTool(client, tool.name, input, context.signal, context.reportProgress, config.toolCallTimeoutMs ?? 120_000),
     };
-    return { definition, rawName: tool.name };
+    const warning = schemaWarning(tool.inputSchema);
+    return { definition, rawName: tool.name, ...(warning === undefined ? {} : { schemaWarning: warning }) };
   });
 }
 
@@ -62,6 +65,11 @@ export function registerMcpTools(registry: ToolRegistry, registrations: readonly
     for (const name of registered) registry.unregister(name);
     throw error;
   }
+}
+
+export function replaceMcpTools(registry: ToolRegistry, previousNames: readonly string[], registrations: readonly McpToolRegistration[]): readonly string[] {
+  registry.replace(previousNames, registrations.map((item) => item.definition));
+  return registrations.map((item) => item.definition.name);
 }
 
 export function unregisterMcpTools(registry: ToolRegistry, names: readonly string[]): void {
@@ -115,6 +123,8 @@ async function executeMcpTool(
 }
 
 function resolveRisk(config: McpServerConfig, tool: McpToolDescriptor): ToolRiskLevel {
+  const override = config.toolPolicies?.[tool.name]?.riskLevel;
+  if (override !== undefined) return override;
   if (config.riskLevel !== undefined) return config.riskLevel;
   const annotations = tool.annotations ?? {};
   if (annotations["readOnlyHint"] === true || annotations["read_only"] === true) return "read";
@@ -122,30 +132,35 @@ function resolveRisk(config: McpServerConfig, tool: McpToolDescriptor): ToolRisk
   return "network";
 }
 
+function resolveApproval(config: McpServerConfig, tool: McpToolDescriptor): ToolApprovalMode {
+  const override = config.toolPolicies?.[tool.name]?.approvalMode;
+  if (override !== undefined) return override;
+  return resolveRisk(config, tool) === "read" ? "auto" : "ask";
+}
+
 function normalizeJsonSchema(value: unknown): JsonSchema {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return { type: "object", additionalProperties: true };
-  const input = value as Record<string, unknown>;
-  const typeValue = input["type"];
-  const type = typeValue === "object" || typeValue === "array" || typeValue === "string" || typeValue === "number" || typeValue === "integer" || typeValue === "boolean" || typeValue === "null" ? typeValue : undefined;
-  const properties = input["properties"];
-  const required = input["required"];
-  const enumValue = input["enum"];
-  const items = input["items"];
-  return {
-    ...(type === undefined ? {} : { type }),
-    ...(properties !== null && typeof properties === "object" && !Array.isArray(properties) ? { properties: Object.fromEntries(Object.entries(properties as Record<string, unknown>).map(([key, schema]) => [key, normalizeJsonSchema(schema)])) } : {}),
-    ...(Array.isArray(required) ? { required: required.filter((item): item is string => typeof item === "string") } : {}),
-    ...(typeof input["additionalProperties"] === "boolean" ? { additionalProperties: input["additionalProperties"] } : {}),
-    ...(items === undefined ? {} : { items: normalizeJsonSchema(items) }),
-    ...(Array.isArray(enumValue) ? { enum: enumValue } : {}),
-    ...(typeof input["minLength"] === "number" ? { minLength: input["minLength"] } : {}),
-    ...(typeof input["maxLength"] === "number" ? { maxLength: input["maxLength"] } : {}),
-    ...(typeof input["minimum"] === "number" ? { minimum: input["minimum"] } : {}),
-    ...(typeof input["maximum"] === "number" ? { maximum: input["maximum"] } : {}),
-    ...(typeof input["pattern"] === "string" ? { pattern: input["pattern"] } : {}),
-    ...(typeof input["minItems"] === "number" ? { minItems: input["minItems"] } : {}),
-    ...(typeof input["maxItems"] === "number" ? { maxItems: input["maxItems"] } : {}),
-  };
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return { type: "object", additionalProperties: true, "x-mcp-schema-fallback": "invalid-root" };
+  let encoded: string;
+  try { encoded = JSON.stringify(value); } catch { return { type: "object", additionalProperties: true, "x-mcp-schema-fallback": "schema-not-serializable" }; }
+  if (encoded.length > 262_144) return { type: "object", additionalProperties: true, "x-mcp-schema-fallback": "schema-too-large" };
+  return cloneSchemaValue(value, 0) as JsonSchema;
+}
+
+function cloneSchemaValue(value: unknown, depth: number): unknown {
+  if (depth > 32) return { type: "object", additionalProperties: true, "x-mcp-schema-fallback": "schema-too-deep" };
+  if (Array.isArray(value)) return value.slice(0, 512).map((item) => cloneSchemaValue(item, depth + 1));
+  if (typeof value !== "object" || value === null) return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, cloneSchemaValue(item, depth + 1)]));
+}
+
+function schemaWarning(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return "invalid-root";
+  try {
+    if (JSON.stringify(value).length > 262_144) return "schema-too-large";
+  } catch {
+    return "schema-not-serializable";
+  }
+  return undefined;
 }
 
 function extractText(content: readonly unknown[]): string {

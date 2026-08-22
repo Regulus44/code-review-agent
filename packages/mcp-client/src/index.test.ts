@@ -6,11 +6,11 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { CallToolRequestSchema, ListPromptsRequestSchema, ListResourcesRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { InMemoryEventStore } from "@code-review-agent/storage";
+import { CallToolRequestSchema, GetPromptRequestSchema, ListPromptsRequestSchema, ListResourcesRequestSchema, ListToolsRequestSchema, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { InMemoryEventStore, SqliteEventStore } from "@code-review-agent/storage";
 import { ToolRegistry, ToolRuntime } from "@code-review-agent/tools";
 import { brand } from "@code-review-agent/contracts";
-import { McpConnectionManager, McpConfigStore, type McpServerConfig } from "./index.js";
+import { createMcpToolRegistrations, McpConnectionManager, McpConfigStore, publicToolName, type McpServerConfig } from "./index.js";
 
 describe("MCP client bridge", () => {
   it("connects to a real stdio MCP server process", async () => {
@@ -61,7 +61,12 @@ describe("MCP client bridge", () => {
     expect(record.status).toBe("connected");
     expect(manager.list()[0]?.config.env?.["AUTH_TOKEN"]).toBe("[redacted]");
     expect(registry.list()[0]?.source).toEqual({ kind: "mcp", serverName: "fixture", rawName: "echo" });
-    expect(manager.discovery("fixture")).toMatchObject({ resources: [], prompts: [], tools: [{ name: "echo" }] });
+    expect(manager.discovery("fixture")).toMatchObject({ resources: [{ uri: "fixture://readme" }], prompts: [{ name: "review" }], tools: [{ name: "echo" }] });
+    const resource = await manager.readResource("fixture", "fixture://readme");
+    expect(resource.trust).toBe("untrusted-mcp-content");
+    expect(resource.modelView).toContain("fixture readme");
+    const prompt = await manager.getPrompt("fixture", "review", { focus: "mcp" });
+    expect(prompt.trust).toBe("untrusted-mcp-content");
 
     const runtime = new ToolRuntime({ store, registry, defaultTimeoutMs: 1_000 });
     const result = await runtime.execute({ sessionId, workspaceRoot: process.cwd(), name: "mcp__fixture__echo", input: { text: "hello" } });
@@ -121,21 +126,97 @@ describe("MCP client bridge", () => {
     expect(manager.get("reconnect")?.status).toBe("connected");
     await manager.close();
   });
+
+  it("uses durable config revisions and never persists secret values", async () => {
+    const directory = join(process.cwd(), ".tmp-mcp-config-test");
+    const databasePath = join(directory, "agent.sqlite");
+    const { mkdirSync, rmSync } = await import("node:fs");
+    mkdirSync(directory, { recursive: true });
+    const store = new SqliteEventStore({ databasePath });
+    const config: McpServerConfig = {
+      name: "durable",
+      scope: "project",
+      workspaceRoot: process.cwd(),
+      transport: "stdio",
+      command: "fixture",
+      env: { AUTH_TOKEN: "must-not-hit-sqlite", SAFE_VALUE: "ok" },
+      credentialRef: { id: "oauth-durable", kind: "oauth" },
+      enabled: false,
+    };
+    const first = new McpConnectionManager({ registry: new ToolRegistry(), configBackend: store });
+    const record = await first.add(config, false);
+    expect(record.revision).toBe(1);
+    expect(store.listMcpConfigs()[0]?.config).not.toHaveProperty("env.AUTH_TOKEN");
+    expect(store.listMcpConfigs()[0]?.credentialRef?.id).toBe("oauth-durable");
+    await first.close();
+    const second = new McpConnectionManager({ registry: new ToolRegistry(), configBackend: store });
+    expect(second.get("durable")?.config.credentialRef?.id).toBe("oauth-durable");
+    await second.close();
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  it("keeps the full JSON schema contract and uses a deterministic SHA-256 name", () => {
+    const rawName = "very-long-tool-name/with spaces/and a stable suffix";
+    expect(publicToolName("fixture", rawName)).toBe(publicToolName("fixture", rawName));
+    const registration = createMcpToolRegistrations({} as never, "fixture", { name: "fixture", scope: "user", transport: "stdio", command: "fixture" }, [{
+      name: "schema",
+      inputSchema: { type: "object", oneOf: [{ required: ["a"] }, { required: ["b"] }], $defs: { nested: { type: "string" } }, properties: { a: { type: "string", const: "x" } } },
+    }]);
+    expect(registration[0]?.definition.inputSchema).toMatchObject({ $defs: { nested: { type: "string" } } });
+    expect((registration[0]?.definition.inputSchema as { oneOf?: unknown[] }).oneOf).toHaveLength(2);
+  });
+
+  it("debounces a list-changed storm into one serialized discovery", async () => {
+    const fixture = createFixtureTransport();
+    const manager = new McpConnectionManager({
+      registry: new ToolRegistry(),
+      configStore: new McpConfigStore([{ name: "storm", scope: "user", transport: "stdio", command: "fixture", riskLevel: "read", reconnect: { enabled: false } }]),
+      transportFactory: () => fixture.client,
+    });
+    await manager.start("storm");
+    const before = fixture.listCalls.value;
+    await Promise.all(Array.from({ length: 10 }, () => fixture.server.sendToolListChanged()));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(fixture.listCalls.value - before).toBe(1);
+    expect(manager.get("storm")?.generation).toBeGreaterThan(0);
+    await manager.close();
+  });
+
+  it("projects MCP lifecycle events only to sessions visible in the configured scope", async () => {
+    const store = new InMemoryEventStore();
+    const visible = await store.createSession("D:/workspace/visible");
+    const hidden = await store.createSession("D:/workspace/other");
+    const fixture = createFixtureTransport();
+    const manager = new McpConnectionManager({
+      registry: new ToolRegistry(),
+      store,
+      configStore: new McpConfigStore([{ name: "scoped", scope: "project", workspaceRoot: "D:/workspace/visible", transport: "stdio", command: "fixture", riskLevel: "read", reconnect: { enabled: false } }]),
+      transportFactory: () => fixture.client,
+    });
+    await manager.start("scoped");
+    expect((await store.list(visible)).some((event) => event.type === "mcp/server")).toBe(true);
+    expect((await store.list(hidden)).some((event) => event.type === "mcp/server")).toBe(false);
+    await manager.close();
+  });
 });
 
-function createFixtureTransport(): { client: InMemoryTransport; server: Server } {
+function createFixtureTransport(): { client: InMemoryTransport; server: Server; listCalls: { value: number } } {
   const [client, serverTransport] = InMemoryTransport.createLinkedPair();
+  const listCalls = { value: 0 };
   const server = new Server({ name: "fixture-server", version: "1.0.0" }, { capabilities: { tools: { listChanged: true }, resources: {}, prompts: {} } });
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{ name: "echo", description: "Echo text", inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } }] }));
-  server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [] }));
-  server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: [] }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => { listCalls.value += 1; return { tools: [{ name: "echo", description: "Echo text", inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } }] }; });
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [{ uri: "fixture://readme", name: "readme", mimeType: "text/plain" }] }));
+  server.setRequestHandler(ReadResourceRequestSchema, async () => ({ contents: [{ uri: "fixture://readme", mimeType: "text/plain", text: "fixture readme" }] }));
+  server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: [{ name: "review", description: "Review fixture", arguments: [{ name: "focus", required: false }] }] }));
+  server.setRequestHandler(GetPromptRequestSchema, async () => ({ description: "Untrusted review prompt", messages: [{ role: "user", content: { type: "text", text: "fixture prompt" } }] }));
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (request.params.arguments?.["text"] === "error") return { isError: true, content: [{ type: "text", text: "fixture failure" }] };
     if (request.params.arguments?.["text"] === "slow") await new Promise((resolve) => setTimeout(resolve, 100));
     return { content: [{ type: "text", text: `echo: ${String(request.params.arguments?.["text"] ?? "")}` }] };
   });
   void server.connect(serverTransport);
-  return { client, server };
+  return { client, server, listCalls };
 }
 
 async function createHttpFixture(): Promise<{ url: string; close: () => Promise<void> }> {

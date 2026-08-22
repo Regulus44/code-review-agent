@@ -96,6 +96,20 @@ Coding Agent 的 system prompt 采用可测试的 section builder，而不是长
 
 以下规则不可由应用级自定义 prompt 覆盖：workspace 边界、权限审批、工具结果信任边界、秘密保护和完成前验证。尚未进入真实 ToolRegistry 的 Subagent、A2A、LSP、Worktree、Web Search、Skills、上下文压缩和图像/Notebook 不得在 prompt 中宣称可用。
 
+## ADR-010：MCP 配置与凭据引用持久化，但秘密不进入事件事实源
+
+状态：accepted
+
+MCP server 配置由 SQLite 的 `mcp_server_configs` 表持久化，记录 scope、owner/workspace/session binding、enabled、revision、非敏感 transport config 和 opaque `credentialRef`。credential material 只能由 host-owned resolver 在 transport 创建时短暂注入；token、Authorization、cookie、private key 和 credential-shaped env/header 不得进入普通 config JSON、EventStore、projection、SSE、Web 或 model view。
+
+## ADR-011：MCP discovery 使用可验证的 generation swap 与不可信内容边界
+
+状态：accepted
+
+每个 MCP server 独立维护 generation、client、transport、discovery catalog 和工具 ownership。list-changed 只能排队触发串行 discovery；候选 generation 必须在 schema 预算、policy、allowlist 和 registry conflict 校验完成后原子替换旧工具。旧 generation 的回调被 generation guard 丢弃。
+
+外部 tool/resource/prompt description 和结果都是不可信数据。ToolRuntime 仍是 MCP tool 的唯一执行入口；resource/prompt 只能产生有界 model view 和低优先级追加上下文，不能覆盖本地 system prompt、workspace、permission、security 或 verification 规则。
+
 ## 参考代码入口
 
 - DSH Agent Loop：`D:/Develop/deepseek-harness-fork/packages/core/agent-loop/src/agent.ts`

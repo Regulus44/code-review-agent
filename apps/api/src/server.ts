@@ -38,7 +38,11 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
     ...(options.modelSelector === undefined ? {} : { selector: options.modelSelector }),
   };
   const ownsMcp = options.mcp === undefined;
-  const mcp = options.mcp ?? new McpConnectionManager(store === undefined ? { registry: host.toolRegistry() } : { registry: host.toolRegistry(), store });
+  const mcp = options.mcp ?? new McpConnectionManager({
+    registry: host.toolRegistry(),
+    ...(store === undefined ? {} : { store }),
+    ...(store instanceof SqliteEventStore ? { configBackend: store } : {}),
+  });
   void mcp.startConfigured();
   const persistence = store instanceof SqliteEventStore ? "sqlite" : "custom";
   const webRoot = options.webRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web");
@@ -130,11 +134,21 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "POST" && url.pathname === "/v1/mcp/servers") {
       const body = await readJson(request);
       const { start, ...configBody } = body;
+      const existing = typeof configBody.name === "string" ? mcp.get(configBody.name) : undefined;
+      if (typeof body.expectedRevision === "number" && existing?.revision !== body.expectedRevision) throw new HttpError(409, "MCP config revision conflict");
       sendJson(response, 201, await mcp.add(configBody as unknown as McpServerConfig, start !== false));
       return;
     }
     const mcpMatch = url.pathname.match(/^\/v1\/mcp\/servers\/([^/]+)$/u);
     const mcpResourceMatch = url.pathname.match(/^\/v1\/mcp\/servers\/([^/]+)\/resources$/u);
+    const mcpCatalogMatch = url.pathname.match(/^\/v1\/mcp\/servers\/([^/]+)\/catalog$/u);
+    if (mcpCatalogMatch?.[1] !== undefined && request.method === "GET") {
+      const name = decodeURIComponent(mcpCatalogMatch[1]);
+      const server = mcp.get(name);
+      if (server === undefined) throw new HttpError(404, "MCP server not found");
+      sendJson(response, 200, { server, discovery: mcp.discovery(name) ?? { tools: [], resources: [], prompts: [] } });
+      return;
+    }
     if (mcpResourceMatch?.[1] !== undefined && request.method === "GET") {
       const uri = url.searchParams.get("uri");
       if (uri === null || uri.length === 0) throw new HttpError(400, "uri is required");

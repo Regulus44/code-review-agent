@@ -3,6 +3,14 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { McpServerConfig } from "./config.js";
+import type { McpCredentialReference } from "@code-review-agent/contracts";
+
+export interface McpCredentialMaterial {
+  readonly env?: Readonly<Record<string, string>>;
+  readonly headers?: Readonly<Record<string, string>>;
+}
+
+export type McpCredentialResolver = (reference: McpCredentialReference) => McpCredentialMaterial | Promise<McpCredentialMaterial | undefined> | undefined;
 
 export type McpTransportFactory = (config: McpServerConfig) => Transport | Promise<Transport>;
 

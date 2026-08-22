@@ -54,6 +54,8 @@ export type AgentEventType =
   | "job/ended"
   | "mcp/server"
   | "mcp/tool"
+  | "mcp/resource"
+  | "mcp/prompt"
   | "agent/status"
   | "agent/error";
 
@@ -190,7 +192,38 @@ export type ToolSource =
   | { readonly kind: "builtin" }
   | { readonly kind: "mcp"; readonly serverName: string; readonly rawName: string };
 
+export type McpServerScope = "user" | "project" | "session";
+
+/** A non-secret pointer into a host-owned credential provider. */
+export interface McpCredentialReference {
+  readonly id: string;
+  readonly kind: "header" | "env" | "oauth" | "custom";
+  readonly label?: string;
+}
+
+export interface McpConfigRecord {
+  readonly name: string;
+  readonly scope: McpServerScope;
+  readonly ownerId?: string;
+  readonly workspaceRoot?: string;
+  readonly sessionId?: string;
+  readonly enabled: boolean;
+  readonly revision: number;
+  readonly credentialRef?: McpCredentialReference;
+  /** Persisted configuration is already scrubbed; it must never contain secret values. */
+  readonly config: Readonly<Record<string, unknown>>;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface McpConfigBackend {
+  listMcpConfigs(): readonly McpConfigRecord[];
+  upsertMcpConfig(record: McpConfigRecord): McpConfigRecord;
+  deleteMcpConfig(name: string): boolean;
+}
+
 export interface JsonSchema {
+  readonly [key: string]: unknown;
   readonly type?: "object" | "array" | "string" | "number" | "integer" | "boolean" | "null";
   readonly properties?: Readonly<Record<string, JsonSchema>>;
   readonly required?: readonly string[];
