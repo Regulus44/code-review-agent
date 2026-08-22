@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { brand, type AgentEvent, type EventStore, type SessionId, type SessionProjection, type ToolDefinition } from "@code-review-agent/contracts";
@@ -45,8 +45,37 @@ describe("ToolRuntime", () => {
       const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools());
       const runtime = new ToolRuntime({ store, registry }); const sessionId = brand<string, "SessionId">("ses_test");
       const result = await runtime.execute({ sessionId, workspaceRoot: root, name: "read_file", input: { path: "hello.txt" } });
-      expect(result.status).toBe("completed"); expect(result.result?.output).toBe("hello");
+      expect(result.status).toBe("completed"); expect(result.result?.output).toMatchObject({ path: "hello.txt", lines: [{ number: 1, text: "hello" }], truncated: false });
       expect(store.events.map((event) => event.type)).toEqual(["tool/call", "tool/progress", "tool/result"]);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("returns line-numbered read ranges with continuation metadata", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-read-contract-"));
+    try {
+      await writeFile(path.join(root, "sample.txt"), "zero\none\ntwo\nthree", "utf8");
+      const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools());
+      const runtime = new ToolRuntime({ store, registry }); const sessionId = brand<string, "SessionId">("ses_read_contract");
+      const result = await runtime.execute({ sessionId, workspaceRoot: root, name: "read_file", input: { path: "sample.txt", offset: 2, limit: 1 } });
+      expect(result.result?.output).toMatchObject({ offset: 2, totalLines: 4, truncated: true, nextOffset: 3, lines: [{ number: 2, text: "one" }] });
+      expect(String(result.result?.modelView)).toContain("Use offset=3 to continue");
+      expect(store.events.find((event) => event.type === "tool/call")?.payload.presentation).toMatchObject({ kind: "tool", title: "read_file" });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("keeps glob and grep results bounded, deterministic, and contextual", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-search-contract-"));
+    try {
+      await mkdir(path.join(root, "nested"), { recursive: true });
+      await writeFile(path.join(root, "root.ts"), "before\nNeedle\nafter", "utf8");
+      await writeFile(path.join(root, "nested", "child.ts"), "child", "utf8");
+      await writeFile(path.join(root, "binary.bin"), Buffer.from([0, 1, 2]));
+      const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools());
+      const runtime = new ToolRuntime({ store, registry }); const sessionId = brand<string, "SessionId">("ses_search_contract");
+      const glob = await runtime.execute({ sessionId, workspaceRoot: root, name: "glob", input: { pattern: "**/*.ts", maxResults: 10 } });
+      expect(glob.result?.output).toMatchObject({ paths: ["nested/child.ts", "root.ts"], truncated: false });
+      const grep = await runtime.execute({ sessionId, workspaceRoot: root, name: "grep", input: { pattern: "needle", path: ".", literal: true, ignoreCase: true, contextLines: 1, maxResults: 10 } });
+      expect(grep.result?.output).toMatchObject({ truncated: false, skippedBinaryFiles: 1, matches: [{ path: "root.ts", lineNumber: 2, line: "Needle", before: ["before"], after: ["after"] }] });
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 

@@ -185,6 +185,7 @@ export class ToolRuntime {
       approvalMode: evaluation.mode,
       caller,
       workspaceRoot: input.workspaceRoot,
+      presentation: definition.presentCall?.(input.input) ?? defaultCallPresentation(definition),
     });
     if (evaluation.mode === "deny") {
       const result = this.errorResult("PERMISSION_DENIED", evaluation.reason);
@@ -366,7 +367,9 @@ export class ToolRuntime {
           requestUserInput: async (input) => this.requestUserInput(request, toolCallId, input, controller),
         });
         if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
-        const bounded = boundResult(result, this.outputBudgetBytes);
+        const presented = result.presentation ?? definition.presentResult?.(result);
+        const enriched = presented === undefined ? result : { ...result, presentation: presented };
+        const bounded = boundResult(enriched, this.outputBudgetBytes);
         await this.append(request, "tool/result", { toolCallId, status: bounded.ok ? "completed" : "failed", result: bounded });
         if (bounded.diff !== undefined) await this.append(request, "diff/preview", { toolCallId, diff: bounded.diff });
         return { toolCallId, status: bounded.ok ? "completed" : "failed", result: bounded };
@@ -445,7 +448,7 @@ export class ToolRuntime {
   }
 
   private errorResult(code: string, message: string): ToolResult {
-    return { ok: false, error: { code, message }, presentation: { kind: "tool", title: code, text: message } };
+    return { ok: false, error: { code, message, remedy: remedyFor(code) }, presentation: { kind: "tool", title: code, text: message } };
   }
 
   private scheduleExpiry(permissionId: PermissionId, expiresAt: string): void {
@@ -460,6 +463,26 @@ function errorCodeOf(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null || !("code" in error)) return undefined;
   const code = (error as { code?: unknown }).code;
   return typeof code === "string" && /^[A-Z][A-Z0-9_]{2,63}$/u.test(code) ? code : undefined;
+}
+
+function defaultCallPresentation(definition: ToolDefinition): { readonly kind: "tool" | "diff" | "terminal"; readonly title: string; readonly data: { readonly riskLevel: string; readonly executionMode: string } } {
+  const kind = definition.riskLevel === "execute" ? "terminal" : definition.riskLevel === "write" ? "diff" : "tool";
+  return { kind, title: definition.name, data: { riskLevel: definition.riskLevel, executionMode: definition.executionMode } };
+}
+
+function remedyFor(code: string): string {
+  if (code === "TOOL_NOT_FOUND") return "Check the visible tool catalog and use a supported tool name.";
+  if (code === "TOOL_DISABLED") return "Use a visible enabled tool or wait for the permission preset to change.";
+  if (code === "PERMISSION_DENIED" || code === "PERMISSION_EXPIRED" || code === "PERMISSION_CANCELLED") return "Respect the permission result and choose a narrower safe alternative.";
+  if (code === "TOOL_TIMEOUT") return "Reduce the scope or timeout-sensitive work and retry only when the operation is safe.";
+  if (code === "TOOL_CANCELLED" || code === "COMMAND_CANCELLED") return "Inspect the partial result and continue only from the last confirmed state.";
+  if (code === "INVALID_TOOL_INPUT" || code === "MALFORMED_TOOL_ARGUMENTS") return "Check the tool schema and send only valid arguments.";
+  if (code === "WORKDIR_INVALID" || code === "TERMINAL_CWD_INVALID") return "Use an existing directory inside the active workspace.";
+  if (code === "COMMAND_NOT_FOUND") return "Check the executable name and the configured allowlist.";
+  if (code === "NON_ZERO_EXIT" || code === "COMMAND_EXITED") return "Inspect stdout/stderr and exit metadata before choosing the next command.";
+  if (code === "OUTPUT_TRUNCATED") return "Narrow the command or search scope, or use the reported bounded output/spill path.";
+  if (code === "TEXT_NOT_FOUND" || code === "TEXT_NOT_UNIQUE" || code === "EDIT_STALE") return "Reread the current file and use a unique current context before editing.";
+  return "Inspect the structured error and adjust the next step; do not blindly repeat the same call.";
 }
 
 function boundResult(result: ToolResult, budget: number): ToolResult {

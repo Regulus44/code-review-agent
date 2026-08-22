@@ -16,6 +16,10 @@ const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_SEARCH_FILE_BYTES = 1 * 1024 * 1024;
 const DEFAULT_GLOB_RESULTS = 1_000;
 const DEFAULT_TERMINAL_READ_BYTES = 64 * 1024;
+const DEFAULT_READ_LINES = 200;
+const MAX_READ_LINES = 1_000;
+const MAX_READ_LINE_CHARS = 2_000;
+const MAX_READ_RESULT_BYTES = 50 * 1024;
 
 const object = (properties: Record<string, any>, required: string[] = []) => ({ type: "object" as const, properties, required, additionalProperties: false });
 const string = { type: "string" as const };
@@ -252,16 +256,16 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
   const terminals = options.terminalManager ?? new TerminalManager();
   return [
     {
-      name: "read_file", description: "Read a UTF-8 text file inside the workspace.", inputSchema: object({ path: string }), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
-      execute: async (input, context) => { const resolver = new WorkspaceResolver(context.workspaceRoot); const target = await resolver.resolveExisting((input as { path: string }).path); const info = await stat(target); if (info.size > MAX_FILE_BYTES) return fail("FILE_TOO_LARGE", `File exceeds ${MAX_FILE_BYTES} bytes`); return ok(await readFile(target, "utf8")); },
+      name: "read_file", description: "Read a bounded, line-numbered UTF-8 text range inside the workspace.", inputSchema: object({ path: string, offset: integer(1, Number.MAX_SAFE_INTEGER), limit: integer(1, MAX_READ_LINES) }, ["path"]), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
+      execute: async (input, context) => { const args = input as { path: string; offset?: number; limit?: number }; return readWorkspaceFile(context.workspaceRoot, args, context.signal); },
     },
     {
-      name: "glob", description: "List files under the workspace matching a simple glob.", inputSchema: object({ pattern: string, maxResults: integer(1, 5_000) }), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
-      execute: async (input, context) => { const args = input as { pattern: string; maxResults?: number }; return ok(await globFiles(context.workspaceRoot, args.pattern, args.maxResults ?? DEFAULT_GLOB_RESULTS)); },
+      name: "glob", description: "List bounded, sorted files under the workspace matching a glob pattern.", inputSchema: object({ pattern: string, maxResults: integer(1, 5_000) }), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
+      execute: async (input, context) => { const args = input as { pattern: string; maxResults?: number }; return globFiles(context.workspaceRoot, args.pattern, args.maxResults ?? DEFAULT_GLOB_RESULTS); },
     },
     {
-      name: "grep", description: "Search UTF-8 text files under the workspace.", inputSchema: object({ pattern: string, path: string, maxResults: integer(1, 500) }), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
-      execute: async (input, context) => ok(await grepFiles(context.workspaceRoot, input as { pattern: string; path?: string; maxResults?: number }, context.signal)),
+      name: "grep", description: "Search bounded UTF-8 text files with literal/regex, case, path, and context controls.", inputSchema: object({ pattern: string, path: string, maxResults: integer(1, 500), literal: boolean, ignoreCase: boolean, contextLines: integer(0, 20) }), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
+      execute: async (input, context) => grepFiles(context.workspaceRoot, input as { pattern: string; path?: string; maxResults?: number; literal?: boolean; ignoreCase?: boolean; contextLines?: number }, context.signal),
     },
     {
       name: "edit_file", description: "Replace an exact string in a workspace file and return a diff.", inputSchema: object({ path: string, oldText: string, newText: string }), executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "cancel",
@@ -276,8 +280,8 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
       execute: async (_input, context) => gitStatus(context.workspaceRoot, context.signal),
     },
     {
-      name: "git_diff", description: "Read the current git diff for the workspace.", inputSchema: object({ staged: boolean }), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
-      execute: async (input, context) => runArgv("git", (input as { staged?: boolean }).staged === true ? ["diff", "--cached"] : ["diff"], context.workspaceRoot, context.signal),
+      name: "git_diff", description: "Read the current bounded Git diff for the workspace or one path.", inputSchema: object({ staged: boolean, path: string }), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
+      execute: async (input, context) => { const args = input as { staged?: boolean; path?: string }; const argv = args.staged === true ? ["diff", "--cached"] : ["diff"]; if (args.path !== undefined) argv.push("--", relativeGitPath(context.workspaceRoot, args.path)); return runArgv("git", argv, context.workspaceRoot, context.signal); },
     },
     {
       name: "run_command", description: "Run an allowlisted executable with argv inside the workspace.", inputSchema: object({ executable: string, args: { type: "array" as const, items: string, maxItems: 32 } }, ["executable"]), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
@@ -350,11 +354,109 @@ async function writeWorkspaceFile(root: string, args: { path: string; content: s
   return { ...ok({ path: args.path, bytes: Buffer.byteLength(args.content) }), ...(before === undefined ? {} : { diff: { path: args.path, before, after: args.content }, presentation: { kind: "diff" as const, title: `Updated ${args.path}`, data: { before, after: args.content } } }) };
 }
 
-async function globFiles(root: string, pattern: string, maxResults: number): Promise<string[]> { const normalized = pattern.replaceAll("\\", "/"); const regex = new RegExp("^" + normalized.split("*").map(escapeRegExp).join(".*") + "$", "u"); const output: string[] = []; await walk(root, root, async (file) => { if (output.length >= maxResults) return; const relative = path.relative(root, file).replaceAll("\\", "/"); if (regex.test(relative)) output.push(relative); }); return output.sort(); }
+async function readWorkspaceFile(root: string, args: { path: string; offset?: number; limit?: number }, signal: AbortSignal): Promise<ToolResult> {
+  if (signal.aborted) return fail("TOOL_CANCELLED", "File read was cancelled");
+  const offset = args.offset ?? 1;
+  const limit = args.limit ?? DEFAULT_READ_LINES;
+  const resolver = new WorkspaceResolver(root);
+  let target: string;
+  try { target = await resolver.resolveExisting(args.path); } catch { return fail("FILE_NOT_FOUND", `File was not found: ${args.path}`); }
+  const info = await stat(target);
+  if (!info.isFile()) return fail("FILE_NOT_REGULAR", `Target is not a regular file: ${args.path}`);
+  if (info.size > MAX_FILE_BYTES) return fail("FILE_TOO_LARGE", `File exceeds ${MAX_FILE_BYTES} bytes`);
+  const buffer = await readFile(target);
+  if (buffer.includes(0)) return fail("FILE_BINARY", `Binary file is not readable as UTF-8 text: ${args.path}`);
+  const text = buffer.toString("utf8");
+  const allLines = text.length === 0 ? [] : text.split(/\r?\n/u);
+  const totalLines = allLines.length;
+  if (offset > Math.max(totalLines, 1)) return fail("READ_OFFSET_INVALID", `Offset ${offset} is outside ${args.path} (${totalLines} lines)`);
+  const selected: { readonly number: number; readonly text: string }[] = [];
+  let outputBytes = 0;
+  for (let index = offset - 1; index < Math.min(allLines.length, offset - 1 + limit); index += 1) {
+    if (signal.aborted) return fail("TOOL_CANCELLED", "File read was cancelled");
+    const line = allLines[index]!.length > MAX_READ_LINE_CHARS ? `${allLines[index]!.slice(0, MAX_READ_LINE_CHARS)}… (line truncated)` : allLines[index]!;
+    const bytes = Buffer.byteLength(`${index + 1}: ${line}\n`, "utf8");
+    if (outputBytes + bytes > MAX_READ_RESULT_BYTES && selected.length > 0) break;
+    selected.push({ number: index + 1, text: line });
+    outputBytes += bytes;
+  }
+  const endLine = selected.at(-1)?.number ?? offset - 1;
+  const truncated = endLine < totalLines;
+  const footer = truncated ? `(Output capped. Showing lines ${offset}-${endLine}. Use offset=${endLine + 1} to continue.)` : `(End of file - total ${totalLines} lines)`;
+  const modelView = `<path>${args.path}</path>\n${selected.map((line) => `${line.number}: ${line.text}`).join("\n")}\n\n${footer}`;
+  return {
+    ok: true,
+    output: { path: args.path, offset, limit, totalLines, lines: selected, truncated, ...(truncated ? { nextOffset: endLine + 1 } : {}) },
+    modelView,
+    presentation: { kind: "tool", title: `Read ${args.path}`, text: modelView, data: { path: args.path, offset, totalLines, lines: selected, truncated } },
+  };
+}
+
+async function globFiles(root: string, pattern: string, maxResults: number): Promise<ToolResult> {
+  const normalized = pattern.trim().replaceAll("\\", "/");
+  if (normalized.length === 0) return fail("GLOB_PATTERN_REQUIRED", "Glob pattern cannot be empty");
+  let regex: RegExp;
+  try { regex = globRegExp(normalized); } catch (error) { return fail("GLOB_PATTERN_INVALID", error instanceof Error ? error.message : String(error)); }
+  const matches: string[] = [];
+  let seen = 0;
+  await walk(root, root, async (file) => {
+    const relative = path.relative(root, file).replaceAll("\\", "/");
+    const candidate = normalized.includes("/") ? relative : path.posix.basename(relative);
+    if (!regex.test(candidate)) return;
+    seen += 1;
+    if (matches.length < maxResults) matches.push(relative);
+  });
+  matches.sort();
+  const truncated = seen > matches.length;
+  return {
+    ok: true,
+    output: { root: ".", paths: matches, seen, truncated, ...(truncated ? { nextStep: "Narrow the pattern or lower the search scope to inspect all matches." } : {}) },
+    presentation: { kind: "tool", title: `Glob ${pattern}`, text: matches.join("\n"), data: { root: ".", paths: matches, seen, truncated } },
+  };
+}
 
 async function walk(root: string, current: string, visit: (file: string) => Promise<void>): Promise<void> { for (const entry of await readdir(current, { withFileTypes: true })) { const full = path.join(current, entry.name); if (entry.isDirectory() && entry.name !== ".git" && entry.name !== "node_modules" && entry.name !== ".agent-trash") await walk(root, full, visit); else if (entry.isFile()) await visit(full); } }
 
-async function grepFiles(root: string, args: { pattern: string; path?: string; maxResults?: number }, signal: AbortSignal): Promise<string[]> { const resolver = new WorkspaceResolver(root); const base = await resolver.resolveExisting(args.path || "."); const info = await stat(base); const files: string[] = []; if (info.isFile()) files.push(base); else await walk(root, base, async (file) => { files.push(file); }); const regex = new RegExp(args.pattern, "u"); const maxResults = args.maxResults ?? 100; const results: string[] = []; for (const file of files) { if (signal.aborted) throw signal.reason ?? new Error("Cancelled"); if ((await stat(file)).size > MAX_SEARCH_FILE_BYTES) continue; const lines = (await readFile(file, "utf8")).split(/\r?\n/u); lines.forEach((line, index) => { if (results.length < maxResults && regex.test(line)) results.push(`${path.relative(root, file).replaceAll("\\", "/")}:${index + 1}:${line}`); }); if (results.length >= maxResults) break; } return results; }
+async function grepFiles(root: string, args: { pattern: string; path?: string; maxResults?: number; literal?: boolean; ignoreCase?: boolean; contextLines?: number }, signal: AbortSignal): Promise<ToolResult> {
+  const resolver = new WorkspaceResolver(root);
+  let base: string;
+  try { base = await resolver.resolveExisting(args.path || "."); } catch { return fail("SEARCH_PATH_INVALID", `Search path is not inside the workspace or does not exist: ${args.path ?? "."}`); }
+  let regex: RegExp;
+  try { regex = new RegExp(args.literal === true ? escapeRegExp(args.pattern) : args.pattern, args.ignoreCase === true ? "iu" : "u"); } catch (error) { return fail("SEARCH_PATTERN_INVALID", error instanceof Error ? error.message : String(error)); }
+  const info = await stat(base);
+  const files: string[] = [];
+  if (info.isFile()) files.push(base); else await walk(root, base, async (file) => { files.push(file); });
+  files.sort();
+  const maxResults = args.maxResults ?? 100;
+  const contextLines = args.contextLines ?? 0;
+  const matches: { readonly path: string; readonly lineNumber: number; readonly line: string; readonly before: readonly string[]; readonly after: readonly string[] }[] = [];
+  let skippedBinaryFiles = 0;
+  let truncated = false;
+  for (const file of files) {
+    if (signal.aborted) return fail("TOOL_CANCELLED", "Search was cancelled");
+    if ((await stat(file)).size > MAX_SEARCH_FILE_BYTES) continue;
+    const buffer = await readFile(file);
+    if (buffer.includes(0)) { skippedBinaryFiles += 1; continue; }
+    const lines = buffer.toString("utf8").split(/\r?\n/u);
+    for (let index = 0; index < lines.length; index += 1) {
+      if (!regex.test(lines[index]!)) continue;
+      if (matches.length >= maxResults) { truncated = true; break; }
+      matches.push({
+        path: path.relative(root, file).replaceAll("\\", "/"),
+        lineNumber: index + 1,
+        line: lines[index]!,
+        before: lines.slice(Math.max(0, index - contextLines), index),
+        after: lines.slice(index + 1, Math.min(lines.length, index + 1 + contextLines)),
+      });
+    }
+    if (truncated) break;
+  }
+  return {
+    ok: true,
+    output: { matches, searchedFiles: files.length, skippedBinaryFiles, truncated, ...(truncated ? { nextStep: "Narrow the pattern/path or increase maxResults within the schema limit." } : {}) },
+    presentation: { kind: "tool", title: `Grep ${args.pattern}`, text: matches.map((match) => `${match.path}:${match.lineNumber}:${match.line}`).join("\n"), data: { matches, truncated, searchedFiles: files.length, skippedBinaryFiles } },
+  };
+}
 
 async function gitStatus(cwd: string, signal: AbortSignal): Promise<ToolResult> { const result = await runArgv("git", ["status", "--porcelain=v2", "--branch"], cwd, signal); if (!result.ok || typeof result.output !== "string") return result; const lines = result.output.split(/\r?\n/u).filter(Boolean); const value = (prefix: string) => lines.find((line) => line.startsWith(prefix))?.slice(prefix.length); const branchAb = value("# branch.ab ")?.match(/^\+(\d+) -(\d+)$/u); return { ...result, output: { branch: { head: value("# branch.head "), oid: value("# branch.oid "), ahead: branchAb === undefined || branchAb === null ? 0 : Number(branchAb[1]), behind: branchAb === undefined || branchAb === null ? 0 : Number(branchAb[2]) }, entries: lines.filter((line) => !line.startsWith("# ")).map((line) => ({ raw: line })) } }; }
 
@@ -366,7 +468,45 @@ function relativeGitPath(cwd: string, value: string): string { const resolver = 
 
 async function deleteWorkspacePath(root: string, args: { path: string; recursive?: boolean; permanent?: boolean }): Promise<ToolResult> { const resolver = new WorkspaceResolver(root); const candidate = resolver.resolve(args.path); if (candidate === resolver.rootPath) return fail("DELETE_WORKSPACE_ROOT", "Refusing to delete the workspace root"); const existing = await resolver.resolveExisting(args.path); const info = await stat(existing); if (args.permanent === true) { await rm(candidate, { force: false, recursive: args.recursive ?? info.isDirectory() }); return ok({ path: args.path, permanent: true, type: info.isDirectory() ? "directory" : "file" }); } const trashRoot = path.join(resolver.rootPath, ".agent-trash"); await mkdir(trashRoot, { recursive: true }); const trashPath = path.join(trashRoot, `${Date.now()}-${randomUUID()}-${path.basename(candidate)}`); await rename(candidate, trashPath); return ok({ path: args.path, permanent: false, trashedTo: path.relative(resolver.rootPath, trashPath).replaceAll("\\", "/"), type: info.isDirectory() ? "directory" : "file" }); }
 
-function runArgv(command: string, args: string[], cwd: string, signal: AbortSignal): Promise<ToolResult> { return new Promise((resolve) => { const child = spawn(command, args, { cwd, detached: true, shell: false, windowsHide: true }); let output = ""; let stdout = ""; let stderr = ""; let bytes = 0; let truncated = false; const append = (stream: "stdout" | "stderr", chunk: Buffer) => { const text = chunk.toString("utf8"); if (stream === "stdout") stdout += text; else stderr += text; bytes += chunk.byteLength; const currentBytes = Buffer.byteLength(output, "utf8"); if (currentBytes < MAX_PROCESS_OUTPUT_BYTES) output += text.slice(0, MAX_PROCESS_OUTPUT_BYTES - currentBytes); if (bytes > MAX_PROCESS_OUTPUT_BYTES) truncated = true; }; child.stdout.on("data", (chunk: Buffer) => append("stdout", chunk)); child.stderr.on("data", (chunk: Buffer) => append("stderr", chunk)); const abort = () => terminateProcessTree(child); signal.addEventListener("abort", abort, { once: true }); child.on("error", (error) => { signal.removeEventListener("abort", abort); resolve(fail("COMMAND_FAILED", error.message)); }); child.on("close", (code, signalName) => { signal.removeEventListener("abort", abort); const usage = { bytes, truncated }; const audit = { stdout, stderr, exitCode: code, signal: signalName ?? undefined }; if (signal.aborted || signalName) resolve({ ...fail("COMMAND_CANCELLED", "Command was cancelled"), output, audit, usage }); else if (code === 0) resolve({ ...ok(output), audit, usage }); else resolve({ ok: false, output, audit, usage, error: { code: "COMMAND_EXITED", message: `Command exited with code ${code}` }, presentation: { kind: "terminal", title: "Command failed", text: output } }); }); }); }
+async function runArgv(command: string, args: string[], cwd: string, signal: AbortSignal): Promise<ToolResult> {
+  try {
+    if (!(await stat(cwd)).isDirectory()) return fail("WORKDIR_INVALID", `Working directory is not a directory: ${cwd}`);
+  } catch { return fail("WORKDIR_INVALID", `Working directory does not exist: ${cwd}`); }
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { cwd, detached: true, shell: false, windowsHide: true });
+    let output = "";
+    let stdout = "";
+    let stderr = "";
+    let bytes = 0;
+    let truncated = false;
+    const append = (stream: "stdout" | "stderr", chunk: Buffer) => {
+      const text = chunk.toString("utf8");
+      if (stream === "stdout") stdout += text; else stderr += text;
+      bytes += chunk.byteLength;
+      const currentBytes = Buffer.byteLength(output, "utf8");
+      if (currentBytes < MAX_PROCESS_OUTPUT_BYTES) output += text.slice(0, MAX_PROCESS_OUTPUT_BYTES - currentBytes);
+      if (bytes > MAX_PROCESS_OUTPUT_BYTES) truncated = true;
+    };
+    child.stdout.on("data", (chunk: Buffer) => append("stdout", chunk));
+    child.stderr.on("data", (chunk: Buffer) => append("stderr", chunk));
+    const abort = () => terminateProcessTree(child);
+    signal.addEventListener("abort", abort, { once: true });
+    child.on("error", (error) => {
+      signal.removeEventListener("abort", abort);
+      const code = (error as NodeJS.ErrnoException).code === "ENOENT" ? "COMMAND_NOT_FOUND" : "COMMAND_FAILED";
+      resolve(fail(code, error.message));
+    });
+    child.on("close", (code, signalName) => {
+      signal.removeEventListener("abort", abort);
+      const usage = { bytes, truncated };
+      const audit = { stdout, stderr, exitCode: code, signal: signalName ?? undefined };
+      if (signal.aborted || signalName) resolve({ ...fail("COMMAND_CANCELLED", "Command was cancelled"), output, audit, usage });
+      else if (truncated) resolve({ ok: false, output, audit, usage, error: { code: "OUTPUT_TRUNCATED", message: `Command output exceeded ${MAX_PROCESS_OUTPUT_BYTES} bytes`, remedy: "Narrow the command or use a bounded output path." }, presentation: { kind: "terminal", title: "Command output truncated", text: output } });
+      else if (code === 0) resolve({ ...ok(output), audit, usage });
+      else resolve({ ok: false, output, audit, usage, error: { code: "NON_ZERO_EXIT", message: `Command exited with code ${code}`, remedy: "Inspect stdout/stderr and exit metadata before selecting the next command." }, presentation: { kind: "terminal", title: "Command failed", text: output } });
+    });
+  });
+}
 
 function terminateProcessTree(child: ChildProcessWithoutNullStreams | ReturnType<typeof spawn>): void { if (child.pid === undefined) { child.kill(); return; } if (process.platform === "win32") { const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, shell: false }); killer.unref(); try { child.kill(); } catch { /* taskkill remains the fallback for the process tree */ } } else { try { process.kill(-child.pid, "SIGTERM"); } catch { child.kill(); } } }
 function defaultShell(): string { return process.platform === "win32" ? (process.env["ComSpec"] ?? "cmd.exe") : (process.env["SHELL"] ?? "/bin/sh"); }
@@ -377,5 +517,31 @@ function waitForTerminalOutput(terminal: ManagedTerminal, waitMs: number, signal
 function waitForChildClose(child: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<void> { if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(); return new Promise((resolve) => { let settled = false; const finish = () => { if (settled) return; settled = true; clearTimeout(timer); resolve(); }; const timer = setTimeout(finish, timeoutMs); child.once("close", finish); }); }
 function isMissingPathError(error: unknown): boolean { return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT"; }
 function ok(output: unknown): ToolResult { return { ok: true, output, presentation: { kind: "tool", title: "Completed" } }; }
-function fail(code: string, message: string): ToolResult { return { ok: false, error: { code, message }, presentation: { kind: "tool", title: code, text: message } }; }
+function fail(code: string, message: string, remedy?: string): ToolResult { return { ok: false, error: { code, message, remedy: remedy ?? remedyForBuiltinError(code) }, presentation: { kind: "tool", title: code, text: message } }; }
+function remedyForBuiltinError(code: string): string {
+  if (code === "FILE_NOT_FOUND" || code === "FILE_NOT_REGULAR") return "Check the workspace-relative path and reread the current target.";
+  if (code === "FILE_BINARY") return "Use a controlled image/binary-aware tool when available; do not decode arbitrary bytes as text.";
+  if (code === "FILE_TOO_LARGE" || code === "READ_OFFSET_INVALID") return "Use a bounded line range or choose a supported artifact/read path.";
+  if (code === "GLOB_PATTERN_REQUIRED" || code === "GLOB_PATTERN_INVALID") return "Use a non-empty supported glob rooted at the active workspace.";
+  if (code === "SEARCH_PATH_INVALID" || code === "SEARCH_PATTERN_INVALID") return "Correct the search path/pattern and retry with a bounded scope.";
+  if (code === "COMMAND_NOT_ALLOWED") return "Choose an executable from the visible allowlist and pass explicit argv.";
+  if (code === "COMMAND_NOT_FOUND") return "Check the executable name and installed toolchain before retrying.";
+  if (code === "WORKDIR_INVALID") return "Use an existing directory inside the active workspace.";
+  if (code === "NON_ZERO_EXIT") return "Inspect stdout/stderr and exit metadata before selecting the next command.";
+  if (code === "OUTPUT_TRUNCATED") return "Narrow the command/search scope or use the bounded continuation/spill guidance.";
+  return "Inspect the structured error and adjust the next safe step; do not blindly repeat the call.";
+}
+function globRegExp(pattern: string): RegExp {
+  let source = "";
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index]!;
+    if (char === "*") {
+      if (pattern[index + 1] === "*" && pattern[index + 2] === "/") { source += "(?:.*/)?"; index += 2; }
+      else if (pattern[index + 1] === "*") { source += ".*"; index += 1; }
+      else source += "[^/]*";
+    } else if (char === "?") source += "[^/]";
+    else source += escapeRegExp(char);
+  }
+  return new RegExp(`^${source}$`, "u");
+}
 function escapeRegExp(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"); }

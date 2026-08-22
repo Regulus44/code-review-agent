@@ -35,6 +35,25 @@ Phase 3 的基础 ToolRuntime、权限和审计 checkpoint 已完成。对当前
 
 进入 3B.1：补齐 P0 工具的 schema/prompt/result/presentation 对齐合同，随后强化 read/search/Git 组合和编辑 stale/conflict/diff 语义。
 
+## 2026-08-22：Phase 3B.1 P0 文件、搜索和结果 presentation checkpoint
+
+### 变更范围
+
+- `read_file` 增加 1-based `offset`/`limit`，返回稳定行号、总行数、截断标记和 `nextOffset`；识别二进制目标并提供结构化 remedy；
+- `glob` 支持确定性排序、`**`/`*`/`?` 路径模式、结果上限和过量结果下一步；
+- `grep` 增加 literal/regex、大小写、上下文行、路径约束、二进制跳过、结果截断和结构化 match；
+- `git_diff` 支持限定路径；命令结果区分 `WORKDIR_INVALID`、`COMMAND_NOT_FOUND`、`NON_ZERO_EXIT`、`COMMAND_CANCELLED` 和 `OUTPUT_TRUNCATED`；
+- `ToolRuntime` 为每次 `tool/call` 追加稳定 call presentation，并使用工具 `presentResult` 或结构化结果生成 result presentation；错误统一携带可行动 remedy。
+
+### 验证
+
+- `pnpm typecheck` 通过；
+- `pnpm --filter @code-review-agent/tools test`：29 项通过，覆盖行范围读取、glob/grep 结构化结果、presentation 和既有安全回归。
+
+### 下一步
+
+进入 3B.2：实现结构化多段编辑、stale/version 检测、冲突停止与重新读取、unified diff/patch parser 和 apply/reject 审计。
+
 阶段计划：[phase-3-tools-permissions.zh-CN.md](../phase-plans/phase-3-tools-permissions.zh-CN.md)
 
 ## 2026-08-21：阶段启动
