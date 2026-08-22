@@ -5,8 +5,9 @@
 Code Review Agent 是一个 TypeScript 实现的 Coding Agent Runtime。它在本地
 workspace 上运行流式 Agent Loop，把每个 Session 以 append-only 事件日志的
 形式持久化到 SQLite，并提供 DSH 风格的 Web 工作台用于交互式编码会话。
+仓库只保留当前 TypeScript Runtime、Web host、公共契约、工具、测试和产品
+文档。
 
-项目正在从早期的 Python 仓库分析原型演进为网页版 Coding Agent Runtime。
 开发按 `docs/coding-agent-migration-plan.zh-CN.md` 中的阶段计划推进，阶段
 状态和验收证据记录在 `docs/phase-status.zh-CN.md`。
 
@@ -114,12 +115,8 @@ packages/
 apps/
   api/          Node HTTP/SSE host；同时托管 Web UI
   web/          静态 DSH 风格 Web 工作台
-src/code_review_agent/   Python 遗留原型（仅作参考）
 docs/                    计划、契约、开发日志
 ```
-
-TypeScript Runtime 的依赖图不包含 `src/code_review_agent`。Python 包在迁移
-期间保留在仓库中，作为行为和测试参考。
 
 ## 环境要求
 
@@ -165,8 +162,7 @@ TypeScript API 读取的 `.env` 配置：
 | `DEEPSEEK_BASE_URL` | 默认 `https://api.deepseek.com`。 |
 | `DEEPSEEK_MODEL` | 默认模型，默认 `deepseek-v4-flash`。 |
 | `PORT` | API 端口，默认 `3210`。 |
-
-`.env.example` 中的其余配置属于 Python 遗留原型，TypeScript API 不读取。
+| `CODE_REVIEW_AGENT_DB_PATH` | SQLite 数据库路径，默认使用 API 包的 `.data` 目录。 |
 
 ## API 概览
 
@@ -245,10 +241,3 @@ Phase 5 将在现有事件、工具和任务契约之上增加 `SubagentRegistry
 parent/child 生命周期、task/report contract 和并发/深度/预算限制。
 Phase 6 随后把 A2A 作为适配层接入，提供 agent card 发现、task
 create/get/cancel 和流式更新，并映射到内部 Session。
-
-## Python 遗留原型
-
-`src/code_review_agent` 是最初的 Python 实现：FastAPI 服务、结构化仓库分析
-应用、SQLite 持久化的 run/session，以及单页 Web UI。它仍可通过
-`pyproject.toml` 和 `docker-compose.yml` 运行，作为行为和测试参考保留。
-新功能在 TypeScript 包中开发。

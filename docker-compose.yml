@@ -5,15 +5,15 @@ services:
       dockerfile: Dockerfile
     image: code-review-agent:local
     ports:
-      - "${CODE_REVIEW_AGENT_PORT:-8000}:8000"
+      - "${CODE_REVIEW_AGENT_PORT:-3210}:3210"
     env_file:
       - .env
     environment:
-      DATABASE_URL: sqlite:////data/runtime.db
-      RUNTIME_WORKSPACE_ROOT: /workspaces
+      PORT: 3210
+      CODE_REVIEW_AGENT_DB_PATH: /app/.data/code-review-agent.sqlite
     volumes:
-      - code-review-agent-data:/data
-      - ${CODE_REVIEW_WORKSPACE_HOST_ROOT:-.}:/workspaces/code-review-agent:ro
+      - code-review-agent-data:/app/.data
+      - ${CODE_REVIEW_WORKSPACE_HOST_ROOT:-.}:/workspaces/project
     restart: unless-stopped
 
 volumes:

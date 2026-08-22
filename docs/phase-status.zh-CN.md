@@ -33,7 +33,7 @@ Phase 1 的 provider-neutral adapter 现在已接入 API CLI 启动路径：通�
 - `packages/tools` 已有 9 个内置工具，`ToolRuntime` 已有 schema、workspace、权限、取消、超时、输出预算和审计能力；
 - `packages/mcp-client` 已能发现并桥接外部工具；
 - 第一批 `packages/contracts`、`packages/llm` 和 `packages/runtime` 已携带工具 schema、解析 `delta.tool_calls` 并执行 model → tool → model 循环；进程重启后的 pending approval/turn continuation 已在 Phase 1A.5 完成；
-- 当前 `packages/tools/src/builtin.ts` 的 9 个工具已经是 TypeScript 初版；旧 `src/code_review_agent/tools/` 仍是 Python legacy/reference，不进入新 Runtime 依赖图；
+- 当前 `packages/tools/src/builtin.ts` 的工具池已经是 TypeScript 实现；旧 Python 工具实现已从工作树移除，新 Runtime 只使用 TypeScript 工具；
 - 因此当前阶段目标改为 `Phase 1A：Agentic Core + TypeScript Tool Pool`，该目标现已通过工具调用层、Terminal、Plan/Todo、AskUser、权限恢复和真实垂直场景门禁；
 - Phase 5 Subagent、Phase 6 A2A 和 Phase 8 高级能力的核心实现必须等待本门禁通过。
 
@@ -107,7 +107,7 @@ Phase 1 的 provider-neutral adapter 现在已接入 API CLI 启动路径：通�
 
 ## Phase 1A.0 迁移边界收尾（2026-08-22）
 
-新增 [工具迁移矩阵](tool-migration-matrix.zh-CN.md)，明确 Python legacy/reference 边界、DSH/Claude Code 行为参考、P0/P1 工具的 source/risk/execution/approval/workspace contract，以及行为 fixture 和安全回归索引。`packages/tools/src/behavior-fixtures.ts` 提供跨平台的 P0 contract fixture，新增 registry 对齐测试。
+新增 [工具迁移矩阵](tool-migration-matrix.zh-CN.md)，明确 DSH/Claude Code 行为参考、P0/P1 工具的 source/risk/execution/approval/workspace contract，以及行为 fixture 和安全回归索引。`packages/tools/src/behavior-fixtures.ts` 提供跨平台的 P0 contract fixture，新增 registry 对齐测试。
 
 ## Phase 4 验收证据
 

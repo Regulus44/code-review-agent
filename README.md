@@ -5,10 +5,10 @@
 Code Review Agent is a TypeScript coding-agent runtime. It drives a streaming
 agent loop over a local workspace, persists every session as an append-only
 event log in SQLite, and serves a DSH-style web workspace for interactive
-coding sessions.
+coding sessions. The repository contains the TypeScript runtime, web host,
+contracts, tools, tests, and current product documentation.
 
-The project is evolving from an earlier Python repo-analysis prototype into a
-web-based coding agent runtime. Active development follows the phased plan in
+Active development follows the phased plan in
 `docs/coding-agent-migration-plan.zh-CN.md`; phase status and acceptance
 evidence live in `docs/phase-status.zh-CN.md`.
 
@@ -127,13 +127,8 @@ packages/
 apps/
   api/          Node HTTP/SSE host; also serves the web UI
   web/          static DSH-style web workspace
-src/code_review_agent/   legacy Python prototype (reference only)
 docs/                    plans, contracts, development logs
 ```
-
-The TypeScript runtime has no dependency on `src/code_review_agent`. The
-Python package remains in the repository as a behavior and test reference
-during the migration.
 
 ## Requirements
 
@@ -181,9 +176,7 @@ directory.
 | `DEEPSEEK_BASE_URL` | Defaults to `https://api.deepseek.com`. |
 | `DEEPSEEK_MODEL` | Default model; defaults to `deepseek-v4-flash`. |
 | `PORT` | API port; defaults to `3210`. |
-
-The remaining entries in `.env.example` belong to the legacy Python prototype
-and are ignored by the TypeScript API.
+| `CODE_REVIEW_AGENT_DB_PATH` | SQLite database path; defaults to the API package `.data` directory. |
 
 ## API Overview
 
@@ -265,11 +258,3 @@ report contracts, and concurrency/depth/budget limits, built on the existing
 event, tool, and task contracts. Phase 6 will then add A2A as an adapter
 layer (agent card discovery, task create/get/cancel, streaming updates)
 mapped onto internal sessions.
-
-## Legacy Python Prototype
-
-`src/code_review_agent` contains the original Python implementation: a
-FastAPI service, a structured repo-analysis app, SQLite-backed runs and
-sessions, and a single-page web UI. It remains runnable via `pyproject.toml`
-and `docker-compose.yml` and serves as a behavior and test reference. New
-features are developed in the TypeScript packages.

@@ -6,15 +6,9 @@
 
 状态：accepted
 
-目标后端使用 TypeScript/Node.js。现有 `src/code_review_agent` 不进入新 Runtime 的 import graph，也不作为新 API、Session、Tool 或 Event 类型的来源。
+目标后端使用 TypeScript/Node.js。旧 Python 原型不进入新 Runtime 的 import graph，也不作为新 API、Session、Tool 或 Event 类型的来源。
 
-旧 Python 实现保留为 legacy/reference，作用只有三类：
-
-- 提供现有功能的行为样本；
-- 提供迁移前后的回归输入和验收案例；
-- 帮助识别安全边界、数据字段和已知缺陷。
-
-当 TypeScript 版本通过 Read-only、Edit、Test 三个垂直场景后，再单独决定是否把 Python 目录归档或移除。迁移期间不通过 Python/TypeScript 双运行时共享业务对象来“临时兼容”，避免新旧模型互相污染。
+TypeScript 版本已经通过 Read-only、Edit、Test 三个垂直场景，旧 Python 源码、测试和启动入口已从工作树移除。历史行为和迁移决策通过 Git 提交与开发日志保留，当前运行时只保留一套 TypeScript 实现。
 
 ## ADR-002：DSH 负责主骨架，Claude Code 负责行为层
 

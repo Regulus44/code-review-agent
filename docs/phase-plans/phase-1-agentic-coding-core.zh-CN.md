@@ -24,7 +24,7 @@
   → 最终回答
 ```
 
-旧 Python 原型中的工具位于 `src/code_review_agent/tools/`，只保留为行为和回归参考；当前 `packages/tools/src/builtin.ts` 已经是 TypeScript 初版。Phase 1A 不会把 Python 模块接回新 Runtime，也不会逐行翻译旧 Python，而是以现有 TypeScript `ToolDefinition`/`ToolRuntime` 为基线，按 DSH/Claude Code 的核心工具行为重新审计、补齐和测试。
+当前工具实现位于 `packages/tools/src/builtin.ts`。Phase 1A 以现有 TypeScript `ToolDefinition`/`ToolRuntime` 为基线，按 DSH/Claude Code 的核心工具行为重新审计、补齐和测试。
 
 本阶段同时解决两件事：先恢复正常的 model → tool → model 调用流程，再把文件、搜索、Shell、持久终端、计划、任务和用户交互等 Coding Agent 核心工具补齐到可用的 TypeScript 工具池。
 
@@ -33,7 +33,7 @@
 | 能力层 | 当前项目 | DSH / Claude Code 的做法 | 本阶段结论 |
 |---|---|---|---|
 | 模型工具调用 | `ModelRequest` 只有 messages；只解析 text delta | 每一步都把工具 schema 发给模型，解析多 tool call，再把结果作为下一轮上下文 | P0，必须先完成 |
-| 文件基础工具 | TypeScript 已有 9 个工具，但主要可由 API 直接调用；旧 Python 工具只作参考 | Read/Write/Edit/Glob/Grep 是模型第一层工具 | 接入 Loop，并按模型 UX 重新审计 |
+| 文件基础工具 | TypeScript 已有 9 个工具，但主要可由 API 直接调用 | Read/Write/Edit/Glob/Grep 是模型第一层工具 | 接入 Loop，并按模型 UX 重新审计 |
 | 命令执行 | 一次性 `run_command` / `run_tests` | Bash/Pwsh + 持久 Terminal session | P0 保留一次性命令；P1 增加 terminal session |
 | 权限 | risk、auto/ask/deny、workspace、取消、审计已有 | permission mode、deny rule、工具过滤、审批暂停/恢复统一进入 Loop | P0 增加 preset、模型可见过滤、暂停恢复 |
 | 计划与任务 | projection 有 Task 基础，但无模型工具闭环 | Plan/Todo/AskUser 是独立状态，可暂停 Agent | Phase 1A 增加 `plan`、`todo_write`、`ask_user` |
@@ -162,7 +162,7 @@ Phase 1A 是当前优先级最高的执行单元，必须同时交付 Agent Loop
 
 ### 1A.0：迁移边界和工具清点
 
-- [x] 将 `src/code_review_agent/tools/` 标记为 legacy/reference，不被新 Runtime import；
+- [x] 移除旧工具实现，确保新 Runtime 只使用 TypeScript 工具池；
 - [x] 为当前 TypeScript 9 个工具建立行为 fixture、输入/输出快照和安全回归清单；
 - [x] 对照 DSH `packages/fs`、`packages/shell`、`packages/terminal`、`packages/plan`、`packages/todo`、`packages/interaction` 与 Claude Code `packages/builtin-tools/src/tools` 建立工具映射；
 - [x] 明确每个工具的 source、risk、executionMode、approvalMode、workspace 规则和模型可见结果；

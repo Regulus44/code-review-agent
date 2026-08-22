@@ -31,7 +31,7 @@ Coding Agent Host
 
 ### 1.2 明确非目标
 
-- 不把现有 Python Runtime 继续作为目标后端底座；Python 代码只保留为需求、行为和测试参考。
+- 不把旧 Python Runtime 作为目标后端底座；旧实现已从当前工作树移除，历史行为通过 Git 和开发日志追溯。
 - 不把整个 DSH monorepo 原样复制进本项目；只选择性重建能够支撑本项目目标的包和接口。
 - 不直接复制 DSH 的 Cordis、全部插件和桌面端代码。
 - 不复制本地 Claude Code 仓库的完整逆向工程实现、CLI、商业服务、遥测或账户体系；在来源和许可证清晰的前提下，可以选择性复用局部代码，否则按其源码重建行为。
@@ -58,8 +58,8 @@ Coding Agent Host
 
 ### 2.2 必须保留本项目边界的部分
 
-- 目标后端是 TypeScript/Node.js；现有 Python 包不参与新 Runtime 的运行时依赖图。
-- 迁移期间不删除 Python 代码，但将其明确标记为 legacy/reference，等 TypeScript 垂直切片达到验收后再决定归档或移除。
+- 目标后端是 TypeScript/Node.js；旧 Python 包不参与新 Runtime 的运行时依赖图。
+- TypeScript 垂直切片已经达到验收，当前仓库只保留 TypeScript Runtime 和对应测试。
 - SQLite 先继续使用，但通过 TypeScript Store 接口访问，不把 Python ORM 或 FastAPI 类型带入新代码。
 - 本项目的工作区安全策略必须比“直接允许 shell”更严格。
 - API 事件契约由本项目维护，不直接暴露第三方内部类型。
@@ -112,7 +112,7 @@ Coding Agent Host
 
 ## 4. 目标后端分层
 
-新 Runtime 在仓库根目录建立 TypeScript workspace。当前 `src/code_review_agent` 不再是新后端的依赖；它只作为 legacy/reference 保留，直到新 Runtime 覆盖既有验收场景。
+新 Runtime 在仓库根目录建立 TypeScript workspace。旧 Python 原型已移除，当前工作树只包含新后端、Web host、工具和契约。
 
 ```text
 packages/
@@ -127,8 +127,8 @@ apps/
   api/             Node.js HTTP/SSE host
   web/             DSH 风格的独立 TypeScript/Vite 前端
 
-legacy-reference/
-  （未来可选的归档位置；Phase 0 不移动现有 `src/code_review_agent`）
+docs/
+  计划、契约、开发日志和迁移决策
 ```
 
 现有模块的迁移原则：
@@ -168,8 +168,8 @@ legacy-reference/
 
 - 新需求可以明确映射到某个 Phase；
 - 如果一个需求不能映射到 Phase，先写决策记录，不能直接编码；
-- 旧 Python 测试仍能运行；新 TypeScript 包可以独立 typecheck/test；
-- 新 Runtime 的依赖图不包含 `src/code_review_agent`。
+- 新 TypeScript 包可以独立 typecheck/test；
+- 新 Runtime 的依赖图只包含 TypeScript workspace 包。
 
 ### Phase 1：Agentic Coding Core（DSH Web Shell + 真正工具调用）
 
@@ -190,7 +190,7 @@ legacy-reference/
 - 权限 preset、审批暂停/恢复和模型工具过滤；
 - Web UI 对话、工具卡片、diff 卡片、停止按钮。
 
-Phase 1A 的 TypeScript 工具迁移边界：旧 `src/code_review_agent/tools/` 只作 legacy/reference；新 Runtime 只依赖 `packages/tools`，不把 Python 工具重新接回后端。工具实现可以参考 DSH/Claude Code 的行为和结果形状，但必须经过本项目的 workspace、permission、event、cancel 和 output budget 管线。
+Phase 1A 的 TypeScript 工具边界：新 Runtime 只依赖 `packages/tools`。工具实现可以参考 DSH/Claude Code 的行为和结果形状，但必须经过本项目的 workspace、permission、event、cancel 和 output budget 管线。
 
 不包含：MCP、A2A、Subagent、LSP、Code Mode、Worktree。
 

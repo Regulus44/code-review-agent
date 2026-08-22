@@ -4,8 +4,8 @@
 
 ## 迁移边界
 
-- `src/code_review_agent/tools/` 是 Python legacy/reference，只用于行为对照、迁移输入和回归 fixture；新 Runtime 不 import 该目录。
 - 新工具实现位于 `packages/tools/src/builtin.ts`，统一经过 `ToolRegistry`、`ToolRuntime`、workspace resolver、permission policy、取消、输出预算和事件存储。
+- 旧工具实现已从工作树移除；历史映射保留在本文件，便于理解行为来源和验收边界。
 - DSH 主要提供 TypeScript Agent Loop、filesystem/shell/terminal/plan/todo/interaction 的行为参考；Claude Code 主要提供 Read/Edit/Write/Glob/Grep/Bash、审批和工具 UX 的行为参考。
 - 未从 Claude Code 快照复制代码；DSH 只登记了信息架构和行为适配范围，若未来直接改编代码，必须先补许可证证据和独立 checkpoint。
 
