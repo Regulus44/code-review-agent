@@ -176,7 +176,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "POST" && url.pathname === "/v1/sessions") {
       const body = await readJson(request);
       const workspaceRoot = typeof body.workspaceRoot === "string" && body.workspaceRoot.length > 0 ? body.workspaceRoot : process.cwd();
-      sendJson(response, 201, await host.createSession(workspaceRoot));
+      const permissionPreset = body.permissionPreset === undefined ? undefined : parsePermissionPreset(body.permissionPreset);
+      sendJson(response, 201, await host.createSession(workspaceRoot, permissionPreset));
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/sessions") {
@@ -194,6 +195,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         return;
       }
       await streamEvents(request, response, host, id, after);
+      return;
+    }
+    const modeMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/mode$/u);
+    if (request.method === "POST" && modeMatch?.[1] !== undefined) {
+      const id = sessionId(decodeURIComponent(modeMatch[1]));
+      const body = await readJson(request);
+      sendJson(response, 200, await host.setSessionPermissionPreset(id, parsePermissionPreset(body.permissionPreset)));
       return;
     }
     const resumeMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/resume$/u);
@@ -365,6 +373,11 @@ function parseSequence(value: string | string[] | null | undefined): number {
   if (raw === null || raw === undefined || raw === "") return 0;
   const parsed = Number.parseInt(raw, 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+function parsePermissionPreset(value: unknown): PermissionPreset {
+  if (value === "read-only" || value === "workspace-write" || value === "ask-on-write" || value === "ask-on-execute" || value === "danger-full-access") return value;
+  throw new HttpError(400, "permissionPreset must be read-only, workspace-write, ask-on-write, ask-on-execute, or danger-full-access");
 }
 
 class HttpError extends Error {

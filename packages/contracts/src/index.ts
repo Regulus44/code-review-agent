@@ -58,10 +58,12 @@ export interface AgentEvent {
 export type SessionStatus = "idle" | "queued" | "running" | "stopped" | "failed" | "interrupted";
 export type TurnStatus = "queued" | "running" | "completed" | "stopped" | "failed" | "interrupted";
 export type TaskStatus = "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "blocked";
+export type PermissionPreset = "read-only" | "workspace-write" | "ask-on-write" | "ask-on-execute" | "danger-full-access";
 
 export interface SessionSummary {
   readonly id: SessionId;
   readonly workspaceRoot: string;
+  readonly permissionPreset: PermissionPreset;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly status: SessionStatus;
@@ -307,6 +309,7 @@ export interface UserInteractionAnswer {
 
 export interface CreateSessionInput {
   readonly workspaceRoot: string;
+  readonly permissionPreset?: PermissionPreset;
 }
 
 export interface SendMessageInput {
@@ -358,10 +361,10 @@ export interface EventStore {
 }
 
 export interface SessionEventStore extends EventStore {
-  createSession(workspaceRoot: string): Promise<SessionId>;
+  createSession(workspaceRoot: string, permissionPreset?: PermissionPreset): Promise<SessionId>;
   listSessions(): Promise<readonly SessionSummary[]>;
   claimCommand(input: ClaimCommandInput): Promise<CommandClaim>;
-  forkSession(sessionId: SessionId, workspaceRoot?: string, id?: SessionId): Promise<SessionId>;
+  forkSession(sessionId: SessionId, workspaceRoot?: string, id?: SessionId, permissionPreset?: PermissionPreset): Promise<SessionId>;
 }
 
 export interface AppendEventInput {

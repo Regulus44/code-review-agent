@@ -20,7 +20,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { ToolRegistry } from "./registry.js";
 import { assertValidInput } from "./schema.js";
-import { DefaultPermissionPolicy, type PermissionPolicy } from "./permissions.js";
+import { DefaultPermissionPolicy, type PermissionPolicy, type PermissionPreset } from "./permissions.js";
 import { TerminalManager } from "./builtin.js";
 
 export interface ToolRuntimeOptions {
@@ -31,6 +31,8 @@ export interface ToolRuntimeOptions {
   readonly outputBudgetBytes?: number;
   readonly permissionTtlMs?: number;
   readonly terminalManager?: TerminalManager;
+  /** Optional per-session override used by the Web work-mode selector. */
+  readonly sessionPermissionPresets?: ReadonlyMap<SessionId, PermissionPreset>;
 }
 
 export interface ExecuteToolInput {
@@ -85,12 +87,22 @@ export class ToolRuntime {
   private readonly expiryTimers = new Map<PermissionId, NodeJS.Timeout>();
   private readonly interactionExpiryTimers = new Map<InteractionId, NodeJS.Timeout>();
   private readonly activeExclusive = new Map<SessionId, Promise<unknown>>();
+  private readonly sessionPermissionPresets = new Map<SessionId, PermissionPreset>();
 
   constructor(private readonly options: ToolRuntimeOptions) {
     this.policy = options.policy ?? new DefaultPermissionPolicy();
     this.defaultTimeoutMs = options.defaultTimeoutMs ?? 120_000;
     this.outputBudgetBytes = options.outputBudgetBytes ?? 64 * 1024;
     this.permissionTtlMs = options.permissionTtlMs ?? 15 * 60_000;
+    for (const [sessionId, preset] of options.sessionPermissionPresets ?? []) this.sessionPermissionPresets.set(sessionId, preset);
+  }
+
+  setSessionPermissionPreset(sessionId: SessionId, preset: PermissionPreset): void {
+    this.sessionPermissionPresets.set(sessionId, preset);
+  }
+
+  permissionPresetFor(sessionId: SessionId): PermissionPreset {
+    return this.sessionPermissionPresets.get(sessionId) ?? (this.policy instanceof DefaultPermissionPolicy ? this.policy.preset : "ask-on-write");
   }
 
   /** The registry is shared with optional adapters that register external tools. */
@@ -98,8 +110,9 @@ export class ToolRuntime {
     return this.options.registry;
   }
 
-  listTools(): readonly ToolDefinition[] {
-    return this.options.registry.list().filter((definition) => this.policy.isVisible?.(definition) ?? true);
+  listTools(sessionId?: SessionId): readonly ToolDefinition[] {
+    const policy = sessionId === undefined ? this.policy : new DefaultPermissionPolicy({ preset: this.permissionPresetFor(sessionId) });
+    return this.options.registry.list().filter((definition) => policy.isVisible?.(definition) ?? true);
   }
 
   pendingPermissions(): readonly PermissionRequest[] {
@@ -162,7 +175,8 @@ export class ToolRuntime {
     const definition = this.options.registry.validate(input.name, input.input);
     const toolCallId = input.toolCallId ?? brand<string, "ToolCallId">(`tool_${randomUUID()}`);
     const caller = input.caller ?? "agent";
-    const evaluation = this.policy.evaluate(definition);
+    const policy = new DefaultPermissionPolicy({ preset: this.permissionPresetFor(input.sessionId) });
+    const evaluation = policy.evaluate(definition);
     await this.append(input, "tool/call", {
       toolCallId,
       name: definition.name,
@@ -232,7 +246,10 @@ export class ToolRuntime {
     const expiryTimer = this.expiryTimers.get(permissionId);
     if (expiryTimer !== undefined) clearTimeout(expiryTimer);
     this.expiryTimers.delete(permissionId);
-    const resolutionStatus: PermissionStatus = Date.parse(pending.permission.expiresAt) <= Date.now() ? "expired" : status;
+    const currentPolicy = new DefaultPermissionPolicy({ preset: this.permissionPresetFor(pending.permission.sessionId) });
+    const resolutionStatus: PermissionStatus = Date.parse(pending.permission.expiresAt) <= Date.now()
+      ? "expired"
+      : status === "approved" && currentPolicy.evaluate(pending.definition).mode === "deny" ? "denied" : status;
     await this.options.store.append({
       sessionId: pending.permission.sessionId,
       ...(pending.permission.turnId === undefined ? {} : { turnId: pending.permission.turnId }),

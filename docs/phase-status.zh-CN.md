@@ -16,6 +16,12 @@
 | Phase 7：DSH Web 前端收敛 | in_progress | DSH 三栏 Web 垂直切片 + Workspace Picker；类型检查、API 测试和浏览器 smoke 通过 |
 | Phase 8：高级能力与产品化 | pending | 等前置阶段完成 |
 
+## Phase 7 Web Coding 工作模式修复（2026-08-22）
+
+Web 工作台现在支持 Session 级工作模式：新建 Session 可以选择 `read-only`、`ask-on-write`、`workspace-write`、`ask-on-execute` 和 `danger-full-access`，已有 Session 可以从 composer 的 Mode 菜单切换。权限模式已经进入 Session 事件与 projection，ToolRuntime 会按 Session 选择可见工具和执行策略。默认 `ask-on-write` 允许读操作自动执行，写入和命令执行需要确认。
+
+验证：`pnpm typecheck`、`pnpm test` 和 Runtime 工作模式合同测试通过。该修复属于 Phase 7 Web 可用性收敛，同时补齐 Session/Permission contract 的实际入口。
+
 ## Phase 1 真实模型增强（2026-08-22）
 
 Phase 1 的 provider-neutral adapter 现在已接入 API CLI 启动路径：通过根目录本地 `.env` 配置 `DEEPSEEK_API_KEY`，`MODEL_PROVIDER=auto` 会选择 DeepSeek；没有 Key 时保留 Echo fallback。默认模型为 `deepseek-v4-flash`，并可在 API/Web 中切换到 `deepseek-v4-pro` 或 `deepseek-v4-flash-vision-exp`。`.env`、`.env.*`（`.env.example` 除外）均被 Git 忽略，API health、事件和 Web 响应只展示不含凭据的 provider/model/configured 信息。fake-fetch API/LLM 测试已证明真实流式路径和 Authorization header 行为，Phase 1A.1–1A.3 的 tool-calling loop 以及 Phase 1A.6 的真实 DeepSeek Coding smoke 均已完成。

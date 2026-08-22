@@ -58,6 +58,26 @@ describe("AgentHost", () => {
     expect(system).toContain("Active permission preset: read-only");
   });
 
+  it("applies the selected work mode to a session instead of the host default", async () => {
+    const store = new InMemoryEventStore();
+    const registry = new ToolRegistry();
+    registry.register({ name: "write_fixture", description: "write", inputSchema: { type: "object" }, executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "cancel", execute: async () => ({ ok: true, output: "written" }) });
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        if (request.messages.some((message) => message.role === "tool")) yield { type: "text_delta", text: "done" };
+        else { yield { type: "tool_call_start", index: 0, id: "call_write_mode", name: "write_fixture" }; yield { type: "tool_call_delta", index: 0, arguments: "{}" }; yield { type: "tool_call_end", index: 0 }; }
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store, model, permissionPreset: "read-only", toolRuntime: new ToolRuntime({ store, registry }) });
+    const session = await host.createSession("D:/workspace", "workspace-write");
+    expect(session.permissionPreset).toBe("workspace-write");
+    const turn = await host.sendMessage(session.id, "write the fixture");
+    await host.waitForTurn(turn);
+    expect((await host.getSession(session.id))?.permissions).toHaveLength(0);
+    expect((await host.getSession(session.id))?.toolCalls.at(-1)?.status).toBe("completed");
+  });
+
   it("runs a streaming turn and persists every visible event", async () => {
     const host = new AgentHost({ store: new InMemoryEventStore() });
     const session = await host.createSession("D:/workspace");

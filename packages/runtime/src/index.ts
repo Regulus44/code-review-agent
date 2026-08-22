@@ -95,9 +95,11 @@ export class AgentHost {
     this.model = model;
   }
 
-  async createSession(workspaceRoot: string): Promise<SessionProjection> {
+  async createSession(workspaceRoot: string, permissionPreset?: PermissionPreset): Promise<SessionProjection> {
     await this.ready;
-    const id = await this.options.store.createSession(workspaceRoot);
+    const preset = permissionPreset ?? this.permissionPreset ?? "ask-on-write";
+    const id = await this.options.store.createSession(workspaceRoot, preset);
+    this.toolRuntime.setSessionPermissionPreset(id, preset);
     const projection = await this.options.store.project(id);
     if (projection === undefined) throw new Error("Session projection was not created");
     return projection;
@@ -113,6 +115,17 @@ export class AgentHost {
     return this.options.store.project(sessionId);
   }
 
+  async setSessionPermissionPreset(sessionId: SessionId, permissionPreset: PermissionPreset): Promise<SessionProjection> {
+    await this.ready;
+    const current = await this.options.store.project(sessionId);
+    if (current === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    this.toolRuntime.setSessionPermissionPreset(sessionId, permissionPreset);
+    await this.options.store.append({ sessionId, type: "session/updated", payload: { permissionPreset } });
+    const updated = await this.options.store.project(sessionId);
+    if (updated === undefined) throw new Error(`Session disappeared: ${sessionId}`);
+    return updated;
+  }
+
   async events(sessionId: SessionId, afterSequence = 0): Promise<readonly AgentEvent[]> {
     await this.ready;
     return this.options.store.list(sessionId, afterSequence);
@@ -122,8 +135,8 @@ export class AgentHost {
     return this.options.store.subscribe(sessionId, listener);
   }
 
-  listTools() {
-    return this.toolRuntime.listTools().map((tool) => ({
+  listTools(sessionId?: SessionId) {
+    return this.toolRuntime.listTools(sessionId).map((tool) => ({
       name: tool.name,
       description: tool.description,
       inputSchema: tool.inputSchema,
@@ -367,7 +380,7 @@ export class AgentHost {
       if (typeof savedId !== "string") throw new Error(`Command ${idempotencyKey} has an invalid result`);
       return sessionIdFrom(savedId);
     }
-    return this.options.store.forkSession(sessionId, workspaceRoot, forkedId);
+    return this.options.store.forkSession(sessionId, workspaceRoot, forkedId, source.permissionPreset);
   }
 
   async waitForTurn(turnId: TurnId, timeoutMs = 10_000): Promise<void> {
@@ -396,6 +409,7 @@ export class AgentHost {
     for (const summary of await this.options.store.listSessions()) {
       let projection = await this.options.store.project(summary.id);
       if (projection === undefined) continue;
+      this.toolRuntime.setSessionPermissionPreset(summary.id, projection.permissionPreset ?? this.permissionPreset ?? "ask-on-write");
       await this.toolRuntime.restorePending(summary.id, projection.workspaceRoot, await this.options.store.list(summary.id));
       projection = await this.options.store.project(summary.id);
       if (projection === undefined) continue;
@@ -463,8 +477,8 @@ export class AgentHost {
     const workspaceRoot = projection?.workspaceRoot ?? ".";
     return buildAgentSystemPrompt({
       workspaceRoot,
-      tools: this.toolRuntime.listTools(),
-      ...(this.permissionPreset === undefined ? {} : { permissionPreset: this.permissionPreset }),
+      tools: this.toolRuntime.listTools(sessionId),
+      permissionPreset: projection?.permissionPreset ?? this.permissionPreset ?? "ask-on-write",
       ...(this.customSystemPrompt === undefined ? {} : { customInstructions: this.customSystemPrompt }),
       ...(recovery ? { recovery: true } : {}),
     });
@@ -568,8 +582,8 @@ export class AgentHost {
     }
   }
 
-  private modelTools(): readonly ModelToolDefinition[] {
-    return this.toolRuntime.listTools().map((tool) => ({
+  private modelTools(sessionId: SessionId): readonly ModelToolDefinition[] {
+    return this.toolRuntime.listTools(sessionId).map((tool) => ({
       name: tool.name,
       description: tool.description,
       parameters: tool.inputSchema,
@@ -584,7 +598,7 @@ export class AgentHost {
   ): Promise<CollectedModelResponse> {
     const textParts: string[] = [];
     const calls = new Map<number, { id?: string; name?: string; arguments: string }>();
-    for await (const part of this.model.stream({ messages, tools: this.modelTools(), toolChoice: "auto", signal: controller.signal })) {
+    for await (const part of this.model.stream({ messages, tools: this.modelTools(sessionId), toolChoice: "auto", signal: controller.signal })) {
       if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
       if (part.type === "text_delta") {
         textParts.push(part.text);

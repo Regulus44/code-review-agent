@@ -207,3 +207,26 @@ git diff --check ✓
 ```
 
 `packages/runtime` 测试覆盖默认 prompt 的 workspace/tool-use contract、permission-filtered tool inventory、自定义应用指令和 recovery prompt。该更新仍属于 Phase 1A 退出后的行为强化，不新增 Subagent、A2A、LSP、Worktree 或其他未计划核心能力。
+
+## 2026-08-22：Session 工作模式与 Coding 权限入口
+
+### 用户反馈
+
+- Web composer 只显示静态 Read-only 标识，无法选择可写 Coding 工作流；
+- 权限 preset 原先只在 AgentHost 启动时配置，无法让同一个 Web 服务中的不同 Session 使用不同权限策略。
+
+### 变更
+
+- `SessionProjection`、`SessionSummary` 和 `session/created` 事件保存 `permissionPreset`；SQLite、内存 store、fork 和重启恢复均保留该字段；
+- `ToolRuntime` 增加 Session 级 preset，模型工具清单、Agent tool-call、用户手动工具调用和恢复路径按 Session 策略过滤与评估；
+- API 的 `POST /v1/sessions` 接收工作模式，并增加 `POST /v1/sessions/:id/mode` 在会话中切换模式；
+- Web 新建 workspace 时可以选择 Read only、Ask on write、Workspace write、Ask on execute 和 Full access，composer 的 Mode 菜单也可以切换当前 Session；
+- 默认模式保持 `ask-on-write`：读操作自动执行，写入和命令执行经过批准，适合实际 Coding Agent 使用。
+
+### 验证
+
+```text
+pnpm typecheck   ✓
+pnpm test        ✓
+packages/runtime：Session 工作模式合同测试 ✓
+```

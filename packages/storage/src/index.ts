@@ -18,6 +18,7 @@ import {
   type SessionProjection,
   type SessionStatus,
   type SessionSummary,
+  type PermissionPreset,
   type PlanStatus,
   type TaskProjection,
   type TaskStatus,
@@ -39,6 +40,10 @@ import { randomUUID } from "node:crypto";
 
 const SCHEMA_VERSION = 1 as const;
 
+function isPermissionPreset(value: unknown): value is PermissionPreset {
+  return value === "read-only" || value === "workspace-write" || value === "ask-on-write" || value === "ask-on-execute" || value === "danger-full-access";
+}
+
 function now(): string {
   return new Date().toISOString();
 }
@@ -51,10 +56,11 @@ function newSessionId(): SessionId {
   return brand<string, "SessionId">(`ses_${randomUUID()}`);
 }
 
-function baseProjection(id: SessionId, workspaceRoot: string, timestamp = now()): SessionProjection {
+function baseProjection(id: SessionId, workspaceRoot: string, permissionPreset: PermissionPreset = "ask-on-write", timestamp = now()): SessionProjection {
   return {
     id,
     workspaceRoot,
+    permissionPreset,
     createdAt: timestamp,
     updatedAt: timestamp,
     status: "idle",
@@ -140,6 +146,8 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
   if (event.type === "session/created" || event.type === "session/updated") {
     const workspaceRoot = event.payload["workspaceRoot"];
     if (typeof workspaceRoot === "string") next = { ...next, workspaceRoot };
+    const permissionPreset = event.payload["permissionPreset"];
+    if (isPermissionPreset(permissionPreset)) next = { ...next, permissionPreset };
   }
 
   const turnId = event.turnId;
@@ -419,11 +427,11 @@ interface MemorySession {
 export class InMemoryEventStore implements SessionEventStore {
   private readonly sessions = new Map<SessionId, MemorySession>();
 
-  async createSession(workspaceRoot: string, id = newSessionId()): Promise<SessionId> {
+  async createSession(workspaceRoot: string, permissionPreset: PermissionPreset = "ask-on-write", id = newSessionId()): Promise<SessionId> {
     if (this.sessions.has(id)) throw new Error(`Session already exists: ${id}`);
-    const projection = baseProjection(id, workspaceRoot);
+    const projection = baseProjection(id, workspaceRoot, permissionPreset);
     this.sessions.set(id, { events: [], listeners: new Set(), projection, commands: new Map() });
-    await this.append({ sessionId: id, type: "session/created", payload: { workspaceRoot } });
+    await this.append({ sessionId: id, type: "session/created", payload: { workspaceRoot, permissionPreset } });
     return id;
   }
 
@@ -486,10 +494,10 @@ export class InMemoryEventStore implements SessionEventStore {
     return { created: true, record };
   }
 
-  async forkSession(sessionId: SessionId, workspaceRoot?: string, id?: SessionId): Promise<SessionId> {
+  async forkSession(sessionId: SessionId, workspaceRoot?: string, id?: SessionId, permissionPreset?: PermissionPreset): Promise<SessionId> {
     const source = await this.project(sessionId);
     if (source === undefined) throw new Error(`Unknown session: ${sessionId}`);
-    const forked = await this.createSession(workspaceRoot ?? source.workspaceRoot, id);
+    const forked = await this.createSession(workspaceRoot ?? source.workspaceRoot, permissionPreset ?? source.permissionPreset, id);
     for (const message of source.messages) {
       await this.append({
         sessionId: forked,
@@ -535,12 +543,12 @@ export class SqliteEventStore implements SessionEventStore {
     this.db.close();
   }
 
-  async createSession(workspaceRoot: string, id = newSessionId()): Promise<SessionId> {
-    const projection = baseProjection(id, workspaceRoot);
+  async createSession(workspaceRoot: string, permissionPreset: PermissionPreset = "ask-on-write", id = newSessionId()): Promise<SessionId> {
+    const projection = baseProjection(id, workspaceRoot, permissionPreset);
     this.withTransaction(() => {
       this.db.prepare("INSERT INTO sessions (id, workspace_root, created_at, updated_at, status, last_sequence) VALUES (?, ?, ?, ?, ?, ?)").run(id, workspaceRoot, projection.createdAt, projection.updatedAt, projection.status, 0);
       this.db.prepare("INSERT INTO projections (session_id, schema_version, projection_json) VALUES (?, ?, ?)").run(id, SCHEMA_VERSION, JSON.stringify(projection));
-      this.appendSync({ sessionId: id, type: "session/created", payload: { workspaceRoot } });
+      this.appendSync({ sessionId: id, type: "session/created", payload: { workspaceRoot, permissionPreset } });
     });
     return id;
   }
@@ -557,7 +565,7 @@ export class SqliteEventStore implements SessionEventStore {
   }
 
   async listSessions(): Promise<readonly SessionSummary[]> {
-    const rows = this.db.prepare("SELECT id, workspace_root, created_at, updated_at, status, last_sequence FROM sessions ORDER BY updated_at DESC").all() as SqliteRow[];
+    const rows = this.db.prepare("SELECT s.id, s.workspace_root, s.created_at, s.updated_at, s.status, s.last_sequence, p.projection_json FROM sessions s JOIN projections p ON p.session_id = s.id ORDER BY s.updated_at DESC").all() as SqliteRow[];
     return rows.map(readSummary);
   }
 
@@ -599,10 +607,10 @@ export class SqliteEventStore implements SessionEventStore {
     });
   }
 
-  async forkSession(sessionId: SessionId, workspaceRoot?: string, id?: SessionId): Promise<SessionId> {
+  async forkSession(sessionId: SessionId, workspaceRoot?: string, id?: SessionId, permissionPreset?: PermissionPreset): Promise<SessionId> {
     const source = await this.project(sessionId);
     if (source === undefined) throw new Error(`Unknown session: ${sessionId}`);
-    const forked = await this.createSession(workspaceRoot ?? source.workspaceRoot, id);
+    const forked = await this.createSession(workspaceRoot ?? source.workspaceRoot, permissionPreset ?? source.permissionPreset, id);
     for (const message of source.messages) {
       await this.append({
         sessionId: forked,
@@ -719,7 +727,7 @@ export class SqliteEventStore implements SessionEventStore {
     this.withTransaction(() => {
       for (const row of rows) {
         const id = brand<string, "SessionId">(String(row["id"]));
-        const initial = baseProjection(id, String(row["workspace_root"]), String(row["created_at"]));
+        const initial = baseProjection(id, String(row["workspace_root"]), "ask-on-write", String(row["created_at"]));
         const events = (this.db.prepare("SELECT event_id, sequence, session_id, turn_id, correlation_id, type, created_at, payload_json, schema_version FROM events WHERE session_id = ? ORDER BY sequence ASC").all(id) as SqliteRow[]).map(readEvent);
         const projection = replayProjection(initial, events);
         this.db.prepare("INSERT INTO projections (session_id, schema_version, projection_json) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET schema_version = excluded.schema_version, projection_json = excluded.projection_json").run(id, SCHEMA_VERSION, JSON.stringify(projection));
@@ -730,14 +738,16 @@ export class SqliteEventStore implements SessionEventStore {
 }
 
 function toSummary(projection: SessionProjection): SessionSummary {
-  const { id, workspaceRoot, createdAt, updatedAt, status, lastSequence } = projection;
-  return { id, workspaceRoot, createdAt, updatedAt, status, lastSequence };
+  const { id, workspaceRoot, permissionPreset, createdAt, updatedAt, status, lastSequence } = projection;
+  return { id, workspaceRoot, permissionPreset, createdAt, updatedAt, status, lastSequence };
 }
 
 function readSummary(row: SqliteRow): SessionSummary {
+  const projection = typeof row["projection_json"] === "string" ? JSON.parse(row["projection_json"] as string) as Partial<SessionProjection> : undefined;
   return {
     id: brand<string, "SessionId">(String(row["id"])),
     workspaceRoot: String(row["workspace_root"]),
+    permissionPreset: isPermissionPreset(projection?.permissionPreset) ? projection.permissionPreset : "ask-on-write",
     createdAt: String(row["created_at"]),
     updatedAt: String(row["updated_at"]),
     status: String(row["status"]) as SessionStatus,
