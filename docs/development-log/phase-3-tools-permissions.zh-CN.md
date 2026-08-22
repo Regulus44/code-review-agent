@@ -57,7 +57,7 @@ Phase 3 的基础 ToolRuntime、权限和审计 checkpoint 已完成。对当前
 ### 当前未闭合项
 
 - 尚未重复执行普通基线测试，也未进行真实 DeepSeek 网络 smoke；
-- Web 对 patch preview/apply/reject 的专用交互 contract 仍需补齐；
+- Web 已补 patch preview/apply/reject 与 LSP server/request 的 SSE 订阅和 transcript row；专用 patch 操作仍复用通用 ToolRuntime approval/execute contract，不在浏览器侧直写文件；
 - Phase 3B 继续保持 `in_progress`。
 
 ## 2026-08-22：Phase 3B.0 ToolPromptRegistry checkpoint
