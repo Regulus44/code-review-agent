@@ -152,3 +152,30 @@ legacy src/tests/pyproject             absent
 ```
 
 Docker CLI 当前机器未安装，因此镜像构建只能通过 Dockerfile 静态检查和 TypeScript 构建门禁验证。
+
+## 2026-08-22：Workspace 树与 Session 生命周期操作
+
+### 需求判断
+
+- 左侧导航需要表达“项目/Workspace → 多个 Session”的长期关系；扁平路径列表无法支撑同一仓库下的多轮开发工作。
+- Session 的归档和删除属于侧栏核心操作，操作入口需要靠近行项目并保持可恢复、可审计。
+- DSH Workspace Browser 的树派生、分组排序和局部展开状态适合直接适配到本项目的 Session projection。
+
+### 变更范围
+
+- 左侧导航改为 DSH 风格 Workspace Browser：Workspace 父节点展示名称、完整路径和 Session 数量，子节点展示 Session 标题、更新时间、工作模式和运行状态。
+- 增加 Workspace 展开/折叠、当前 Workspace 自动展开、Session 搜索、空状态和 Workspace 内新建 Session 入口。
+- Session 行加入操作菜单，支持归档、恢复和删除；归档通过 `archive/restore` 事件保持可见历史，删除通过 `session/deleted` 事件隐藏 Session 并保留完整事件流。
+- 后端契约增加可选 Session 标题、`deleted` 状态、`session/deleted` 事件和 `DELETE /v1/sessions/:id`；`include_archived=true` 仍不会返回已删除 Session。
+- 保留三栏布局、中间 Conversation、右侧 Details、SSE replay 和现有 API client；本批把 DSH Workspace 行为落到当前 Web shell，后续可继续拆成独立 TypeScript UI package。
+
+### 验证
+
+```text
+pnpm typecheck   ✓
+pnpm test        ✓
+git diff --check ✓
+Web script parse ✓
+Browser DOM smoke ✓（Workspace 分组、搜索、展开/折叠、操作菜单）
+API delete smoke ✓（软删除、列表隐藏、事件历史保留）
+```

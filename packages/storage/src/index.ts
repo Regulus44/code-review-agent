@@ -62,6 +62,7 @@ function baseProjection(id: SessionId, workspaceRoot: string, permissionPreset: 
     workspaceRoot,
     permissionPreset,
     archived: false,
+    deleted: false,
     createdAt: timestamp,
     updatedAt: timestamp,
     status: "idle",
@@ -144,12 +145,13 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
     lastSequence: event.sequence,
   };
 
-  if (event.type === "session/created" || event.type === "session/updated") {
+  if (event.type === "session/created" || event.type === "session/updated" || event.type === "session/deleted") {
     const workspaceRoot = event.payload["workspaceRoot"];
     if (typeof workspaceRoot === "string") next = { ...next, workspaceRoot };
     const permissionPreset = event.payload["permissionPreset"];
     if (isPermissionPreset(permissionPreset)) next = { ...next, permissionPreset };
     if (typeof event.payload["archived"] === "boolean") next = { ...next, archived: event.payload["archived"] };
+    if (event.type === "session/deleted" || event.payload["deleted"] === true) next = { ...next, deleted: true };
   }
 
   const turnId = event.turnId;
@@ -464,7 +466,7 @@ export class InMemoryEventStore implements SessionEventStore {
   async listSessions(includeArchived = false): Promise<readonly SessionSummary[]> {
     return [...this.sessions.values()]
       .map((session) => toSummary(session.projection))
-      .filter((session) => includeArchived || !session.archived);
+      .filter((session) => !session.deleted && (includeArchived || !session.archived));
   }
 
   async project(sessionId: SessionId): Promise<SessionProjection | undefined> {
@@ -570,7 +572,7 @@ export class SqliteEventStore implements SessionEventStore {
 
   async listSessions(includeArchived = false): Promise<readonly SessionSummary[]> {
     const rows = this.db.prepare("SELECT s.id, s.workspace_root, s.created_at, s.updated_at, s.status, s.last_sequence, p.projection_json FROM sessions s JOIN projections p ON p.session_id = s.id ORDER BY s.updated_at DESC").all() as SqliteRow[];
-    return rows.map(readSummary).filter((session) => includeArchived || !session.archived);
+    return rows.map(readSummary).filter((session) => !session.deleted && (includeArchived || !session.archived));
   }
 
   async project(sessionId: SessionId): Promise<SessionProjection | undefined> {
@@ -742,17 +744,27 @@ export class SqliteEventStore implements SessionEventStore {
 }
 
 function toSummary(projection: SessionProjection): SessionSummary {
-  const { id, workspaceRoot, permissionPreset, archived, createdAt, updatedAt, status, lastSequence } = projection;
-  return { id, workspaceRoot, permissionPreset, archived: archived ?? false, createdAt, updatedAt, status, lastSequence };
+  const { id, workspaceRoot, permissionPreset, archived, deleted, createdAt, updatedAt, status, lastSequence } = projection;
+  const firstUserMessage = projection.messages.find((message) => message.role === "user")?.content.trim();
+  const title = firstUserMessage === undefined || firstUserMessage.length === 0
+    ? undefined
+    : firstUserMessage.length > 58 ? `${firstUserMessage.slice(0, 55)}…` : firstUserMessage;
+  return { id, ...(title === undefined ? {} : { title }), workspaceRoot, permissionPreset, archived: archived ?? false, deleted: deleted ?? false, createdAt, updatedAt, status, lastSequence };
 }
 
 function readSummary(row: SqliteRow): SessionSummary {
   const projection = typeof row["projection_json"] === "string" ? JSON.parse(row["projection_json"] as string) as Partial<SessionProjection> : undefined;
+  const firstUserMessage = projection?.messages?.find((message) => message.role === "user")?.content.trim();
+  const title = firstUserMessage === undefined || firstUserMessage.length === 0
+    ? undefined
+    : firstUserMessage.length > 58 ? `${firstUserMessage.slice(0, 55)}…` : firstUserMessage;
   return {
     id: brand<string, "SessionId">(String(row["id"])),
+    ...(title === undefined ? {} : { title }),
     workspaceRoot: String(row["workspace_root"]),
     permissionPreset: isPermissionPreset(projection?.permissionPreset) ? projection.permissionPreset : "ask-on-write",
     archived: projection?.archived === true,
+    deleted: projection?.deleted === true,
     createdAt: String(row["created_at"]),
     updatedAt: String(row["updated_at"]),
     status: String(row["status"]) as SessionStatus,

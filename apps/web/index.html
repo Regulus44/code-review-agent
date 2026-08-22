@@ -79,6 +79,47 @@
       .session-archive { flex: 0 0 auto; width: 26px; height: 26px; border-radius: 7px; color: var(--text-tertiary); background: transparent; font-size: 12px; opacity: .35; transition: opacity .15s var(--ease), background .15s var(--ease), color .15s var(--ease); }
       .session-row:hover .session-archive, .session-archive:focus-visible { opacity: 1; }
       .session-archive:hover { color: var(--blue); background: var(--blue-soft); }
+      .workspace-browser { display: grid; gap: 8px; }
+      .workspace-browser-toolbar { display: flex; align-items: center; gap: 7px; margin: 1px 2px 4px; }
+      .workspace-browser-title { flex: 1; color: var(--text-tertiary); font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+      .workspace-search { width: 105px; height: 27px; padding: 0 8px; border: 1px solid var(--border); border-radius: 7px; outline: 0; color: var(--text); background: var(--surface-subtle); font-size: 10px; }
+      .workspace-search:focus { border-color: rgba(65,118,230,.45); box-shadow: 0 0 0 2px rgba(65,118,230,.1); }
+      .workspace-search::placeholder { color: var(--text-tertiary); }
+      .workspace-group { display: grid; gap: 2px; }
+      .workspace-group-header { display: flex; align-items: center; gap: 4px; min-width: 0; min-height: 34px; padding: 4px 5px 4px 6px; border-radius: 9px; color: var(--text-secondary); background: transparent; text-align: left; transition: background .15s var(--ease), color .15s var(--ease); }
+      .workspace-group-header:hover, .workspace-group-header.active { color: var(--text); background: var(--surface-hover); }
+      .workspace-caret { display: grid; place-items: center; width: 15px; color: var(--text-tertiary); font-size: 11px; transition: transform .15s var(--ease); }
+      .workspace-group.collapsed .workspace-caret { transform: rotate(-90deg); }
+      .workspace-folder { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; color: var(--blue); background: var(--blue-soft); font-size: 11px; }
+      .workspace-group-copy { min-width: 0; flex: 1; }
+      .workspace-group-name, .workspace-group-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .workspace-group-name { font-size: 11px; font-weight: 650; }
+      .workspace-group-path { margin-top: 1px; color: var(--text-tertiary); font: 9px ui-monospace, SFMono-Regular, Consolas, monospace; }
+      .workspace-count { padding: 2px 5px; border-radius: 99px; color: var(--text-tertiary); background: var(--surface-subtle); font-size: 9px; }
+      .workspace-menu-trigger { display: grid; place-items: center; flex: 0 0 24px; width: 24px; height: 24px; border-radius: 6px; color: var(--text-tertiary); background: transparent; opacity: .4; font-size: 13px; }
+      .workspace-group-header:hover .workspace-menu-trigger, .workspace-menu-trigger:focus-visible { opacity: 1; }
+      .workspace-menu-trigger:hover { color: var(--text); background: var(--surface-active); }
+      .workspace-sessions { display: grid; gap: 2px; padding-left: 19px; }
+      .workspace-group.collapsed .workspace-sessions { display: none; }
+      .tree-session { position: relative; display: flex; align-items: center; gap: 4px; min-width: 0; }
+      .tree-session::before { content: ""; position: absolute; left: -11px; top: -4px; bottom: -4px; width: 1px; background: var(--border); }
+      .tree-session > .session { min-width: 0; flex: 1; min-height: 36px; padding-left: 8px; }
+      .tree-session .session-dot { width: 6px; height: 6px; }
+      .tree-session-actions { display: flex; gap: 1px; margin-right: 2px; opacity: 0; transition: opacity .15s var(--ease); }
+      .tree-session:hover .tree-session-actions, .tree-session:focus-within .tree-session-actions { opacity: 1; }
+      .tree-action { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--text-tertiary); background: transparent; font-size: 11px; }
+      .tree-action:hover { color: var(--text); background: var(--surface-active); }
+      .tree-action.danger:hover { color: var(--red); background: #fff0f0; }
+      .session-status-dot { flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--text-tertiary); }
+      .session-status-dot.running { background: var(--green); box-shadow: 0 0 0 3px rgba(35,155,87,.12); }
+      .session-status-dot.failed { background: var(--red); }
+      .session-status-dot.queued { background: var(--amber); }
+      .tree-empty { padding: 12px 9px; border: 1px dashed var(--border-strong); border-radius: 9px; color: var(--text-tertiary); font-size: 11px; line-height: 1.5; }
+      .session-menu { position: fixed; z-index: 30; width: 164px; padding: 5px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); }
+      .session-menu[hidden] { display: none; }
+      .session-menu button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 9px; border-radius: 7px; color: var(--text-secondary); background: transparent; text-align: left; font-size: 11px; }
+      .session-menu button:hover { color: var(--text); background: var(--surface-hover); }
+      .session-menu button.danger:hover { color: var(--red); background: #fff0f0; }
       .mcp-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 34px; padding: 6px 8px; border-radius: 9px; color: var(--text-secondary); background: var(--surface-subtle); font-size: 11px; }
       .mcp-copy { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .mcp-actions { display: flex; gap: 2px; }
@@ -237,7 +278,10 @@
         <div class="sidebar-content">
           <button id="new-session" class="new-session" type="button"><span class="plus">＋</span><span>New session</span></button>
           <div class="session-section-heading"><div class="section-label">Sessions</div><button id="archive-toggle" class="archive-toggle" type="button" aria-pressed="false">Archived</button></div>
-          <div id="session-list" class="session-list"></div>
+          <div class="workspace-browser">
+            <div class="workspace-browser-toolbar"><span class="workspace-browser-title">Workspaces</span><input id="session-search" class="workspace-search" type="search" placeholder="Search" aria-label="Search sessions" /></div>
+            <div id="session-list" class="session-list"></div>
+          </div>
           <div class="section-label">MCP servers</div>
           <div id="mcp-list" class="mcp-list"></div>
         </div>
@@ -291,10 +335,11 @@
           <div class="workspace-modal-actions"><button id="workspace-cancel" class="workspace-cancel" type="button">Cancel</button><button id="workspace-create" class="workspace-create" type="submit">Create session</button></div>
         </form>
       </div>
+      <div id="session-menu" class="session-menu" hidden></div>
     </div>
     <script>
       (() => {
-        const state = { session: null, events: new Map(), source: null, tools: new Map(), mcp: [], models: null, sidebarCollapsed: false, detailsOpen: true, recentWorkspaces: [], showArchived: false };
+        const state = { session: null, events: new Map(), source: null, tools: new Map(), mcp: [], models: null, sidebarCollapsed: false, detailsOpen: true, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sidebarSessions: [] };
         const app = document.querySelector('#app');
         const list = document.querySelector('#session-list');
         const mcpList = document.querySelector('#mcp-list');
@@ -317,12 +362,14 @@
         const workspaceRecent = document.querySelector('#workspace-recent');
         const workspaceCreate = document.querySelector('#workspace-create');
         const permissionPreset = document.querySelector('#permission-preset');
+        const sessionSearch = document.querySelector('#session-search');
+        const sessionMenu = document.querySelector('#session-menu');
         const api = async (url, options) => { const response = await fetch(url, options); if (!response.ok) throw new Error(await response.text()); return response.json(); };
         const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
         const currentModel = () => state.models?.current || state.models?.defaultModel || 'deepseek-v4-flash';
         const modeLabels = { 'read-only': 'Read only', 'workspace-write': 'Workspace write', 'ask-on-write': 'Ask on write', 'ask-on-execute': 'Ask on execute', 'danger-full-access': 'Full access' };
         const currentMode = () => state.session?.permissionPreset || 'ask-on-write';
-        const refreshSessionList = async () => { const payload = await api(`/v1/sessions?include_archived=${state.showArchived}`); showSessions(payload); archiveToggle.classList.toggle('active', state.showArchived); archiveToggle.setAttribute('aria-pressed', String(state.showArchived)); };
+        const refreshSessionList = async () => { const payload = await api(`/v1/sessions?include_archived=${state.showArchived}`); showSessionsTree(payload); archiveToggle.classList.toggle('active', state.showArchived); archiveToggle.setAttribute('aria-pressed', String(state.showArchived)); };
         const setStatus = (text, connected = true) => { status.textContent = text; status.classList.toggle('disconnected', !connected); };
         const addEvent = (event, shouldRender = true) => { if (!event || state.events.has(event.sequence)) return; state.events.set(event.sequence, event); if (shouldRender) render(); };
         const orderedEvents = () => [...state.events.values()].sort((a, b) => a.sequence - b.sequence);
@@ -368,11 +415,93 @@
         const openWorkspacePicker = () => { workspaceError.textContent = ''; workspaceInput.value = state.session?.workspaceRoot || ''; permissionPreset.value = currentMode(); renderWorkspaceRecent(); workspaceModal.hidden = false; workspaceInput.focus(); workspaceInput.select(); };
         const closeWorkspacePicker = () => { workspaceModal.hidden = true; workspaceError.textContent = ''; };
         const showSessions = (payload) => { const sessions = Array.isArray(payload) ? payload : payload.sessions || []; const visible = sessions.filter((session) => Boolean(session.archived) === state.showArchived); state.sidebarSessions = visible; state.recentWorkspaces = sessions.map((session) => session.workspaceRoot); list.innerHTML = ''; if (!visible.length) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = state.showArchived ? 'No archived sessions.' : 'No active sessions.'; list.append(empty); return; } for (const session of visible) { const row = document.createElement('div'); row.className = 'session-row'; const button = document.createElement('button'); button.className = `session ${state.session?.id === session.id ? 'active' : ''}`; button.type = 'button'; const name = session.title || session.workspaceRoot?.split(/[\/]/).filter(Boolean).pop() || 'New session'; button.innerHTML = `<span class="session-dot"></span><span class="session-copy"><span class="session-name">${esc(name)}</span><span class="session-path">${esc(session.workspaceRoot || '.')}</span></span>`; button.onclick = () => openSession(session.id); const archive = document.createElement('button'); archive.className = 'session-archive'; archive.type = 'button'; archive.title = session.archived ? 'Restore session' : 'Archive session'; archive.setAttribute('aria-label', session.archived ? 'Restore session' : 'Archive session'); archive.textContent = session.archived ? '↩' : '▱'; archive.onclick = async (event) => { event.stopPropagation(); archive.disabled = true; try { await api(`/v1/sessions/${encodeURIComponent(session.id)}/archive`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ archived: !session.archived }) }); await refreshSessionList(); if (state.session?.id === session.id) { state.session.archived = !session.archived; render(); } } catch (error) { setStatus(error.message, false); archive.disabled = false; } }; row.append(button, archive); list.append(row); } };
+        const workspaceLabel = (root) => { const value = String(root || '.').replace(/[\\/]+$/, ''); const segments = value.split(/[\\/]/).filter(Boolean); return segments[segments.length - 1] || value || 'Workspace'; };
+        const workspaceKey = (root) => { const value = String(root || '.').replace(/\\/g, '/').replace(/\/+$/, '') || '.'; return /^[A-Za-z]:\//.test(value) ? value.toLowerCase() : value; };
+        const sessionLabel = (session) => session.title || `Session · ${String(session.id || '').slice(-6)}`;
+        const sessionTime = (timestamp) => { if (!timestamp) return ''; const diff = Math.max(0, Date.now() - Date.parse(timestamp)); if (diff < 60_000) return 'now'; if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`; if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`; return `${Math.floor(diff / 86_400_000)}d`; };
+        const closeSessionMenu = () => { sessionMenu.hidden = true; sessionMenu.innerHTML = ''; };
+        const performSessionArchive = async (session) => {
+          const endpoint = session.archived ? 'restore' : 'archive';
+          const options = { method: 'POST', headers: { 'content-type': 'application/json' }, ...(endpoint === 'archive' ? { body: JSON.stringify({ archived: true }) } : {}) };
+          await api(`/v1/sessions/${encodeURIComponent(session.id)}/${endpoint}`, options);
+          closeSessionMenu();
+          await refreshSessionList();
+          if (state.session?.id === session.id) { state.session.archived = !session.archived; render(); }
+        };
+        const deleteSession = async (session) => {
+          if (!window.confirm(`Delete “${sessionLabel(session)}”? Its event history will be retained for audit, but it will disappear from the workspace list.`)) return;
+          await api(`/v1/sessions/${encodeURIComponent(session.id)}`, { method: 'DELETE' });
+          closeSessionMenu();
+          if (state.session?.id === session.id) {
+            if (state.source) state.source.close();
+            state.source = null; state.session = null; state.events.clear();
+            title.textContent = 'New coding session'; path.textContent = 'Workspace · .'; render();
+          }
+          await refreshSessionList();
+        };
+        const openSessionMenu = (session, anchor) => {
+          sessionMenu.innerHTML = '';
+          const addAction = (label, icon, handler, danger = false) => { const button = document.createElement('button'); button.type = 'button'; button.className = danger ? 'danger' : ''; button.innerHTML = `<span>${icon}</span><span>${label}</span>`; button.onclick = async () => { button.disabled = true; try { await handler(); } catch (error) { setStatus(error.message, false); button.disabled = false; } }; sessionMenu.append(button); };
+          addAction(session.archived ? 'Restore session' : 'Archive session', session.archived ? '↩' : '▱', () => performSessionArchive(session));
+          addAction('Delete session', '⌫', () => deleteSession(session), true);
+          const rect = anchor.getBoundingClientRect(); sessionMenu.style.left = `${Math.max(8, Math.min(window.innerWidth - 176, rect.right - 164))}px`; sessionMenu.style.top = `${Math.min(window.innerHeight - 110, rect.bottom + 4)}px`; sessionMenu.hidden = false;
+        };
+        const showSessionsTree = (payload) => {
+          const sessions = Array.isArray(payload) ? payload : payload.sessions || [];
+          const visible = sessions.filter((session) => session.deleted !== true && Boolean(session.archived) === state.showArchived);
+          state.sidebarSessions = visible;
+          state.recentWorkspaces = sessions.map((session) => session.workspaceRoot).filter(Boolean);
+          const query = state.sessionSearch.trim().toLowerCase();
+          const grouped = new Map();
+          for (const session of visible) {
+            const root = session.workspaceRoot || '.';
+            const key = workspaceKey(root);
+            const group = grouped.get(key) || { key, root, sessions: [] };
+            group.sessions.push(session); grouped.set(key, group);
+            if (state.session?.id === session.id) state.expandedWorkspaces.add(key);
+          }
+          list.innerHTML = '';
+          const groups = [...grouped.values()].map((group) => {
+            const workspaceText = `${workspaceLabel(group.root)} ${group.root}`.toLowerCase();
+            const matching = query.length === 0 || workspaceText.includes(query)
+              ? group.sessions
+              : group.sessions.filter((session) => `${sessionLabel(session)} ${session.workspaceRoot || ''}`.toLowerCase().includes(query));
+            return { ...group, sessions: matching };
+          }).filter((group) => group.sessions.length > 0).sort((a, b) => {
+            const aTime = Math.max(...a.sessions.map((session) => Date.parse(session.updatedAt || session.createdAt || '') || 0));
+            const bTime = Math.max(...b.sessions.map((session) => Date.parse(session.updatedAt || session.createdAt || '') || 0));
+            return bTime - aTime;
+          });
+          if (!groups.length) { const empty = document.createElement('div'); empty.className = 'tree-empty'; empty.textContent = query ? 'No sessions match this search.' : state.showArchived ? 'No archived sessions.' : 'No active sessions. Create a session to start coding.'; list.append(empty); return; }
+          for (const group of groups) {
+            const section = document.createElement('section'); section.className = `workspace-group ${state.expandedWorkspaces.has(group.key) ? '' : 'collapsed'}`;
+            const header = document.createElement('div'); header.className = 'workspace-group-header'; header.setAttribute('role', 'button'); header.tabIndex = 0;
+            const caret = document.createElement('span'); caret.className = 'workspace-caret'; caret.textContent = '⌄';
+            const folder = document.createElement('span'); folder.className = 'workspace-folder'; folder.textContent = '⌂';
+            const copy = document.createElement('span'); copy.className = 'workspace-group-copy'; copy.innerHTML = `<span class="workspace-group-name">${esc(workspaceLabel(group.root))}</span><span class="workspace-group-path">${esc(group.root)}</span>`;
+            const count = document.createElement('span'); count.className = 'workspace-count'; count.textContent = String(group.sessions.length);
+            const workspaceMenu = document.createElement('button'); workspaceMenu.type = 'button'; workspaceMenu.className = 'workspace-menu-trigger'; workspaceMenu.textContent = '⋯'; workspaceMenu.title = 'New session in this workspace'; workspaceMenu.onclick = (event) => { event.stopPropagation(); openWorkspacePicker(); workspaceInput.value = group.root; };
+            header.append(caret, folder, copy, count, workspaceMenu); const toggleGroup = () => { if (state.expandedWorkspaces.has(group.key)) state.expandedWorkspaces.delete(group.key); else state.expandedWorkspaces.add(group.key); showSessionsTree({ sessions: state.sidebarSessions }); }; header.onclick = toggleGroup; header.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleGroup(); } };
+            section.append(header);
+            const children = document.createElement('div'); children.className = 'workspace-sessions';
+            for (const session of group.sessions.sort((a, b) => (Date.parse(b.updatedAt || '') || 0) - (Date.parse(a.updatedAt || '') || 0))) {
+              const row = document.createElement('div'); row.className = 'tree-session';
+              const button = document.createElement('button'); button.type = 'button'; button.className = `session ${state.session?.id === session.id ? 'active' : ''}`; button.title = session.workspaceRoot || '.';
+              const statusDot = document.createElement('span'); statusDot.className = `session-status-dot ${session.status || ''}`;
+              const text = document.createElement('span'); text.className = 'session-copy'; text.innerHTML = `<span class="session-name">${esc(sessionLabel(session))}</span><span class="session-path">${esc(sessionTime(session.updatedAt) || 'new')} · ${esc(session.permissionPreset || 'ask-on-write')}</span>`;
+              button.append(statusDot, text); button.onclick = () => openSession(session.id);
+              const actions = document.createElement('span'); actions.className = 'tree-session-actions';
+              const menuButton = document.createElement('button'); menuButton.type = 'button'; menuButton.className = 'tree-action'; menuButton.textContent = '⋯'; menuButton.title = 'Session actions'; menuButton.onclick = (event) => { event.stopPropagation(); openSessionMenu(session, menuButton); };
+              actions.append(menuButton); row.append(button, actions); children.append(row);
+            }
+            section.append(children); list.append(section);
+          }
+        };
         const renderMcp = () => { mcpList.innerHTML = ''; for (const server of state.mcp) { const name = server.config?.name || server.name; const row = document.createElement('div'); row.className = 'mcp-row'; const label = document.createElement('span'); label.className = `mcp-copy mcp-status ${server.status === 'disabled' ? 'disabled' : server.status === 'error' ? 'error' : ''}`; label.textContent = `${name} · ${server.status}`; const actions = document.createElement('span'); actions.className = 'mcp-actions'; const reconnect = document.createElement('button'); reconnect.type = 'button'; reconnect.textContent = '↻'; reconnect.title = 'Reconnect'; reconnect.onclick = async () => { reconnect.disabled = true; try { await api(`/v1/mcp/servers/${encodeURIComponent(name)}/reconnect`, { method: 'POST' }); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); renderDetails(); } finally { reconnect.disabled = false; } }; const toggle = document.createElement('button'); toggle.type = 'button'; toggle.textContent = server.status === 'disabled' ? '＋' : '−'; toggle.title = server.status === 'disabled' ? 'Enable' : 'Disable'; toggle.onclick = async () => { await api(`/v1/mcp/servers/${encodeURIComponent(name)}/${server.status === 'disabled' ? 'enable' : 'disable'}`, { method: 'POST' }); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); renderDetails(); }; actions.append(reconnect, toggle); row.append(label, actions); mcpList.append(row); } if (!state.mcp.length) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = 'No MCP servers configured.'; mcpList.append(empty); } };
         const renderModels = (payload) => { state.models = payload; modelTrigger.textContent = `Model · ${currentModel()}`; modelPopover.innerHTML = '<div class="popover-label">Choose a model</div>'; for (const model of payload?.models || []) { const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${model === currentModel() ? 'selected' : ''}`; option.innerHTML = `<span class="model-check">${model === currentModel() ? '✓' : ''}</span><span>${esc(model)}<span class="model-meta">DeepSeek API</span></span>`; option.onclick = async () => { modelPopover.hidden = true; modelTrigger.setAttribute('aria-expanded', 'false'); modelTrigger.disabled = true; try { await api('/v1/models', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }) }); renderModels(await api('/v1/models')); setStatus(`Model · ${model}`); renderDetails(); } catch (error) { setStatus(error.message, false); } finally { modelTrigger.disabled = false; } }; modelPopover.append(option); } };
         const renderModes = () => { modeTrigger.textContent = `◉ Mode · ${modeLabels[currentMode()] || currentMode()}`; modePopover.innerHTML = '<div class="popover-label">Choose a work mode for this session</div>'; for (const [value, label] of Object.entries(modeLabels)) { const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${value === currentMode() ? 'selected' : ''}`; option.innerHTML = `<span class="model-check">${value === currentMode() ? '✓' : ''}</span><span>${label}<span class="model-meta">${value === 'read-only' ? 'Inspect without changing files' : value === 'danger-full-access' ? 'Run tools without approval' : 'Permission-controlled coding workflow'}</span></span>`; option.onclick = async () => { modePopover.hidden = true; modeTrigger.setAttribute('aria-expanded', 'false'); if (value === currentMode() || !state.session) return; modeTrigger.disabled = true; try { state.session = await api(`/v1/sessions/${encodeURIComponent(state.session.id)}/mode`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ permissionPreset: value }) }); renderModes(); renderDetails(); setStatus(`Mode · ${label}`); } catch (error) { setStatus(error.message, false); } finally { modeTrigger.disabled = false; } }; modePopover.append(option); } };
         const renderDetails = () => { const connected = state.mcp.filter((server) => server.status !== 'disabled' && server.status !== 'error').length; details.innerHTML = `<div class="detail-section"><div class="detail-label">Model</div><div class="detail-value">${esc(currentModel())}</div><div class="detail-line"><span>Provider</span><strong>${esc(state.models?.provider || 'DeepSeek-compatible')}</strong></div><div class="detail-line"><span>Default</span><strong>${esc(state.models?.defaultModel || 'deepseek-v4-flash')}</strong></div></div><div class="detail-section"><div class="detail-label">Session</div><div class="detail-line"><span>Status</span><span class="status-pill">Connected</span></div><div class="detail-line"><span>Events</span><strong>${state.events.size}</strong></div><div class="detail-line"><span>Workspace</span><strong title="${esc(state.session?.workspaceRoot || '.')}">${esc(state.session?.workspaceRoot || '.')}</strong></div></div><div class="detail-section"><div class="detail-label">MCP</div><div class="detail-line"><span>Servers</span><strong>${connected}/${state.mcp.length}</strong></div><div class="detail-line"><span>Tools</span><strong>${state.tools.size}</strong></div></div><div class="detail-section"><div class="detail-label">Tools</div><div id="detail-tools" class="tool-list"></div></div><div class="detail-section"><div class="detail-label">Permissions</div><div class="empty-detail">Tool approvals appear here when a turn needs confirmation.</div></div>`; const toolList = details.querySelector('#detail-tools'); const names = [...state.tools.keys()].slice(0, 8); if (!names.length) toolList.innerHTML = '<div class="empty-detail">No tools discovered.</div>'; else names.forEach((name) => { const row = document.createElement('div'); row.className = 'tool-list-item'; row.textContent = name; toolList.append(row); }); };
-        const openSession = async (id) => { if (state.source) state.source.close(); state.session = await api(`/v1/sessions/${encodeURIComponent(id)}`); title.textContent = state.session.title || 'Coding session'; path.textContent = `Workspace · ${state.session.workspaceRoot || '.'}`; state.events.clear(); const history = await api(`/v1/sessions/${encodeURIComponent(id)}/events?format=json`); for (const event of history) addEvent(event, false); render(); state.source = new EventSource(`/v1/sessions/${encodeURIComponent(id)}/events?after_sequence=${state.session.lastSequence || 0}`); const types = ['session/created','session/updated','user/message','turn/queued','turn/started','step/started','step/ended','turn/ended','assistant/chunk','assistant/message','task/created','task/updated','task/ended','plan/updated','todo/updated','tool/call','tool/progress','tool/result','diff/preview','permission/requested','permission/resolved','interaction/requested','interaction/resolved','mcp/server','mcp/tool','agent/status','agent/error']; types.forEach((type) => state.source.addEventListener(type, (message) => addEvent(JSON.parse(message.data)))); state.source.onerror = () => setStatus('Reconnecting…', false); state.source.onopen = () => setStatus('Connected', true); await refreshSessionList(); };
+        const openSession = async (id) => { if (state.source) state.source.close(); state.session = await api(`/v1/sessions/${encodeURIComponent(id)}`); title.textContent = state.session.title || state.session.messages?.find((message) => message.role === 'user')?.content?.slice(0, 58) || 'Coding session'; path.textContent = `Workspace · ${state.session.workspaceRoot || '.'}`; state.events.clear(); const history = await api(`/v1/sessions/${encodeURIComponent(id)}/events?format=json`); for (const event of history) addEvent(event, false); render(); state.source = new EventSource(`/v1/sessions/${encodeURIComponent(id)}/events?after_sequence=${state.session.lastSequence || 0}`); const types = ['session/created','session/updated','session/deleted','user/message','turn/queued','turn/started','step/started','step/ended','turn/ended','assistant/chunk','assistant/message','task/created','task/updated','task/ended','plan/updated','todo/updated','tool/call','tool/progress','tool/result','diff/preview','permission/requested','permission/resolved','interaction/requested','interaction/resolved','mcp/server','mcp/tool','agent/status','agent/error']; types.forEach((type) => state.source.addEventListener(type, (message) => addEvent(JSON.parse(message.data)))); state.source.onerror = () => setStatus('Reconnecting…', false); state.source.onopen = () => setStatus('Connected', true); await refreshSessionList(); };
         const createSession = async (workspaceRoot) => { const checked = await api('/v1/workspaces/validate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspaceRoot }) }); const session = await api('/v1/sessions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspaceRoot: checked.workspaceRoot, permissionPreset: permissionPreset.value }) }); await openSession(session.id); };
         const newSession = () => openWorkspacePicker();
         modeTrigger.textContent = '◉ Mode · Ask on write';
@@ -382,6 +511,7 @@
         document.querySelector('#details-close').onclick = () => { state.detailsOpen = false; app.classList.add('details-collapsed'); };
         document.querySelector('#new-session').onclick = () => newSession();
         archiveToggle.onclick = async () => { state.showArchived = !state.showArchived; try { await refreshSessionList(); } catch (error) { setStatus(error.message, false); } };
+        sessionSearch.addEventListener('input', () => { state.sessionSearch = sessionSearch.value; showSessionsTree({ sessions: state.sidebarSessions }); });
         document.querySelector('#session-path').onclick = () => openWorkspacePicker();
         document.querySelector('#workspace-close').onclick = () => closeWorkspacePicker();
         document.querySelector('#workspace-cancel').onclick = () => closeWorkspacePicker();
@@ -390,7 +520,7 @@
         document.querySelector('#mobile-menu').onclick = () => { state.sidebarCollapsed = false; app.classList.remove('sidebar-collapsed'); };
         modelTrigger.onclick = () => { modelPopover.hidden = !modelPopover.hidden; modelTrigger.setAttribute('aria-expanded', String(!modelPopover.hidden)); };
         modeTrigger.onclick = () => { modePopover.hidden = !modePopover.hidden; modeTrigger.setAttribute('aria-expanded', String(!modePopover.hidden)); renderModes(); };
-        document.addEventListener('click', (event) => { if (!modelPopover.hidden && !modelPopover.contains(event.target) && event.target !== modelTrigger) { modelPopover.hidden = true; modelTrigger.setAttribute('aria-expanded', 'false'); } if (!modePopover.hidden && !modePopover.contains(event.target) && event.target !== modeTrigger) { modePopover.hidden = true; modeTrigger.setAttribute('aria-expanded', 'false'); } });
+        document.addEventListener('click', (event) => { if (!modelPopover.hidden && !modelPopover.contains(event.target) && event.target !== modelTrigger) { modelPopover.hidden = true; modelTrigger.setAttribute('aria-expanded', 'false'); } if (!modePopover.hidden && !modePopover.contains(event.target) && event.target !== modeTrigger) { modePopover.hidden = true; modeTrigger.setAttribute('aria-expanded', 'false'); } if (!sessionMenu.hidden && !sessionMenu.contains(event.target)) closeSessionMenu(); });
         input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 220)}px`; });
         input.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); document.querySelector('#composer').requestSubmit(); } });
         document.querySelector('#composer').addEventListener('submit', async (event) => { event.preventDefault(); const content = input.value.trim(); if (!content || !state.session) return; send.disabled = true; input.value = ''; input.style.height = 'auto'; try { await api(`/v1/sessions/${encodeURIComponent(state.session.id)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content }) }); } catch (error) { setStatus(error.message, false); } finally { send.disabled = false; input.focus(); } });

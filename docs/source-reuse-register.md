@@ -65,6 +65,24 @@ ID:
 
 新增测试：浏览器 smoke 验证 Session transcript、Connected 状态、模型 popover/切换、sidebar collapse、details close 和 API error 空态。
 
+### DSH-004
+
+来源仓库：`D:/Develop/deepseek-harness-fork`
+
+来源路径：`packages/client/ui-workspace/src/client/WorkspaceBrowser.tsx`、`packages/client/ui-workspace/src/client/tree.ts`、`packages/client/ui-sidebar/src/client/SidebarRoot.tsx`。
+
+复用方式：`behavior-reference` + `adapt`
+
+许可证/来源证据：`D:/Develop/deepseek-harness-fork/LICENSE` 为 MIT；本批没有复制 DSH 运行时类型或品牌资产。
+
+本项目路径：`apps/web/index.html`。
+
+范围：Workspace 父级分组、Session 子项、展开/折叠、搜索、活动/归档视图、行级操作菜单、滚动侧栏和当前 Workspace 自动展开。
+
+改写部分：树数据直接由本项目 `/v1/sessions` projection 按 `workspaceRoot` 派生；Session 操作使用本项目 archive/restore/delete API；Workspace 和 Session 文案、颜色、图标保持本项目风格。
+
+新增测试：浏览器 DOM smoke 验证多 Workspace 分组、搜索过滤、展开/折叠和 Session 操作菜单；API 合同测试覆盖软删除与事件历史保留。
+
 ### CC-001
 
 来源仓库：`D:/Develop/claude-code`

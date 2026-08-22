@@ -16,6 +16,7 @@ export function brand<Value, Name extends string>(value: Value): Brand<Value, Na
 export type AgentEventType =
   | "session/created"
   | "session/updated"
+  | "session/deleted"
   | "user/message"
   | "turn/queued"
   | "turn/started"
@@ -62,9 +63,11 @@ export type PermissionPreset = "read-only" | "workspace-write" | "ask-on-write" 
 
 export interface SessionSummary {
   readonly id: SessionId;
+  readonly title?: string;
   readonly workspaceRoot: string;
   readonly permissionPreset: PermissionPreset;
   readonly archived: boolean;
+  readonly deleted: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly status: SessionStatus;

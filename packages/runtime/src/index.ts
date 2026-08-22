@@ -120,6 +120,18 @@ export class AgentHost {
     return updated;
   }
 
+  /** Soft-deletes a session through the event stream while retaining its history for audit/recovery. */
+  async deleteSession(sessionId: SessionId): Promise<SessionProjection> {
+    await this.ready;
+    const current = await this.options.store.project(sessionId);
+    if (current === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    if (current.deleted) return current;
+    await this.options.store.append({ sessionId, type: "session/deleted", payload: { deleted: true } });
+    const updated = await this.options.store.project(sessionId);
+    if (updated === undefined) throw new Error(`Session disappeared: ${sessionId}`);
+    return updated;
+  }
+
   async getSession(sessionId: SessionId): Promise<SessionProjection | undefined> {
     await this.ready;
     return this.options.store.project(sessionId);

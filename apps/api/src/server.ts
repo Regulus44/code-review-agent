@@ -219,6 +219,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       sendJson(response, 200, await host.archiveSession(id, archived));
       return;
     }
+    const restoreMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/restore$/u);
+    if (request.method === "POST" && restoreMatch?.[1] !== undefined) {
+      const id = sessionId(decodeURIComponent(restoreMatch[1]));
+      sendJson(response, 200, await host.archiveSession(id, false));
+      return;
+    }
     const resumeMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/resume$/u);
     if (request.method === "POST" && resumeMatch?.[1] !== undefined) {
       const id = sessionId(decodeURIComponent(resumeMatch[1]));
@@ -273,6 +279,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     const sessionMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)$/u);
     if (sessionMatch?.[1] !== undefined) {
       const id = sessionId(decodeURIComponent(sessionMatch[1]));
+      if (request.method === "DELETE") {
+        const deleted = await host.deleteSession(id);
+        sendJson(response, 200, { deleted: true, sessionId: deleted.id });
+        return;
+      }
       if (request.method === "POST") {
         const body = await readJson(request);
         const content = body.content;

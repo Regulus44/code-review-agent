@@ -104,6 +104,23 @@ describe("Phase 2 API", () => {
     expect(await restored.json()).toMatchObject({ archived: false });
   });
 
+  it("soft-deletes a session and keeps its event history out of active lists", async () => {
+    const created = await fetch(`${baseUrl}/v1/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspaceRoot: "D:/workspace/delete-fixture" }),
+    });
+    const session = await created.json() as { id: string };
+    const deleted = await fetch(`${baseUrl}/v1/sessions/${session.id}`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toMatchObject({ deleted: true, sessionId: session.id });
+    const active = await (await fetch(`${baseUrl}/v1/sessions?include_archived=true`)).json() as { sessions: { id: string }[] };
+    expect(active.sessions.some((item) => item.id === session.id)).toBe(false);
+    const history = await fetch(`${baseUrl}/v1/sessions/${session.id}/events?format=json`);
+    expect(history.status).toBe(200);
+    expect((await history.json() as { type: string }[]).at(-1)?.type).toBe("session/deleted");
+  });
+
   it("replays session events over SSE", async () => {
     const created = await fetch(`${baseUrl}/v1/sessions`, {
       method: "POST",
