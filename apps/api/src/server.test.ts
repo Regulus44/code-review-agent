@@ -73,6 +73,37 @@ describe("Phase 2 API", () => {
     }
   });
 
+  it("creates, switches, archives, and restores a session work mode", async () => {
+    const created = await fetch(`${baseUrl}/v1/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspaceRoot: "D:/workspace", permissionPreset: "workspace-write" }),
+    });
+    expect(created.status).toBe(201);
+    const session = await created.json() as { id: string; permissionPreset: string; archived: boolean };
+    expect(session).toMatchObject({ permissionPreset: "workspace-write", archived: false });
+
+    const switched = await fetch(`${baseUrl}/v1/sessions/${session.id}/mode`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ permissionPreset: "read-only" }),
+    });
+    expect(switched.status).toBe(200);
+    expect(await switched.json()).toMatchObject({ permissionPreset: "read-only" });
+
+    const archived = await fetch(`${baseUrl}/v1/sessions/${session.id}/archive`, { method: "POST" });
+    expect(archived.status).toBe(200);
+    expect(await archived.json()).toMatchObject({ archived: true });
+    expect((await (await fetch(`${baseUrl}/v1/sessions`)).json() as { sessions: { id: string }[] }).sessions.some((item) => item.id === session.id)).toBe(false);
+
+    const restored = await fetch(`${baseUrl}/v1/sessions/${session.id}/archive`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ archived: false }),
+    });
+    expect(await restored.json()).toMatchObject({ archived: false });
+  });
+
   it("replays session events over SSE", async () => {
     const created = await fetch(`${baseUrl}/v1/sessions`, {
       method: "POST",

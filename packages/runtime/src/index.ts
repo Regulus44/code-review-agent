@@ -105,9 +105,19 @@ export class AgentHost {
     return projection;
   }
 
-  async listSessions(): Promise<readonly SessionSummary[]> {
+  async listSessions(includeArchived = false): Promise<readonly SessionSummary[]> {
     await this.ready;
-    return this.options.store.listSessions();
+    return this.options.store.listSessions(includeArchived);
+  }
+
+  async archiveSession(sessionId: SessionId, archived = true): Promise<SessionProjection> {
+    await this.ready;
+    const current = await this.options.store.project(sessionId);
+    if (current === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    await this.options.store.append({ sessionId, type: "session/updated", payload: { archived } });
+    const updated = await this.options.store.project(sessionId);
+    if (updated === undefined) throw new Error(`Session disappeared: ${sessionId}`);
+    return updated;
   }
 
   async getSession(sessionId: SessionId): Promise<SessionProjection | undefined> {
@@ -406,7 +416,7 @@ export class AgentHost {
   }
 
   private async restoreQueuedTurns(): Promise<void> {
-    for (const summary of await this.options.store.listSessions()) {
+    for (const summary of await this.options.store.listSessions(true)) {
       let projection = await this.options.store.project(summary.id);
       if (projection === undefined) continue;
       this.toolRuntime.setSessionPermissionPreset(summary.id, projection.permissionPreset ?? this.permissionPreset ?? "ask-on-write");

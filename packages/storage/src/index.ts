@@ -61,6 +61,7 @@ function baseProjection(id: SessionId, workspaceRoot: string, permissionPreset: 
     id,
     workspaceRoot,
     permissionPreset,
+    archived: false,
     createdAt: timestamp,
     updatedAt: timestamp,
     status: "idle",
@@ -148,6 +149,7 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
     if (typeof workspaceRoot === "string") next = { ...next, workspaceRoot };
     const permissionPreset = event.payload["permissionPreset"];
     if (isPermissionPreset(permissionPreset)) next = { ...next, permissionPreset };
+    if (typeof event.payload["archived"] === "boolean") next = { ...next, archived: event.payload["archived"] };
   }
 
   const turnId = event.turnId;
@@ -459,8 +461,10 @@ export class InMemoryEventStore implements SessionEventStore {
     return this.sessions.get(sessionId)?.events.filter((event) => event.sequence > afterSequence) ?? [];
   }
 
-  async listSessions(): Promise<readonly SessionSummary[]> {
-    return [...this.sessions.values()].map((session) => toSummary(session.projection));
+  async listSessions(includeArchived = false): Promise<readonly SessionSummary[]> {
+    return [...this.sessions.values()]
+      .map((session) => toSummary(session.projection))
+      .filter((session) => includeArchived || !session.archived);
   }
 
   async project(sessionId: SessionId): Promise<SessionProjection | undefined> {
@@ -564,9 +568,9 @@ export class SqliteEventStore implements SessionEventStore {
     return rows.map(readEvent);
   }
 
-  async listSessions(): Promise<readonly SessionSummary[]> {
+  async listSessions(includeArchived = false): Promise<readonly SessionSummary[]> {
     const rows = this.db.prepare("SELECT s.id, s.workspace_root, s.created_at, s.updated_at, s.status, s.last_sequence, p.projection_json FROM sessions s JOIN projections p ON p.session_id = s.id ORDER BY s.updated_at DESC").all() as SqliteRow[];
-    return rows.map(readSummary);
+    return rows.map(readSummary).filter((session) => includeArchived || !session.archived);
   }
 
   async project(sessionId: SessionId): Promise<SessionProjection | undefined> {
@@ -738,8 +742,8 @@ export class SqliteEventStore implements SessionEventStore {
 }
 
 function toSummary(projection: SessionProjection): SessionSummary {
-  const { id, workspaceRoot, permissionPreset, createdAt, updatedAt, status, lastSequence } = projection;
-  return { id, workspaceRoot, permissionPreset, createdAt, updatedAt, status, lastSequence };
+  const { id, workspaceRoot, permissionPreset, archived, createdAt, updatedAt, status, lastSequence } = projection;
+  return { id, workspaceRoot, permissionPreset, archived: archived ?? false, createdAt, updatedAt, status, lastSequence };
 }
 
 function readSummary(row: SqliteRow): SessionSummary {
@@ -748,6 +752,7 @@ function readSummary(row: SqliteRow): SessionSummary {
     id: brand<string, "SessionId">(String(row["id"])),
     workspaceRoot: String(row["workspace_root"]),
     permissionPreset: isPermissionPreset(projection?.permissionPreset) ? projection.permissionPreset : "ask-on-write",
+    archived: projection?.archived === true,
     createdAt: String(row["created_at"]),
     updatedAt: String(row["updated_at"]),
     status: String(row["status"]) as SessionStatus,

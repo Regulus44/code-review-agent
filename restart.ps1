@@ -1,8 +1,13 @@
-$port = 8000
-$p = (Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue).OwningProcess
-if ($p) { Stop-Process -Id $p -Force; Write-Host "stopped port $port" }
+$port = 3210
+$p = (Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue).OwningProcess | Select-Object -Unique
+if ($p) {
+  foreach ($processId in $p) {
+    Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+  }
+  Write-Host "stopped port $port"
+}
 
 Set-Location $PSScriptRoot
-Start-Process -WindowStyle Hidden D:\Anaconda\envs\dl\python.exe -ArgumentList "-m", "uvicorn", "code_review_agent.api.app:create_app", "--factory", "--host", "127.0.0.1", "--port", "$port", "--reload"
+Start-Process -WindowStyle Hidden node -WorkingDirectory $PSScriptRoot -ArgumentList "--env-file-if-exists=.env", "--import", "tsx", "apps/api/src/server.ts"
 
-Write-Host "started on http://127.0.0.1:$port"
+Write-Host "started TypeScript API on http://127.0.0.1:$port"

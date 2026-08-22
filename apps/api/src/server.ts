@@ -30,7 +30,7 @@ export interface ApiServerOptions {
 
 export function createApiServer(options: ApiServerOptions = {}): Server {
   const ownsStore = options.store === undefined && options.host === undefined;
-  const store = options.store ?? (options.host === undefined ? new SqliteEventStore(options.databasePath === undefined ? {} : { databasePath: options.databasePath }) : undefined);
+  const store = options.store ?? (options.host === undefined ? new SqliteEventStore({ databasePath: options.databasePath ?? defaultDatabasePath() }) : undefined);
   const host = options.host ?? new AgentHost({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), ...(options.permissionPreset === undefined ? {} : { permissionPreset: options.permissionPreset }) });
   const modelRuntime: ModelRuntimeState = {
     availableModels: options.availableModels ?? [],
@@ -48,6 +48,12 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
   if (ownsStore && store instanceof SqliteEventStore) server.on("close", () => store.close());
   if (ownsMcp) server.on("close", () => { void mcp.close(); });
   return server;
+}
+
+function defaultDatabasePath(): string {
+  // Keep the local database stable when the API is started from the repository
+  // root, apps/api, or a process manager with a different working directory.
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.data/code-review-agent.sqlite");
 }
 
 /** CLI/runtime entry that opts into local `.env` model configuration. Tests stay deterministic via createApiServer(). */
@@ -181,7 +187,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/sessions") {
-      sendJson(response, 200, { sessions: await host.listSessions() });
+      sendJson(response, 200, { sessions: await host.listSessions(url.searchParams.get("include_archived") === "true") });
       return;
     }
     const eventsMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/events$/u);
@@ -202,6 +208,15 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const id = sessionId(decodeURIComponent(modeMatch[1]));
       const body = await readJson(request);
       sendJson(response, 200, await host.setSessionPermissionPreset(id, parsePermissionPreset(body.permissionPreset)));
+      return;
+    }
+    const archiveMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/archive$/u);
+    if (request.method === "POST" && archiveMatch?.[1] !== undefined) {
+      const id = sessionId(decodeURIComponent(archiveMatch[1]));
+      const body = await readJson(request);
+      const archived = body.archived === undefined ? true : body.archived;
+      if (typeof archived !== "boolean") throw new HttpError(400, "archived must be a boolean");
+      sendJson(response, 200, await host.archiveSession(id, archived));
       return;
     }
     const resumeMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/resume$/u);

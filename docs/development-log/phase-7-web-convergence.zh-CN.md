@@ -71,3 +71,34 @@ git diff --check                       ✓
 - 不存在的目录显示 API 返回的可解释错误；
 - 选择 `D:/Develop/code-review-agent` 后创建新 Session，header、hero chip 和 details panel 均显示该 workspace；
 - 最近 workspace 可再次选用。
+
+## 2026-08-22：Session 操作与真实模型失败诊断收敛
+
+### 问题定位
+
+- 最近一次失败 Session `ses_9854b5f5-a981-4a07-a495-4f50e5e2db30` 的事件顺序是 `turn/started → agent/error → turn/ended`，其中没有 `tool/call`；失败发生在首次模型请求阶段，工具运行时尚未开始执行。
+- SQLite 事件中的原始错误为 `fetch failed`。本地 Node Fetch 直接访问 DeepSeek API 可以返回 200，因而该记录更接近瞬时网络失败或旧进程状态，不能归因于某个内置工具。
+- 根目录 `restart.ps1` 仍启动旧 Python/FastAPI 进程，导致新 Web API 的 Session mode/archive 路由得到 `not found`，并且可能使用不同的 SQLite 工作目录。
+
+### 修复范围
+
+- `restart.ps1` 统一启动 `apps/api/src/server.ts` 的 TypeScript API，默认监听 `127.0.0.1:3210`；`/health` 返回 `runtime: typescript`。
+- SQLite 默认路径固定为 `apps/api/.data/code-review-agent.sqlite`，与启动目录无关，避免重启后 Session 查找漂移。
+- DeepSeek 请求失败增加目标 URL、底层 cause 和一次短重试；诊断信息不包含 API key。
+- Session 列表的 `Archived` 入口现在只显示归档 Session，默认列表只显示活动 Session；归档按钮增加无障碍名称并在悬停时显示，减少侧栏视觉噪声。
+- 对话区增加滚动边界保护和稳定滚动条槽；打开 Session 后按当前活动/归档筛选状态刷新侧栏，避免切换视图后列表混杂。
+
+### 验证
+
+```text
+Node script syntax check       ✓
+pnpm typecheck                 ✓
+pnpm test                      ✓
+git diff --check               ✓
+```
+
+浏览器与真实 DeepSeek smoke：
+
+- 新建 `read-only` Session、切换到 `workspace-write`、归档和恢复均返回成功；
+- 浏览器中的 New session 工作模式选择和对话中 Mode popover 均可用；
+- 真实 DeepSeek Session `ses_ef4121aa-b328-4260-95b4-ed3041522b27` 完成 `glob/read_file` 工具调用并返回仓库总结，6 个只读工具调用均为 `completed`，说明当前失败路径没有复现。

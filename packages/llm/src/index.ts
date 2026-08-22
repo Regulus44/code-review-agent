@@ -70,31 +70,36 @@ export class OpenAICompatibleChatModel implements ChatModel {
     if (typeof fetchImpl !== "function") {
       throw new Error("Fetch API is unavailable in this runtime");
     }
-    const response = await fetchImpl(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        model: this.options.model,
-        messages: request.messages.map(toWireMessage),
-        stream: true,
-        ...(request.tools === undefined ? {} : {
-          tools: request.tools.map((tool) => ({
-            type: "function",
-            function: {
-              name: tool.name,
-              description: tool.description,
-              parameters: tool.parameters,
-            },
-          })),
+    let response: Response;
+    try {
+      response = await fetchWithRetry(fetchImpl, url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: this.options.model,
+          messages: request.messages.map(toWireMessage),
+          stream: true,
+          ...(request.tools === undefined ? {} : {
+            tools: request.tools.map((tool) => ({
+              type: "function",
+              function: {
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.parameters,
+              },
+            })),
+          }),
+          ...(request.toolChoice === undefined ? {} : {
+            tool_choice: typeof request.toolChoice === "string"
+              ? request.toolChoice
+              : { type: "function", function: { name: request.toolChoice.name } },
+          }),
         }),
-        ...(request.toolChoice === undefined ? {} : {
-          tool_choice: typeof request.toolChoice === "string"
-            ? request.toolChoice
-            : { type: "function", function: { name: request.toolChoice.name } },
-        }),
-      }),
-      ...(request.signal === undefined ? {} : { signal: request.signal }),
-    });
+        ...(request.signal === undefined ? {} : { signal: request.signal }),
+      }, request.signal);
+    } catch (error) {
+      throw new Error(`LLM request failed before receiving a response from ${url}: ${describeNetworkError(error)}`);
+    }
     if (!response.ok) {
       throw new Error(`LLM request failed with HTTP ${response.status}`);
     }
@@ -125,6 +130,30 @@ export class OpenAICompatibleChatModel implements ChatModel {
     for (const index of openToolIndices) yield { type: "tool_call_end", index };
     yield { type: "done" };
   }
+}
+
+async function fetchWithRetry(fetchImpl: typeof globalThis.fetch, url: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      return await fetchImpl(url, init);
+    } catch (error) {
+      lastError = error;
+      if (signal?.aborted || attempt === 2) throw error;
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, 250);
+        signal?.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason ?? new Error("Request cancelled")); }, { once: true });
+      });
+    }
+  }
+  throw lastError ?? new Error("Unknown network failure");
+}
+
+function describeNetworkError(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const cause = "cause" in error ? (error as Error & { cause?: unknown }).cause : undefined;
+  if (cause instanceof Error && cause.message !== error.message) return `${error.message}; cause: ${cause.message}`;
+  return error.message;
 }
 
 /**

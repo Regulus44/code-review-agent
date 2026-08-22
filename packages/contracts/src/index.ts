@@ -64,6 +64,7 @@ export interface SessionSummary {
   readonly id: SessionId;
   readonly workspaceRoot: string;
   readonly permissionPreset: PermissionPreset;
+  readonly archived: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly status: SessionStatus;
@@ -362,7 +363,7 @@ export interface EventStore {
 
 export interface SessionEventStore extends EventStore {
   createSession(workspaceRoot: string, permissionPreset?: PermissionPreset): Promise<SessionId>;
-  listSessions(): Promise<readonly SessionSummary[]>;
+  listSessions(includeArchived?: boolean): Promise<readonly SessionSummary[]>;
   claimCommand(input: ClaimCommandInput): Promise<CommandClaim>;
   forkSession(sessionId: SessionId, workspaceRoot?: string, id?: SessionId, permissionPreset?: PermissionPreset): Promise<SessionId>;
 }
