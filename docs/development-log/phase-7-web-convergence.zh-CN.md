@@ -131,3 +131,24 @@ git diff --check              ✓
 - 真实历史 Session 中 6 个工具调用各显示一张卡片，`call/result` 已合并；
 - 长历史加载后对话区保持可滚动，页面可以继续输入下一轮消息；
 - `Read only` 切换到 `Workspace write` 成功，并写入新的 Session 更新事件。
+
+## 2026-08-22：退役旧实现并收敛仓库入口
+
+### 清理范围
+
+- 删除旧 Python Runtime、Python 测试、`pyproject.toml` 和旧单页 Web 原型；
+- 删除旧 FastAPI Docker 启动方式，改为 Node 22 + pnpm + TypeScript API 镜像；
+- `.env.example` 只保留 TypeScript API、DeepSeek、端口和 SQLite 配置；
+- 删除仓库中发现的临时凭据文件，当前代码和文档不再提供旧 provider 的启动命令；
+- README、架构决策、迁移矩阵和阶段状态同步到 TypeScript-only 工作树；历史阶段记录保留在开发日志中。
+
+### 验证
+
+```text
+pnpm typecheck                         ✓
+pnpm test                              ✓
+API /health runtime=typescript         ✓
+legacy src/tests/pyproject             absent
+```
+
+Docker CLI 当前机器未安装，因此镜像构建只能通过 Dockerfile 静态检查和 TypeScript 构建门禁验证。
