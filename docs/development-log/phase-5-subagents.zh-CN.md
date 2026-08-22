@@ -2,11 +2,41 @@
 
 ## 状态
 
-`planned`
+`completed`
+
+## 2026-08-23：Phase 5.0–5.4 完成
+
+本轮按 DSH R0/R1 行为逐层实现，主参考为 `D:/Develop/deepseek-harness-fork`，`D:/Develop/claude-code` 只用于 prompt/UX 语义参考。
+
+### 交付切片
+
+- 5.0：`packages/contracts` 增加 `SubagentDescriptor`、`TaskReport`、`ArtifactRef`、authority、budget、child metadata 和 lifecycle events；`packages/storage` schema v3 保存 parent/child metadata，Task projection 支持 report/artifact/input-required、重建和幂等 terminal folding；新增 descriptor、sequence-gap、SQLite reopen fixtures。
+- 5.1：`packages/subagent` provider registry 与 `SubagentRuntime`；one-shot foreground 使用 `start → result → dispose`，background 立即返回 durable Task，child Session 独立保存 transcript；`packages/runtime/src/subagent-provider.ts` 用新 AgentHost 作为 in-process driver。
+- 5.2：continuable child 使用 FIFO inbox、单 child turn lock、`send_message`/`interrupt_agent`/`list_agents`，interrupt 不删除 queued inbox；authority 允许 direct parent/ancestor，cold resume 从 descriptor 读取，不从 live Map 虚构 agent。
+- 5.3：child-scoped `report` 由 descriptor 推导 direct parent，支持 `wakeup/quiet` 和独立 settlement notice；in-process child 的 tool registry 同时执行 tool allowlist 和 MCP server/tool allowlist，未显式 allow 的 MCP 不继承。
+- 5.4：API 提供 subagent catalog/history/prompt/interrupt、task query/output/cancel；SSE 提供 parent/child scoped replay；Web 隐藏 child session 的顶层重复项，使用 Child agents 树展示状态、artifact/report 和取消入口。
+
+### DSH 文件到本项目的行为对照
+
+| DSH R0 文件 | 本项目对应实现 | 差异/边界 | Fixture |
+|---|---|---|---|
+| `subagent/src/descriptor.ts` | `packages/subagent/src/descriptor.ts` | 使用本项目 EventStore event payload 和 SessionId；版本 1、未知字段拒绝 | corrupt/unknown descriptor |
+| `subagent/src/continuation.ts` + `core/agent/src/inbox.ts` | `packages/subagent/src/runtime.ts` | provider handle 由 AgentHost adapter 注入；FIFO/interrupt/authority 保持同语义 | FIFO、child lock、queued-after-interrupt |
+| `subagent/src/run-settlement.ts` | `SubagentRuntime.settle*` | report/artifact 使用本项目 bounded contract | partial、双失败 dispose |
+| `tool-subagent-control` / `tool-subagent-report` | `packages/tools/src/subagent.ts` + runtime methods | 工具只调用 SubagentRuntime，不直接调用 ToolRegistry | authority/direct-parent report |
+| `host/apiproxy/src/api/subagents*.ts` | `apps/api/src/server.ts` | 使用本项目 `/v1/*`、DTO 和 SSE replay | API catalog/output/scoped replay |
+
+### 约束确认
+
+- child tool execution 继续走 `ToolRuntime`；`packages/tools` 不直接创建 Agent；
+- EventStore 先追加、projection 后更新、SSE 最后消费；Web 不成为事实来源；
+- workspaceRoot、permission preset、tool/MCP allowlist 显式传递并冻结；
+- 不实现 A2A HTTP endpoint、Agent Card、外部 Task mapper 或 unrestricted swarm；
+- 不重复普通基线测试，验证集中在 phase-specific fixtures 和 API/Web smoke。
 
 ## 2026-08-23：建立 DSH 对照执行计划
 
-本轮完成本地 DeepSeek Harness multi-agent 结构调研，尚未合并 Phase 5 运行时代码。详细计划见 [Phase 5：内部 Task/Subagent 多 Agent（DSH 对照执行计划）](../phase-plans/phase-5-subagents.zh-CN.md)。
+本节记录 5.0 实现前的调研基线；随后已按该计划完成 Phase 5.0–5.4。详细计划见 [Phase 5：内部 Task/Subagent 多 Agent（DSH 对照执行计划）](../phase-plans/phase-5-subagents.zh-CN.md)。
 
 ### 已核对的 DSH 结构
 
@@ -46,6 +76,6 @@ DSH R0 工作项必须逐文件对照并补行为 fixture；R1 工作项对照�
 ### 验证与提交
 
 - 调研依据：本地 `D:/Develop/deepseek-harness-fork` 当前源码和 MIT LICENSE；
-- 本轮只写计划和日志，没有修改运行时代码；
-- 计划文档、开发日志、阶段状态和来源登记完成后必须创建独立 `docs(phase-5): ...` checkpoint；
-- 下一次开发从 `5.0.0` contract/projection fixture 开始，完成后立即独立 commit。
+- 本节对应的计划建立阶段只写计划和日志；后续实现已在上方 Phase 5.0–5.4 条目记录；
+- 计划文档、开发日志、阶段状态、ADR 和来源登记均已同步，提交门禁见最终 checkpoint；
+- A2A HTTP endpoint 和远程 provider 保持 Phase 6 边界。

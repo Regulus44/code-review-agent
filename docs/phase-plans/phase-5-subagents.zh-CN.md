@@ -1,6 +1,6 @@
 # Phase 5：内部 Task/Subagent 多 Agent（DSH 对照执行计划）
 
-状态：`planned`（已完成架构调研和执行计划，尚未合并 Phase 5 运行时代码）
+状态：`completed`（5.0–5.4 已完成；2026-08-23）
 计划建立：2026-08-23
 
 本阶段的目标是让当前主 Agent 可以安全地创建、观察、等待、继续、打断和回收子 Agent。实现路径以 DeepSeek Harness（DSH）的 TypeScript 包边界和生命周期语义为主参照，继续复用本项目已经完成的 EventStore、ToolRuntime、PermissionPolicy、WorkspaceResolver、MCP generation 和 Web/SSE 管线。
@@ -469,15 +469,21 @@ Phase 5 的首批模型工具：
 - provider 可单独禁用，已发布 Task 进入 `rejected`/`failed` 并带 diagnostics；
 - 每个 5.0–5.4 checkpoint 独立 commit，禁止把 Phase 6 A2A 代码混入 Phase 5 提交。
 
-## 13. 下一步执行清单
+## 13. 执行结果与收口证据
 
-下一次开发从 `5.0.0` 开始：
+本计划中的 5.0–5.4 已按以下顺序完成：
 
-1. 建立 `packages/subagent` package skeleton 和 DSH R0 source map；
-2. 在 `packages/contracts` 定义 descriptor、TaskReport、ArtifactRef、authority 和事件 schema；
-3. 给 `packages/storage` 增加 child session metadata 与 Task/Subagent projector fixture；
-4. 输出 ADR：child Session 与 parent Task 的事实来源、descriptor 版本和恢复状态；
-5. 只实现 contract、projection 和 fixture，完成后独立 commit；
-6. 通过 5.0 门禁后再实现 one-shot provider，不提前接入 A2A。
+1. `5.0`：完成 `packages/subagent` skeleton、Task/Descriptor/Report/Authority contract、SQLite durable projection、重启恢复 fixture 和事实来源 ADR；
+2. `5.1`：完成 provider registry、foreground/background one-shot lifecycle、settlement 和 task output；
+3. `5.2`：完成 continuable child、FIFO inbox、child lock、parent/ancestor authority、cold resume 及控制工具；
+4. `5.3`：完成 child-scoped report、artifact/input-required projection、MCP/tool allowlist 和独立 child `AgentHost`；
+5. `5.4`：完成 API/SSE/Web catalog、child Session 侧栏、cancel 和 scoped event replay。
 
-该清单完成后，Phase 5 才从 `planned` 进入 `in_progress`。
+收口验证：
+
+- `pnpm exec tsc -b --pretty false` 通过；
+- `@code-review-agent/subagent` 5 项测试通过；
+- `@code-review-agent/api` 15 项测试通过；
+- API `http://127.0.0.1:3210` 可访问，Web 标题、Connected 状态、Session sidebar 和 Child agents 区块 smoke 通过；
+- subagent catalog 与 scoped event JSON endpoint 均返回 HTTP 200；
+- `git diff --check` 通过；普通 baseline 测试按约定未重复执行。

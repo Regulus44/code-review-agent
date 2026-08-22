@@ -240,3 +240,21 @@ ID:
 范围：provider registry、one-shot run ownership、continuable child inbox、descriptor/versioning、parent/ancestor authority、depth/budget、child-scoped report、Task projection 和 browser-safe subagent API。
 
 适配方式：先建立行为 fixture 和本项目 contract，再按 DSH 的职责分层实现；EventStore、ToolRuntime、PermissionPolicy、WorkspaceResolver、MCP scope 和 SSE replay 继续作为本项目事实来源与安全边界。Phase 5 不引入完整 DSH runtime，也不把 DSH 内部类型暴露为公共 API。
+
+### DSH-012
+
+来源仓库：`D:/Develop/deepseek-harness-fork`
+
+来源路径：`packages/subagent/subagent/src/{descriptor,continuation,run-settlement}.ts`、`packages/core/agent/src/inbox.ts`、`packages/subagent/tool-subagent-control/src/{index,list-agents}.ts`、`packages/subagent/tool-subagent-report/src/index.ts`、`packages/host/apiproxy/src/api/subagents.ts`。
+
+复用方式：`behavior-reference` + `architecture-reference`
+
+许可证/来源证据：`D:/Develop/deepseek-harness-fork/LICENSE` 为 MIT；Phase 5 实现没有复制 DSH 代码、Cordis Context、内部品牌类型或 Web 组件。
+
+本项目路径：`packages/contracts/src/index.ts`、`packages/storage/src/index.ts`、`packages/subagent/src/*`、`packages/runtime/src/subagent-provider.ts`、`packages/tools/src/subagent.ts`、`apps/api/src/server.ts`、`apps/web/index.html`。
+
+范围：Task 与 child Session 身份分离、descriptor versioning、one-shot `start → result → dispose`、continuable FIFO/child lock、interrupt 保留 inbox、parent/ancestor authority、direct-parent report、settlement notice 和 browser-safe catalog/history/control API。
+
+改写部分：所有 durable event、projection、permission、workspace、MCP allowlist、ToolRuntime、SSE 和 DTO 均为本项目自有实现；MCP child 默认 deny 未显式 allow 的 server/tool，Web 只消费 projection/DTO。
+
+新增测试：`packages/subagent/src/index.test.ts` 覆盖 descriptor、SQLite child metadata、foreground/background report、sequence gap、FIFO/interrupt/direct-parent report；`apps/api/src/server.test.ts` 覆盖 catalog/output/scoped replay。

@@ -4,6 +4,7 @@ export type Brand<Value, Name extends string> = Value & { readonly __brand: Name
 export type SessionId = Brand<string, "SessionId">;
 export type TurnId = Brand<string, "TurnId">;
 export type TaskId = Brand<string, "TaskId">;
+export type RunId = Brand<string, "RunId">;
 export type GoalId = Brand<string, "GoalId">;
 export type ToolCallId = Brand<string, "ToolCallId">;
 export type PermissionId = Brand<string, "PermissionId">;
@@ -28,7 +29,15 @@ export type AgentEventType =
   | "assistant/message"
   | "task/created"
   | "task/updated"
+  | "task/input-required"
+  | "task/report"
+  | "task/artifact"
   | "task/ended"
+  | "subagent/descriptor"
+  | "subagent/start"
+  | "subagent/end"
+  | "subagent/inbox"
+  | "subagent/settlement"
   | "goal/created"
   | "goal/updated"
   | "goal/ended"
@@ -74,8 +83,90 @@ export interface AgentEvent {
 export type SessionStatus = "idle" | "queued" | "running" | "stopped" | "failed" | "interrupted";
 export type TurnStatus = "queued" | "running" | "completed" | "stopped" | "failed" | "interrupted";
 export type TaskStatus = "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "blocked";
+export type SubagentMode = "one-shot" | "continuable";
+export type SubagentStatus = "queued" | "running" | "ready" | "waiting" | "completed" | "failed" | "cancelled" | "rejected" | "interrupted";
+export type TaskTerminalStatus = "completed" | "failed" | "cancelled" | "rejected" | "partial";
+export type TaskStopReason = "completed" | "aborted" | "error" | "max-tokens" | "refusal";
+export type ReportDeliveryPolicy = "wakeup" | "quiet";
 export type GoalStatus = "active" | "completed" | "blocked" | "cancelled";
 export type PermissionPreset = "read-only" | "workspace-write" | "ask-on-write" | "ask-on-execute" | "danger-full-access";
+
+export interface ArtifactRef {
+  readonly id: string;
+  readonly kind: "file" | "diff" | "log" | "url" | "json" | "other";
+  readonly label: string;
+  readonly path?: string;
+  readonly mediaType?: string;
+  readonly sizeBytes?: number;
+  readonly digest?: string;
+  readonly preview?: string;
+}
+
+export interface TaskBudget {
+  readonly maxSteps?: number;
+  readonly maxTokens?: number;
+  readonly timeoutMs?: number;
+}
+
+export interface SubagentDescriptor {
+  readonly version: 1;
+  readonly mode: SubagentMode;
+  readonly provider: string;
+  readonly label?: string;
+  readonly parentTaskId?: TaskId;
+  readonly parentSessionId: SessionId;
+  readonly childSessionId: SessionId;
+  readonly workspaceRoot: string;
+  readonly permissionPreset: PermissionPreset;
+  readonly toolAllowlist?: readonly string[];
+  readonly mcpAllowlist?: readonly string[];
+  readonly model?: string;
+  readonly delegationDepth: number;
+}
+
+export interface TaskAuthority {
+  readonly directParentSessionId: SessionId;
+  readonly directParentTaskId?: TaskId;
+  readonly ancestorSessionIds: readonly SessionId[];
+  readonly delegationDepth: number;
+}
+
+export interface TaskReport {
+  readonly taskId: TaskId;
+  readonly childSessionId: SessionId;
+  readonly status: TaskTerminalStatus;
+  readonly stopReason?: TaskStopReason;
+  readonly summary: string;
+  readonly output?: unknown;
+  readonly artifacts: readonly ArtifactRef[];
+  readonly diagnostics?: readonly ToolError[];
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+}
+
+export interface ChildReportInput {
+  readonly summary: string;
+  readonly output?: unknown;
+  readonly artifacts?: readonly ArtifactRef[];
+  readonly delivery?: ReportDeliveryPolicy;
+}
+
+export interface SettlementNotice {
+  readonly taskId: TaskId;
+  readonly childSessionId: SessionId;
+  readonly status: TaskTerminalStatus | "ready";
+  readonly summary?: string;
+  readonly stopReason?: TaskStopReason;
+}
+
+export interface ChildSessionMetadata {
+  readonly parentSessionId: SessionId;
+  readonly parentTaskId?: TaskId;
+  readonly childMode: SubagentMode;
+  readonly childProvider: string;
+  readonly delegationDepth: number;
+  readonly descriptor?: SubagentDescriptor;
+}
 
 export interface SessionSummary {
   readonly id: SessionId;
@@ -88,6 +179,11 @@ export interface SessionSummary {
   readonly updatedAt: string;
   readonly status: SessionStatus;
   readonly lastSequence: number;
+  readonly parentSessionId?: SessionId;
+  readonly parentTaskId?: TaskId;
+  readonly childMode?: SubagentMode;
+  readonly childProvider?: string;
+  readonly delegationDepth?: number;
 }
 
 export interface TurnProjection {
@@ -109,6 +205,19 @@ export interface TaskProjection {
   readonly updatedAt: string;
   readonly title?: string;
   readonly result?: unknown;
+  readonly parentSessionId?: SessionId;
+  readonly parentTaskId?: TaskId;
+  readonly childSessionId?: SessionId;
+  readonly mode?: SubagentMode;
+  readonly provider?: string;
+  readonly workspaceRoot?: string;
+  readonly permissionPreset?: PermissionPreset;
+  readonly delegationDepth?: number;
+  readonly budget?: TaskBudget;
+  readonly artifacts: readonly ArtifactRef[];
+  readonly report?: TaskReport;
+  readonly terminalReason?: string;
+  readonly diagnostics?: readonly ToolError[];
   readonly lastSequence: number;
 }
 
@@ -375,6 +484,7 @@ export interface UserInteractionAnswer {
 export interface CreateSessionInput {
   readonly workspaceRoot: string;
   readonly permissionPreset?: PermissionPreset;
+  readonly metadata?: ChildSessionMetadata;
 }
 
 export interface SendMessageInput {
@@ -426,8 +536,11 @@ export interface EventStore {
 }
 
 export interface SessionEventStore extends EventStore {
-  createSession(workspaceRoot: string, permissionPreset?: PermissionPreset): Promise<SessionId>;
+  createSession(workspaceRoot: string, permissionPreset?: PermissionPreset, idOrMetadata?: SessionId | ChildSessionMetadata, metadata?: ChildSessionMetadata): Promise<SessionId>;
   listSessions(includeArchived?: boolean): Promise<readonly SessionSummary[]>;
+  listTasks(sessionId?: SessionId): Promise<readonly TaskProjection[]>;
+  listChildSessions(parentSessionId: SessionId): Promise<readonly SessionSummary[]>;
+  createChildSession(input: { readonly id?: SessionId; readonly workspaceRoot: string; readonly permissionPreset: PermissionPreset; readonly metadata: ChildSessionMetadata }): Promise<SessionId>;
   claimCommand(input: ClaimCommandInput): Promise<CommandClaim>;
   forkSession(sessionId: SessionId, workspaceRoot?: string, id?: SessionId, permissionPreset?: PermissionPreset): Promise<SessionId>;
 }

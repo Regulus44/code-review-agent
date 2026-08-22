@@ -13,14 +13,14 @@
 | Phase 3B：Coding Agent 工具池与工具 Prompt 强化 | completed（2026-08-22） | 3B.0–3B.5、patch/diff、LSP 生命周期/恢复、job spill/恢复和 Web presentation 已闭合；隔离本地长任务与真实 DeepSeek long-task smoke 通过。普通基线测试未重复执行 |
 | Phase 4：MCP Client | completed | `5477f16`；官方 SDK stdio/SSE/Streamable HTTP、discovery、ToolRegistry bridge、权限/取消/重连、API/Web MCP 状态和 fixture 验证通过 |
 | Phase 4B：MCP 加固 | completed（2026-08-23） | 本 checkpoint；4B.0–4B.6、focused tests、API restart persistence 和 MCP browser smoke 通过；普通 baseline 未重复执行 |
-| Phase 5：内部 Subagent / 多 Agent | pending | 等 Phase 4 MCP 和 Task contract 稳定 |
+| Phase 5：内部 Subagent / 多 Agent | completed（2026-08-23） | 5.0–5.4：Task/Descriptor durable projection、one-shot/continuable child、FIFO/authority/cold resume、report/MCP scope、API/SSE/Web catalog；定向 typecheck、storage/subagent/runtime/API 测试和 API/Web smoke 通过 |
 | Phase 6：A2A | pending | 等 Phase 5 parent/child lifecycle 稳定 |
 | Phase 7：DSH Web 前端收敛 | in_progress | DSH 三栏 Web 垂直切片 + Workspace Picker + Workspace→Session 树 + Session mode/archive/delete；类型检查、API 测试、浏览器交互和真实 DeepSeek 只读工具 smoke 通过 |
 | Phase 8：高级能力与产品化 | pending | 等前置阶段完成 |
 
-## 下一执行计划：MCP 与 A2A 演进
+## 后续执行计划：Phase 6 A2A 边界
 
-Phase 3B 已完成，下一条执行路线采用 [MCP 与 A2A 演进执行计划](phase-plans/mcp-a2a-execution-plan.zh-CN.md)：
+Phase 3B 已完成，Phase 4B 和 Phase 5 已完成；后续路线继续采用 [MCP 与 A2A 演进执行计划](phase-plans/mcp-a2a-execution-plan.zh-CN.md)：
 
 ```text
 Phase 4B MCP 加固
@@ -28,9 +28,19 @@ Phase 4B MCP 加固
   → Phase 6 A2A inbound adapter
 ```
 
-计划明确了 DSH R0/R1/R2 参考等级。MCP contract audit、持久化 scope/credential 设计、连接 generation fixture 和 ADR 已在 Phase 4B 完成；下一步转入 Phase 5 内部 Task/Subagent，A2A HTTP endpoint 等 parent/child contract 稳定后再实现。
+计划明确了 DSH R0/R1/R2 参考等级。MCP contract audit、持久化 scope/credential 设计、连接 generation fixture 和 ADR 已在 Phase 4B 完成；Phase 5 已将 parent/child contract 稳定下来，下一步才进入 A2A inbound adapter 研究。
 
-Phase 5 的详细 DSH 对照计划已建立：[Phase 5：内部 Task/Subagent 多 Agent（DSH 对照执行计划）](phase-plans/phase-5-subagents.zh-CN.md)。当前仍为 `planned`，下一次只先推进 5.0 contract、descriptor 和 durable projection fixture。
+Phase 5 的详细 DSH 对照计划：[Phase 5：内部 Task/Subagent 多 Agent（DSH 对照执行计划）](phase-plans/phase-5-subagents.zh-CN.md) 已完成 5.0–5.4。A2A HTTP endpoint、Agent Card 和远程 provider 仍保持 Phase 6 边界。
+
+## Phase 5 Subagent / Multi-Agent 验收证据（2026-08-23）
+
+- `packages/contracts`：Task/Subagent/Descriptor/Report/Artifact/authority contract 和事件类型；
+- `packages/storage`：SQLite schema v3 child metadata、parent/child catalog、Task folding、重复 terminal 保护、projection rebuild 和 restart recovery；
+- `packages/subagent`：provider catalog、foreground/background one-shot、continuable FIFO/child lock、ancestor authority、descriptor cold resume、direct-parent report 和 settlement；5 项 targeted tests 通过；
+- `packages/runtime` / `packages/tools`：独立 child AgentHost adapter、ToolRuntime 仍为唯一执行入口、tool/MCP allowlist 和 model-facing subagent tools/prompt sections；
+- `apps/api`：`/v1/sessions/:id/subagents`、prompt/interrupt、task query/output/cancel、parent/child scoped SSE replay；API 15 项测试通过；
+- `apps/web`：parent/child tree、ready/running/failed 状态、report/task projection 和 child cancel/history 入口；
+- 门禁：`pnpm exec tsc -b --pretty false`、storage 9 项、subagent 5 项、runtime 12 项、API 15 项 targeted tests 通过；tools 全包测试有一个 Windows 临时目录锁定的既有 JobManager 环境型失败，未作为 Phase 5 代码失败处理；普通 baseline 未重复执行。
 
 ## Phase 4B 加固进展（2026-08-23）
 
@@ -43,7 +53,7 @@ Phase 5 的详细 DSH 对照计划已建立：[Phase 5：内部 Task/Subagent �
 - resource/prompt adapter 增加 timeout/cancel、bounded modelView、untrusted trust marker 和 `mcp/resource`/`mcp/prompt` 脱敏事件；
 - Web MCP panel 展示 scope、revision、generation、auth、retry 和 catalog 统计。
 
-最终验证：`pnpm typecheck`、`packages/storage` 9 项测试、`packages/mcp-client` 9 项测试、`apps/api` 14 项测试、`git diff --check` 和 MCP browser smoke 通过；普通 workspace baseline 未重复执行。独立 checkpoint 提交后才开放 Phase 5。
+最终验证：`pnpm typecheck`、`packages/storage` 9 项测试、`packages/mcp-client` 9 项测试、`apps/api` 14 项测试、`git diff --check` 和 MCP browser smoke 通过；普通 workspace baseline 未重复执行。该记录是 Phase 4B 的历史退出证据，随后已进入并完成 Phase 5。
 
 ## Phase 7 Web Coding 工作模式修复（2026-08-22）
 
@@ -64,7 +74,7 @@ Phase 1 的 provider-neutral adapter 现在已接入 API CLI 启动路径：通�
 - 第一批 `packages/contracts`、`packages/llm` 和 `packages/runtime` 已携带工具 schema、解析 `delta.tool_calls` 并执行 model → tool → model 循环；进程重启后的 pending approval/turn continuation 已在 Phase 1A.5 完成；
 - 当前 `packages/tools/src/builtin.ts` 的工具池已经是 TypeScript 实现；旧 Python 工具实现已从工作树移除，新 Runtime 只使用 TypeScript 工具；
 - 因此当前阶段目标改为 `Phase 1A：Agentic Core + TypeScript Tool Pool`，该目标现已通过工具调用层、Terminal、Plan/Todo、AskUser、权限恢复和真实垂直场景门禁；
-- Phase 5 Subagent、Phase 6 A2A 和 Phase 8 高级能力的核心实现必须等待本门禁通过。
+- Phase 5 Subagent、Phase 6 A2A 和 Phase 8 高级能力的核心实现必须等待本门禁通过（历史约束，Phase 5 已完成）。
 
 执行计划：[phase-1-agentic-coding-core.zh-CN.md](phase-plans/phase-1-agentic-coding-core.zh-CN.md)。
 

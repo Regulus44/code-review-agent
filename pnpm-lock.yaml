@@ -38,6 +38,9 @@ importers:
       '@code-review-agent/storage':
         specifier: workspace:*
         version: link:../../packages/storage
+      '@code-review-agent/subagent':
+        specifier: workspace:*
+        version: link:../../packages/subagent
       '@code-review-agent/tools':
         specifier: workspace:*
         version: link:../../packages/tools
@@ -78,6 +81,9 @@ importers:
       '@code-review-agent/storage':
         specifier: workspace:*
         version: link:../storage
+      '@code-review-agent/subagent':
+        specifier: workspace:*
+        version: link:../subagent
       '@code-review-agent/tools':
         specifier: workspace:*
         version: link:../tools
@@ -88,11 +94,23 @@ importers:
         specifier: workspace:*
         version: link:../contracts
 
+  packages/subagent:
+    dependencies:
+      '@code-review-agent/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@code-review-agent/storage':
+        specifier: workspace:*
+        version: link:../storage
+
   packages/tools:
     dependencies:
       '@code-review-agent/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@code-review-agent/subagent':
+        specifier: workspace:*
+        version: link:../subagent
       '@code-review-agent/workspace':
         specifier: workspace:*
         version: link:../workspace

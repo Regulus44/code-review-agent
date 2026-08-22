@@ -18,10 +18,12 @@ import {
   type ToolResult,
   type UserInteractionAnswer,
   type UserInteractionRequest,
+  type ChildSessionMetadata,
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { randomUUID } from "node:crypto";
-import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type ExecuteToolOutput, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
+import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type ExecuteToolOutput, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
+import type { SubagentRuntime } from "@code-review-agent/subagent";
 import { buildAgentSystemPrompt } from "./system-prompt.js";
 
 export interface AgentHostOptions {
@@ -36,6 +38,7 @@ export interface AgentHostOptions {
   readonly visionEnabled?: boolean;
   readonly lspServers?: Readonly<Record<string, LspServerConfig>>;
   readonly capabilities?: CapabilityRegistry;
+  readonly subagentRuntime?: SubagentRuntime;
 }
 
 interface PendingTurn {
@@ -90,11 +93,12 @@ export class AgentHost {
     if (options.toolRuntime === undefined) {
       this.terminalManager = new TerminalManager();
       this.jobManager = new JobManager({ eventStore: options.store });
-      registry.registerMany(createBuiltinTools({ terminalManager: this.terminalManager, jobManager: this.jobManager, eventStore: options.store, ...(options.visionEnabled === undefined ? {} : { visionEnabled: options.visionEnabled }), ...(options.lspServers === undefined ? {} : { lspServers: options.lspServers }), ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }) }));
+      if (options.toolRegistry === undefined) registry.registerMany(createBuiltinTools({ terminalManager: this.terminalManager, jobManager: this.jobManager, eventStore: options.store, ...(options.visionEnabled === undefined ? {} : { visionEnabled: options.visionEnabled }), ...(options.lspServers === undefined ? {} : { lspServers: options.lspServers }), ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }) }));
       this.permissionPreset = options.permissionPreset ?? "ask-on-write";
     } else {
       this.permissionPreset = options.permissionPreset;
     }
+    if (options.subagentRuntime !== undefined) registry.registerMany(createSubagentTools({ runtime: options.subagentRuntime }).filter((tool) => !registry.has(tool.name)));
     this.toolRuntime = options.toolRuntime ?? new ToolRuntime({ store: options.store, registry, ...(this.terminalManager === undefined ? {} : { terminalManager: this.terminalManager }), ...(options.permissionPreset === undefined ? {} : { policy: new DefaultPermissionPolicy({ preset: options.permissionPreset }) }) });
     this.ready = this.restoreQueuedTurns();
   }
@@ -104,10 +108,10 @@ export class AgentHost {
     this.model = model;
   }
 
-  async createSession(workspaceRoot: string, permissionPreset?: PermissionPreset): Promise<SessionProjection> {
+  async createSession(workspaceRoot: string, permissionPreset?: PermissionPreset, metadata?: ChildSessionMetadata): Promise<SessionProjection> {
     await this.ready;
     const preset = permissionPreset ?? this.permissionPreset ?? "ask-on-write";
-    const id = await this.options.store.createSession(workspaceRoot, preset);
+    const id = await this.options.store.createSession(workspaceRoot, preset, metadata);
     this.toolRuntime.setSessionPermissionPreset(id, preset);
     const projection = await this.options.store.project(id);
     if (projection === undefined) throw new Error("Session projection was not created");
@@ -722,6 +726,8 @@ export class AgentHost {
     this.permissionWaiters.get(permissionId)?.resolve(output);
   }
 }
+
+export { createInProcessSubagentProvider, type InProcessProviderOptions } from "./subagent-provider.js";
 
 export function sessionId(value: string): SessionId {
   return brand<string, "SessionId">(value);

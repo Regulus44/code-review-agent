@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@code-review-agent/contracts": "workspace:*",
+    "@code-review-agent/subagent": "workspace:*",
     "@code-review-agent/workspace": "workspace:*"
   },
   "scripts": {

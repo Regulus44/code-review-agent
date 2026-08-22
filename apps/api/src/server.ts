@@ -3,9 +3,10 @@ import { realpath, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
-import { sessionId, AgentHost, turnId } from "@code-review-agent/runtime";
+import { createInProcessSubagentProvider, sessionId, AgentHost, turnId } from "@code-review-agent/runtime";
 import { SqliteEventStore } from "@code-review-agent/storage";
 import { brand, type AgentEvent, type ChatModel, type InteractionId, type PermissionId, type SessionEventStore } from "@code-review-agent/contracts";
+import { SubagentRuntime } from "@code-review-agent/subagent";
 import { createConfiguredChatModel, DEEPSEEK_MODELS, type ModelConfigView } from "@code-review-agent/llm";
 import { McpConnectionManager, type McpServerConfig } from "@code-review-agent/mcp-client";
 import type { PermissionPreset } from "@code-review-agent/tools";
@@ -25,13 +26,16 @@ export interface ApiServerOptions {
   readonly modelSelector?: (model: string) => ModelSelection;
   readonly permissionPreset?: PermissionPreset;
   readonly mcp?: McpConnectionManager;
+  readonly subagentRuntime?: SubagentRuntime;
   readonly webRoot?: string;
 }
 
 export function createApiServer(options: ApiServerOptions = {}): Server {
   const ownsStore = options.store === undefined && options.host === undefined;
   const store = options.store ?? (options.host === undefined ? new SqliteEventStore({ databasePath: options.databasePath ?? defaultDatabasePath() }) : undefined);
-  const host = options.host ?? new AgentHost({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), ...(options.permissionPreset === undefined ? {} : { permissionPreset: options.permissionPreset }) });
+  const subagentRuntime = options.subagentRuntime ?? new SubagentRuntime({ store: store as SessionEventStore });
+  const host = options.host ?? new AgentHost({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), ...(options.permissionPreset === undefined ? {} : { permissionPreset: options.permissionPreset }), subagentRuntime });
+  if (!subagentRuntime.providerCatalog().some((provider) => provider.name === "in-process")) subagentRuntime.registerProvider(createInProcessSubagentProvider({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), baseToolDefinitions: host.toolRegistry().listAll(), subagentRuntime }));
   const modelRuntime: ModelRuntimeState = {
     availableModels: options.availableModels ?? [],
     ...(options.modelInfo === undefined ? {} : { info: options.modelInfo }),
@@ -47,7 +51,7 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
   const persistence = store instanceof SqliteEventStore ? "sqlite" : "custom";
   const webRoot = options.webRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web");
   const server = createServer((request, response) => {
-    void handleRequest(request, response, host, mcp, webRoot, persistence, modelRuntime);
+    void handleRequest(request, response, host, mcp, subagentRuntime, webRoot, persistence, modelRuntime);
   });
   if (ownsStore && store instanceof SqliteEventStore) server.on("close", () => store.close());
   if (ownsMcp) server.on("close", () => { void mcp.close(); });
@@ -89,7 +93,7 @@ interface ModelRuntimeState {
   readonly selector?: (model: string) => ModelSelection;
 }
 
-async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, mcp: McpConnectionManager, webRoot: string, persistence: string, modelRuntime: ModelRuntimeState): Promise<void> {
+async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, mcp: McpConnectionManager, subagents: SubagentRuntime, webRoot: string, persistence: string, modelRuntime: ModelRuntimeState): Promise<void> {
   response.setHeader("access-control-allow-origin", "*");
   response.setHeader("access-control-allow-headers", "content-type, idempotency-key, last-event-id");
   response.setHeader("access-control-allow-methods", "GET,POST,DELETE,OPTIONS");
@@ -217,6 +221,22 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       await streamEvents(request, response, host, id, after);
       return;
     }
+    const scopedEventsMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/subagents\/events$/u);
+    if (request.method === "GET" && scopedEventsMatch?.[1] !== undefined) {
+      const parentSessionId = sessionId(decodeURIComponent(scopedEventsMatch[1]));
+      const after = parseSequence(url.searchParams.get("after_sequence") ?? request.headers["last-event-id"]);
+      const parent = await host.getSession(parentSessionId);
+      if (parent === undefined) throw new HttpError(404, "session not found");
+      const children = await subagents.agentCatalog(parentSessionId, "descendants");
+      const childSessionIds = children.flatMap((entry) => entry.task.childSessionId === undefined ? [] : [entry.task.childSessionId]);
+      if (url.searchParams.get("format") === "json") {
+        const events = await scopedEvents(host, parentSessionId, childSessionIds, after);
+        sendJson(response, 200, events);
+      } else {
+        await streamScopedEvents(request, response, host, parentSessionId, childSessionIds, after);
+      }
+      return;
+    }
     const modeMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/mode$/u);
     if (request.method === "POST" && modeMatch?.[1] !== undefined) {
       const id = sessionId(decodeURIComponent(modeMatch[1]));
@@ -280,6 +300,83 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const workspaceRoot = typeof body.workspaceRoot === "string" ? body.workspaceRoot : undefined;
       sendJson(response, 201, { sessionId: await host.forkSession(id, workspaceRoot, commandId(request, body)) });
       return;
+    }
+    const subagentsMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/subagents$/u);
+    if (subagentsMatch?.[1] !== undefined) {
+      const parentSessionId = sessionId(decodeURIComponent(subagentsMatch[1]));
+      if (request.method === "GET") {
+        const scope = url.searchParams.get("scope") === "descendants" ? "descendants" : "children";
+        sendJson(response, 200, { agents: await subagents.agentCatalog(parentSessionId, scope) });
+        return;
+      }
+      if (request.method === "POST") {
+        const body = await readJson(request);
+        const parent = await host.getSession(parentSessionId);
+        if (parent === undefined) throw new HttpError(404, "session not found");
+        if (typeof body.prompt !== "string") throw new HttpError(400, "prompt is required");
+        const permissionPreset = body.permissionPreset === undefined ? parent.permissionPreset : parsePermissionPreset(body.permissionPreset);
+        const receipt = await subagents.spawn({
+          parentSessionId,
+          prompt: body.prompt,
+          workspaceRoot: typeof body.workspaceRoot === "string" ? body.workspaceRoot : parent.workspaceRoot,
+          permissionPreset,
+          ...(body.mode === "one-shot" || body.mode === "continuable" ? { mode: body.mode } : {}),
+          ...(typeof body.background === "boolean" ? { background: body.background } : {}),
+          ...(typeof body.label === "string" ? { label: body.label } : {}),
+          ...(typeof body.provider === "string" ? { provider: body.provider } : {}),
+          ...(Array.isArray(body.toolAllowlist) ? { toolAllowlist: body.toolAllowlist as string[] } : {}),
+          ...(Array.isArray(body.mcpAllowlist) ? { mcpAllowlist: body.mcpAllowlist as string[] } : {}),
+          ...(typeof body.model === "string" ? { model: body.model } : {}),
+          ...(typeof body.delegationDepth === "number" ? { delegationDepth: body.delegationDepth } : {}),
+          ...(typeof body.commandId === "string" ? { commandId: body.commandId } : {}),
+        });
+        sendJson(response, receipt.report === undefined ? 202 : 200, receipt);
+        return;
+      }
+    }
+    const subagentActionMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/subagents\/([^/]+)\/(prompt|interrupt)$/u);
+    if (subagentActionMatch?.[1] !== undefined && subagentActionMatch[2] !== undefined && subagentActionMatch[3] !== undefined && request.method === "POST") {
+      const parentSessionId = sessionId(decodeURIComponent(subagentActionMatch[1]));
+      const taskId = brand<string, "TaskId">(decodeURIComponent(subagentActionMatch[2]));
+      const body = await readJson(request);
+      if (subagentActionMatch[3] === "prompt") {
+        if (typeof body.prompt !== "string") throw new HttpError(400, "prompt is required");
+        sendJson(response, 202, await subagents.sendMessage(parentSessionId, taskId, body.prompt));
+      } else {
+        sendJson(response, 202, await subagents.interrupt(parentSessionId, taskId));
+      }
+      return;
+    }
+    const subagentHistoryMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/subagents\/([^/]+)$/u);
+    if (subagentHistoryMatch?.[1] !== undefined && subagentHistoryMatch[2] !== undefined && request.method === "GET") {
+      const parentSessionId = sessionId(decodeURIComponent(subagentHistoryMatch[1]));
+      const taskId = brand<string, "TaskId">(decodeURIComponent(subagentHistoryMatch[2]));
+      const output = await subagents.taskOutput(parentSessionId, taskId);
+      if (output === undefined) throw new HttpError(404, "task not found");
+      sendJson(response, 200, output);
+      return;
+    }
+    const taskMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/tasks\/([^/]+)(?:\/(output|cancel))?$/u);
+    if (taskMatch?.[1] !== undefined && taskMatch[2] !== undefined) {
+      const parentSessionId = sessionId(decodeURIComponent(taskMatch[1]));
+      const taskId = brand<string, "TaskId">(decodeURIComponent(taskMatch[2]));
+      if (request.method === "GET" && taskMatch[3] === undefined) {
+        const task = await subagents.taskQuery(parentSessionId, taskId);
+        if (task === undefined) throw new HttpError(404, "task not found");
+        sendJson(response, 200, task);
+        return;
+      }
+      if (request.method === "GET" && taskMatch[3] === "output") {
+        const output = await subagents.taskOutput(parentSessionId, taskId);
+        if (output === undefined) throw new HttpError(404, "task not found");
+        sendJson(response, 200, output);
+        return;
+      }
+      if (request.method === "POST" && taskMatch[3] === "cancel") {
+        const body = await readJson(request);
+        sendJson(response, 200, await subagents.cancel(parentSessionId, taskId, commandId(request, body)));
+        return;
+      }
     }
     const cancelMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/cancel$/u);
     if (request.method === "POST" && cancelMatch?.[1] !== undefined) {
@@ -372,6 +469,44 @@ async function streamEvents(request: IncomingMessage, response: ServerResponse, 
   }
 }
 
+async function scopedEvents(host: AgentHost, parentSessionId: ReturnType<typeof sessionId>, childSessionIds: readonly ReturnType<typeof sessionId>[], after: number): Promise<readonly { readonly sessionId: string; readonly event: AgentEvent }[]> {
+  const ids = [parentSessionId, ...childSessionIds];
+  const items: { readonly sessionId: string; readonly event: AgentEvent }[] = [];
+  for (const id of ids) for (const event of await host.events(id, after)) items.push({ sessionId: id, event });
+  return items.sort((left, right) => left.event.createdAt.localeCompare(right.event.createdAt) || left.event.sequence - right.event.sequence);
+}
+
+async function streamScopedEvents(request: IncomingMessage, response: ServerResponse, host: AgentHost, parentSessionId: ReturnType<typeof sessionId>, childSessionIds: readonly ReturnType<typeof sessionId>[], after: number): Promise<void> {
+  response.writeHead(200, { "cache-control": "no-cache", connection: "keep-alive", "content-type": "text/event-stream; charset=utf-8" });
+  response.write(": connected\n\n");
+  const ids = [parentSessionId, ...childSessionIds];
+  const seen = new Set<string>();
+  let replaying = true;
+  const buffered: { readonly sessionId: string; readonly event: AgentEvent }[] = [];
+  const unsubscribe = ids.map((id) => host.subscribe(id, (event) => {
+    const key = `${id}:${event.sequence}`;
+    if (seen.has(key)) return;
+    if (replaying) buffered.push({ sessionId: id, event });
+    else { seen.add(key); writeScopedEvent(response, id, event); }
+  }));
+  const close = () => unsubscribe.forEach((dispose) => dispose());
+  request.on("close", close);
+  const historical = await scopedEvents(host, parentSessionId, childSessionIds, after);
+  for (const item of historical) {
+    const key = `${item.sessionId}:${item.event.sequence}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    writeScopedEvent(response, item.sessionId, item.event);
+  }
+  replaying = false;
+  for (const item of buffered.sort((left, right) => left.event.createdAt.localeCompare(right.event.createdAt))) {
+    const key = `${item.sessionId}:${item.event.sequence}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    writeScopedEvent(response, item.sessionId, item.event);
+  }
+}
+
 function commandId(request: IncomingMessage, body: Record<string, unknown>): string | undefined {
   const header = request.headers["idempotency-key"];
   if (typeof header === "string" && header.length > 0) return header;
@@ -388,6 +523,11 @@ function serveIndex(response: ServerResponse, webRoot: string): void {
 function writeEvent(response: ServerResponse, event: { sequence: number; type: string; payload: unknown }): void {
   if (response.destroyed) return;
   response.write(`id: ${event.sequence}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+}
+
+function writeScopedEvent(response: ServerResponse, sessionId: string, event: AgentEvent): void {
+  if (response.destroyed) return;
+  response.write(`id: ${sessionId}:${event.sequence}\nevent: ${event.type}\ndata: ${JSON.stringify({ sessionId, event })}\n\n`);
 }
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {

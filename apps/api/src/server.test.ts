@@ -50,6 +50,21 @@ describe("Phase 2 API", () => {
     expect(await shell.text()).toContain("Code Review Agent");
   });
 
+  it("exposes durable subagent catalog, task output, cancel, and scoped replay", async () => {
+    const created = await fetch(`${baseUrl}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: "D:/workspace", permissionPreset: "read-only" }) });
+    const session = await created.json() as { id: string };
+    const spawned = await fetch(`${baseUrl}/v1/sessions/${session.id}/subagents`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: "child fixture", mode: "one-shot", background: false, permissionPreset: "read-only", toolAllowlist: [], mcpAllowlist: [] }) });
+    expect(spawned.status).toBe(200);
+    const receipt = await spawned.json() as { taskId: string; childSessionId: string; report?: { summary: string } };
+    expect(receipt.report?.summary).toContain("Echo: child fixture");
+    const catalog = await (await fetch(`${baseUrl}/v1/sessions/${session.id}/subagents`)).json() as { agents: { task: { id: string; childSessionId?: string; status: string } }[] };
+    expect(catalog.agents.some((entry) => entry.task.id === receipt.taskId && entry.task.childSessionId === receipt.childSessionId)).toBe(true);
+    const output = await (await fetch(`${baseUrl}/v1/sessions/${session.id}/tasks/${receipt.taskId}/output`)).json() as { report?: { summary: string } };
+    expect(output.report?.summary).toContain("Echo: child fixture");
+    const scoped = await (await fetch(`${baseUrl}/v1/sessions/${session.id}/subagents/events?format=json`)).json() as { sessionId: string; event: { type: string } }[];
+    expect(scoped.some((entry) => entry.sessionId === receipt.childSessionId && entry.event.type === "subagent/descriptor")).toBe(true);
+  });
+
   it("validates a local workspace directory before creating a session", async () => {
     const root = mkdtempSync(join(tmpdir(), "code-review-agent-workspace-"));
     try {

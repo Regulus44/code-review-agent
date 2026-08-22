@@ -21,6 +21,12 @@ import {
   type SessionStatus,
   type SessionSummary,
   type PermissionPreset,
+  type ChildSessionMetadata,
+  type ArtifactRef,
+  type TaskReport,
+  type TaskBudget,
+  type ToolError,
+  type SubagentMode,
   type PlanStatus,
   type TaskProjection,
   type TaskStatus,
@@ -43,7 +49,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
-const SCHEMA_VERSION = 2 as const;
+const SCHEMA_VERSION = 3 as const;
 
 function isPermissionPreset(value: unknown): value is PermissionPreset {
   return value === "read-only" || value === "workspace-write" || value === "ask-on-write" || value === "ask-on-execute" || value === "danger-full-access";
@@ -61,7 +67,11 @@ function newSessionId(): SessionId {
   return brand<string, "SessionId">(`ses_${randomUUID()}`);
 }
 
-function baseProjection(id: SessionId, workspaceRoot: string, permissionPreset: PermissionPreset = "ask-on-write", timestamp = now()): SessionProjection {
+function isSubagentMode(value: unknown): value is SubagentMode {
+  return value === "one-shot" || value === "continuable";
+}
+
+function baseProjection(id: SessionId, workspaceRoot: string, permissionPreset: PermissionPreset = "ask-on-write", timestamp = now(), metadata?: ChildSessionMetadata): SessionProjection {
   return {
     id,
     workspaceRoot,
@@ -81,6 +91,13 @@ function baseProjection(id: SessionId, workspaceRoot: string, permissionPreset: 
     interactions: [],
     toolCalls: [],
     permissions: [],
+    ...(metadata === undefined ? {} : {
+      parentSessionId: metadata.parentSessionId,
+      ...(metadata.parentTaskId === undefined ? {} : { parentTaskId: metadata.parentTaskId }),
+      childMode: metadata.childMode,
+      childProvider: metadata.childProvider,
+      delegationDepth: metadata.delegationDepth,
+    }),
   };
 }
 
@@ -102,6 +119,49 @@ function taskStatus(value: unknown, fallback: TaskStatus): TaskStatus {
   return value === "queued" || value === "running" || value === "waiting" || value === "completed" || value === "failed" || value === "cancelled" || value === "blocked"
     ? value
     : fallback;
+}
+
+function isTerminalTaskStatus(value: TaskStatus | undefined): boolean {
+  return value === "completed" || value === "failed" || value === "cancelled" || value === "blocked";
+}
+
+function artifactRefs(value: unknown): readonly ArtifactRef[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): ArtifactRef[] => {
+    if (typeof item !== "object" || item === null) return [];
+    const record = item as Record<string, unknown>;
+    if (typeof record["id"] !== "string" || typeof record["kind"] !== "string" || typeof record["label"] !== "string") return [];
+    const kind = record["kind"];
+    if (kind !== "file" && kind !== "diff" && kind !== "log" && kind !== "url" && kind !== "json" && kind !== "other") return [];
+    return [{
+      id: record["id"], kind, label: record["label"],
+      ...(typeof record["path"] === "string" ? { path: record["path"] } : {}),
+      ...(typeof record["mediaType"] === "string" ? { mediaType: record["mediaType"] } : {}),
+      ...(typeof record["sizeBytes"] === "number" ? { sizeBytes: record["sizeBytes"] } : {}),
+      ...(typeof record["digest"] === "string" ? { digest: record["digest"] } : {}),
+      ...(typeof record["preview"] === "string" ? { preview: record["preview"] } : {}),
+    }];
+  });
+}
+
+function normalizeReport(value: unknown): TaskReport | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const report = value as Record<string, unknown>;
+  if (typeof report["taskId"] !== "string" || typeof report["childSessionId"] !== "string" || typeof report["summary"] !== "string") return undefined;
+  const status = report["status"];
+  if (status !== "completed" && status !== "failed" && status !== "cancelled" && status !== "rejected" && status !== "partial") return undefined;
+  const stopReason = report["stopReason"];
+  const diagnostics = Array.isArray(report["diagnostics"]) ? report["diagnostics"] as TaskReport["diagnostics"] : undefined;
+  return {
+    taskId: brand<string, "TaskId">(report["taskId"]),
+    childSessionId: brand<string, "SessionId">(report["childSessionId"]),
+    status,
+    ...(stopReason === "completed" || stopReason === "aborted" || stopReason === "error" || stopReason === "max-tokens" || stopReason === "refusal" ? { stopReason } : {}),
+    summary: report["summary"],
+    ...(Object.hasOwn(report, "output") ? { output: report["output"] } : {}),
+    artifacts: artifactRefs(report["artifacts"]),
+    ...(diagnostics === undefined ? {} : { diagnostics }),
+  };
 }
 
 function goalStatus(value: unknown, fallback: GoalStatus): GoalStatus {
@@ -161,6 +221,13 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
     if (typeof workspaceRoot === "string") next = { ...next, workspaceRoot };
     const permissionPreset = event.payload["permissionPreset"];
     if (isPermissionPreset(permissionPreset)) next = { ...next, permissionPreset };
+    const parentSessionId = event.payload["parentSessionId"];
+    if (typeof parentSessionId === "string") next = { ...next, parentSessionId: brand<string, "SessionId">(parentSessionId) };
+    const parentTaskId = event.payload["parentTaskId"];
+    if (typeof parentTaskId === "string") next = { ...next, parentTaskId: brand<string, "TaskId">(parentTaskId) };
+    if (isSubagentMode(event.payload["childMode"])) next = { ...next, childMode: event.payload["childMode"] };
+    if (typeof event.payload["childProvider"] === "string") next = { ...next, childProvider: event.payload["childProvider"] };
+    if (typeof event.payload["delegationDepth"] === "number") next = { ...next, delegationDepth: event.payload["delegationDepth"] };
     if (typeof event.payload["archived"] === "boolean") next = { ...next, archived: event.payload["archived"] };
     if (event.type === "session/deleted" || event.payload["deleted"] === true) next = { ...next, deleted: true };
   }
@@ -241,26 +308,50 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
     }
   }
 
-  if (event.type === "task/created" || event.type === "task/updated" || event.type === "task/ended") {
+  if (event.type === "task/created" || event.type === "task/updated" || event.type === "task/input-required" || event.type === "task/report" || event.type === "task/artifact" || event.type === "task/ended") {
     const rawTaskId = event.payload["taskId"];
     if (typeof rawTaskId === "string") {
       const id = brand<string, "TaskId">(rawTaskId);
       const current = next.tasks.find((task) => task.id === id);
+      const report = event.type === "task/report" ? normalizeReport(event.payload["report"] ?? event.payload) : undefined;
+      const currentStatus = current?.status;
+      const requestedStatus = event.type === "task/input-required"
+        ? "waiting"
+        : event.type === "task/report"
+          ? report?.status === "completed" ? "completed" : report?.status === "cancelled" ? "cancelled" : report?.status === "rejected" ? "failed" : report?.status === "partial" ? "waiting" : "failed"
+          : event.type === "task/ended"
+            ? taskStatus(event.payload["status"], "completed")
+            : event.type === "task/updated" ? taskStatus(event.payload["status"], currentStatus ?? "queued") : "queued";
+      const nextStatus = currentStatus !== undefined && isTerminalTaskStatus(currentStatus) && (event.type === "task/created" || event.type === "task/updated")
+        ? currentStatus
+        : requestedStatus;
       const task: TaskProjection = {
         ...(current ?? {
           id,
           status: "queued" as const,
           createdAt: event.createdAt,
           updatedAt: event.createdAt,
+          artifacts: [],
           lastSequence: event.sequence,
         }),
         updatedAt: event.createdAt,
         lastSequence: event.sequence,
-        ...(event.type === "task/created" ? { status: "queued" as const } : {}),
-        ...(event.type === "task/updated" ? { status: taskStatus(event.payload["status"], current?.status ?? "queued") } : {}),
-        ...(event.type === "task/ended" ? { status: taskStatus(event.payload["status"], "completed") } : {}),
+        status: nextStatus,
         ...(typeof event.payload["title"] === "string" ? { title: event.payload["title"] as string } : {}),
         ...(Object.prototype.hasOwnProperty.call(event.payload, "result") ? { result: event.payload["result"] } : {}),
+        ...(typeof event.payload["parentSessionId"] === "string" ? { parentSessionId: brand<string, "SessionId">(event.payload["parentSessionId"]) } : {}),
+        ...(typeof event.payload["parentTaskId"] === "string" ? { parentTaskId: brand<string, "TaskId">(event.payload["parentTaskId"]) } : {}),
+        ...(typeof event.payload["childSessionId"] === "string" ? { childSessionId: brand<string, "SessionId">(event.payload["childSessionId"]) } : {}),
+        ...(isSubagentMode(event.payload["mode"]) ? { mode: event.payload["mode"] } : {}),
+        ...(typeof event.payload["provider"] === "string" ? { provider: event.payload["provider"] } : {}),
+        ...(typeof event.payload["workspaceRoot"] === "string" ? { workspaceRoot: event.payload["workspaceRoot"] } : {}),
+        ...(isPermissionPreset(event.payload["permissionPreset"]) ? { permissionPreset: event.payload["permissionPreset"] } : {}),
+        ...(typeof event.payload["delegationDepth"] === "number" ? { delegationDepth: event.payload["delegationDepth"] } : {}),
+        ...(typeof event.payload["budget"] === "object" && event.payload["budget"] !== null ? { budget: event.payload["budget"] as TaskBudget } : {}),
+        ...(report === undefined ? {} : { report, result: report.output }),
+        ...(typeof event.payload["terminalReason"] === "string" ? { terminalReason: event.payload["terminalReason"] } : {}),
+        ...(Array.isArray(event.payload["diagnostics"]) ? { diagnostics: event.payload["diagnostics"] as readonly ToolError[] } : {}),
+        ...(event.type === "task/artifact" ? { artifacts: [...(current?.artifacts ?? []), ...artifactRefs([event.payload["artifact"] ?? event.payload])] } : {}),
       };
       next = {
         ...next,
@@ -470,16 +561,65 @@ interface MemorySession {
   commands: Map<string, CommandRecord>;
 }
 
+interface CreateSessionArgs {
+  readonly id: SessionId;
+  readonly metadata?: ChildSessionMetadata;
+}
+
+function resolveCreateSessionArgs(idOrMetadata?: SessionId | ChildSessionMetadata, metadata?: ChildSessionMetadata): CreateSessionArgs {
+  if (typeof idOrMetadata === "string") return { id: idOrMetadata as SessionId, ...(metadata === undefined ? {} : { metadata }) };
+  return { id: newSessionId(), ...(idOrMetadata === undefined ? {} : { metadata: idOrMetadata }) };
+}
+
+function metadataPayload(metadata: ChildSessionMetadata): Record<string, unknown> {
+  return {
+    parentSessionId: metadata.parentSessionId,
+    ...(metadata.parentTaskId === undefined ? {} : { parentTaskId: metadata.parentTaskId }),
+    childMode: metadata.childMode,
+    childProvider: metadata.childProvider,
+    delegationDepth: metadata.delegationDepth,
+    ...(metadata.descriptor === undefined ? {} : { descriptor: metadata.descriptor }),
+  };
+}
+
+function readChildMetadata(row: SqliteRow): ChildSessionMetadata | undefined {
+  const parentSessionId = row["parent_session_id"];
+  const childMode = row["child_mode"];
+  const childProvider = row["child_provider"];
+  const delegationDepth = row["delegation_depth"];
+  if (typeof parentSessionId !== "string" || !isSubagentMode(childMode) || typeof childProvider !== "string" || typeof delegationDepth !== "number") return undefined;
+  const rawParentTaskId = row["parent_task_id"];
+  const rawDescriptor = row["descriptor_json"];
+  let descriptor: ChildSessionMetadata["descriptor"];
+  if (typeof rawDescriptor === "string") {
+    try { descriptor = JSON.parse(rawDescriptor) as ChildSessionMetadata["descriptor"]; } catch { descriptor = undefined; }
+  }
+  return {
+    parentSessionId: brand<string, "SessionId">(parentSessionId),
+    ...(typeof rawParentTaskId === "string" ? { parentTaskId: brand<string, "TaskId">(rawParentTaskId) } : {}),
+    childMode,
+    childProvider,
+    delegationDepth,
+    ...(descriptor === undefined ? {} : { descriptor }),
+  };
+}
+
 /** Deterministic in-memory store retained for unit tests and local fixtures. */
 export class InMemoryEventStore implements SessionEventStore {
   private readonly sessions = new Map<SessionId, MemorySession>();
 
-  async createSession(workspaceRoot: string, permissionPreset: PermissionPreset = "ask-on-write", id = newSessionId()): Promise<SessionId> {
+  async createSession(workspaceRoot: string, permissionPreset: PermissionPreset = "ask-on-write", idOrMetadata?: SessionId | ChildSessionMetadata, metadata?: ChildSessionMetadata): Promise<SessionId> {
+    const args = resolveCreateSessionArgs(idOrMetadata, metadata);
+    const id = args.id;
     if (this.sessions.has(id)) throw new Error(`Session already exists: ${id}`);
-    const projection = baseProjection(id, workspaceRoot, permissionPreset);
+    const projection = baseProjection(id, workspaceRoot, permissionPreset, now(), args.metadata);
     this.sessions.set(id, { events: [], listeners: new Set(), projection, commands: new Map() });
-    await this.append({ sessionId: id, type: "session/created", payload: { workspaceRoot, permissionPreset } });
+    await this.append({ sessionId: id, type: "session/created", payload: { workspaceRoot, permissionPreset, ...(args.metadata === undefined ? {} : metadataPayload(args.metadata)) } });
     return id;
+  }
+
+  async createChildSession(input: { readonly id?: SessionId; readonly workspaceRoot: string; readonly permissionPreset: PermissionPreset; readonly metadata: ChildSessionMetadata }): Promise<SessionId> {
+    return this.createSession(input.workspaceRoot, input.permissionPreset, input.id ?? input.metadata, input.id === undefined ? undefined : input.metadata);
   }
 
   async append(input: AppendEventInput): Promise<AgentEvent> {
@@ -510,6 +650,17 @@ export class InMemoryEventStore implements SessionEventStore {
     return [...this.sessions.values()]
       .map((session) => toSummary(session.projection))
       .filter((session) => !session.deleted && (includeArchived || !session.archived));
+  }
+
+  async listTasks(sessionId?: SessionId): Promise<readonly TaskProjection[]> {
+    const sessions = sessionId === undefined ? [...this.sessions.values()] : [this.sessions.get(sessionId)].filter((value): value is MemorySession => value !== undefined);
+    return sessions.flatMap((session) => session.projection.tasks);
+  }
+
+  async listChildSessions(parentSessionId: SessionId): Promise<readonly SessionSummary[]> {
+    return [...this.sessions.values()]
+      .map((session) => toSummary(session.projection))
+      .filter((summary) => summary.parentSessionId === parentSessionId && !summary.deleted);
   }
 
   async project(sessionId: SessionId): Promise<SessionProjection | undefined> {
@@ -592,14 +743,21 @@ export class SqliteEventStore implements SessionEventStore, McpConfigBackend {
     this.db.close();
   }
 
-  async createSession(workspaceRoot: string, permissionPreset: PermissionPreset = "ask-on-write", id = newSessionId()): Promise<SessionId> {
-    const projection = baseProjection(id, workspaceRoot, permissionPreset);
+  async createSession(workspaceRoot: string, permissionPreset: PermissionPreset = "ask-on-write", idOrMetadata?: SessionId | ChildSessionMetadata, metadata?: ChildSessionMetadata): Promise<SessionId> {
+    const args = resolveCreateSessionArgs(idOrMetadata, metadata);
+    const id = args.id;
+    const projection = baseProjection(id, workspaceRoot, permissionPreset, now(), args.metadata);
     this.withTransaction(() => {
-      this.db.prepare("INSERT INTO sessions (id, workspace_root, created_at, updated_at, status, last_sequence) VALUES (?, ?, ?, ?, ?, ?)").run(id, workspaceRoot, projection.createdAt, projection.updatedAt, projection.status, 0);
+      const child = args.metadata;
+      this.db.prepare("INSERT INTO sessions (id, workspace_root, parent_session_id, parent_task_id, child_mode, child_provider, delegation_depth, descriptor_json, created_at, updated_at, status, last_sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, workspaceRoot, child?.parentSessionId ?? null, child?.parentTaskId ?? null, child?.childMode ?? null, child?.childProvider ?? null, child?.delegationDepth ?? null, child?.descriptor === undefined ? null : JSON.stringify(child.descriptor), projection.createdAt, projection.updatedAt, projection.status, 0);
       this.db.prepare("INSERT INTO projections (session_id, schema_version, projection_json) VALUES (?, ?, ?)").run(id, SCHEMA_VERSION, JSON.stringify(projection));
-      this.appendSync({ sessionId: id, type: "session/created", payload: { workspaceRoot, permissionPreset } });
+      this.appendSync({ sessionId: id, type: "session/created", payload: { workspaceRoot, permissionPreset, ...(child === undefined ? {} : metadataPayload(child)) } });
     });
     return id;
+  }
+
+  async createChildSession(input: { readonly id?: SessionId; readonly workspaceRoot: string; readonly permissionPreset: PermissionPreset; readonly metadata: ChildSessionMetadata }): Promise<SessionId> {
+    return this.createSession(input.workspaceRoot, input.permissionPreset, input.id ?? input.metadata, input.id === undefined ? undefined : input.metadata);
   }
 
   async append(input: AppendEventInput): Promise<AgentEvent> {
@@ -616,6 +774,21 @@ export class SqliteEventStore implements SessionEventStore, McpConfigBackend {
   async listSessions(includeArchived = false): Promise<readonly SessionSummary[]> {
     const rows = this.db.prepare("SELECT s.id, s.workspace_root, s.created_at, s.updated_at, s.status, s.last_sequence, p.projection_json FROM sessions s JOIN projections p ON p.session_id = s.id ORDER BY s.updated_at DESC").all() as SqliteRow[];
     return rows.map(readSummary).filter((session) => !session.deleted && (includeArchived || !session.archived));
+  }
+
+  async listTasks(sessionId?: SessionId): Promise<readonly TaskProjection[]> {
+    const rows = sessionId === undefined
+      ? this.db.prepare("SELECT projection_json FROM projections ORDER BY session_id ASC").all()
+      : this.db.prepare("SELECT projection_json FROM projections WHERE session_id = ?").all(sessionId);
+    return (rows as SqliteRow[]).flatMap((row) => {
+      const projection = JSON.parse(String(row["projection_json"])) as SessionProjection;
+      return projection.tasks ?? [];
+    });
+  }
+
+  async listChildSessions(parentSessionId: SessionId): Promise<readonly SessionSummary[]> {
+    const rows = this.db.prepare("SELECT s.id, s.workspace_root, s.created_at, s.updated_at, s.status, s.last_sequence, p.projection_json FROM sessions s JOIN projections p ON p.session_id = s.id WHERE s.parent_session_id = ? ORDER BY s.created_at ASC").all(parentSessionId) as SqliteRow[];
+    return rows.map(readSummary).filter((session) => !session.deleted);
   }
 
   async project(sessionId: SessionId): Promise<SessionProjection | undefined> {
@@ -817,6 +990,18 @@ export class SqliteEventStore implements SessionEventStore, McpConfigBackend {
         `);
         this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(2, now());
       }
+      if (currentVersion < 3) {
+        this.db.exec(`
+          ALTER TABLE sessions ADD COLUMN parent_session_id TEXT;
+          ALTER TABLE sessions ADD COLUMN parent_task_id TEXT;
+          ALTER TABLE sessions ADD COLUMN child_mode TEXT;
+          ALTER TABLE sessions ADD COLUMN child_provider TEXT;
+          ALTER TABLE sessions ADD COLUMN delegation_depth INTEGER;
+          ALTER TABLE sessions ADD COLUMN descriptor_json TEXT;
+          CREATE INDEX IF NOT EXISTS sessions_parent_idx ON sessions(parent_session_id, created_at);
+        `);
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(3, now());
+      }
       this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     });
   }
@@ -836,11 +1021,12 @@ export class SqliteEventStore implements SessionEventStore, McpConfigBackend {
   }
 
   private rebuildProjections(): void {
-    const rows = this.db.prepare("SELECT id, workspace_root, created_at FROM sessions ORDER BY created_at ASC").all() as SqliteRow[];
+    const rows = this.db.prepare("SELECT id, workspace_root, parent_session_id, parent_task_id, child_mode, child_provider, delegation_depth, descriptor_json, created_at FROM sessions ORDER BY created_at ASC").all() as SqliteRow[];
     this.withTransaction(() => {
       for (const row of rows) {
         const id = brand<string, "SessionId">(String(row["id"]));
-        const initial = baseProjection(id, String(row["workspace_root"]), "ask-on-write", String(row["created_at"]));
+        const metadata = readChildMetadata(row);
+        const initial = baseProjection(id, String(row["workspace_root"]), "ask-on-write", String(row["created_at"]), metadata);
         const events = (this.db.prepare("SELECT event_id, sequence, session_id, turn_id, correlation_id, type, created_at, payload_json, schema_version FROM events WHERE session_id = ? ORDER BY sequence ASC").all(id) as SqliteRow[]).map(readEvent);
         const projection = replayProjection(initial, events);
         this.db.prepare("INSERT INTO projections (session_id, schema_version, projection_json) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET schema_version = excluded.schema_version, projection_json = excluded.projection_json").run(id, SCHEMA_VERSION, JSON.stringify(projection));
@@ -856,7 +1042,13 @@ function toSummary(projection: SessionProjection): SessionSummary {
   const title = firstUserMessage === undefined || firstUserMessage.length === 0
     ? undefined
     : firstUserMessage.length > 58 ? `${firstUserMessage.slice(0, 55)}…` : firstUserMessage;
-  return { id, ...(title === undefined ? {} : { title }), workspaceRoot, permissionPreset, archived: archived ?? false, deleted: deleted ?? false, createdAt, updatedAt, status, lastSequence };
+  return { id, ...(title === undefined ? {} : { title }), workspaceRoot, permissionPreset, archived: archived ?? false, deleted: deleted ?? false, createdAt, updatedAt, status, lastSequence,
+    ...(projection.parentSessionId === undefined ? {} : { parentSessionId: projection.parentSessionId }),
+    ...(projection.parentTaskId === undefined ? {} : { parentTaskId: projection.parentTaskId }),
+    ...(projection.childMode === undefined ? {} : { childMode: projection.childMode }),
+    ...(projection.childProvider === undefined ? {} : { childProvider: projection.childProvider }),
+    ...(projection.delegationDepth === undefined ? {} : { delegationDepth: projection.delegationDepth }),
+  };
 }
 
 function readSummary(row: SqliteRow): SessionSummary {
@@ -876,6 +1068,11 @@ function readSummary(row: SqliteRow): SessionSummary {
     updatedAt: String(row["updated_at"]),
     status: String(row["status"]) as SessionStatus,
     lastSequence: Number(row["last_sequence"]),
+    ...(projection?.parentSessionId === undefined ? {} : { parentSessionId: projection.parentSessionId }),
+    ...(projection?.parentTaskId === undefined ? {} : { parentTaskId: projection.parentTaskId }),
+    ...(projection?.childMode === undefined ? {} : { childMode: projection.childMode }),
+    ...(projection?.childProvider === undefined ? {} : { childProvider: projection.childProvider }),
+    ...(projection?.delegationDepth === undefined ? {} : { delegationDepth: projection.delegationDepth }),
   };
 }
 

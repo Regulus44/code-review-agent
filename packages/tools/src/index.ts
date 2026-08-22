@@ -9,4 +9,5 @@ export * from "./capabilities.js";
 export * from "./patch.js";
 export * from "./registry.js";
 export * from "./runtime.js";
+export * from "./subagent.js";
 export * from "./schema.js";
