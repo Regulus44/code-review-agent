@@ -176,6 +176,10 @@
       .message.user .message-body { padding: 11px 14px; border-radius: 4px 16px 16px 16px; background: var(--surface); box-shadow: 0 1px 2px rgba(31,35,41,.03); }
       .event-row { display: flex; align-items: center; gap: 8px; margin: 13px 0 13px 40px; color: var(--text-tertiary); font-size: 11px; }
       .event-row::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--border-strong); }
+      .turn-state { color: var(--text-secondary); font-weight: 600; }
+      .turn-state.running::before { background: var(--blue); box-shadow: 0 0 0 3px rgba(65,118,230,.12); }
+      .turn-state.completed::before { background: var(--green); }
+      .turn-state.failed::before { background: var(--red); }
       .tool-row { margin: 10px 0 14px 40px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: rgba(255,255,255,.72); }
       .tool-summary { display: flex; align-items: center; gap: 9px; width: 100%; padding: 10px 12px; background: transparent; text-align: left; }
       .tool-summary:hover { background: var(--surface-hover); }
@@ -390,6 +394,7 @@
         const addEvent = (event, shouldRender = true) => { if (!event || state.events.has(event.sequence)) return; state.events.set(event.sequence, event); if (shouldRender) render(); };
         const orderedEvents = () => [...state.events.values()].sort((a, b) => a.sequence - b.sequence);
         const addEventRow = (parent, text) => { const row = document.createElement('div'); row.className = 'event-row'; row.textContent = text; parent.append(row); };
+        const addTurnStateRow = (parent, text, stateName) => { const row = document.createElement('div'); row.className = `event-row turn-state ${stateName || ''}`; row.textContent = text; parent.append(row); };
         const renderInlineMarkdown = (value) => esc(String(value ?? ''))
           .replace(/`([^`\n]+)`/g, '<code>$1</code>')
           .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
@@ -436,8 +441,10 @@
             const upsertTool = (id, name, text, statusText) => { const key = id || `${name}-${toolRows.size}`; let card = toolRows.get(key); if (!card) { card = appendTool(body, name || 'tool', text, statusText); toolRows.set(key, card); } else { card.toolStatus.textContent = statusText; card.pre.textContent = text; } return card; };
             for (const event of ordered) {
               if (event.type === 'user/message') appendMessage(body, 'user', event.payload?.content || '');
-              else if (event.type === 'assistant/chunk') { const key = event.turnId || 'assistant'; if (!assistant.has(key)) assistant.set(key, appendMessage(body, 'assistant', '')); const messageBody = assistant.get(key); setMessageContent(messageBody, `${messageBody.dataset.rawContent || ''}${event.payload?.text || ''}`); }
-              else if (event.type === 'assistant/message') { const key = event.turnId || 'assistant'; if (!assistant.has(key)) assistant.set(key, appendMessage(body, 'assistant', event.payload?.content || '')); else setMessageContent(assistant.get(key), event.payload?.content || ''); }
+              else if (event.type === 'turn/started') addTurnStateRow(body, 'Agent is working…', 'running');
+              else if (event.type === 'turn/ended') { const turnStatus = event.payload?.status || 'completed'; addTurnStateRow(body, turnStatus === 'completed' ? 'Turn completed' : `Turn ${turnStatus}`, turnStatus === 'completed' ? 'completed' : 'failed'); }
+              else if (event.type === 'assistant/chunk') { const key = event.turnId || 'assistant'; let messageBody = assistant.get(key); if (!messageBody) { messageBody = appendMessage(body, 'assistant', ''); assistant.set(key, messageBody); } setMessageContent(messageBody, `${messageBody.dataset.rawContent || ''}${event.payload?.text || ''}`); }
+              else if (event.type === 'assistant/message') { const key = event.turnId || 'assistant'; const content = event.payload?.content || ''; const current = assistant.get(key); if (!content) { if (!assistant.has(key)) assistant.set(key, null); } else if (current && current.dataset.rawContent === content) setMessageContent(current, content); else if (current && current.dataset.rawContent && content.startsWith(current.dataset.rawContent)) setMessageContent(current, content); else { const next = appendMessage(body, 'assistant', content); assistant.set(key, next); } }
               else if (event.type === 'tool/call') { const payload = event.payload || {}; upsertTool(payload.toolCallId, payload.name || 'tool', `${payload.caller || 'agent'} · ${payload.workspaceRoot || ''}\n${JSON.stringify(payload.input || {}, null, 2)}`, 'Running'); }
               else if (event.type === 'tool/progress') { const payload = event.payload || {}; const key = payload.toolCallId || 'tool'; const card = toolRows.get(key) || upsertTool(key, 'tool', '', 'Running'); card.toolStatus.textContent = payload.phase || payload.status || 'Running'; if (payload.text) card.pre.textContent = `${card.pre.textContent}${card.pre.textContent ? '\n\n' : ''}Progress: ${payload.text}`; }
               else if (event.type === 'tool/result') { const payload = event.payload || {}; const result = payload.result || {}; upsertTool(payload.toolCallId, payload.name || payload.toolCallId || 'tool', JSON.stringify({ ...result, output: result.modelView ?? result.output, audit: undefined, modelView: undefined }, null, 2), payload.status || 'Completed'); }

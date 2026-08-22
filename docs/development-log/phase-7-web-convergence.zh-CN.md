@@ -201,5 +201,28 @@ Browser DOM smoke ✓（标题、strong、inline code、列表节点）
 HTML injection check ✓（助手消息中没有 script/iframe 节点）
 pnpm typecheck   ✓
 pnpm test        ✓
+
+## 2026-08-22：Turn 工具时间线渲染
+
+### 问题定位
+
+- Runtime 事件序列本身已经按 `assistant/message` 阶段标记、`tool/call`、`tool/progress`、`tool/result`、`assistant/chunk` 和 `turn/ended` 写入。
+- Web 渲染器以前按 `turnId` 把所有 Assistant 内容合并为单个 DOM 节点。后续模型输出被更新到第一个位置，工具卡片因此落在回复末端。
+
+### 变更范围
+
+- Assistant 消息改为按消息边界创建片段；空的工具阶段消息只作为阶段标记，不生成空白气泡。
+- `tool/call` 在时间线当前位置创建工具卡片，后续 progress/result 更新同一张卡片，保留执行过程和最终状态。
+- 增加 `Agent is working…` 和 `Turn completed` 状态行；失败、中断等终态会显示对应状态，用户可以判断当前回复是否完整。
+- 历史回放和 SSE 增量事件使用同一套 Turn timeline reducer，避免刷新前后顺序不同。
+
+### 验证
+
+```text
+Web script parse ✓
+Browser timeline smoke ✓（user → running → tools → assistant → completed）
+pnpm typecheck   ✓
+pnpm test        ✓
+```
 ```
 ```
