@@ -17,6 +17,18 @@
 | Phase 7：DSH Web 前端收敛 | in_progress | DSH 三栏 Web 垂直切片 + Workspace Picker + Workspace→Session 树 + Session mode/archive/delete；类型检查、API 测试、浏览器交互和真实 DeepSeek 只读工具 smoke 通过 |
 | Phase 8：高级能力与产品化 | pending | 等前置阶段完成 |
 
+## 下一执行计划：MCP 与 A2A 演进
+
+Phase 3B 已完成，下一条执行路线采用 [MCP 与 A2A 演进执行计划](phase-plans/mcp-a2a-execution-plan.zh-CN.md)：
+
+```text
+Phase 4B MCP 加固
+  → Phase 5 内部 Task/Subagent
+  → Phase 6 A2A inbound adapter
+```
+
+计划明确了 DSH R0/R1/R2 参考等级。下一步先完成 MCP contract audit、持久化 scope/credential 设计、连接 generation fixture 和 ADR；A2A HTTP endpoint 等内部 Task/Subagent contract 稳定后再实现。
+
 ## Phase 7 Web Coding 工作模式修复（2026-08-22）
 
 Web 工作台现在支持 Session 级工作模式：新建 Session 可以选择 `read-only`、`ask-on-write`、`workspace-write`、`ask-on-execute` 和 `danger-full-access`，已有 Session 可以从 composer 的 Mode 菜单切换。权限模式已经进入 Session 事件与 projection，ToolRuntime 会按 Session 选择可见工具和执行策略。默认 `ask-on-write` 允许读操作自动执行，写入和命令执行需要确认。

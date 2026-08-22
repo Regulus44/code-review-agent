@@ -4,6 +4,12 @@
 
 `completed`
 
+## 2026-08-23：后续 MCP/A2A 执行计划建立
+
+Phase 4 原有 MCP Client 退出门禁保持完成。复核当前实现与 DSH 后，下一步拆为 Phase 4B MCP 加固、Phase 5 内部 Task/Subagent 和 Phase 6 A2A inbound adapter。详细计划见 [MCP 与 A2A 演进执行计划](../phase-plans/mcp-a2a-execution-plan.zh-CN.md)。
+
+本计划额外标注了 DSH R0/R1/R2 关注等级。R0 工作项必须逐文件对照 DSH 的 connection supervisor、tool generation swap、Subagent lifecycle、authority、ACP codec 和 Host event mux，并为每项差异补充行为 fixture；A2A 外部 envelope 以官方协议为准，DSH 只提供内部生命周期参考。
+
 本日志只记录 Phase 4 的实际实现与验证，不替代根目录 `AGENTS.md` 的长期治理规则。
 
 ## 阶段目标
