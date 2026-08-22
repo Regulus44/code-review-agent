@@ -5,6 +5,7 @@ import type { PermissionPreset } from "@code-review-agent/tools";
 export interface AgentPromptContext {
   readonly workspaceRoot: string;
   readonly tools: readonly AgentPromptTool[];
+  readonly toolGuidance?: string;
   readonly permissionPreset?: PermissionPreset;
   readonly customInstructions?: string;
   readonly recovery?: boolean;
@@ -25,6 +26,7 @@ export function buildAgentSystemPrompt(context: AgentPromptContext): string {
     identitySection(),
     taskExecutionSection(),
     toolUseSection(context.tools),
+    toolGuidanceSection(context.toolGuidance),
     workspaceSection(context.workspaceRoot),
     permissionSection(context.permissionPreset),
     safetySection(),
@@ -34,6 +36,11 @@ export function buildAgentSystemPrompt(context: AgentPromptContext): string {
     customInstructionsSection(context.customInstructions),
   ];
   return sections.filter((section): section is string => section !== undefined).join("\n\n");
+}
+
+function toolGuidanceSection(guidance: string | undefined): string | undefined {
+  const trimmed = guidance?.trim();
+  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
 }
 
 function identitySection(): string {

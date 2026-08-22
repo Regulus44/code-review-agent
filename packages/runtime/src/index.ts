@@ -21,7 +21,7 @@ import {
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { randomUUID } from "node:crypto";
-import { createBuiltinTools, DefaultPermissionPolicy, TerminalManager, ToolRegistry, ToolRuntime, type ExecuteToolOutput, type PermissionPreset } from "@code-review-agent/tools";
+import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, DefaultPermissionPolicy, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type ExecuteToolOutput, type PermissionPreset } from "@code-review-agent/tools";
 import { buildAgentSystemPrompt } from "./system-prompt.js";
 
 export interface AgentHostOptions {
@@ -32,6 +32,7 @@ export interface AgentHostOptions {
   readonly toolRuntime?: ToolRuntime;
   readonly toolRegistry?: ToolRegistry;
   readonly permissionPreset?: PermissionPreset;
+  readonly toolPromptRegistry?: ToolPromptRegistry;
 }
 
 interface PendingTurn {
@@ -72,6 +73,7 @@ export class AgentHost {
   private readonly ready: Promise<void>;
   private readonly toolRuntime: ToolRuntime;
   private readonly terminalManager?: TerminalManager;
+  private readonly toolPromptRegistry: ToolPromptRegistry;
 
   constructor(private readonly options: AgentHostOptions) {
     this.model = options.model ?? new EchoChatModel();
@@ -79,6 +81,8 @@ export class AgentHost {
     this.maxSteps = options.maxSteps ?? 12;
     if (!Number.isInteger(this.maxSteps) || this.maxSteps < 1 || this.maxSteps > 100) throw new Error("maxSteps must be an integer between 1 and 100");
     const registry = options.toolRegistry ?? new ToolRegistry();
+    this.toolPromptRegistry = options.toolPromptRegistry ?? new ToolPromptRegistry();
+    if (options.toolPromptRegistry === undefined) this.toolPromptRegistry.registerMany(BUILTIN_TOOL_PROMPT_SPECS);
     if (options.toolRuntime === undefined) {
       this.terminalManager = new TerminalManager();
       registry.registerMany(createBuiltinTools({ terminalManager: this.terminalManager }));
@@ -500,6 +504,7 @@ export class AgentHost {
     return buildAgentSystemPrompt({
       workspaceRoot,
       tools: this.toolRuntime.listTools(sessionId),
+      toolGuidance: this.toolPromptRegistry.assemble(this.toolRuntime.listTools(sessionId)),
       permissionPreset: projection?.permissionPreset ?? this.permissionPreset ?? "ask-on-write",
       ...(this.customSystemPrompt === undefined ? {} : { customInstructions: this.customSystemPrompt }),
       ...(recovery ? { recovery: true } : {}),

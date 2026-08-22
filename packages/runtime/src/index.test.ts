@@ -24,6 +24,8 @@ describe("AgentHost", () => {
     expect(system).toContain("Do not ask the user to run shell commands");
     expect(system).toContain("Visible tools for this turn");
     expect(system).toContain("read_file");
+    expect(system).toContain("# Tool guidance");
+    expect(system).toContain("Purpose:");
     expect(system).toContain("Active permission preset: ask-on-write");
     expect(system).toContain("Before editing, read the current file");
   });
@@ -54,6 +56,7 @@ describe("AgentHost", () => {
     const system = requests[0]?.messages.find((message) => message.role === "system")?.content ?? "";
     expect(system).toContain("visible_read");
     expect(system).not.toContain("hidden_write");
+    expect(system).not.toContain("## hidden_write");
     expect(system).toContain("Prefer the repository's existing naming conventions.");
     expect(system).toContain("Active permission preset: read-only");
   });

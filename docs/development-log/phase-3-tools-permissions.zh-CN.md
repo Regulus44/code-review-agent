@@ -14,6 +14,27 @@ Phase 3 的基础 ToolRuntime、权限和审计 checkpoint 已完成。对当前
 
 状态：`completed`
 
+## 2026-08-22：Phase 3B.0 ToolPromptRegistry checkpoint
+
+### 变更范围
+
+- 新增独立 `ToolPromptRegistry` 和 `ToolPromptSpec`，固定 Purpose、When to use、When not to use、Prerequisites、Input rules、Sequencing、Result interpretation、Failure recovery、Safety 九段；
+- assembly 只接收当前 permission-filtered 可见工具，按 prompt order/name 做平台无关的确定性排序，并执行上下文长度预算；
+- 为当前内置 TypeScript 工具池建立本地 prompt catalog；未知 MCP 工具只使用短 fallback，不把远程 description 提升为系统规则；
+- AgentHost 将工具 guidance 注入现有分层 system prompt，未改变 ToolRuntime 的执行、权限、workspace 或事件语义；
+- 登记 DSH system-prompt/tools 的行为参考和 Claude Code 的工具 prompt/Todo 行为参考。
+
+### 验证
+
+- `pnpm typecheck` 通过；
+- `pnpm --filter @code-review-agent/tools test`：27 项通过；
+- `pnpm --filter @code-review-agent/runtime test`：12 项通过；
+- `git diff --check` 通过。
+
+### 下一步
+
+进入 3B.1：补齐 P0 工具的 schema/prompt/result/presentation 对齐合同，随后强化 read/search/Git 组合和编辑 stale/conflict/diff 语义。
+
 阶段计划：[phase-3-tools-permissions.zh-CN.md](../phase-plans/phase-3-tools-permissions.zh-CN.md)
 
 ## 2026-08-21：阶段启动

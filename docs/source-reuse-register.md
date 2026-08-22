@@ -126,3 +126,37 @@ ID:
 本项目路径：未来的 `packages/tools`、`packages/context`、`packages/agents`。
 
 范围：Read/Edit/Write/Glob/Grep/Bash/Task 的用户体验，上下文压缩、父子任务和报告模型。
+
+### DSH-006
+
+来源仓库：`D:/Develop/deepseek-harness-fork`
+
+来源路径：`packages/core/system-prompt/src/index.ts`、`packages/core/system-prompt/tests/tool-order.spec.ts`、`packages/core/tools/src/types.ts`、`packages/core/tools/src/presentation.ts`
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：`D:/Develop/deepseek-harness-fork/LICENSE` 为 MIT；本次未复制 DSH 运行时代码。
+
+本项目路径：`packages/tools/src/prompt.ts`、`packages/tools/src/prompt-catalog.ts`、`packages/runtime/src/system-prompt.ts`
+
+范围：有序 prompt section、确定性工具排序、可见工具过滤、上下文长度预算、schema/presentation 与跨调用工具指导分层。
+
+适配方式：使用本项目的 `ToolPromptRegistry`、`ToolDefinition`、permission-filtered tool list 和 system prompt builder；不引入 Cordis、DSH scope 或远程 description 作为高优先级指令。
+
+新增测试：`packages/tools/src/prompt.test.ts` 和 `packages/runtime/src/index.test.ts` 覆盖唯一注册、确定性 assembly、fallback、预算和权限过滤。
+
+### CC-003
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`packages/builtin-tools/src/tools/*/prompt.ts`、`src/constants/prompts.ts`、`packages/builtin-tools/src/tools/TaskUpdateTool`
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；本次只参考每个工具独立 prompt、前置条件、失败恢复和 Todo/Task 状态边界。
+
+本项目路径：`packages/tools/src/prompt-catalog.ts`
+
+范围：Purpose、When to use、When not to use、Prerequisites、Input rules、Sequencing、Result interpretation、Failure recovery、Safety 九段工具指导。
+
+适配方式：所有文案和实现均为本项目自有内容；不复制 Claude Code 代码、账户、遥测或商业服务。
