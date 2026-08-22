@@ -166,6 +166,7 @@
       .message-body.markdown h3 { font-size: 1.12em; }
       .message-body.markdown p { margin: 9px 0; }
       .message-body.markdown ul, .message-body.markdown ol { margin: 8px 0; padding-left: 24px; }
+      .message-body.markdown ol { list-style-type: decimal; list-style-position: outside; }
       .message-body.markdown li { margin: 4px 0; padding-left: 2px; }
       .message-body.markdown blockquote { margin: 10px 0; padding: 2px 0 2px 13px; border-left: 3px solid rgba(65,118,230,.35); color: var(--text-secondary); }
       .message-body.markdown code { padding: 2px 5px; border-radius: 5px; color: #315da9; background: var(--blue-soft); font: .88em ui-monospace, SFMono-Regular, Consolas, monospace; }
@@ -426,18 +427,22 @@
           const body = bodyLines.length ? `<tbody>${bodyLines.map((line) => { const cells = parseTableCells(line); return `<tr>${headers.map((_, index) => renderCell(cells[index] || '', 'td', index)).join('')}</tr>`; }).join('')}</tbody>` : '';
           return `<div class="markdown-table-scroll"><table>${head}${body}</table></div>`;
         };
-        const renderMarkdown = (source) => {
-          const lines = String(source ?? '').replace(/\r\n?/g, '\n').split('\n');
-          const output = []; let paragraph = []; let listType = null; let listItems = []; let inFence = false; let fenceLanguage = ''; let fenceLines = [];
-          const flushParagraph = () => { if (!paragraph.length) return; output.push(`<p>${renderInlineMarkdown(paragraph.join('\n')).replace(/\n/g, '<br>')}</p>`); paragraph = []; };
-          const flushList = () => { if (!listItems.length || listType === null) return; output.push(`<${listType}>${listItems.map((item) => { const entry = typeof item === 'string' ? { text: item, nested: [], nestedType: null } : item; const nested = entry.nested.length ? `<${entry.nestedType || 'ul'}>${entry.nested.map((nestedItem) => `<li>${renderInlineMarkdown(nestedItem)}</li>`).join('')}</${entry.nestedType || 'ul'}>` : ''; return `<li>${renderInlineMarkdown(entry.text)}${nested}</li>`; }).join('')}</${listType}>`); listItems = []; listType = null; };
+          const orderedMarker = (line) => {
+            const match = String(line ?? '').match(/^\s*(\d+)[.)]\s+(.+)$/);
+            return match ? { start: Number(match[1]), text: match[2] } : null;
+          };
+          const renderMarkdown = (source) => {
+            const lines = String(source ?? '').replace(/\r\n?/g, '\n').split('\n');
+            const output = []; let paragraph = []; let listType = null; let listStart = 1; let listItems = []; let inFence = false; let fenceLanguage = ''; let fenceLines = [];
+            const flushParagraph = () => { if (!paragraph.length) return; output.push(`<p>${renderInlineMarkdown(paragraph.join('\n')).replace(/\n/g, '<br>')}</p>`); paragraph = []; };
+            const flushList = () => { if (!listItems.length || listType === null) return; const start = listType === 'ol' && listStart !== 1 ? ` start="${listStart}"` : ''; output.push(`<${listType}${start}>${listItems.map((item) => { const entry = typeof item === 'string' ? { text: item, nested: [], nestedType: null } : item; const nested = entry.nested.length ? `<${entry.nestedType || 'ul'}>${entry.nested.map((nestedItem) => `<li>${renderInlineMarkdown(nestedItem)}</li>`).join('')}</${entry.nestedType || 'ul'}>` : ''; return `<li>${renderInlineMarkdown(entry.text)}${nested}</li>`; }).join('')}</${listType}>`); listItems = []; listType = null; listStart = 1; };
           const flushFence = () => { if (!inFence) return; const language = fenceLanguage ? ` class="language-${esc(fenceLanguage)}"` : ''; output.push(`<pre><code${language}>${esc(fenceLines.join('\n'))}</code></pre>`); inFence = false; fenceLanguage = ''; fenceLines = []; };
           for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
             const line = lines[lineIndex];
             const fence = line.match(/^\s*```\s*([\w+-]*)\s*$/);
             if (fence) { if (inFence) flushFence(); else { flushParagraph(); flushList(); inFence = true; fenceLanguage = fence[1] || ''; fenceLines = []; } continue; }
             if (inFence) { fenceLines.push(line); continue; }
-            if (/^\s*$/.test(line)) { const nextLine = lines[lineIndex + 1] || ''; const listContinues = listType === 'ol' ? /^\s*\d+[.)]\s+/.test(nextLine) : listType === 'ul' ? /^\s*[-+*]\s+/.test(nextLine) : false; const nestedContinues = listItems.length > 0 && /^\s{2,}(?:[-+*]|\d+[.)])\s+/.test(nextLine); if (listContinues || nestedContinues) continue; flushParagraph(); flushList(); continue; }
+            if (/^\s*$/.test(line)) { const nextLine = lines[lineIndex + 1] || ''; const listContinues = listType === 'ol' ? orderedMarker(nextLine) !== null : listType === 'ul' ? /^\s*[-+*]\s+/.test(nextLine) : false; const nestedContinues = listItems.length > 0 && /^\s{2,}(?:[-+*]|\d+[.)])\s+/.test(nextLine); if (listContinues || nestedContinues) continue; flushParagraph(); flushList(); continue; }
             const delimiterLine = lines[lineIndex + 1];
             if (line.includes('|') && delimiterLine !== undefined && parseTableCells(line).length >= 2 && isTableDelimiter(delimiterLine)) {
               flushParagraph(); flushList(); const bodyLines = []; let tableEnd = lineIndex + 2;
@@ -448,10 +453,10 @@
             if (heading) { flushParagraph(); flushList(); const level = heading[1].length; output.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`); continue; }
             if (/^\s*(---+|___+|\*\*\*+)\s*$/.test(line)) { flushParagraph(); flushList(); output.push('<hr>'); continue; }
             const unordered = line.match(/^\s*[-+*]\s+(?:\[([ xX])\]\s+)?(.+)$/);
-            const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+            const ordered = orderedMarker(line);
             const nested = line.match(/^\s{2,}(?:([-+*])|(\d+[.)]))\s+(?:\[([ xX])\]\s+)?(.+)$/);
             if (nested && listItems.length > 0 && listType !== null) { const entry = typeof listItems[listItems.length - 1] === 'string' ? { text: listItems[listItems.length - 1], nested: [], nestedType: null } : listItems[listItems.length - 1]; listItems[listItems.length - 1] = entry; entry.nestedType = entry.nestedType || (nested[2] ? 'ol' : 'ul'); entry.nested.push(`${nested[3] ? `<input type="checkbox" disabled ${nested[3].toLowerCase() === 'x' ? 'checked' : ''}> ` : ''}${nested[4]}`); continue; }
-            if (unordered || ordered) { flushParagraph(); const nextType = unordered ? 'ul' : 'ol'; if (listType !== null && listType !== nextType) flushList(); listType = nextType; const raw = unordered ? unordered[2] : ordered[1]; const checked = unordered?.[1]; listItems.push({ text: `${checked ? `<input type="checkbox" disabled ${checked.toLowerCase() === 'x' ? 'checked' : ''}> ` : ''}${raw}`, nested: [], nestedType: null }); continue; }
+            if (unordered || ordered) { flushParagraph(); const nextType = unordered ? 'ul' : 'ol'; if (listType !== null && listType !== nextType) flushList(); if (listType === null) listStart = ordered?.start || 1; listType = nextType; const raw = unordered ? unordered[2] : ordered.text; const checked = unordered?.[1]; listItems.push({ text: `${checked ? `<input type="checkbox" disabled ${checked.toLowerCase() === 'x' ? 'checked' : ''}> ` : ''}${raw}`, nested: [], nestedType: null }); continue; }
             if (/^\s*>/.test(line)) { flushParagraph(); flushList(); output.push(`<blockquote>${renderInlineMarkdown(line.replace(/^\s*>\s?/, ''))}</blockquote>`); continue; }
             flushList(); paragraph.push(line);
           }

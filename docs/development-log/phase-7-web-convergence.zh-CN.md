@@ -201,6 +201,7 @@ git diff --check ✓
 Web script parse ✓
 Browser DOM smoke ✓（Workspace 分组、搜索、展开/折叠、操作菜单）
 API delete smoke ✓（软删除、列表隐藏、事件历史保留）
+```
 
 ## 2026-08-22：助手消息 Markdown 渲染
 
@@ -224,6 +225,7 @@ Browser DOM smoke ✓（标题、strong、inline code、列表节点）
 HTML injection check ✓（助手消息中没有 script/iframe 节点）
 pnpm typecheck   ✓
 pnpm test        ✓
+```
 
 ## 2026-08-22：Turn 工具时间线渲染
 
@@ -247,5 +249,26 @@ Browser timeline smoke ✓（user → running → tools → assistant → comple
 pnpm typecheck   ✓
 pnpm test        ✓
 ```
-```
+
+## 2026-08-22：列表编号与 GFM 表格回归修正
+
+### 问题定位
+
+- 有序列表需要明确使用浏览器的十进制列表语义，避免样式被重置后每个条目都从 1 开始。
+- Markdown 表格需要继续沿用 DSH 的 GFM 行为：表头、分隔行、对齐方式和表格主体分别映射到语义化 table DOM。
+
+### 变更范围
+
+- 有序列表显式设置 `decimal` marker 和标准列表布局；解析器保留首项编号，并在非 1 起始时使用 `start` 属性。
+- 空行后的连续有序列表继续归并到同一个 `<ol>`，避免每个条目生成独立列表。
+- GFM 表格继续渲染为 `<table>/<thead>/<tbody>/<th>/<td>`，支持列对齐、转义管道符和横向滚动；原始 HTML 仍按 DSH 约定作为字面文本处理。
+
+### 验证
+
+```text
+Web script parse ✓
+git diff --check ✓
+Browser DOM smoke ✓（有序列表为单个 <ol>，GFM 表格为语义化 <table>）
+pnpm typecheck ✓
+pnpm test ✓
 ```
