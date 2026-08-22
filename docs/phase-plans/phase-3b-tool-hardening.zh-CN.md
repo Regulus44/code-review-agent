@@ -1,6 +1,6 @@
 # Phase 3B：Coding Agent 工具池与工具 Prompt 强化
 
-状态：completed（2026-08-22；3B.0–3B.final）
+状态：in_progress（2026-08-22；3B.0–3B.5 已有实现，3B.2 patch/diff 闭环继续开发）
 
 本计划承接已完成的 Phase 1A 与 Phase 3。Phase 1A 已证明模型可以完成 read → edit → approve → test → summary；Phase 3 已提供统一的 ToolRegistry、ToolRuntime、PermissionPolicy、WorkspaceResolver、取消、输出预算和事件审计。本阶段重点把现有工具提升为可组合、可解释、可恢复的 Coding Agent 工具池。
 
@@ -317,5 +317,7 @@ feat(shell): add policy-bound bash and pwsh semantics
 3. 完成 3B.1：为现有 P0/P1 工具补齐 prompt，不先改变执行语义；
 4. 完成 3B.2：强化 edit/diff/patch 和 stale/conflict；
 5. 完成 3B.3：强化 Bash/Pwsh/Terminal/job 和 Windows 工作区语义；
-6. 用真实 DeepSeek 做 Repository read/Edit/Test smoke，再进入 P1 新工具；
-7. 每个 checkpoint 更新 phase-status 和对应开发日志并立即 commit。
+6. 完成 patch/diff parser、apply/reject/rollback 的事件与恢复边界；
+7. 补齐 LSP 生命周期/取消/崩溃恢复和 background job spill/恢复；
+8. 用真实 DeepSeek 做新增能力隔离 smoke，再进入最终验收；
+9. 每个 checkpoint 更新 phase-status 和对应开发日志并立即 commit。

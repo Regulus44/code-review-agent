@@ -12,7 +12,30 @@ Phase 3 的基础 ToolRuntime、权限和审计 checkpoint 已完成。对当前
 
 本次只更新执行计划和阶段索引，不改变现有工具运行时；后续每个 3B checkpoint 都必须有独立 commit、测试门禁和回滚点。
 
-状态：`completed`
+状态：`in_progress`。原先的 `3B.final` 结论仅视为阶段性验收记录，后续审计发现 patch/diff、LSP 生命周期和 job spill 尚未完全闭合。
+
+## 2026-08-22：Phase 3B 继续开发——多文件 patch/diff checkpoint
+
+### 变更范围
+
+- 新增 `packages/tools/src/patch.ts`：解析 workspace-bound unified patch，支持多文件 create/update/delete、hunk 上下文校验、stale base、冲突诊断和原子失败回滚；
+- 新增 `apply_patch`、`reject_patch`、`rollback_patch`，继续走 schema、WorkspaceResolver、ToolRuntime、写权限审批、结构化结果、diff presentation 和事件审计；
+- 新增 `patch/preview`、`patch/applied`、`patch/rejected`、`patch/rolled_back` 事件；
+- 工具 Prompt catalog 增加 patch 的预览→审批→应用/拒绝→回滚顺序和安全边界；
+- 以 DSH diff/write/edit 行为作为主要参考，未复制代码、未引入 DSH 依赖；Claude Code 仍只作为 prompt/UX 补充参考。
+
+### 验证
+
+- `pnpm typecheck` 通过；
+- 新增 `packages/tools/src/patch.test.ts`：3 项通过，覆盖多文件 patch、create/update/delete、stale/conflict、审批、reject、apply、rollback 和审计事件；
+- `packages/tools/src/prompt.test.ts`：4 项通过；
+- `git diff --check` 通过。
+
+### 当前未闭合项
+
+- LSP 尚缺生命周期事件、取消请求、server crash/restart recovery、stderr/output budget 和 fixture 状态机；
+- background job 尚缺 durable spill artifact、bounded event chunk 和更完整的重启/取消状态测试；
+- 因此 Phase 3B 仍保持 `in_progress`，不重复执行普通基线测试。
 
 ## 2026-08-22：Phase 3B.0 ToolPromptRegistry checkpoint
 
@@ -115,7 +138,7 @@ Phase 3 的基础 ToolRuntime、权限和审计 checkpoint 已完成。对当前
 
 下一步进入 3B.final：完成真实 read/edit/test/long-task 验收，补齐 Web/Job/SSE presentation 和文档收口。
 
-## 2026-08-22：Phase 3B.final 验收完成
+## 2026-08-22：Phase 3B.final 阶段性验收记录（后续审计修正）
 
 - Web 工作台补齐 `goal/*`、`job/*`、`terminal/session` 的历史回放和 SSE 监听；工具结果继续只渲染有界 `modelView`，完整 audit 不进入 UI；
 - 完成 Goal/Job/Session query/read_image/LSP/capability 文档、工具表、事件契约和 source reuse register 收口；DSH 作为主行为参考，Claude Code 仅作 prompt/UX 补充，没有引入外部运行时依赖；

@@ -192,3 +192,19 @@ ID:
 范围：Web 默认关闭和 host allowlist、Skill 低优先级不可覆盖安全规则、Subagent 深度/工具白名单/预算、Workflow 最大迭代与停止条件。
 
 适配方式：先落地 `CapabilityRegistry` 与 `capability_status` 只读切片；真实 Web provider、Skill loader、Subagent lifecycle 和 Workflow executor 留到后续专门阶段，避免从 prompt 或扩展入口绕过 ToolRuntime。
+
+### DSH-009
+
+来源仓库：`D:/Develop/deepseek-harness-fork`
+
+来源路径：`packages/fs/tool-fs/src/diff.ts`、`packages/fs/tool-fs/src/write.ts`、`packages/fs/tool-fs/src/edit.ts`、`packages/fs/tool-str-replace-editor/src/index.ts`
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：`D:/Develop/deepseek-harness-fork/LICENSE` 为 MIT；本次未复制 DSH 代码或引入其 `diff` 依赖。
+
+本项目路径：`packages/tools/src/patch.ts`、`packages/tools/src/builtin.ts`。
+
+范围：多文件 unified patch 的 hunk 解析、上下文/删除校验、stale/conflict 停止、变更前后 diff 展示、apply/reject/rollback 语义和结构化错误。
+
+适配方式：使用本项目自有 parser、WorkspaceResolver、ToolRuntime、审批和 `patch/*` 事件；不复用 DSH runtime、Cordis 或外部 diff 包。新增测试覆盖 create/update/delete、多文件、stale、冲突、审批和回滚。

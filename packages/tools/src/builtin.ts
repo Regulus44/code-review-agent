@@ -15,6 +15,7 @@ import { JobManager } from "./jobs.js";
 import { readWorkspaceImage } from "./image.js";
 import { LspManager, type LspServerConfig } from "./lsp.js";
 import { CapabilityRegistry, CapabilityError } from "./capabilities.js";
+import { applyPreview, PatchConflictError, PatchParseError, previewUnifiedPatch, type AppliedPatch } from "./patch.js";
 
 const ALLOWED_EXECUTABLES = new Set(["git", "node", "npm", "pnpm", "vitest"]);
 const MAX_PROCESS_OUTPUT_BYTES = 512 * 1024;
@@ -263,6 +264,7 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
   const jobs = options.jobManager ?? new JobManager(options.eventStore === undefined ? {} : { eventStore: options.eventStore });
   const lsp = options.lspManager ?? new LspManager(options.lspServers);
   const capabilities = options.capabilities ?? new CapabilityRegistry();
+  const patches = new Map<string, AppliedPatch>();
   const tools: ToolDefinition[] = [
     {
       name: "read_file", description: "Read a bounded, line-numbered UTF-8 text range inside the workspace.", inputSchema: object({ path: string, offset: integer(1, Number.MAX_SAFE_INTEGER), limit: integer(1, MAX_READ_LINES) }, ["path"]), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
@@ -279,6 +281,56 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
     {
       name: "edit_file", description: "Apply one or more unique exact replacements with stale detection and a unified diff.", inputSchema: object({ path: string, oldText: string, newText: string, expectedHash: string, edits: { type: "array" as const, maxItems: 50, items: object({ oldText: string, newText: string }, ["oldText", "newText"]) } }, ["path"]), executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "cancel",
       execute: async (input, context) => editFile(context.workspaceRoot, input as { path: string; oldText?: string; newText?: string; expectedHash?: string; edits?: readonly { oldText: string; newText: string }[] }),
+    },
+    {
+      name: "apply_patch", description: "Parse, preview, and apply a workspace-bound multi-file unified patch with stale-base and conflict checks.", inputSchema: object({ patch: string, dryRun: boolean, expectedHashes: { type: "object" as const, additionalProperties: true } }, ["patch"]), executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "cancel",
+      execute: async (input, context) => {
+        const args = input as { patch: string; dryRun?: boolean; expectedHashes?: Readonly<Record<string, string>> };
+        const patchId = `patch_${randomUUID()}`;
+        try {
+          const inspected = await previewUnifiedPatch(context.workspaceRoot, args.patch, args.expectedHashes ?? {});
+          const record: AppliedPatch = { patchId, patch: args.patch, files: inspected.files, dryRun: args.dryRun === true, before: inspected.before, after: inspected.after };
+          patches.set(patchId, record);
+          await context.appendEvent("patch/preview", { patchId, dryRun: record.dryRun, files: inspected.files });
+          if (record.dryRun) return patchResult(record, "Patch preview");
+          await applyPreview(context.workspaceRoot, inspected);
+          await context.appendEvent("patch/applied", { patchId, files: inspected.files });
+          return patchResult(record, "Patch applied");
+        } catch (error) {
+          const code = error instanceof PatchConflictError ? error.code : error instanceof PatchParseError ? error.code : "PATCH_APPLY_FAILED";
+          return fail(code, error instanceof Error ? error.message : String(error), code === "PATCH_CONFLICT" ? "Reread every affected file, refresh expectedHashes, and regenerate the patch." : "Validate the unified patch and keep all targets inside the workspace.");
+        }
+      },
+    },
+    {
+      name: "reject_patch", description: "Reject a previously previewed patch and record the decision without changing workspace files.", inputSchema: object({ patchId: string, reason: string }, ["patchId"]), executionMode: "exclusive", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
+      execute: async (input, context) => {
+        const args = input as { patchId: string; reason?: string };
+        const record = patches.get(args.patchId);
+        if (record === undefined) return fail("PATCH_NOT_FOUND", `Patch preview was not found: ${args.patchId}`, "Use the patchId returned by apply_patch in this host session.");
+        if (!record.dryRun) return fail("PATCH_ALREADY_APPLIED", `Patch ${args.patchId} has already been applied`, "Use rollback_patch when the applied patch is still safe to reverse.");
+        patches.delete(args.patchId);
+        await context.appendEvent("patch/rejected", { patchId: args.patchId, reason: args.reason ?? "Rejected by user", files: record.files });
+        return ok({ patchId: args.patchId, status: "rejected", reason: args.reason ?? "Rejected by user" });
+      },
+    },
+    {
+      name: "rollback_patch", description: "Roll back an applied multi-file patch only when every target still matches the patch result.", inputSchema: object({ patchId: string }, ["patchId"]), executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "cancel",
+      execute: async (input, context) => {
+        const patchId = (input as { patchId: string }).patchId;
+        const record = patches.get(patchId);
+        if (record === undefined) return fail("PATCH_NOT_FOUND", `Applied patch was not found: ${patchId}`, "Use a patchId from the current host session.");
+        if (record.dryRun) return fail("PATCH_NOT_APPLIED", `Patch ${patchId} was only previewed`, "Apply the patch first or reject the preview.");
+        try {
+          await applyPreview(context.workspaceRoot, { files: record.files, before: record.after, after: record.before });
+          await context.appendEvent("patch/rolled_back", { patchId, files: record.files });
+          patches.delete(patchId);
+          return ok({ patchId, status: "rolled_back", files: record.files });
+        } catch (error) {
+          const code = error instanceof PatchConflictError ? error.code : "PATCH_ROLLBACK_FAILED";
+          return fail(code, error instanceof Error ? error.message : String(error), "Stop and inspect the affected files; rollback will not overwrite newer user changes.");
+        }
+      },
     },
     {
       name: "write_file", description: "Create, overwrite, or append a UTF-8 workspace file with stale detection and a unified diff.", inputSchema: object({ path: string, content: string, overwrite: boolean, mode: { type: "string" as const, enum: ["create", "overwrite", "append"] }, expectedHash: string }, ["path", "content"]), executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "cancel",
@@ -739,6 +791,15 @@ function findOccurrences(value: string, needle: string): number[] { const positi
 function editFailure(code: string, filePath: string, text: string, message: string, matchCount: number): ToolResult {
   const context = text.split(/\r?\n/u).slice(0, 8).map((line, index) => `${index + 1}: ${line}`).join("\n");
   return { ok: false, error: { code, message: `${message}; path=${filePath}; matchCount=${matchCount}`, remedy: code === "EDIT_CONFLICT" || code === "EDIT_STALE" ? "Stop, reread the current file, and retry with a fresh expectedHash." : "Include more exact surrounding context so exactly one current match is selected." }, presentation: { kind: "diff", title: code, text: context, data: { path: filePath, matchCount, context } } };
+}
+function patchResult(record: AppliedPatch, title: string): ToolResult {
+  const text = record.files.map((file) => file.unifiedDiff).filter(Boolean).join("\n\n");
+  return {
+    ok: true,
+    output: { patchId: record.patchId, status: record.dryRun ? "preview" : "applied", dryRun: record.dryRun, files: record.files },
+    ...(record.files.length === 1 ? { diff: { path: record.files[0]!.path, before: record.before[record.files[0]!.path] ?? "", after: record.after[record.files[0]!.path] ?? "" } } : {}),
+    presentation: { kind: "diff", title, text, data: { patchId: record.patchId, dryRun: record.dryRun, files: record.files } },
+  };
 }
 function buildUnifiedDiff(filePath: string, before: string, after: string): string {
   if (before === after) return "";

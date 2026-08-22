@@ -6,6 +6,7 @@ export * from "./prompt.js";
 export * from "./jobs.js";
 export * from "./lsp.js";
 export * from "./capabilities.js";
+export * from "./patch.js";
 export * from "./registry.js";
 export * from "./runtime.js";
 export * from "./schema.js";
