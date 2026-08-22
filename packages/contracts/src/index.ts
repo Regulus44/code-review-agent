@@ -42,6 +42,8 @@ export type AgentEventType =
   | "patch/applied"
   | "patch/rejected"
   | "patch/rolled_back"
+  | "lsp/server"
+  | "lsp/request"
   | "permission/requested"
   | "permission/resolved"
   | "interaction/requested"

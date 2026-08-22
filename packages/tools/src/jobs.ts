@@ -1,7 +1,8 @@
 import { brand, type AgentEvent, type EventStore, type ToolResult } from "@code-review-agent/contracts";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { stat } from "node:fs/promises";
+import { appendFile, mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
+import path from "node:path";
 
 export type JobStatus = "running" | "completed" | "failed" | "cancelled" | "orphaned";
 
@@ -18,6 +19,8 @@ export interface JobSummary {
   readonly signal?: string;
   readonly bufferedBytes: number;
   readonly truncated: boolean;
+  readonly totalBytes: number;
+  readonly spillPath?: string;
 }
 
 interface JobRecord {
@@ -34,7 +37,11 @@ interface JobRecord {
   readonly child?: ChildProcessWithoutNullStreams;
   output: string;
   readOffset: number;
+  readOffsetBytes: number;
   totalBytes: number;
+  readonly spillPath: string;
+  spillWrite: Promise<void>;
+  spillError: string | undefined;
   killed: boolean;
   endedNotified: boolean;
   error: { readonly code: string; readonly message: string } | undefined;
@@ -54,6 +61,7 @@ export interface StartJobInput {
 }
 
 const MAX_JOB_OUTPUT_BYTES = 512 * 1024;
+const MAX_EVENT_OUTPUT_BYTES = 8 * 1024;
 
 /** Session/workspace-scoped background process registry with durable event hooks. */
 export class JobManager {
@@ -67,11 +75,14 @@ export class JobManager {
     if (input.signal?.aborted) return fail("COMMAND_CANCELLED", "Background job was cancelled before start");
     const jobId = `job_${randomUUID()}`;
     const startedAt = new Date().toISOString();
+    const spillPath = path.join(path.resolve(input.workspaceRoot), ".agent-artifacts", "jobs", `${jobId}.log`);
+    try { await mkdir(path.dirname(spillPath), { recursive: true }); await writeFile(spillPath, "", "utf8"); }
+    catch (error) { return fail("JOB_SPILL_FAILED", `Unable to create the durable job output artifact: ${error instanceof Error ? error.message : String(error)}`); }
     let child: ChildProcessWithoutNullStreams;
     try {
       child = spawn(input.executable, [...input.args], { cwd: input.cwd, detached: true, shell: false, windowsHide: true, env: { ...process.env, ...(input.env ?? {}) }, stdio: ["pipe", "pipe", "pipe"] });
     } catch (error) { return fail("COMMAND_FAILED", error instanceof Error ? error.message : String(error)); }
-    const record: JobRecord = { jobId, sessionId: input.sessionId, workspaceRoot: input.workspaceRoot, cwd: input.cwd, command: input.command, status: "running", startedAt, endedAt: undefined, exitCode: undefined, signal: undefined, child, output: "", readOffset: 0, totalBytes: 0, killed: false, endedNotified: false, error: undefined, ...(input.appendEvent === undefined ? {} : { appendEvent: input.appendEvent }) };
+    const record: JobRecord = { jobId, sessionId: input.sessionId, workspaceRoot: input.workspaceRoot, cwd: input.cwd, command: input.command, status: "running", startedAt, endedAt: undefined, exitCode: undefined, signal: undefined, child, output: "", readOffset: 0, readOffsetBytes: 0, totalBytes: 0, spillPath, spillWrite: Promise.resolve(), spillError: undefined, killed: false, endedNotified: false, error: undefined, ...(input.appendEvent === undefined ? {} : { appendEvent: input.appendEvent }) };
     this.jobs.set(jobId, record);
     const append = (stream: "stdout" | "stderr", chunk: Buffer): void => {
       record.totalBytes += chunk.byteLength;
@@ -82,7 +93,9 @@ export class JobManager {
         record.output = encoded.toString("utf8");
         record.readOffset = Math.max(0, record.readOffset - text.length);
       }
-      void record.appendEvent?.("job/output", { jobId, stream, text, bufferedBytes: Buffer.byteLength(record.output, "utf8"), truncated: record.totalBytes > MAX_JOB_OUTPUT_BYTES });
+      record.spillWrite = record.spillWrite.then(async () => { await appendFile(record.spillPath, chunk); }).catch((error: unknown) => { record.spillError = error instanceof Error ? error.message : String(error); });
+      const eventText = chunk.byteLength > MAX_EVENT_OUTPUT_BYTES ? chunk.subarray(0, MAX_EVENT_OUTPUT_BYTES).toString("utf8") : text;
+      void record.appendEvent?.("job/output", { jobId, stream, text: eventText, bytes: chunk.byteLength, totalBytes: record.totalBytes, bufferedBytes: Buffer.byteLength(record.output, "utf8"), truncated: record.totalBytes > MAX_JOB_OUTPUT_BYTES || eventText.length < text.length, spillPath: relativeSpillPath(record) });
     };
     child.stdout.on("data", (chunk: Buffer) => append("stdout", chunk));
     child.stderr.on("data", (chunk: Buffer) => append("stderr", chunk));
@@ -110,6 +123,13 @@ export class JobManager {
   async read(sessionId: string, jobId: string, maxBytes = 64 * 1024): Promise<ToolResult> {
     const record = await this.getOrRecover(sessionId, jobId);
     const bounded = Math.min(Math.max(maxBytes, 1), MAX_JOB_OUTPUT_BYTES);
+    await record.spillWrite;
+    if (record.spillError !== undefined) return fail("JOB_SPILL_UNAVAILABLE", `Durable job output is unavailable: ${record.spillError}`);
+    const spilled = await readSpill(record, bounded);
+    if (spilled !== undefined) {
+      record.readOffsetBytes += spilled.bytesRead;
+      return { ok: true, output: { jobId, status: record.status, output: spilled.text, hasMore: record.readOffsetBytes < record.totalBytes, exitCode: record.exitCode, signal: record.signal, truncated: record.totalBytes > MAX_JOB_OUTPUT_BYTES }, usage: { bytes: record.totalBytes, truncated: record.totalBytes > bounded }, presentation: { kind: "terminal", title: `Job ${record.status}`, text: spilled.text, data: this.summary(record) } };
+    }
     const available = record.output.slice(record.readOffset);
     const text = available.slice(0, bounded);
     record.readOffset += text.length;
@@ -183,7 +203,11 @@ export class JobManager {
         signal: typeof finalPayload?.["signal"] === "string" ? finalPayload["signal"] : undefined,
         output: output.get(jobId) ?? "",
         readOffset: 0,
-        totalBytes: Buffer.byteLength(output.get(jobId) ?? "", "utf8"),
+        readOffsetBytes: 0,
+        totalBytes: typeof finalPayload?.["totalBytes"] === "number" ? finalPayload["totalBytes"] : Buffer.byteLength(output.get(jobId) ?? "", "utf8"),
+        spillPath: path.join(path.resolve(eventWorkspace ?? workspaceRoot ?? "."), ".agent-artifacts", "jobs", `${jobId}.log`),
+        spillWrite: Promise.resolve(),
+        spillError: undefined,
         killed: false,
         endedNotified: true,
         error: undefined,
@@ -193,7 +217,7 @@ export class JobManager {
   }
 
   private summary(record: JobRecord): JobSummary {
-    return { jobId: record.jobId, sessionId: record.sessionId, workspaceRoot: record.workspaceRoot, cwd: record.cwd, command: record.command, status: record.status, startedAt: record.startedAt, ...(record.endedAt === undefined ? {} : { endedAt: record.endedAt }), ...(record.exitCode === undefined ? {} : { exitCode: record.exitCode }), ...(record.signal === undefined ? {} : { signal: record.signal }), bufferedBytes: Buffer.byteLength(record.output, "utf8"), truncated: record.totalBytes > MAX_JOB_OUTPUT_BYTES };
+    return { jobId: record.jobId, sessionId: record.sessionId, workspaceRoot: record.workspaceRoot, cwd: record.cwd, command: record.command, status: record.status, startedAt: record.startedAt, ...(record.endedAt === undefined ? {} : { endedAt: record.endedAt }), ...(record.exitCode === undefined ? {} : { exitCode: record.exitCode }), ...(record.signal === undefined ? {} : { signal: record.signal }), bufferedBytes: Buffer.byteLength(record.output, "utf8"), truncated: record.totalBytes > MAX_JOB_OUTPUT_BYTES, totalBytes: record.totalBytes, spillPath: relativeSpillPath(record) };
   }
 
   private notifyEnded(record: JobRecord): void {
@@ -203,10 +227,26 @@ export class JobManager {
   }
 }
 
+function relativeSpillPath(record: Pick<JobRecord, "workspaceRoot" | "spillPath">): string { return path.relative(record.workspaceRoot, record.spillPath).replaceAll("\\", "/"); }
+
+async function readSpill(record: JobRecord, maxBytes: number): Promise<{ readonly text: string; readonly bytesRead: number } | undefined> {
+  try {
+    const handle = await open(record.spillPath, "r");
+    try {
+      const buffer = Buffer.alloc(maxBytes);
+      const result = await handle.read(buffer, 0, maxBytes, record.readOffsetBytes);
+      return { text: buffer.subarray(0, result.bytesRead).toString("utf8"), bytesRead: result.bytesRead };
+    } finally { await handle.close(); }
+  } catch (error) {
+    if (error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
 function terminateProcessTree(child: ChildProcessWithoutNullStreams): void {
   if (child.pid === undefined) { child.kill(); return; }
   if (process.platform === "win32") { const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, shell: false }); killer.unref(); try { child.kill(); } catch { /* taskkill is the process-tree fallback */ } }
   else { try { process.kill(-child.pid, "SIGTERM"); } catch { child.kill(); } }
 }
 
-function fail(code: string, message: string): ToolResult { return { ok: false, error: { code, message, remedy: code === "WORKDIR_INVALID" ? "Use an existing workspace-bound directory." : code === "COMMAND_NOT_FOUND" ? "Check the executable and installed toolchain." : "Inspect the structured job error before retrying." }, presentation: { kind: "terminal", title: code, text: message } }; }
+function fail(code: string, message: string): ToolResult { return { ok: false, error: { code, message, remedy: code === "WORKDIR_INVALID" ? "Use an existing workspace-bound directory." : code === "COMMAND_NOT_FOUND" ? "Check the executable and installed toolchain." : code === "JOB_SPILL_FAILED" || code === "JOB_SPILL_UNAVAILABLE" ? "Inspect the durable artifact path and preserve the job metadata before retrying." : "Inspect the structured job error before retrying." }, presentation: { kind: "terminal", title: code, text: message } }; }

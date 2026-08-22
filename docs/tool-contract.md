@@ -65,6 +65,9 @@ discover
 | `grep` | read | auto | literal/regex、大小写、上下文行、路径、文件大小和输出限制 |
 | `edit_file` | write | ask | 兼容 old/new；支持多段唯一替换、expectedHash、stale/conflict 和 unified diff |
 | `write_file` | write | ask | `create`/`overwrite`/`append` 模式，兼容 `overwrite=true`，支持 expectedHash 和 diff |
+| `apply_patch` | write | ask | 解析多文件 unified patch，支持 dry-run、hunk/context 校验、stale/conflict、create/update/delete 和 patchId |
+| `reject_patch` | read | auto | 拒绝当前 host session 的 patch preview，只追加审计事件，不修改文件 |
+| `rollback_patch` | write | ask | 按 patchId 比较 after-state 后回滚，不覆盖更新后的用户修改 |
 | `git_status` | read | auto | 固定 cwd，结构化输出 |
 | `git_diff` | read | auto | 限制输出，避免泄露 workspace 外内容 |
 | `run_command` | execute | ask | argv 优先、超时、输出截断、进程树终止 |
@@ -91,7 +94,7 @@ discover
 | `get_goal` | read | auto | 读取当前 session 的 goal projection |
 | `session_query` | read | auto | 只查询当前 session 的 bounded public events，不暴露 SQL |
 | `read_image` | read | auto | 仅在 vision capability 可见时提供，先做 media/size/workspace 检查 |
-| `lsp_diagnostics` / `lsp_definition` / `lsp_references` | read | auto | 只调用 host 配置的 LSP server，不接受任意 executable |
+| `lsp_diagnostics` / `lsp_definition` / `lsp_references` | read | auto | 只调用 host 配置的 LSP server，不接受任意 executable；transport 有生命周期、取消、消息/文档/stderr 预算和崩溃后一次重建 |
 | `capability_status` | read | auto | 展示 Web/Skill/Subagent/Workflow 的显式开关和预算/depth/iteration 限制 |
 
 ## 工具结果
@@ -129,6 +132,20 @@ type ToolResult = {
 - `expectedHash` 与当前内容不一致时返回 `EDIT_STALE`；读取后到写入前检测到变化时返回 `EDIT_CONFLICT`；两者都保留当前文件，不覆盖用户修改；
 - 成功的编辑/写入结果包含 before/after hash、结构化操作状态和 bounded unified diff，并追加 `diff/preview` 事件；
 - `write_file` 默认是 create，覆盖和删除仍受审批；append 只追加用户明确提供的内容。
+
+多文件 patch 必须遵守以下不变量：
+
+- parser 先校验 file header、hunk 行数和 workspace-relative path，再读取任何目标；绝对路径、盘符路径、路径穿越和重复目标均拒绝；
+- preview 阶段先读取所有 base，`expectedHashes` 或 hunk/context 不匹配时一个文件都不写；
+- apply 过程中任一目标写入失败，runtime 尝试恢复本批 before-state；rollback 还要验证每个目标仍匹配记录的 after-state；
+- `patch/preview`、`patch/applied`、`patch/rejected`、`patch/rolled_back` 是审计事实，reject 不伪造 apply，rollback 不删除历史。
+
+LSP 只读工具必须遵守以下不变量：
+
+- server command 和参数来自 host 配置，工具输入只能选择已配置 serverId 与 workspace-relative 文件；
+- JSON-RPC request 取消要发送 `$/cancelRequest` 并产生 `lsp/request` 状态，超时、取消、协议错误和 server crash 使用不同 code；
+- transport 对单消息、header、文档和 stderr 都有界；server crash 后下一次请求最多重建一次 transport，不能无限自动重试；
+- LSP 只能返回只读观察，任何写入必须回到 edit_file/apply_patch/permission 管线。
 
 工具事件的 `tool/call` payload 包含 call presentation；结果优先使用工具自己的 `presentResult`，否则使用结构化 `ToolResult.presentation`。完整 audit 与有界 model view 分离。
 

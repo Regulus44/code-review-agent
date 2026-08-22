@@ -37,6 +37,29 @@ Phase 3 的基础 ToolRuntime、权限和审计 checkpoint 已完成。对当前
 - background job 尚缺 durable spill artifact、bounded event chunk 和更完整的重启/取消状态测试；
 - 因此 Phase 3B 仍保持 `in_progress`，不重复执行普通基线测试。
 
+## 2026-08-22：Phase 3B LSP 只读闭包与 job spill checkpoint
+
+### 变更范围
+
+- LSP manager 按 `serverId + workspace` 复用 transport，增加 `lsp/server`、`lsp/request` 生命周期/请求事件；
+- LSP request 统一使用 `AbortSignal`，取消时发送 `$/cancelRequest`，并区分 cancelled、timeout、protocol、server error 和 crash；
+- stdio framing 增加 header/message/document/stderr 边界；server crash 后下一次只自动重建一次 transport，host 配置仍是唯一 executable 来源；
+- background job 将完整 stdout/stderr 写入 `.agent-artifacts/jobs/<jobId>.log`，`job/output` 事件只保留有界 live chunk，`job_output` 支持 spill 增量读取；
+- 重启恢复优先读取 durable artifact，缺失时保留 bounded event fallback，并继续将失去子进程附着的 job 标记为 `orphaned`。
+
+### 验证
+
+- `pnpm typecheck` 通过；
+- `lsp.test.ts`：3 项通过，覆盖 lifecycle/request event、transport reuse、crash restart、cancel、document bound 和 fixture server；
+- `jobs.test.ts`：4 项通过，覆盖启动、owner kill、durable artifact recovery、bounded event output 和完整 spill 读取；
+- `git diff --check` 待本 checkpoint 提交前执行。
+
+### 当前未闭合项
+
+- 尚未重复执行普通基线测试，也未进行真实 DeepSeek 网络 smoke；
+- Web 对 patch preview/apply/reject 的专用交互 contract 仍需补齐；
+- Phase 3B 继续保持 `in_progress`。
+
 ## 2026-08-22：Phase 3B.0 ToolPromptRegistry checkpoint
 
 ### 变更范围
