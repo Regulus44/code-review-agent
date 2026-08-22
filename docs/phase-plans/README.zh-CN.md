@@ -36,7 +36,7 @@ Phase 8  高级能力与产品化
 - [Phase 3B：Coding Agent 工具池与工具 Prompt 强化](phase-3b-tool-hardening.zh-CN.md)
 - [Phase 4：MCP Client](phase-4-mcp-client.zh-CN.md)
 - [MCP 与 A2A 演进执行计划（Phase 4B → Phase 5 → Phase 6）](mcp-a2a-execution-plan.zh-CN.md)
-- [Phase 5：内部 Subagent / 多 Agent](phase-5-subagents.zh-CN.md)
+- [Phase 5：内部 Task/Subagent 多 Agent（DSH 对照执行计划）](phase-5-subagents.zh-CN.md)
 - [Phase 6：A2A 互操作层](phase-6-a2a.zh-CN.md)
 - [Phase 7：DSH Web 前端收敛](phase-7-web-convergence.zh-CN.md)
 - [Phase 8：高级能力与产品化](phase-8-productization.zh-CN.md)

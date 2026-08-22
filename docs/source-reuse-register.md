@@ -224,3 +224,19 @@ ID:
 范围：server namespace reservation、per-generation client/transport、generation guard、串行 discovery、registry atomic swap、重连预算/稳定窗口、stdio argv/env 清理和 close 顺序。
 
 改写部分：配置事实来源改为本项目 SQLite；credential 只使用 opaque reference；scope visibility、ToolRuntime、EventStore、resource/prompt trust boundary 和 Web projection 使用本项目 contract。
+
+### DSH-011
+
+来源仓库：`D:/Develop/deepseek-harness-fork`
+
+来源路径：`packages/subagent/subagent/src/{index,types,descriptor,child-agent,depth,lifecycle,continuation,projection,run-settlement}.ts`、`packages/subagent/tool-subagent/src/index.ts`、`packages/subagent/tool-subagent-control/src/{index,list-agents}.ts`、`packages/subagent/tool-subagent-report/src/index.ts`、`packages/subagent/subagent-{spawn-in-process,fork-in-process,in-process-driver}`、`packages/core/agent/src/{inbox,dispatch}.ts`、`packages/core/agent-loop/src/agent.ts`、`packages/host/apiproxy/src/api/subagents*.ts`。
+
+复用方式：`behavior-reference` + `architecture-reference`
+
+许可证/来源证据：`D:/Develop/deepseek-harness-fork/LICENSE` 为 MIT；本轮没有复制 DSH 运行时代码、Cordis、内部类型或 Web 组件。
+
+本项目路径：`docs/phase-plans/phase-5-subagents.zh-CN.md`、未来的 `packages/subagent`、`packages/contracts`、`packages/storage`、`packages/runtime`、`packages/tools` 和 `apps/api`/`apps/web`。
+
+范围：provider registry、one-shot run ownership、continuable child inbox、descriptor/versioning、parent/ancestor authority、depth/budget、child-scoped report、Task projection 和 browser-safe subagent API。
+
+适配方式：先建立行为 fixture 和本项目 contract，再按 DSH 的职责分层实现；EventStore、ToolRuntime、PermissionPolicy、WorkspaceResolver、MCP scope 和 SSE replay 继续作为本项目事实来源与安全边界。Phase 5 不引入完整 DSH runtime，也不把 DSH 内部类型暴露为公共 API。

@@ -17,4 +17,5 @@
 - [Phase 2：事件、持久化与恢复](phase-2-events-persistence-recovery.zh-CN.md)
 - [Phase 3：工具运行时与权限](phase-3-tools-permissions.zh-CN.md)
 - [Phase 4：MCP Client](phase-4-mcp-client.zh-CN.md)
+- [Phase 5：内部 Task/Subagent 多 Agent](phase-5-subagents.zh-CN.md)
 - [Phase 7：DSH Web 前端收敛](phase-7-web-convergence.zh-CN.md)

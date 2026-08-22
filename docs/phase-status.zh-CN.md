@@ -28,7 +28,9 @@ Phase 4B MCP 加固
   → Phase 6 A2A inbound adapter
 ```
 
-计划明确了 DSH R0/R1/R2 参考等级。下一步先完成 MCP contract audit、持久化 scope/credential 设计、连接 generation fixture 和 ADR；A2A HTTP endpoint 等内部 Task/Subagent contract 稳定后再实现。
+计划明确了 DSH R0/R1/R2 参考等级。MCP contract audit、持久化 scope/credential 设计、连接 generation fixture 和 ADR 已在 Phase 4B 完成；下一步转入 Phase 5 内部 Task/Subagent，A2A HTTP endpoint 等 parent/child contract 稳定后再实现。
+
+Phase 5 的详细 DSH 对照计划已建立：[Phase 5：内部 Task/Subagent 多 Agent（DSH 对照执行计划）](phase-plans/phase-5-subagents.zh-CN.md)。当前仍为 `planned`，下一次只先推进 5.0 contract、descriptor 和 durable projection fixture。
 
 ## Phase 4B 加固进展（2026-08-23）
 
