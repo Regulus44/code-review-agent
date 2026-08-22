@@ -5,6 +5,25 @@ import { ToolRegistry, ToolRuntime } from "@code-review-agent/tools";
 import { AgentHost } from "./index.js";
 
 describe("AgentHost", () => {
+  it("gives the model an explicit workspace and tool-use contract", async () => {
+    const requests: ModelRequest[] = [];
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        requests.push(request);
+        yield { type: "text_delta", text: "Inspected." };
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store: new InMemoryEventStore(), model });
+    const session = await host.createSession("D:/repository-under-review");
+    const turn = await host.sendMessage(session.id, "review this repository");
+    await host.waitForTurn(turn);
+    const system = requests[0]?.messages.find((message) => message.role === "system")?.content ?? "";
+    expect(system).toContain("D:/repository-under-review");
+    expect(system).toContain("Use the tools proactively");
+    expect(system).toContain("Do not ask the user to run shell commands");
+  });
+
   it("runs a streaming turn and persists every visible event", async () => {
     const host = new AgentHost({ store: new InMemoryEventStore() });
     const session = await host.createSession("D:/workspace");

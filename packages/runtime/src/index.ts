@@ -56,6 +56,12 @@ interface CollectedModelResponse {
   readonly toolCalls: readonly ModelToolCall[];
 }
 
+const DEFAULT_AGENT_SYSTEM_PROMPT = `You are a coding agent operating inside a local workspace. You have direct access to the repository through the tools supplied with this request.
+
+Use the tools proactively. When the user asks you to inspect, review, explain, search, test, or modify repository files, call the relevant tools before answering. Do not ask the user to run shell commands or paste file contents when an available tool can do that work. Do not claim that you cannot view the workspace unless a tool has actually returned an error.
+
+Use paths relative to the active workspace root unless a tool explicitly requires another form. For repository review, start with the smallest useful combination of glob, read_file, grep, git_status, git_diff, git_log, and git_show, then inspect additional files as needed. For writes, deletion, or command execution, use the corresponding tool and let the normal permission approval flow pause for user confirmation. After tool execution, summarize concrete findings and next actions rather than only describing commands the user could run.`;
+
 /** Coordinates durable sessions, queued turns and model execution behind storage/model interfaces. */
 export class AgentHost {
   private model: ChatModel;
@@ -73,7 +79,7 @@ export class AgentHost {
 
   constructor(private readonly options: AgentHostOptions) {
     this.model = options.model ?? new EchoChatModel();
-    this.systemPrompt = options.systemPrompt ?? "You are a helpful coding agent.";
+    this.systemPrompt = options.systemPrompt ?? DEFAULT_AGENT_SYSTEM_PROMPT;
     this.maxSteps = options.maxSteps ?? 12;
     if (!Number.isInteger(this.maxSteps) || this.maxSteps < 1 || this.maxSteps > 100) throw new Error("maxSteps must be an integer between 1 and 100");
     const registry = options.toolRegistry ?? new ToolRegistry();
@@ -453,6 +459,12 @@ export class AgentHost {
     return messages;
   }
 
+  private async systemMessage(sessionId: SessionId): Promise<string> {
+    const projection = await this.options.store.project(sessionId);
+    const workspaceRoot = projection?.workspaceRoot ?? ".";
+    return `${this.systemPrompt}\n\nActive workspace root: ${workspaceRoot}\nAll file, search, Git, and command tools for this turn are scoped to that workspace.`;
+  }
+
   private enqueue(pending: PendingTurn): void {
     const queue = this.queues.get(pending.sessionId) ?? [];
     if (!queue.some((item) => item.turnId === pending.turnId)) queue.push(pending);
@@ -495,7 +507,7 @@ export class AgentHost {
     try {
       await this.options.store.append({ sessionId, turnId, type: "turn/started", payload: {} });
       const messages: ChatMessage[] = [
-        { role: "system", content: this.systemPrompt },
+        { role: "system", content: await this.systemMessage(sessionId) },
         ...previousMessages,
         { role: "user", content },
       ];
@@ -508,7 +520,7 @@ export class AgentHost {
   private async runRecoveredTurn(sessionId: SessionId, turnId: TurnId, controller: AbortController): Promise<void> {
     try {
       await this.options.store.append({ sessionId, turnId, type: "agent/status", payload: { status: "running", reason: "permission_resolved_after_restart" } });
-      const messages: ChatMessage[] = [{ role: "system", content: this.systemPrompt }, ...(await this.conversationMessages(sessionId))];
+      const messages: ChatMessage[] = [{ role: "system", content: await this.systemMessage(sessionId) }, ...(await this.conversationMessages(sessionId))];
       await this.runSteps(sessionId, turnId, controller, messages);
     } catch (error) {
       await this.finishTurnAfterError(sessionId, turnId, controller, error);
@@ -520,6 +532,7 @@ export class AgentHost {
       if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
       await this.options.store.append({ sessionId, turnId, type: "step/started", payload: { step } });
       const response = await this.collectModelResponse(sessionId, turnId, controller, messages);
+      if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
       const assistantPayload = { content: response.text, ...(response.toolCalls.length === 0 ? {} : { toolCalls: response.toolCalls }) };
       await this.options.store.append({ sessionId, turnId, type: "assistant/message", payload: assistantPayload });
       if (response.toolCalls.length === 0) {

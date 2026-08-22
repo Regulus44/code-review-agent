@@ -159,3 +159,27 @@ git diff --check ✓
 ```
 
 本次阶段状态收口对应一个独立 Git checkpoint；后续阶段性更新仍必须遵守根目录 `AGENTS.md` 的“更新后立即 commit”规则。
+
+## 2026-08-22：Phase 1A 通过后的可用性修复
+
+### 用户验收反馈
+
+- 选择 workspace 后，模型仍可能用“无法直接查看仓库”的话术要求用户自行执行命令并粘贴结果；
+- 长输出期间 Web 会话滚动区域与 composer 的布局不稳定，可能导致输入框离开可视区域，无法继续下一轮对话。
+
+### 修复
+
+- AgentHost 默认 system prompt 明确声明当前 workspace、可用工具和主动调用规则；模型被要求在可用工具能够完成任务时先调用工具，不得要求用户代为执行命令；每个 turn 还会注入实际 workspace 根路径；
+- `runSteps` 在模型收到取消后返回空流时检查 AbortSignal，避免已取消 turn 被错误标记为 completed；
+- Web app/workspace 增加 `min-height: 0` 和溢出约束，使 conversation 独立滚动、composer 保持在固定网格行；
+- 渲染时只在用户原本接近底部时自动跟随新事件，用户向上查看长输出时不再被每个 SSE 事件强制拉回底部。
+
+### 验证
+
+```text
+pnpm typecheck   ✓
+pnpm test        ✓
+git diff --check ✓
+```
+
+新增 Runtime 合同测试确认模型收到 workspace 和工具使用约束；本地 API Web smoke 确认返回页面包含独立滚动布局和 near-bottom 自动滚动逻辑。
