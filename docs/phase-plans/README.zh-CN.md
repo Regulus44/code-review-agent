@@ -13,6 +13,8 @@ Phase 2  事件日志、持久化与恢复
    ↓
 Phase 3  内置工具运行时与权限
    ↓
+Phase 3B 工具池与工具 Prompt 强化（Phase 3 补充执行单元）
+   ↓
 Phase 4  MCP Client
    ↓
 Phase 5  内部 Subagent / 多 Agent
@@ -31,6 +33,7 @@ Phase 8  高级能力与产品化
 - [Phase 1：Agentic Coding Core（当前执行计划）](phase-1-agentic-coding-core.zh-CN.md)
 - [Phase 2：事件、持久化与恢复](phase-2-events-recovery.zh-CN.md)
 - [Phase 3：工具运行时与权限](phase-3-tools-permissions.zh-CN.md)
+- [Phase 3B：Coding Agent 工具池与工具 Prompt 强化](phase-3b-tool-hardening.zh-CN.md)
 - [Phase 4：MCP Client](phase-4-mcp-client.zh-CN.md)
 - [Phase 5：内部 Subagent / 多 Agent](phase-5-subagents.zh-CN.md)
 - [Phase 6：A2A 互操作层](phase-6-a2a.zh-CN.md)

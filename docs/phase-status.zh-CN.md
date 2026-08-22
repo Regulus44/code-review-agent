@@ -10,6 +10,7 @@
 | Phase 1：Agentic Coding Core | completed（Phase 1A.0–1A.6 已完成） | Tool-calling loop、P0/P1 TypeScript 工具、permission preset、pending approval/terminal 恢复和真实 `read → edit → approve → test → summary` 已通过；本次 checkpoint 完成阶段退出记录 |
 | Phase 2：事件、持久化与恢复 | completed | `a7f636f` + `5d5a198`；SQLite reopen/recovery、projection replay、SSE replay、queue、幂等 command 和 model failure 通过 |
 | Phase 3：工具运行时与权限 | completed | `e1d3172`（替代 `5003dbd`）；工具禁用、显式覆盖、进程树终止、audit/modelView、权限过期/取消/重启恢复和 Web smoke 通过 |
+| Phase 3B：Coding Agent 工具池与工具 Prompt 强化 | planned | 已建立执行计划；下一步从 ToolPromptRegistry、P0 工具 prompt、编辑/diff 和 Bash/Pwsh/Terminal 语义开始 |
 | Phase 4：MCP Client | completed | `5477f16`；官方 SDK stdio/SSE/Streamable HTTP、discovery、ToolRegistry bridge、权限/取消/重连、API/Web MCP 状态和 fixture 验证通过 |
 | Phase 5：内部 Subagent / 多 Agent | pending | 等 Phase 4 MCP 和 Task contract 稳定 |
 | Phase 6：A2A | pending | 等 Phase 5 parent/child lifecycle 稳定 |

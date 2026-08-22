@@ -1,5 +1,17 @@
 # Phase 3：工具运行时与权限开发日志
 
+## 2026-08-22：建立 Phase 3B 工具强化计划
+
+Phase 3 的基础 ToolRuntime、权限和审计 checkpoint 已完成。对当前工具池和本地 DSH 参考实现复核后，确认下一阶段的主要缺口集中在工具级 Prompt、编辑质量、Shell/PowerShell/Terminal 语义、结构化 presentation、Goal/后台任务/Session query/LSP 等 Coding Agent 能力。因此新增独立计划 [Phase 3B：Coding Agent 工具池与工具 Prompt 强化](../phase-plans/phase-3b-tool-hardening.zh-CN.md)。
+
+计划分为：
+
+- P0：ToolPromptRegistry、现有文件/搜索/Git 工具 prompt、stale/conflict/diff/patch、Bash/Pwsh/Terminal/job 基础语义、Plan/Todo/AskUser 规则；
+- P1：Goal、background jobs、Session query、read_image、LSP 只读诊断和变更预览；
+- P2：Web search/fetch、Skills、Subagent 消息控制、Workflow/Ralph。
+
+本次只更新执行计划和阶段索引，不改变现有工具运行时；后续每个 3B checkpoint 都必须有独立 commit、测试门禁和回滚点。
+
 状态：`completed`
 
 阶段计划：[phase-3-tools-permissions.zh-CN.md](../phase-plans/phase-3-tools-permissions.zh-CN.md)

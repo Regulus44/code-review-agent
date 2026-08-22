@@ -287,6 +287,18 @@ type ToolDefinition = {
 - 工具错误携带稳定 error code 和可行动 remedy；
 - diff、stdout、stderr、exit code 都是结构化结果。
 
+### Phase 3B：Coding Agent 工具池与工具 Prompt 强化
+
+Phase 3 的基础运行时已完成，后续工具工作进入独立的 Phase 3B 执行单元。该阶段专注于把工具提升为可组合、可解释、可恢复的 Coding Agent 能力：
+
+- ToolPromptRegistry 和每个工具的 purpose、when-to-use、prerequisite、sequencing、result interpretation、failure recovery、safety 规则；
+- 文件/搜索/Git 的调用组合、结构化编辑、stale/conflict 检测、diff/patch 预览；
+- Bash、PowerShell、持久 Terminal、background job 的 cwd、输出、超时、取消、权限和 Windows 语义；
+- Goal、Session query、read_image、LSP 只读诊断等 P1 能力；
+- Web、Skills、Subagent、Workflow/Ralph 等 P2 扩展入口。
+
+详细交付物、DSH 对照路径、测试门禁和 checkpoint 见：[Phase 3B：Coding Agent 工具池与工具 Prompt 强化](phase-plans/phase-3b-tool-hardening.zh-CN.md)。
+
 ### Phase 4：MCP Client 和外部工具目录
 
 **目标**：外部能力优先通过 MCP 接入，不继续堆积本地业务工具；本地安全基元仍由本项目维护。
