@@ -21,7 +21,7 @@ import {
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { randomUUID } from "node:crypto";
-import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, DefaultPermissionPolicy, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type ExecuteToolOutput, type PermissionPreset } from "@code-review-agent/tools";
+import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type ExecuteToolOutput, type PermissionPreset } from "@code-review-agent/tools";
 import { buildAgentSystemPrompt } from "./system-prompt.js";
 
 export interface AgentHostOptions {
@@ -73,6 +73,7 @@ export class AgentHost {
   private readonly ready: Promise<void>;
   private readonly toolRuntime: ToolRuntime;
   private readonly terminalManager?: TerminalManager;
+  private readonly jobManager?: JobManager;
   private readonly toolPromptRegistry: ToolPromptRegistry;
 
   constructor(private readonly options: AgentHostOptions) {
@@ -85,7 +86,8 @@ export class AgentHost {
     if (options.toolPromptRegistry === undefined) this.toolPromptRegistry.registerMany(BUILTIN_TOOL_PROMPT_SPECS);
     if (options.toolRuntime === undefined) {
       this.terminalManager = new TerminalManager();
-      registry.registerMany(createBuiltinTools({ terminalManager: this.terminalManager }));
+      this.jobManager = new JobManager();
+      registry.registerMany(createBuiltinTools({ terminalManager: this.terminalManager, jobManager: this.jobManager }));
       this.permissionPreset = options.permissionPreset ?? "ask-on-write";
     } else {
       this.permissionPreset = options.permissionPreset;

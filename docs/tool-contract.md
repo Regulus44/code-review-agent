@@ -69,6 +69,11 @@ discover
 | `git_diff` | read | auto | 限制输出，避免泄露 workspace 外内容 |
 | `run_command` | execute | ask | argv 优先、超时、输出截断、进程树终止 |
 | `run_tests` | execute | ask | 复用 command policy，记录 exit/stdout/stderr |
+| `bash` | execute | ask | 显式 fresh shell、workspace cwd、stdout/stderr、timeout、取消；长任务可返回 job id |
+| `pwsh` | execute | ask | 显式 PowerShell、native cwd/环境语义、非交互约束、exit/timeout/cancel |
+| `job_output` | read | auto | session/workspace 归属、增量输出、状态、truncated/spill 边界 |
+| `job_kill` | execute | ask | 只终止当前 session 的 background job，记录取消和最终状态 |
+| `job_list` | read | auto | 只列出当前 session/workspace 的 job 元数据 |
 | `terminal_open` | execute | ask | 独立 session、固定 cwd、argv 或受控 shell、输出缓冲；生命周期写入 `terminal/session` |
 | `terminal_send` | execute | ask-on-execute | 只能写入当前 session 的 terminal，不能跨 workspace |
 | `terminal_read` | read | auto | 增量读取、等待上限和输出预算 |
@@ -121,6 +126,8 @@ type ToolResult = {
 工具事件的 `tool/call` payload 包含 call presentation；结果优先使用工具自己的 `presentResult`，否则使用结构化 `ToolResult.presentation`。完整 audit 与有界 model view 分离。
 
 进程工具的 `audit` 至少记录 `stdout`、`stderr`、`exitCode` 和终止 signal。取消或超时必须终止进程树，而不仅是顶层 shell/child process。
+
+`bash` 和 `pwsh` 是显式 shell 工具：每次前台调用使用 fresh shell，`workdir` 由 workspace resolver 解析，shell 字符串不会进入默认 `run_command` argv 接口。`pwsh` 使用非交互、无 profile 启动，并注入受控 LanguageMode 约束；环境变量使用 PowerShell 原生 `$env:NAME` 语义。长任务通过 `run_in_background` 返回 `jobId`，后续只通过 `job_output`/`job_kill`/`job_list` 操作，job 状态和输出通过 `job/started`、`job/output`、`job/ended` 事件审计。
 
 ## 调度与禁用
 

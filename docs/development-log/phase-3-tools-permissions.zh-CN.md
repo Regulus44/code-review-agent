@@ -74,6 +74,26 @@ Phase 3 的基础 ToolRuntime、权限和审计 checkpoint 已完成。对当前
 
 进入 3B.3：补齐 Bash/PowerShell 一等语义、短命令与持久 Terminal/job 选择、Windows cwd/环境/退出码/取消和长任务 presentation。
 
+## 2026-08-22：Phase 3B.3 Bash/Pwsh/Background Job 基础 checkpoint
+
+### 变更范围
+
+- 新增显式 `bash` 和 `pwsh` 工具；每次前台调用使用 fresh shell、workspace-bound `workdir`、stdout/stderr、timeout、cancel、exit code 和 output truncation 语义；
+- 新增 `JobManager` 以及 `job_output`、`job_kill`、`job_list`，job 记录 session/workspace owner、cwd、command、状态、exit/signal、增量输出和截断元数据；
+- background job 通过 `job/started`、`job/output`、`job/ended` 事件进入统一审计管线，shell 字符串只存在于显式 bash/pwsh 工具，不改变 `run_command` 的 argv 安全边界；
+- AgentHost 默认内置工具池共享 TerminalManager 和 JobManager；prompt catalog 增加 shell/job 的跨调用规则；
+- 同步 `docs/tool-contract.md` 与 `docs/event-contract.md`。
+
+### 验证
+
+- `pnpm typecheck` 通过；
+- `pnpm --filter @code-review-agent/tools test`：34 项通过，含 JobManager 启动、输出、owner 隔离和 kill 测试；
+- `pnpm --filter @code-review-agent/runtime test`：12 项通过。
+
+### 下一步
+
+继续 3B.3 的 Windows/Bash smoke 与 Terminal/job presentation 收口，然后进入 3B.4 的 Goal、Session query、read_image、LSP read-only contract。
+
 阶段计划：[phase-3-tools-permissions.zh-CN.md](../phase-plans/phase-3-tools-permissions.zh-CN.md)
 
 ## 2026-08-21：阶段启动

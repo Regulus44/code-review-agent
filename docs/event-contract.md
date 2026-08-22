@@ -50,6 +50,9 @@ todo/updated
 interaction/requested
 interaction/resolved
 terminal/session
+job/started
+job/output
+job/ended
 mcp/server
 mcp/tool
 ```
@@ -57,6 +60,8 @@ mcp/tool
 `step/started` / `step/ended` 标记一个 turn 内的模型请求和工具执行边界。`assistant/message` 的 payload 可以包含 `toolCalls`，每个元素至少包含 `id`、`name` 和 JSON `arguments`；后续 `tool/result` 通过 `toolCallId` 关联到该调用。`plan/updated` 是当前实施计划的全量替换事件，`todo/updated` 是当前待办列表的全量替换事件。`interaction/requested` / `interaction/resolved` 表示 `ask_user` 暂停和恢复，不等同于工具权限审批。工具、权限、交互和 queue 事件都必须经过同一事件存储和 SSE 回放管线。
 
 `terminal/session` 记录持久终端的元数据生命周期。payload 至少包含 `action`（`opened`、`signalled`、`exited`、`closed` 或 `interrupted`）、`terminalId`、`workspaceRoot`、`cwd`、`command` 和 `status`；它只记录可回放的会话摘要，不记录环境变量或完整 stdout。进程重启时，最近状态为 `running` 的终端必须追加 `interrupted` 事件并在 `terminal_list` 中显示为 `interrupted`，不得伪造一个仍然存在的子进程。
+
+`job/started`、`job/output`、`job/ended` 记录显式 bash/pwsh background job 的归属、增量输出和最终 exit/signal/status。job payload 不得包含环境变量或凭据；job 只能由同一 session/workspace 通过 `job_output`、`job_kill` 和 `job_list` 访问。
 
 MCP 生命周期事件只携带 `serverName`、状态、动作和脱敏错误；env/header/token 等配置秘密不得进入 payload。MCP 工具调用本身仍使用公共 `tool/*` 和 `permission/*` 事件。
 
@@ -68,6 +73,7 @@ MCP 生命周期事件只携带 `serverName`、状态、动作和脱敏错误；
 - `ask_user` 必须产生 `interaction/requested`，回答、取消或过期必须产生 `interaction/resolved`，并通过 `interactionId` 幂等；
 - `plan/updated` 和 `todo/updated` 的 payload 必须是可回放的全量状态，不能只依赖内存镜像；
 - `terminal/session` 必须能从事件重建终端元数据；重启后的 `interrupted` 状态不能继续发送输入或发送信号；
+- `job/*` 必须保留 owner、workspace、状态和 bounded output 事实；job 控制不能绕过 ToolRuntime、权限或取消；
 - permission 事件必须记录 caller、workspace、toolCall、创建时间和过期时间；过期、拒绝、取消都必须有 terminal tool/result；
 - 事件先落盘，再推送 SSE；
 - 重复发送消息、重复批准、重复取消必须幂等；

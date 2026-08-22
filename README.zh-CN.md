@@ -46,8 +46,10 @@ workspace 上运行流式 Agent Loop，把每个 Session 以 append-only 事件�
   文件需要显式开启）、`delete_file`（默认移入 `.agent-trash`）
 - Git 只读：`git_status`、`git_diff`、`git_log`、`git_show`
 - 进程：`run_command`、`run_tests`（argv + 可执行文件白名单，拒绝 shell
-  字符串），以及持久终端 `terminal_open` / `terminal_send` /
+  字符串），显式 `bash` / `pwsh` fresh-shell 工具，以及持久终端 `terminal_open` / `terminal_send` /
   `terminal_read` / `terminal_signal` / `terminal_close` / `terminal_list`
+- 后台任务：`job_output`、`job_kill`、`job_list`；job 受 session/workspace
+  隔离、权限、取消和 `job/*` 事件审计约束。
 - 交互与计划：`ask_user`、`plan`、`todo_write`
 
 `ToolRuntime` 负责 JSON schema 校验、workspace 路径解析、风险级别
