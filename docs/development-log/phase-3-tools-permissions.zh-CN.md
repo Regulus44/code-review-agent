@@ -105,6 +105,16 @@ Phase 3 的基础 ToolRuntime、权限和审计 checkpoint 已完成。对当前
 
 继续 3B.5：只实现 Web/Skill/Subagent/Workflow 的安全边界和可验证最小切片，不引入任意网络、任意代码执行或未审计的子代理运行时。
 
+## 2026-08-22：Phase 3B.5 capability-gated extension slice
+
+- 新增 `CapabilityRegistry` 和 `capability_status`，Web、Skill、Subagent、Workflow 四类扩展默认 disabled；只有 host 显式配置后才会进入 capability 判断；
+- Web gate 只接受 HTTP(S) 和 host allowlist；Skill 内容有字节上限并固定为 low priority、`mayOverrideSafety: false`；
+- Subagent gate 固定最大 depth、工具白名单和预算；Workflow gate 固定最大 iteration，超过上限返回稳定错误；
+- 本 checkpoint 不添加绕过 ToolRuntime 的网络请求、任意 Skill loader、子 Agent 进程或 Ralph executor；扩展能力必须在后续阶段通过相同 permission/event/presentation 管线实现；
+- 针对性验证覆盖默认关闭、URL/host policy、Skill 优先级、Subagent depth/allowlist、Workflow stop limit。
+
+下一步进入 3B.final：完成真实 read/edit/test/long-task 验收，补齐 Web/Job/SSE presentation 和文档收口。
+
 阶段计划：[phase-3-tools-permissions.zh-CN.md](../phase-plans/phase-3-tools-permissions.zh-CN.md)
 
 ## 2026-08-21：阶段启动

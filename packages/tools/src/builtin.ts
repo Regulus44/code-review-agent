@@ -14,6 +14,7 @@ import { WorkspaceResolver } from "@code-review-agent/workspace";
 import { JobManager } from "./jobs.js";
 import { readWorkspaceImage } from "./image.js";
 import { LspManager, type LspServerConfig } from "./lsp.js";
+import { CapabilityRegistry, CapabilityError } from "./capabilities.js";
 
 const ALLOWED_EXECUTABLES = new Set(["git", "node", "npm", "pnpm", "vitest"]);
 const MAX_PROCESS_OUTPUT_BYTES = 512 * 1024;
@@ -257,10 +258,11 @@ export class TerminalManager {
   }
 }
 
-export function createBuiltinTools(options: { readonly terminalManager?: TerminalManager; readonly jobManager?: JobManager; readonly eventStore?: Pick<EventStore, "list" | "project">; readonly visionEnabled?: boolean; readonly lspServers?: Readonly<Record<string, LspServerConfig>>; readonly lspManager?: LspManager } = {}): readonly ToolDefinition[] {
+export function createBuiltinTools(options: { readonly terminalManager?: TerminalManager; readonly jobManager?: JobManager; readonly eventStore?: Pick<EventStore, "list" | "project">; readonly visionEnabled?: boolean; readonly lspServers?: Readonly<Record<string, LspServerConfig>>; readonly lspManager?: LspManager; readonly capabilities?: CapabilityRegistry } = {}): readonly ToolDefinition[] {
   const terminals = options.terminalManager ?? new TerminalManager();
   const jobs = options.jobManager ?? new JobManager(options.eventStore === undefined ? {} : { eventStore: options.eventStore });
   const lsp = options.lspManager ?? new LspManager(options.lspServers);
+  const capabilities = options.capabilities ?? new CapabilityRegistry();
   const tools: ToolDefinition[] = [
     {
       name: "read_file", description: "Read a bounded, line-numbered UTF-8 text range inside the workspace.", inputSchema: object({ path: string, offset: integer(1, Number.MAX_SAFE_INTEGER), limit: integer(1, MAX_READ_LINES) }, ["path"]), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
@@ -381,6 +383,10 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
     {
       name: "session_query", description: "Query bounded public events for the current session by sequence, time, event type, text, or status.", inputSchema: object({ afterSequence: integer(0, Number.MAX_SAFE_INTEGER), beforeSequence: integer(1, Number.MAX_SAFE_INTEGER), after: string, before: string, eventTypes: { type: "array" as const, maxItems: 20, items: string }, text: string, status: string, maxResults: integer(1, 200) }), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
       execute: async (input, context) => querySessionEvents(options.eventStore, context, input as SessionQueryInput),
+    },
+    {
+      name: "capability_status", description: "Inspect enabled Phase 3B.5 extension capabilities and their bounded limits.", inputSchema: object({}), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
+      execute: async () => ok({ capabilities: capabilities.snapshot() }),
     },
   ];
   if (options.visionEnabled === true) tools.push({

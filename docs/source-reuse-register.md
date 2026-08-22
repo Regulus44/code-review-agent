@@ -176,3 +176,19 @@ ID:
 范围：Goal durable lifecycle、bounded session query、background job restart metadata、image type/size gate 和 configured read-only LSP lifecycle。
 
 适配方式：使用本项目 EventStore、SQLite projection、ToolRuntime、WorkspaceResolver、权限和审计；LSP server 只能由 host 配置，工具输入不能注入任意 executable；无 vision/LSP capability 时不暴露对应工具。
+
+### DSH-008
+
+来源仓库：`D:/Develop/deepseek-harness-fork`
+
+来源路径：`packages/web/tool-web`、`packages/skill/tool-skill`、`packages/subagent/subagent`、`packages/subagent/tool-subagent`、`packages/workflow/tool-workflow`、`packages/workflow/tool-ralph`。
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：`D:/Develop/deepseek-harness-fork/LICENSE` 为 MIT；本次只登记 capability、scope、budget、depth、iteration、stop-condition 参考，没有复制运行时实现。
+
+本项目路径：`packages/tools/src/capabilities.ts`、`packages/tools/src/builtin.ts`、`docs/phase-plans/phase-3b-tool-hardening.zh-CN.md`。
+
+范围：Web 默认关闭和 host allowlist、Skill 低优先级不可覆盖安全规则、Subagent 深度/工具白名单/预算、Workflow 最大迭代与停止条件。
+
+适配方式：先落地 `CapabilityRegistry` 与 `capability_status` 只读切片；真实 Web provider、Skill loader、Subagent lifecycle 和 Workflow executor 留到后续专门阶段，避免从 prompt 或扩展入口绕过 ToolRuntime。
