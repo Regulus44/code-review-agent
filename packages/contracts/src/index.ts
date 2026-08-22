@@ -4,6 +4,7 @@ export type Brand<Value, Name extends string> = Value & { readonly __brand: Name
 export type SessionId = Brand<string, "SessionId">;
 export type TurnId = Brand<string, "TurnId">;
 export type TaskId = Brand<string, "TaskId">;
+export type GoalId = Brand<string, "GoalId">;
 export type ToolCallId = Brand<string, "ToolCallId">;
 export type PermissionId = Brand<string, "PermissionId">;
 export type InteractionId = Brand<string, "InteractionId">;
@@ -28,6 +29,9 @@ export type AgentEventType =
   | "task/created"
   | "task/updated"
   | "task/ended"
+  | "goal/created"
+  | "goal/updated"
+  | "goal/ended"
   | "plan/updated"
   | "todo/updated"
   | "tool/call"
@@ -62,6 +66,7 @@ export interface AgentEvent {
 export type SessionStatus = "idle" | "queued" | "running" | "stopped" | "failed" | "interrupted";
 export type TurnStatus = "queued" | "running" | "completed" | "stopped" | "failed" | "interrupted";
 export type TaskStatus = "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "blocked";
+export type GoalStatus = "active" | "completed" | "blocked" | "cancelled";
 export type PermissionPreset = "read-only" | "workspace-write" | "ask-on-write" | "ask-on-execute" | "danger-full-access";
 
 export interface SessionSummary {
@@ -96,6 +101,19 @@ export interface TaskProjection {
   readonly updatedAt: string;
   readonly title?: string;
   readonly result?: unknown;
+  readonly lastSequence: number;
+}
+
+export interface GoalProjection {
+  readonly id: GoalId;
+  readonly title: string;
+  readonly status: GoalStatus;
+  readonly successCriteria: readonly string[];
+  readonly budget?: Readonly<Record<string, unknown>>;
+  readonly result?: unknown;
+  readonly reason?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
   readonly lastSequence: number;
 }
 
@@ -147,6 +165,7 @@ export interface SessionProjection extends SessionSummary {
   }[];
   readonly turns: readonly TurnProjection[];
   readonly tasks: readonly TaskProjection[];
+  readonly goals: readonly GoalProjection[];
   readonly plan: PlanProjection;
   readonly todos: readonly TodoItem[];
   readonly interactions: readonly InteractionProjection[];

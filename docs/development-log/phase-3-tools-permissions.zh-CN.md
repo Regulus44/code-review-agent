@@ -94,6 +94,17 @@ Phase 3 的基础 ToolRuntime、权限和审计 checkpoint 已完成。对当前
 
 继续 3B.3 的 Windows/Bash smoke 与 Terminal/job presentation 收口，然后进入 3B.4 的 Goal、Session query、read_image、LSP read-only contract。
 
+## 2026-08-22：Phase 3B.4 Goal/Session query/read_image/LSP read-only checkpoint
+
+- contracts 与 SQLite/InMemory projection 新增 Goal 生命周期：`goal/created`、`goal/updated`、`goal/ended`，支持 active/completed/blocked/cancelled、success criteria、budget/result/reason；
+- 新增 `create_goal`、`update_goal`、`get_goal` 和 `session_query`，查询只读取当前 session 的公开事件，支持 sequence/time/type/text/status 过滤和结果上限；
+- `JobManager` 支持从 `job/*` 事件恢复完成任务元数据和增量输出；重启后仍在运行的 job 标记为 `orphaned`，不虚构可恢复的子进程；
+- 新增能力开关控制的 `read_image`，先做 workspace、大小、媒体类型和 PNG/JPEG/GIF 尺寸检查；未启用 vision 时不将工具加入可见目录；
+- 新增 host 配置的只读 LSP JSON-RPC 客户端与 `lsp_diagnostics`、`lsp_definition`、`lsp_references`；工具输入不能指定任意 server executable，写入仍必须回到 edit/patch/permission；
+- 3B.4 针对性验证：`pnpm exec tsc -b --force`、tools 38 tests、storage 8 tests、runtime 12 tests；Windows `pwsh` smoke 在可用时验证输出，不可用时验证 `COMMAND_NOT_FOUND` 分类。
+
+继续 3B.5：只实现 Web/Skill/Subagent/Workflow 的安全边界和可验证最小切片，不引入任意网络、任意代码执行或未审计的子代理运行时。
+
 阶段计划：[phase-3-tools-permissions.zh-CN.md](../phase-plans/phase-3-tools-permissions.zh-CN.md)
 
 ## 2026-08-21：阶段启动

@@ -21,7 +21,7 @@ import {
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { randomUUID } from "node:crypto";
-import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type ExecuteToolOutput, type PermissionPreset } from "@code-review-agent/tools";
+import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type ExecuteToolOutput, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
 import { buildAgentSystemPrompt } from "./system-prompt.js";
 
 export interface AgentHostOptions {
@@ -33,6 +33,8 @@ export interface AgentHostOptions {
   readonly toolRegistry?: ToolRegistry;
   readonly permissionPreset?: PermissionPreset;
   readonly toolPromptRegistry?: ToolPromptRegistry;
+  readonly visionEnabled?: boolean;
+  readonly lspServers?: Readonly<Record<string, LspServerConfig>>;
 }
 
 interface PendingTurn {
@@ -86,8 +88,8 @@ export class AgentHost {
     if (options.toolPromptRegistry === undefined) this.toolPromptRegistry.registerMany(BUILTIN_TOOL_PROMPT_SPECS);
     if (options.toolRuntime === undefined) {
       this.terminalManager = new TerminalManager();
-      this.jobManager = new JobManager();
-      registry.registerMany(createBuiltinTools({ terminalManager: this.terminalManager, jobManager: this.jobManager }));
+      this.jobManager = new JobManager({ eventStore: options.store });
+      registry.registerMany(createBuiltinTools({ terminalManager: this.terminalManager, jobManager: this.jobManager, eventStore: options.store, ...(options.visionEnabled === undefined ? {} : { visionEnabled: options.visionEnabled }), ...(options.lspServers === undefined ? {} : { lspServers: options.lspServers }) }));
       this.permissionPreset = options.permissionPreset ?? "ask-on-write";
     } else {
       this.permissionPreset = options.permissionPreset;

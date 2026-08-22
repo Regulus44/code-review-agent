@@ -1,6 +1,7 @@
 import type {
   ToolDefinition,
   ToolContext,
+  EventStore,
   ToolResult,
   TodoItem,
   TodoStatus,
@@ -11,6 +12,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { WorkspaceResolver } from "@code-review-agent/workspace";
 import { JobManager } from "./jobs.js";
+import { readWorkspaceImage } from "./image.js";
+import { LspManager, type LspServerConfig } from "./lsp.js";
 
 const ALLOWED_EXECUTABLES = new Set(["git", "node", "npm", "pnpm", "vitest"]);
 const MAX_PROCESS_OUTPUT_BYTES = 512 * 1024;
@@ -254,10 +257,11 @@ export class TerminalManager {
   }
 }
 
-export function createBuiltinTools(options: { readonly terminalManager?: TerminalManager; readonly jobManager?: JobManager } = {}): readonly ToolDefinition[] {
+export function createBuiltinTools(options: { readonly terminalManager?: TerminalManager; readonly jobManager?: JobManager; readonly eventStore?: Pick<EventStore, "list" | "project">; readonly visionEnabled?: boolean; readonly lspServers?: Readonly<Record<string, LspServerConfig>>; readonly lspManager?: LspManager } = {}): readonly ToolDefinition[] {
   const terminals = options.terminalManager ?? new TerminalManager();
-  const jobs = options.jobManager ?? new JobManager();
-  return [
+  const jobs = options.jobManager ?? new JobManager(options.eventStore === undefined ? {} : { eventStore: options.eventStore });
+  const lsp = options.lspManager ?? new LspManager(options.lspServers);
+  const tools: ToolDefinition[] = [
     {
       name: "read_file", description: "Read a bounded, line-numbered UTF-8 text range inside the workspace.", inputSchema: object({ path: string, offset: integer(1, Number.MAX_SAFE_INTEGER), limit: integer(1, MAX_READ_LINES) }, ["path"]), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
       execute: async (input, context) => { const args = input as { path: string; offset?: number; limit?: number }; return readWorkspaceFile(context.workspaceRoot, args, context.signal); },
@@ -312,7 +316,7 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
     },
     {
       name: "job_list", description: "List background jobs belonging to this session and workspace.", inputSchema: object({}), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
-      execute: async (_input, context) => ({ ok: true, output: jobs.list(context.sessionId, context.workspaceRoot), presentation: { kind: "terminal", title: "Background jobs" } }),
+      execute: async (_input, context) => ({ ok: true, output: await jobs.listForSession(context.sessionId, context.workspaceRoot), presentation: { kind: "terminal", title: "Background jobs" } }),
     },
     {
       name: "terminal_open", description: "Open a persistent terminal process scoped to this session and workspace.", inputSchema: object({ cwd: string, executable: string, args: { type: "array" as const, items: string, maxItems: 32 }, env: { type: "object" as const, additionalProperties: true } }), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
@@ -362,7 +366,63 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
       name: "todo_write", description: "Replace the session todo list with an explicit set of pending, active, or completed items.", inputSchema: object({ todos: { type: "array" as const, maxItems: 100, items: object({ id: string, content: string, status: { type: "string" as const, enum: ["pending", "in_progress", "completed", "cancelled"] }, activeForm: string }, ["content", "status"]) } }, ["todos"]), executionMode: "exclusive", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
       execute: async (input, context) => { const args = input as { todos: readonly { id?: string; content: string; status: TodoStatus; activeForm?: string }[] }; const seen = new Set<string>(); const todos: TodoItem[] = args.todos.map((item, index) => { const id = item.id?.trim() || `todo_${index + 1}`; if (seen.has(id)) throw new Error(`TODO_DUPLICATE_ID: ${id}`); seen.add(id); return { id, content: item.content, status: item.status, ...(item.activeForm === undefined ? {} : { activeForm: item.activeForm }) }; }); await context.appendEvent("todo/updated", { todos }); return ok({ todos, allCompleted: todos.length > 0 && todos.every((item) => item.status === "completed") }); },
     },
+    {
+      name: "create_goal", description: "Create a durable session goal with explicit success criteria and optional budget metadata.", inputSchema: object({ title: string, successCriteria: { type: "array" as const, minItems: 1, maxItems: 20, items: string }, budget: { type: "object" as const, additionalProperties: true } }, ["title", "successCriteria"]), executionMode: "exclusive", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
+      execute: async (input, context) => { const args = input as { title: string; successCriteria: readonly string[]; budget?: Record<string, unknown> }; const title = args.title.trim(); const criteria = args.successCriteria.map((item) => item.trim()).filter(Boolean); if (title.length === 0 || criteria.length === 0) return fail("GOAL_INPUT_INVALID", "A goal title and at least one non-empty success criterion are required."); const goalId = `goal_${randomUUID()}`; await context.appendEvent("goal/created", { goalId, title, successCriteria: criteria, ...(args.budget === undefined ? {} : { budget: args.budget }), status: "active" }); return ok({ goalId, title, successCriteria: criteria, status: "active" }); },
+    },
+    {
+      name: "update_goal", description: "Update a durable goal status or result without claiming completion unless the supplied state says so.", inputSchema: object({ goalId: string, status: { type: "string" as const, enum: ["active", "completed", "blocked", "cancelled"] }, result: { type: "object" as const, additionalProperties: true }, reason: string }, ["goalId", "status"]), executionMode: "exclusive", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
+      execute: async (input, context) => { const args = input as { goalId: string; status: "active" | "completed" | "blocked" | "cancelled"; result?: unknown; reason?: string }; const eventType = args.status === "active" ? "goal/updated" : "goal/ended"; await context.appendEvent(eventType, { goalId: args.goalId, status: args.status, ...(args.result === undefined ? {} : { result: args.result }), ...(args.reason === undefined ? {} : { reason: args.reason }) }); return ok({ goalId: args.goalId, status: args.status, ...(args.result === undefined ? {} : { result: args.result }), ...(args.reason === undefined ? {} : { reason: args.reason }) }); },
+    },
+    {
+      name: "get_goal", description: "Read the current durable goal projection for this session.", inputSchema: object({ goalId: string }, ["goalId"]), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
+      execute: async (input, context) => getGoal(options.eventStore, context, (input as { goalId: string }).goalId),
+    },
+    {
+      name: "session_query", description: "Query bounded public events for the current session by sequence, time, event type, text, or status.", inputSchema: object({ afterSequence: integer(0, Number.MAX_SAFE_INTEGER), beforeSequence: integer(1, Number.MAX_SAFE_INTEGER), after: string, before: string, eventTypes: { type: "array" as const, maxItems: 20, items: string }, text: string, status: string, maxResults: integer(1, 200) }), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
+      execute: async (input, context) => querySessionEvents(options.eventStore, context, input as SessionQueryInput),
+    },
   ];
+  if (options.visionEnabled === true) tools.push({
+    name: "read_image", description: "Read bounded image metadata and an optional controlled vision artifact from the workspace.", inputSchema: object({ path: string, includeData: boolean }, ["path"]), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
+    execute: async (input, context) => readWorkspaceImage(context.workspaceRoot, input as { path: string; includeData?: boolean }, context.signal),
+  });
+  if (options.lspServers !== undefined || options.lspManager !== undefined) {
+    tools.push(
+      { name: "lsp_diagnostics", description: "Request read-only diagnostics from a configured workspace LSP server.", inputSchema: object({ serverId: string, path: string }, ["path"]), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel", execute: async (input, context) => lsp.diagnostics(input as { serverId?: string; path: string }, context.workspaceRoot, context.signal) },
+      { name: "lsp_definition", description: "Request a read-only definition location from a configured workspace LSP server.", inputSchema: object({ serverId: string, path: string, line: integer(0, Number.MAX_SAFE_INTEGER), character: integer(0, Number.MAX_SAFE_INTEGER) }, ["path", "line", "character"]), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel", execute: async (input, context) => lsp.definition(input as { serverId?: string; path: string; line: number; character: number }, context.workspaceRoot, context.signal) },
+      { name: "lsp_references", description: "Request read-only references from a configured workspace LSP server.", inputSchema: object({ serverId: string, path: string, line: integer(0, Number.MAX_SAFE_INTEGER), character: integer(0, Number.MAX_SAFE_INTEGER), includeDeclaration: boolean }, ["path", "line", "character"]), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel", execute: async (input, context) => lsp.references(input as { serverId?: string; path: string; line: number; character: number; includeDeclaration?: boolean }, context.workspaceRoot, context.signal) },
+    );
+  }
+  return tools;
+}
+
+interface SessionQueryInput { readonly afterSequence?: number; readonly beforeSequence?: number; readonly after?: string; readonly before?: string; readonly eventTypes?: readonly string[]; readonly text?: string; readonly status?: string; readonly maxResults?: number; }
+
+async function getGoal(store: Pick<EventStore, "project"> | undefined, context: ToolContext, goalId: string): Promise<ToolResult> {
+  if (store === undefined) return fail("GOAL_STATE_UNAVAILABLE", "Goal projection is unavailable in this tool adapter.");
+  const projection = await store.project(context.sessionId);
+  const goal = projection?.goals.find((item) => item.id === goalId);
+  return goal === undefined ? fail("GOAL_NOT_FOUND", `Goal does not exist in this session: ${goalId}`) : { ok: true, output: goal, presentation: { kind: "tool", title: `Goal ${goalId}`, data: goal } };
+}
+
+async function querySessionEvents(store: Pick<EventStore, "list"> | undefined, context: ToolContext, input: SessionQueryInput): Promise<ToolResult> {
+  if (store === undefined) return fail("SESSION_QUERY_UNAVAILABLE", "Session query is unavailable in this tool adapter.");
+  const events = await store.list(context.sessionId, input.afterSequence ?? 0);
+  const eventTypes = new Set(input.eventTypes ?? []);
+  const text = input.text?.toLowerCase();
+  const filtered = events.filter((event) => {
+    if (input.beforeSequence !== undefined && event.sequence >= input.beforeSequence) return false;
+    if (input.after !== undefined && event.createdAt < input.after) return false;
+    if (input.before !== undefined && event.createdAt > input.before) return false;
+    if (eventTypes.size > 0 && !eventTypes.has(event.type)) return false;
+    if (input.status !== undefined && event.payload["status"] !== input.status) return false;
+    if (text !== undefined && !JSON.stringify(event).toLowerCase().includes(text)) return false;
+    return true;
+  });
+  const maxResults = Math.min(Math.max(input.maxResults ?? 50, 1), 200);
+  const result = filtered.slice(0, maxResults);
+  return { ok: true, output: { sessionId: context.sessionId, events: result, returned: result.length, totalMatches: filtered.length, truncated: filtered.length > result.length, nextAfterSequence: result.at(-1)?.sequence }, presentation: { kind: "tool", title: "Session query", data: { returned: result.length, totalMatches: filtered.length } } };
 }
 
 interface EditableFile {
@@ -403,7 +463,7 @@ function shellLaunch(kind: ShellKind, command: string): { readonly executable: s
 
 function runShellForeground(kind: ShellKind, command: string, label: string, cwd: string, executable: string, args: readonly string[], timeoutMs: number, signal: AbortSignal): Promise<ToolResult> {
   return new Promise((resolve) => {
-    const child = spawn(executable, [...args], { cwd, detached: true, shell: false, windowsHide: true, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env } });
+    const child = spawn(executable, [...args], { cwd, detached: false, shell: false, windowsHide: true, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env } });
     let stdout = "";
     let stderr = "";
     let output = "";

@@ -160,3 +160,19 @@ ID:
 范围：Purpose、When to use、When not to use、Prerequisites、Input rules、Sequencing、Result interpretation、Failure recovery、Safety 九段工具指导。
 
 适配方式：所有文案和实现均为本项目自有内容；不复制 Claude Code 代码、账户、遥测或商业服务。
+
+### DSH-007
+
+来源仓库：`D:/Develop/deepseek-harness-fork`
+
+来源路径：`packages/goal/tool-goal`、`packages/session-query/tool-session-query`、`packages/fs/tool-fs/src/read-image.ts`、`packages/lsp/lsp`、`packages/lsp/lsp-stdio`、`packages/shell/tool-bash` background adapter。
+
+复用方式：`behavior-reference` + `adapt`
+
+许可证/来源证据：`D:/Develop/deepseek-harness-fork/LICENSE` 为 MIT；本次未复制 DSH 运行时代码或内部包依赖。
+
+本项目路径：`packages/contracts/src/index.ts`、`packages/storage/src/index.ts`、`packages/tools/src/builtin.ts`、`packages/tools/src/jobs.ts`、`packages/tools/src/image.ts`、`packages/tools/src/lsp.ts`。
+
+范围：Goal durable lifecycle、bounded session query、background job restart metadata、image type/size gate 和 configured read-only LSP lifecycle。
+
+适配方式：使用本项目 EventStore、SQLite projection、ToolRuntime、WorkspaceResolver、权限和审计；LSP server 只能由 host 配置，工具输入不能注入任意 executable；无 vision/LSP capability 时不暴露对应工具。

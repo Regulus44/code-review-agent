@@ -34,4 +34,20 @@ describe("JobManager", () => {
       expect(jobs.list("ses_job_kill", root)[0]?.status).toBe("cancelled");
     } finally { await rm(root, { recursive: true, force: true }); }
   });
+
+  it("recovers completed metadata and buffered output from durable job events", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-job-recovery-"));
+    try {
+      const sessionId = "ses_job_recovery";
+      const events = [
+        { sessionId, type: "job/started", sequence: 1, createdAt: new Date().toISOString(), payload: { jobId: "job_recovered", sessionId, workspaceRoot: root, cwd: root, command: "node long" } },
+        { sessionId, type: "job/output", sequence: 2, createdAt: new Date().toISOString(), payload: { jobId: "job_recovered", text: "persisted-output" } },
+        { sessionId, type: "job/ended", sequence: 3, createdAt: new Date().toISOString(), payload: { jobId: "job_recovered", status: "completed", endedAt: new Date().toISOString(), exitCode: 0 } },
+      ] as const;
+      const jobs = new JobManager({ eventStore: { list: async () => events as never } });
+      expect(await jobs.listForSession(sessionId, root)).toMatchObject([{ jobId: "job_recovered", status: "completed" }]);
+      const output = await jobs.read(sessionId, "job_recovered", 100);
+      expect(output.output).toMatchObject({ output: "persisted-output", status: "completed", exitCode: 0 });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
 });

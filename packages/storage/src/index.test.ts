@@ -44,6 +44,13 @@ describe("InMemoryEventStore", () => {
     expect(projection?.plan).toMatchObject({ content: "Read then edit", status: "active" }); expect(projection?.todos).toHaveLength(2); expect(projection?.interactions[0]).toMatchObject({ status: "answered", answer: "yes" });
   });
 
+  it("projects durable goal lifecycle state", async () => {
+    const store = new InMemoryEventStore(); const sessionId = await store.createSession("D:/workspace");
+    await store.append({ sessionId, type: "goal/created", payload: { goalId: "goal_1", title: "Ship phase", successCriteria: ["Tests pass"], status: "active" } });
+    await store.append({ sessionId, type: "goal/ended", payload: { goalId: "goal_1", status: "completed", result: { tests: "pass" } } });
+    expect((await store.project(sessionId))?.goals[0]).toMatchObject({ id: "goal_1", title: "Ship phase", status: "completed", successCriteria: ["Tests pass"], result: { tests: "pass" } });
+  });
+
   it("persists events, projections, commands, and schema across reopen", async () => {
     const directory = mkdtempSync(join(tmpdir(), "code-review-agent-"));
     const databasePath = join(directory, "agent.sqlite");

@@ -7,6 +7,8 @@ import {
   type CommandClaim,
   type CommandRecord,
   type EventListener,
+  type GoalProjection,
+  type GoalStatus,
   type InteractionProjection,
   type InteractionStatus,
   type InteractionOption,
@@ -70,6 +72,7 @@ function baseProjection(id: SessionId, workspaceRoot: string, permissionPreset: 
     messages: [],
     turns: [],
     tasks: [],
+    goals: [],
     plan: { content: "", status: "cleared", updatedAt: timestamp, lastSequence: 0 },
     todos: [],
     interactions: [],
@@ -96,6 +99,10 @@ function taskStatus(value: unknown, fallback: TaskStatus): TaskStatus {
   return value === "queued" || value === "running" || value === "waiting" || value === "completed" || value === "failed" || value === "cancelled" || value === "blocked"
     ? value
     : fallback;
+}
+
+function goalStatus(value: unknown, fallback: GoalStatus): GoalStatus {
+  return value === "active" || value === "completed" || value === "blocked" || value === "cancelled" ? value : fallback;
 }
 
 function planStatus(value: unknown, fallback: PlanStatus): PlanStatus {
@@ -140,6 +147,7 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
     ...projection,
     plan: projection.plan ?? { content: "", status: "cleared", updatedAt: event.createdAt, lastSequence: 0 },
     todos: projection.todos ?? [],
+    goals: projection.goals ?? [],
     interactions: projection.interactions ?? [],
     updatedAt: event.createdAt,
     lastSequence: event.sequence,
@@ -255,6 +263,38 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
         ...next,
         tasks: current === undefined ? [...next.tasks, task] : next.tasks.map((item) => (item.id === id ? task : item)),
       };
+    }
+  }
+
+  if (event.type === "goal/created" || event.type === "goal/updated" || event.type === "goal/ended") {
+    const rawGoalId = event.payload["goalId"];
+    if (typeof rawGoalId === "string") {
+      const id = brand<string, "GoalId">(rawGoalId);
+      const current = next.goals.find((goal) => goal.id === id);
+      const rawCriteria = event.payload["successCriteria"];
+      const successCriteria = Array.isArray(rawCriteria)
+        ? rawCriteria.filter((item): item is string => typeof item === "string")
+        : current?.successCriteria ?? [];
+      const goal: GoalProjection = {
+        ...(current ?? {
+          id,
+          title: typeof event.payload["title"] === "string" ? event.payload["title"] : "",
+          status: "active" as const,
+          successCriteria,
+          createdAt: event.createdAt,
+          updatedAt: event.createdAt,
+          lastSequence: event.sequence,
+        }),
+        ...(typeof event.payload["title"] === "string" ? { title: event.payload["title"] } : {}),
+        status: goalStatus(event.payload["status"], current?.status ?? "active"),
+        successCriteria,
+        ...(event.payload["budget"] !== undefined ? { budget: event.payload["budget"] as Readonly<Record<string, unknown>> } : {}),
+        ...(Object.prototype.hasOwnProperty.call(event.payload, "result") ? { result: event.payload["result"] } : {}),
+        ...(typeof event.payload["reason"] === "string" ? { reason: event.payload["reason"] } : {}),
+        updatedAt: event.createdAt,
+        lastSequence: event.sequence,
+      };
+      next = { ...next, goals: current === undefined ? [...next.goals, goal] : next.goals.map((item) => item.id === id ? goal : item) };
     }
   }
 

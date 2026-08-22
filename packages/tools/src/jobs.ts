@@ -1,9 +1,9 @@
-import type { ToolResult } from "@code-review-agent/contracts";
+import { brand, type AgentEvent, type EventStore, type ToolResult } from "@code-review-agent/contracts";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 
-export type JobStatus = "running" | "completed" | "failed" | "cancelled";
+export type JobStatus = "running" | "completed" | "failed" | "cancelled" | "orphaned";
 
 export interface JobSummary {
   readonly jobId: string;
@@ -31,7 +31,7 @@ interface JobRecord {
   endedAt: string | undefined;
   exitCode: number | undefined;
   signal: string | undefined;
-  readonly child: ChildProcessWithoutNullStreams;
+  readonly child?: ChildProcessWithoutNullStreams;
   output: string;
   readOffset: number;
   totalBytes: number;
@@ -58,6 +58,8 @@ const MAX_JOB_OUTPUT_BYTES = 512 * 1024;
 /** Session/workspace-scoped background process registry with durable event hooks. */
 export class JobManager {
   private readonly jobs = new Map<string, JobRecord>();
+
+  constructor(private readonly options: { readonly eventStore?: Pick<EventStore, "list"> } = {}) {}
 
   async start(input: StartJobInput): Promise<ToolResult> {
     try { if (!(await stat(input.cwd)).isDirectory()) return fail("WORKDIR_INVALID", `Job cwd is not a directory: ${input.cwd}`); }
@@ -90,6 +92,10 @@ export class JobManager {
       record.status = "failed";
     });
     child.once("close", (exitCode, signalName) => {
+      child.stdin.destroy();
+      child.stdout.destroy();
+      child.stderr.destroy();
+      child.unref();
       record.exitCode = exitCode === null ? undefined : exitCode;
       record.signal = signalName ?? undefined;
       record.status = record.killed ? "cancelled" : exitCode === 0 ? "completed" : "failed";
@@ -102,7 +108,7 @@ export class JobManager {
   }
 
   async read(sessionId: string, jobId: string, maxBytes = 64 * 1024): Promise<ToolResult> {
-    const record = this.get(sessionId, jobId);
+    const record = await this.getOrRecover(sessionId, jobId);
     const bounded = Math.min(Math.max(maxBytes, 1), MAX_JOB_OUTPUT_BYTES);
     const available = record.output.slice(record.readOffset);
     const text = available.slice(0, bounded);
@@ -111,8 +117,9 @@ export class JobManager {
   }
 
   async kill(sessionId: string, jobId: string): Promise<ToolResult> {
-    const record = this.get(sessionId, jobId);
+    const record = await this.getOrRecover(sessionId, jobId);
     if (record.status !== "running") return { ok: true, output: this.summary(record), presentation: { kind: "terminal", title: `Job ${record.status}`, data: this.summary(record) } };
+    if (record.child === undefined) return fail("JOB_NOT_RUNNING", "The job metadata was recovered after restart, but its process is no longer attached.");
     record.killed = true;
     terminateProcessTree(record.child);
     return { ok: true, output: { jobId, status: "cancelling" }, presentation: { kind: "terminal", title: `Stopping job ${jobId}`, data: this.summary(record) } };
@@ -122,10 +129,67 @@ export class JobManager {
     return [...this.jobs.values()].filter((job) => job.sessionId === sessionId && job.workspaceRoot === workspaceRoot).map((job) => this.summary(job));
   }
 
-  private get(sessionId: string, jobId: string): JobRecord {
+  async listForSession(sessionId: string, workspaceRoot: string): Promise<readonly JobSummary[]> {
+    await this.recoverSession(sessionId, workspaceRoot);
+    return this.list(sessionId, workspaceRoot);
+  }
+
+  private async getOrRecover(sessionId: string, jobId: string): Promise<JobRecord> {
+    const existing = this.jobs.get(jobId);
+    if (existing !== undefined) {
+      if (existing.sessionId !== sessionId) throw new Error("JOB_NOT_FOUND: job does not belong to this session");
+      return existing;
+    }
+    await this.recoverSession(sessionId);
     const record = this.jobs.get(jobId);
     if (record === undefined || record.sessionId !== sessionId) throw new Error("JOB_NOT_FOUND: job does not belong to this session");
     return record;
+  }
+
+  private async recoverSession(sessionId: string, workspaceRoot?: string): Promise<void> {
+    const list = this.options.eventStore?.list;
+    if (list === undefined) return;
+    const events = await list(brand<string, "SessionId">(sessionId), 0);
+    const started = new Map<string, AgentEvent>();
+    const output = new Map<string, string>();
+    const ended = new Map<string, AgentEvent>();
+    for (const event of events) {
+      const jobId = event.payload["jobId"];
+      if (typeof jobId !== "string") continue;
+      if (event.type === "job/started") started.set(jobId, event);
+      if (event.type === "job/output") output.set(jobId, `${output.get(jobId) ?? ""}${typeof event.payload["text"] === "string" ? event.payload["text"] : ""}`);
+      if (event.type === "job/ended") ended.set(jobId, event);
+    }
+    for (const [jobId, event] of started) {
+      if (this.jobs.has(jobId)) continue;
+      const payload = event.payload;
+      const eventWorkspace = typeof payload["workspaceRoot"] === "string" ? payload["workspaceRoot"] : undefined;
+      if (workspaceRoot !== undefined && eventWorkspace !== workspaceRoot) continue;
+      const finalPayload = ended.get(jobId)?.payload;
+      const finalStatus = finalPayload?.["status"];
+      const status: JobStatus = finalStatus === "completed" || finalStatus === "failed" || finalStatus === "cancelled"
+        ? finalStatus
+        : "orphaned";
+      const record: JobRecord = {
+        jobId,
+        sessionId,
+        workspaceRoot: eventWorkspace ?? workspaceRoot ?? ".",
+        cwd: typeof payload["cwd"] === "string" ? payload["cwd"] : ".",
+        command: typeof payload["command"] === "string" ? payload["command"] : "<recovered job>",
+        status,
+        startedAt: event.createdAt,
+        endedAt: typeof finalPayload?.["endedAt"] === "string" ? finalPayload["endedAt"] : undefined,
+        exitCode: typeof finalPayload?.["exitCode"] === "number" ? finalPayload["exitCode"] : undefined,
+        signal: typeof finalPayload?.["signal"] === "string" ? finalPayload["signal"] : undefined,
+        output: output.get(jobId) ?? "",
+        readOffset: 0,
+        totalBytes: Buffer.byteLength(output.get(jobId) ?? "", "utf8"),
+        killed: false,
+        endedNotified: true,
+        error: undefined,
+      };
+      this.jobs.set(jobId, record);
+    }
   }
 
   private summary(record: JobRecord): JobSummary {
