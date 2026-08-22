@@ -178,4 +178,28 @@ git diff --check ✓
 Web script parse ✓
 Browser DOM smoke ✓（Workspace 分组、搜索、展开/折叠、操作菜单）
 API delete smoke ✓（软删除、列表隐藏、事件历史保留）
+
+## 2026-08-22：助手消息 Markdown 渲染
+
+### 问题定位
+
+- Assistant 消息使用 `textContent` 写入页面，Markdown 标记会以井号、星号和反引号原样显示。
+- 代码审查和 Coding Agent 的核心输出包含标题、列表、代码片段和链接，纯文本展示会降低阅读和复制效率。
+
+### 变更范围
+
+- Assistant 消息增加安全的轻量 Markdown 渲染器，覆盖标题、段落、粗体、斜体、行内代码、fenced code block、无序/有序列表、任务复选框、引用、分隔线和 HTTP(S) 链接。
+- 渲染前统一转义原始 HTML；链接协议限制为 HTTP(S)，外部链接使用新标签页和 `noreferrer noopener`。
+- 流式 `assistant/chunk` 按原始消息缓冲重新渲染，历史消息和实时消息保持相同的 Markdown 效果。
+- User 消息、工具详情、权限 payload 和 JSON 结果继续使用纯文本/等宽文本展示，保留原始结构。
+
+### 验证
+
+```text
+Web script parse ✓
+Browser DOM smoke ✓（标题、strong、inline code、列表节点）
+HTML injection check ✓（助手消息中没有 script/iframe 节点）
+pnpm typecheck   ✓
+pnpm test        ✓
+```
 ```
