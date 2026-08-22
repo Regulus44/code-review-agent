@@ -7,7 +7,7 @@ import type {
 import { readFile, writeFile, readdir, stat, mkdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { WorkspaceResolver } from "@code-review-agent/workspace";
 
 const ALLOWED_EXECUTABLES = new Set(["git", "node", "npm", "pnpm", "vitest"]);
@@ -268,12 +268,12 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
       execute: async (input, context) => grepFiles(context.workspaceRoot, input as { pattern: string; path?: string; maxResults?: number; literal?: boolean; ignoreCase?: boolean; contextLines?: number }, context.signal),
     },
     {
-      name: "edit_file", description: "Replace an exact string in a workspace file and return a diff.", inputSchema: object({ path: string, oldText: string, newText: string }), executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "cancel",
-      execute: async (input, context) => editFile(context.workspaceRoot, input as { path: string; oldText: string; newText: string }),
+      name: "edit_file", description: "Apply one or more unique exact replacements with stale detection and a unified diff.", inputSchema: object({ path: string, oldText: string, newText: string, expectedHash: string, edits: { type: "array" as const, maxItems: 50, items: object({ oldText: string, newText: string }, ["oldText", "newText"]) } }, ["path"]), executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "cancel",
+      execute: async (input, context) => editFile(context.workspaceRoot, input as { path: string; oldText?: string; newText?: string; expectedHash?: string; edits?: readonly { oldText: string; newText: string }[] }),
     },
     {
-      name: "write_file", description: "Create a UTF-8 workspace file; overwrites require explicit opt-in and return a diff.", inputSchema: object({ path: string, content: string, overwrite: boolean }), executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "cancel",
-      execute: async (input, context) => writeWorkspaceFile(context.workspaceRoot, input as { path: string; content: string; overwrite?: boolean }),
+      name: "write_file", description: "Create, overwrite, or append a UTF-8 workspace file with stale detection and a unified diff.", inputSchema: object({ path: string, content: string, overwrite: boolean, mode: { type: "string" as const, enum: ["create", "overwrite", "append"] }, expectedHash: string }, ["path", "content"]), executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "cancel",
+      execute: async (input, context) => writeWorkspaceFile(context.workspaceRoot, input as { path: string; content: string; overwrite?: boolean; mode?: "create" | "overwrite" | "append"; expectedHash?: string }),
     },
     {
       name: "git_status", description: "Read git status for the workspace.", inputSchema: object({}), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
@@ -342,16 +342,85 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
   ];
 }
 
-async function editFile(root: string, args: { path: string; oldText: string; newText: string }): Promise<ToolResult> {
-  const resolver = new WorkspaceResolver(root); const target = await resolver.resolveExisting(args.path); const before = await readFile(target, "utf8"); const first = before.indexOf(args.oldText); if (first < 0) return fail("TEXT_NOT_FOUND", "oldText was not found"); if (before.indexOf(args.oldText, first + args.oldText.length) >= 0) return fail("TEXT_NOT_UNIQUE", "oldText occurs more than once"); const after = before.slice(0, first) + args.newText + before.slice(first + args.oldText.length); await writeFile(target, after, "utf8"); return { ok: true, output: { path: args.path }, diff: { path: args.path, before: args.oldText, after: args.newText }, presentation: { kind: "diff", title: `Updated ${args.path}`, data: { before: args.oldText, after: args.newText } } };
+interface EditableFile {
+  readonly target: string;
+  readonly before: string;
+  readonly hash: string;
 }
 
-async function writeWorkspaceFile(root: string, args: { path: string; content: string; overwrite?: boolean }): Promise<ToolResult> {
-  const resolver = new WorkspaceResolver(root); const candidate = resolver.resolve(args.path); let before: string | undefined;
-  try { await stat(candidate); before = await readFile(await resolver.resolveExisting(args.path), "utf8"); } catch (error) { if (!isMissingPathError(error)) throw error; }
-  if (before !== undefined && args.overwrite !== true) return fail("WRITE_TARGET_EXISTS", "Refusing to overwrite an existing file; set overwrite=true or use edit_file");
-  await mkdir(path.dirname(candidate), { recursive: true }); const target = await resolver.resolveForWrite(args.path); await writeFile(target, args.content, "utf8");
-  return { ...ok({ path: args.path, bytes: Buffer.byteLength(args.content) }), ...(before === undefined ? {} : { diff: { path: args.path, before, after: args.content }, presentation: { kind: "diff" as const, title: `Updated ${args.path}`, data: { before, after: args.content } } }) };
+async function loadEditableFile(root: string, filePath: string): Promise<EditableFile | ToolResult> {
+  const resolver = new WorkspaceResolver(root);
+  let target: string;
+  try { target = await resolver.resolveExisting(filePath); } catch { return fail("FILE_NOT_FOUND", `File was not found: ${filePath}`); }
+  const info = await stat(target);
+  if (!info.isFile()) return fail("FILE_NOT_REGULAR", `Target is not a regular file: ${filePath}`);
+  if (info.size > MAX_FILE_BYTES) return fail("FILE_TOO_LARGE", `File exceeds ${MAX_FILE_BYTES} bytes`);
+  const buffer = await readFile(target);
+  if (buffer.includes(0)) return fail("FILE_BINARY", `Binary file is not editable as UTF-8 text: ${filePath}`);
+  const before = buffer.toString("utf8");
+  return { target, before, hash: hashText(before) };
+}
+
+async function editFile(root: string, args: { path: string; oldText?: string; newText?: string; expectedHash?: string; edits?: readonly { oldText: string; newText: string }[] }): Promise<ToolResult> {
+  const loaded = await loadEditableFile(root, args.path);
+  if ("ok" in loaded) return loaded;
+  if (args.expectedHash !== undefined && args.expectedHash !== loaded.hash) return editFailure("EDIT_STALE", args.path, loaded.before, `File hash changed before edit (expected ${args.expectedHash}, current ${loaded.hash})`, 0);
+  const operations = args.edits ?? (args.oldText === undefined || args.newText === undefined ? [] : [{ oldText: args.oldText, newText: args.newText }]);
+  if (operations.length === 0) return fail("EDIT_INPUT_INVALID", "Provide oldText/newText or at least one edits item", "Provide an exact replacement or a non-empty edits array.");
+  let after = loaded.before;
+  const statuses: { readonly index: number; readonly status: "applied"; readonly matchCount: number }[] = [];
+  for (const [index, operation] of operations.entries()) {
+    if (operation.oldText.length === 0) return fail("EDIT_INPUT_INVALID", `Edit ${index + 1} oldText cannot be empty`);
+    const positions = findOccurrences(after, operation.oldText);
+    if (positions.length !== 1) return editFailure(positions.length === 0 ? "TEXT_NOT_FOUND" : "TEXT_NOT_UNIQUE", args.path, after, `Edit ${index + 1} expected one match but found ${positions.length}`, positions.length);
+    const position = positions[0]!;
+    after = after.slice(0, position) + operation.newText + after.slice(position + operation.oldText.length);
+    statuses.push({ index, status: "applied", matchCount: 1 });
+  }
+  const latest = await loadEditableFile(root, args.path);
+  if ("ok" in latest) return latest;
+  if (latest.hash !== loaded.hash) return editFailure("EDIT_CONFLICT", args.path, latest.before, `File changed during edit (expected ${loaded.hash}, current ${latest.hash})`, 0);
+  if (after === loaded.before) return fail("EDIT_NOOP", `Edit produced no change: ${args.path}`, "Reread the file and provide a replacement that changes the current content.");
+  await writeFile(loaded.target, after, "utf8");
+  const unifiedDiff = buildUnifiedDiff(args.path, loaded.before, after);
+  return {
+    ok: true,
+    output: { path: args.path, beforeHash: loaded.hash, afterHash: hashText(after), operations: statuses, changed: true, unifiedDiff },
+    diff: { path: args.path, before: loaded.before, after },
+    presentation: { kind: "diff", title: `Updated ${args.path}`, text: unifiedDiff, data: { path: args.path, operations: statuses, unifiedDiff } },
+  };
+}
+
+async function writeWorkspaceFile(root: string, args: { path: string; content: string; overwrite?: boolean; mode?: "create" | "overwrite" | "append"; expectedHash?: string }): Promise<ToolResult> {
+  const resolver = new WorkspaceResolver(root);
+  const candidate = resolver.resolve(args.path);
+  const mode = args.mode ?? (args.overwrite === true ? "overwrite" : "create");
+  let loaded: EditableFile | undefined;
+  try {
+    const current = await loadEditableFile(root, args.path);
+    if ("ok" in current) {
+      if (current.error?.code !== "FILE_NOT_FOUND") return current;
+    } else loaded = current;
+  } catch (error) { if (!isMissingPathError(error)) throw error; }
+  if (mode === "create" && loaded !== undefined) return fail("WRITE_TARGET_EXISTS", "Refusing to overwrite an existing file in create mode", "Use mode=overwrite or mode=append only when the current content has been inspected and approval is granted.");
+  if (args.expectedHash !== undefined && (loaded === undefined || args.expectedHash !== loaded.hash)) return fail("EDIT_STALE", `File hash does not match expectedHash for ${args.path}`, "Reread the target and send the current expectedHash before writing.");
+  const before = loaded?.before ?? "";
+  const after = mode === "append" ? `${before}${args.content}` : args.content;
+  if (loaded !== undefined) {
+    const latest = await loadEditableFile(root, args.path);
+    if ("ok" in latest) return latest;
+    if (latest.hash !== loaded.hash) return fail("EDIT_CONFLICT", `File changed during write: ${args.path}`, "Reread the file and retry with a fresh expectedHash.");
+  }
+  await mkdir(path.dirname(candidate), { recursive: true });
+  const target = await resolver.resolveForWrite(args.path);
+  await writeFile(target, after, "utf8");
+  const unifiedDiff = buildUnifiedDiff(args.path, before, after);
+  return {
+    ok: true,
+    output: { path: args.path, mode, bytes: Buffer.byteLength(args.content), beforeHash: loaded?.hash, afterHash: hashText(after), unifiedDiff },
+    diff: { path: args.path, before, after },
+    presentation: { kind: "diff", title: `${mode === "append" ? "Appended to" : "Updated"} ${args.path}`, text: unifiedDiff, data: { path: args.path, mode, unifiedDiff } },
+  };
 }
 
 async function readWorkspaceFile(root: string, args: { path: string; offset?: number; limit?: number }, signal: AbortSignal): Promise<ToolResult> {
@@ -516,6 +585,26 @@ function terminalStatus(value: unknown): TerminalStatus { return value === "exit
 function waitForTerminalOutput(terminal: ManagedTerminal, waitMs: number, signal: AbortSignal): Promise<void> { return new Promise((resolve) => { const started = Date.now(); const timer = setInterval(() => { if (signal.aborted || terminal.readOffset < terminal.output.length || terminal.status !== "running" || Date.now() - started >= waitMs) { clearInterval(timer); resolve(); } }, 25); }); }
 function waitForChildClose(child: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<void> { if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(); return new Promise((resolve) => { let settled = false; const finish = () => { if (settled) return; settled = true; clearTimeout(timer); resolve(); }; const timer = setTimeout(finish, timeoutMs); child.once("close", finish); }); }
 function isMissingPathError(error: unknown): boolean { return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT"; }
+function hashText(value: string): string { return createHash("sha256").update(value, "utf8").digest("hex"); }
+function findOccurrences(value: string, needle: string): number[] { const positions: number[] = []; let offset = 0; while (offset <= value.length - needle.length) { const index = value.indexOf(needle, offset); if (index < 0) break; positions.push(index); offset = index + Math.max(needle.length, 1); } return positions; }
+function editFailure(code: string, filePath: string, text: string, message: string, matchCount: number): ToolResult {
+  const context = text.split(/\r?\n/u).slice(0, 8).map((line, index) => `${index + 1}: ${line}`).join("\n");
+  return { ok: false, error: { code, message: `${message}; path=${filePath}; matchCount=${matchCount}`, remedy: code === "EDIT_CONFLICT" || code === "EDIT_STALE" ? "Stop, reread the current file, and retry with a fresh expectedHash." : "Include more exact surrounding context so exactly one current match is selected." }, presentation: { kind: "diff", title: code, text: context, data: { path: filePath, matchCount, context } } };
+}
+function buildUnifiedDiff(filePath: string, before: string, after: string): string {
+  if (before === after) return "";
+  const oldLines = before.split(/\r?\n/u);
+  const newLines = after.split(/\r?\n/u);
+  let prefix = 0;
+  while (prefix < oldLines.length && prefix < newLines.length && oldLines[prefix] === newLines[prefix]) prefix += 1;
+  let suffix = 0;
+  while (suffix < oldLines.length - prefix && suffix < newLines.length - prefix && oldLines[oldLines.length - suffix - 1] === newLines[newLines.length - suffix - 1]) suffix += 1;
+  const removed = oldLines.slice(prefix, oldLines.length - suffix);
+  const added = newLines.slice(prefix, newLines.length - suffix);
+  const oldCount = Math.max(removed.length, 1);
+  const newCount = Math.max(added.length, 1);
+  return [`--- a/${filePath}`, `+++ b/${filePath}`, `@@ -${prefix + 1},${oldCount} +${prefix + 1},${newCount} @@`, ...removed.map((line) => `-${line}`), ...added.map((line) => `+${line}`)].join("\n");
+}
 function ok(output: unknown): ToolResult { return { ok: true, output, presentation: { kind: "tool", title: "Completed" } }; }
 function fail(code: string, message: string, remedy?: string): ToolResult { return { ok: false, error: { code, message, remedy: remedy ?? remedyForBuiltinError(code) }, presentation: { kind: "tool", title: code, text: message } }; }
 function remedyForBuiltinError(code: string): string {

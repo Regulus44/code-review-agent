@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { brand, type AgentEvent, type EventStore, type SessionId, type SessionProjection, type ToolDefinition } from "@code-review-agent/contracts";
@@ -149,6 +150,48 @@ describe("ToolRuntime", () => {
       expect(refusedResult.result?.error?.code).toBe("WRITE_TARGET_EXISTS"); expect(await readFile(path.join(root, "existing.txt"), "utf8")).toBe("before");
       const explicit = await runtime.execute({ sessionId, workspaceRoot: root, name: "write_file", input: { path: "existing.txt", content: "after", overwrite: true } }); const explicitResult = await runtime.resolvePermission(explicit.permission!.id, "approved");
       expect(explicitResult.status).toBe("completed"); expect(explicitResult.result?.diff).toMatchObject({ before: "before", after: "after" });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("applies structured edits only against the expected current version", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-edit-contract-"));
+    try {
+      const before = "alpha\nbeta\ngamma";
+      await writeFile(path.join(root, "multi.txt"), before, "utf8");
+      const expectedHash = createHash("sha256").update(before, "utf8").digest("hex");
+      const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools()); const runtime = new ToolRuntime({ store, registry }); const sessionId = brand<string, "SessionId">("ses_edit_contract");
+      const pending = await runtime.execute({ sessionId, workspaceRoot: root, name: "edit_file", input: { path: "multi.txt", expectedHash, edits: [{ oldText: "alpha", newText: "ALPHA" }, { oldText: "gamma", newText: "GAMMA" }] } });
+      const result = await runtime.resolvePermission(pending.permission!.id, "approved");
+      expect(result.status).toBe("completed");
+      expect(result.result?.output).toMatchObject({ changed: true, operations: [{ status: "applied" }, { status: "applied" }] });
+      expect(String(result.result?.output && (result.result.output as { unifiedDiff?: string }).unifiedDiff)).toContain("-alpha");
+      expect(await readFile(path.join(root, "multi.txt"), "utf8")).toBe("ALPHA\nbeta\nGAMMA");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("stops instead of overwriting a file changed after approval was requested", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-edit-conflict-"));
+    try {
+      const before = "before";
+      await writeFile(path.join(root, "conflict.txt"), before, "utf8");
+      const expectedHash = createHash("sha256").update(before, "utf8").digest("hex");
+      const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools()); const runtime = new ToolRuntime({ store, registry }); const sessionId = brand<string, "SessionId">("ses_edit_conflict");
+      const pending = await runtime.execute({ sessionId, workspaceRoot: root, name: "edit_file", input: { path: "conflict.txt", expectedHash, oldText: "before", newText: "after" } });
+      await writeFile(path.join(root, "conflict.txt"), "user change", "utf8");
+      const result = await runtime.resolvePermission(pending.permission!.id, "approved");
+      expect(result.result?.error?.code).toBe("EDIT_STALE");
+      expect(await readFile(path.join(root, "conflict.txt"), "utf8")).toBe("user change");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("supports explicit append mode without weakening create protection", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-write-modes-"));
+    try {
+      await writeFile(path.join(root, "append.txt"), "before", "utf8");
+      const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools()); const runtime = new ToolRuntime({ store, registry }); const sessionId = brand<string, "SessionId">("ses_write_modes");
+      const pending = await runtime.execute({ sessionId, workspaceRoot: root, name: "write_file", input: { path: "append.txt", content: " after", mode: "append" } });
+      const result = await runtime.resolvePermission(pending.permission!.id, "approved");
+      expect(result.status).toBe("completed"); expect((result.result?.output as { mode?: string }).mode).toBe("append"); expect(await readFile(path.join(root, "append.txt"), "utf8")).toBe("before after");
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 

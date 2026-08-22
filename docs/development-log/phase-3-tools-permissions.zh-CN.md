@@ -54,6 +54,26 @@ Phase 3 的基础 ToolRuntime、权限和审计 checkpoint 已完成。对当前
 
 进入 3B.2：实现结构化多段编辑、stale/version 检测、冲突停止与重新读取、unified diff/patch parser 和 apply/reject 审计。
 
+## 2026-08-22：Phase 3B.2 结构化编辑与 stale/conflict checkpoint
+
+### 变更范围
+
+- `edit_file` 保留旧的 `path/oldText/newText` 输入，并增加 `edits[]` 多段唯一替换和 `expectedHash`；
+- 编辑在写入前再次读取并比较 hash；当前内容不匹配返回 `EDIT_STALE`，读取后发生变化返回 `EDIT_CONFLICT`，两种情况都停止写入；
+- 错误包含 path、匹配数量和有限上下文，成功结果包含操作状态、before/after hash 和 unified diff；
+- `write_file` 增加 `create`、`overwrite`、`append` 三种模式，继续兼容 `overwrite=true`，并统一返回 diff/preview；
+- 更新 `docs/tool-contract.md`，明确编辑、写入、presentation 和 audit/modelView 边界。
+
+### 验证
+
+- `pnpm typecheck` 通过；
+- `pnpm --filter @code-review-agent/tools test`：32 项通过，覆盖多段编辑、stale、append、diff 和既有权限/恢复回归；
+- `pnpm --filter @code-review-agent/api test`：13 项通过，验证结构化 read result 的 API 兼容更新。
+
+### 下一步
+
+进入 3B.3：补齐 Bash/PowerShell 一等语义、短命令与持久 Terminal/job 选择、Windows cwd/环境/退出码/取消和长任务 presentation。
+
 阶段计划：[phase-3-tools-permissions.zh-CN.md](../phase-plans/phase-3-tools-permissions.zh-CN.md)
 
 ## 2026-08-21：阶段启动

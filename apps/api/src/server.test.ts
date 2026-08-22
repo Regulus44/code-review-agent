@@ -154,7 +154,7 @@ describe("Phase 2 API", () => {
       expect(tools.tools.map((tool) => tool.name)).toContain("edit_file");
       const read = await fetch(`${baseUrl}/v1/sessions/${session.id}/tools`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "tool-read-1" }, body: JSON.stringify({ name: "read_file", input: { path: "note.txt" } }) });
       expect(read.status).toBe(200);
-      expect((await read.json()).result.output).toBe("before");
+      expect((await read.json()).result.output).toMatchObject({ path: "note.txt", lines: [{ number: 1, text: "before" }], truncated: false });
       const edit = await fetch(`${baseUrl}/v1/sessions/${session.id}/tools`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "tool-edit-1" }, body: JSON.stringify({ name: "edit_file", input: { path: "note.txt", oldText: "before", newText: "after" } }) });
       expect(edit.status).toBe(202);
       const pending = await edit.json() as { toolCallId: string; permission: { id: string } };

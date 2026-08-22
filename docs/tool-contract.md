@@ -60,11 +60,11 @@ discover
 
 | 工具 | 风险 | 默认执行 | 关键安全规则 |
 |---|---|---|---|
-| `read_file` | read | auto | 只能读取 workspace 内路径，限制大小 |
-| `glob` | read | auto | 只返回 workspace 内匹配结果，限制数量 |
-| `grep` | read | auto | 限制目录、文件大小和输出 |
-| `edit_file` | write | ask | 以 old/new 或 patch 为输入，返回 diff |
-| `write_file` | write | ask | 默认只创建新文件；显式 `overwrite=true` 才允许覆盖，并返回 diff/摘要 |
+| `read_file` | read | auto | workspace 内 UTF-8 文本、1-based offset/limit、行号和继续读取提示 |
+| `glob` | read | auto | 只返回 workspace 内确定性排序的匹配结果，限制数量并标记截断 |
+| `grep` | read | auto | literal/regex、大小写、上下文行、路径、文件大小和输出限制 |
+| `edit_file` | write | ask | 兼容 old/new；支持多段唯一替换、expectedHash、stale/conflict 和 unified diff |
+| `write_file` | write | ask | `create`/`overwrite`/`append` 模式，兼容 `overwrite=true`，支持 expectedHash 和 diff |
 | `git_status` | read | auto | 固定 cwd，结构化输出 |
 | `git_diff` | read | auto | 限制输出，避免泄露 workspace 外内容 |
 | `run_command` | execute | ask | argv 优先、超时、输出截断、进程树终止 |
@@ -110,6 +110,15 @@ type ToolResult = {
 ```
 
 工具结果进入上下文前必须经过预算控制；完整 stdout/stderr、diff 和审计字段进入事件存储，模型只接收符合预算的视图。
+
+文件编辑必须遵守以下不变量：
+
+- `edit_file` 的每个 replacement 必须唯一匹配；任一段失败时不写入任何段；
+- `expectedHash` 与当前内容不一致时返回 `EDIT_STALE`；读取后到写入前检测到变化时返回 `EDIT_CONFLICT`；两者都保留当前文件，不覆盖用户修改；
+- 成功的编辑/写入结果包含 before/after hash、结构化操作状态和 bounded unified diff，并追加 `diff/preview` 事件；
+- `write_file` 默认是 create，覆盖和删除仍受审批；append 只追加用户明确提供的内容。
+
+工具事件的 `tool/call` payload 包含 call presentation；结果优先使用工具自己的 `presentResult`，否则使用结构化 `ToolResult.presentation`。完整 audit 与有界 model view 分离。
 
 进程工具的 `audit` 至少记录 `stdout`、`stderr`、`exitCode` 和终止 signal。取消或超时必须终止进程树，而不仅是顶层 shell/child process。
 
