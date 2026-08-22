@@ -138,7 +138,7 @@ type ToolResult = {
 - parser 先校验 file header、hunk 行数和 workspace-relative path，再读取任何目标；绝对路径、盘符路径、路径穿越和重复目标均拒绝；
 - preview 阶段先读取所有 base，`expectedHashes` 或 hunk/context 不匹配时一个文件都不写；
 - apply 过程中任一目标写入失败，runtime 尝试恢复本批 before-state；rollback 还要验证每个目标仍匹配记录的 after-state；
-- `patch/preview`、`patch/applied`、`patch/rejected`、`patch/rolled_back` 是审计事实，reject 不伪造 apply，rollback 不删除历史。
+- `patch/preview`、`patch/applied`、`patch/rejected`、`patch/rolled_back` 是审计事实，完整 snapshot 位于 `.agent-artifacts/patches/<patchId>.json`，reject 不伪造 apply，rollback 不删除历史。
 
 LSP 只读工具必须遵守以下不变量：
 

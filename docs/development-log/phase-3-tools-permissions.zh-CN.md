@@ -20,6 +20,7 @@ Phase 3 的基础 ToolRuntime、权限和审计 checkpoint 已完成。对当前
 
 - 新增 `packages/tools/src/patch.ts`：解析 workspace-bound unified patch，支持多文件 create/update/delete、hunk 上下文校验、stale base、冲突诊断和原子失败回滚；
 - 新增 `apply_patch`、`reject_patch`、`rollback_patch`，继续走 schema、WorkspaceResolver、ToolRuntime、写权限审批、结构化结果、diff presentation 和事件审计；
+- patch before/after snapshot 持久化到 `.agent-artifacts/patches/<patchId>.json`，新 host 可按 patchId 恢复 rollback；reject/rollback 成功后清理 snapshot，事件历史保留；
 - 新增 `patch/preview`、`patch/applied`、`patch/rejected`、`patch/rolled_back` 事件；
 - 工具 Prompt catalog 增加 patch 的预览→审批→应用/拒绝→回滚顺序和安全边界；
 - 以 DSH diff/write/edit 行为作为主要参考，未复制代码、未引入 DSH 依赖；Claude Code 仍只作为 prompt/UX 补充参考。

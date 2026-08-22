@@ -43,6 +43,7 @@ export interface AppliedPatch extends PatchPreview {
   readonly patch: string;
   readonly before: Readonly<Record<string, string | null>>;
   readonly after: Readonly<Record<string, string | null>>;
+  readonly artifactPath?: string;
 }
 
 export class PatchParseError extends Error {
@@ -177,6 +178,30 @@ export async function restoreFiles(root: string, files: Readonly<Record<string, 
   }
 }
 
+export async function persistPatchRecord(root: string, record: AppliedPatch): Promise<string> {
+  const artifactPath = patchArtifactPath(root, record.patchId);
+  await mkdir(path.dirname(artifactPath), { recursive: true });
+  await writeFile(artifactPath, JSON.stringify({ ...record, artifactPath: path.relative(path.resolve(root), artifactPath).replaceAll("\\", "/") }), "utf8");
+  return artifactPath;
+}
+
+export async function loadPatchRecord(root: string, patchId: string): Promise<AppliedPatch | undefined> {
+  if (!/^patch_[0-9a-f-]{20,80}$/u.test(patchId)) return undefined;
+  try {
+    const artifactPath = patchArtifactPath(root, patchId);
+    const value: unknown = JSON.parse(await readFile(artifactPath, "utf8"));
+    if (!isAppliedPatch(value) || value.patchId !== patchId) return undefined;
+    return { ...value, artifactPath: path.relative(path.resolve(root), artifactPath).replaceAll("\\", "/") };
+  } catch (error) {
+    if (error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    return undefined;
+  }
+}
+
+export async function removePatchRecord(root: string, patchId: string): Promise<void> {
+  await rm(patchArtifactPath(root, patchId), { force: true });
+}
+
 export class PatchConflictError extends Error {
   readonly code = "PATCH_CONFLICT";
 }
@@ -264,3 +289,16 @@ async function readTextIfPresent(resolver: WorkspaceResolver, filePath: string):
 }
 
 function hashText(value: string): string { return createHash("sha256").update(value, "utf8").digest("hex"); }
+
+function patchArtifactPath(root: string, patchId: string): string { return path.join(path.resolve(root), ".agent-artifacts", "patches", `${patchId}.json`); }
+
+function isAppliedPatch(value: unknown): value is AppliedPatch {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate["patchId"] === "string" && typeof candidate["patch"] === "string" && typeof candidate["dryRun"] === "boolean" && Array.isArray(candidate["files"]) && isStringMap(candidate["before"]) && isStringMap(candidate["after"]);
+}
+
+function isStringMap(value: unknown): value is Readonly<Record<string, string | null>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  return Object.values(value).every((item) => item === null || typeof item === "string");
+}

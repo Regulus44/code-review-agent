@@ -86,8 +86,10 @@ describe("unified patch contract", () => {
       const applied = await runtime.resolvePermission(appliedPending.permission!.id, "approved");
       const appliedId = (applied.result?.output as { patchId: string }).patchId;
       expect(applied.status).toBe("completed"); expect(await readFile(path.join(root, "target.txt"), "utf8")).toBe("after\n");
-      const rollbackPending = await runtime.execute({ sessionId, workspaceRoot: root, name: "rollback_patch", input: { patchId: appliedId } });
-      const rolledBack = await runtime.resolvePermission(rollbackPending.permission!.id, "approved");
+      const restoredRegistry = new ToolRegistry(); restoredRegistry.registerMany(createBuiltinTools({ eventStore: store }));
+      const restoredRuntime = new ToolRuntime({ store, registry: restoredRegistry });
+      const rollbackPending = await restoredRuntime.execute({ sessionId, workspaceRoot: root, name: "rollback_patch", input: { patchId: appliedId } });
+      const rolledBack = await restoredRuntime.resolvePermission(rollbackPending.permission!.id, "approved");
       expect(rolledBack.status).toBe("completed"); expect(await readFile(path.join(root, "target.txt"), "utf8")).toBe("before\n");
       expect(store.events.map((event) => event.type)).toEqual(expect.arrayContaining(["patch/preview", "patch/rejected", "patch/applied", "patch/rolled_back"]));
     } finally { await rm(root, { recursive: true, force: true }); }

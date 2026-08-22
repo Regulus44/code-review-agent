@@ -15,7 +15,7 @@ import { JobManager } from "./jobs.js";
 import { readWorkspaceImage } from "./image.js";
 import { LspManager, type LspServerConfig } from "./lsp.js";
 import { CapabilityRegistry, CapabilityError } from "./capabilities.js";
-import { applyPreview, PatchConflictError, PatchParseError, previewUnifiedPatch, type AppliedPatch } from "./patch.js";
+import { applyPreview, loadPatchRecord, PatchConflictError, PatchParseError, persistPatchRecord, previewUnifiedPatch, removePatchRecord, type AppliedPatch } from "./patch.js";
 
 const ALLOWED_EXECUTABLES = new Set(["git", "node", "npm", "pnpm", "vitest"]);
 const MAX_PROCESS_OUTPUT_BYTES = 512 * 1024;
@@ -292,10 +292,10 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
           const record: AppliedPatch = { patchId, patch: args.patch, files: inspected.files, dryRun: args.dryRun === true, before: inspected.before, after: inspected.after };
           patches.set(patchId, record);
           await context.appendEvent("patch/preview", { patchId, dryRun: record.dryRun, files: inspected.files });
-          if (record.dryRun) return patchResult(record, "Patch preview");
+          if (record.dryRun) { const artifactPath = await persistPatchRecord(context.workspaceRoot, record); const persisted = { ...record, artifactPath: path.relative(path.resolve(context.workspaceRoot), artifactPath).replaceAll("\\", "/") }; patches.set(patchId, persisted); return patchResult(persisted, "Patch preview"); }
           await applyPreview(context.workspaceRoot, inspected);
           await context.appendEvent("patch/applied", { patchId, files: inspected.files });
-          return patchResult(record, "Patch applied");
+          const artifactPath = await persistPatchRecord(context.workspaceRoot, record); const persisted = { ...record, artifactPath: path.relative(path.resolve(context.workspaceRoot), artifactPath).replaceAll("\\", "/") }; patches.set(patchId, persisted); return patchResult(persisted, "Patch applied");
         } catch (error) {
           const code = error instanceof PatchConflictError ? error.code : error instanceof PatchParseError ? error.code : "PATCH_APPLY_FAILED";
           return fail(code, error instanceof Error ? error.message : String(error), code === "PATCH_CONFLICT" ? "Reread every affected file, refresh expectedHashes, and regenerate the patch." : "Validate the unified patch and keep all targets inside the workspace.");
@@ -306,10 +306,11 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
       name: "reject_patch", description: "Reject a previously previewed patch and record the decision without changing workspace files.", inputSchema: object({ patchId: string, reason: string }, ["patchId"]), executionMode: "exclusive", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
       execute: async (input, context) => {
         const args = input as { patchId: string; reason?: string };
-        const record = patches.get(args.patchId);
+        const record = patches.get(args.patchId) ?? await loadPatchRecord(context.workspaceRoot, args.patchId);
         if (record === undefined) return fail("PATCH_NOT_FOUND", `Patch preview was not found: ${args.patchId}`, "Use the patchId returned by apply_patch in this host session.");
         if (!record.dryRun) return fail("PATCH_ALREADY_APPLIED", `Patch ${args.patchId} has already been applied`, "Use rollback_patch when the applied patch is still safe to reverse.");
         patches.delete(args.patchId);
+        await removePatchRecord(context.workspaceRoot, args.patchId);
         await context.appendEvent("patch/rejected", { patchId: args.patchId, reason: args.reason ?? "Rejected by user", files: record.files });
         return ok({ patchId: args.patchId, status: "rejected", reason: args.reason ?? "Rejected by user" });
       },
@@ -318,13 +319,14 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
       name: "rollback_patch", description: "Roll back an applied multi-file patch only when every target still matches the patch result.", inputSchema: object({ patchId: string }, ["patchId"]), executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "cancel",
       execute: async (input, context) => {
         const patchId = (input as { patchId: string }).patchId;
-        const record = patches.get(patchId);
+        const record = patches.get(patchId) ?? await loadPatchRecord(context.workspaceRoot, patchId);
         if (record === undefined) return fail("PATCH_NOT_FOUND", `Applied patch was not found: ${patchId}`, "Use a patchId from the current host session.");
         if (record.dryRun) return fail("PATCH_NOT_APPLIED", `Patch ${patchId} was only previewed`, "Apply the patch first or reject the preview.");
         try {
           await applyPreview(context.workspaceRoot, { files: record.files, before: record.after, after: record.before });
           await context.appendEvent("patch/rolled_back", { patchId, files: record.files });
           patches.delete(patchId);
+          await removePatchRecord(context.workspaceRoot, patchId);
           return ok({ patchId, status: "rolled_back", files: record.files });
         } catch (error) {
           const code = error instanceof PatchConflictError ? error.code : "PATCH_ROLLBACK_FAILED";
@@ -685,7 +687,7 @@ async function globFiles(root: string, pattern: string, maxResults: number): Pro
   };
 }
 
-async function walk(root: string, current: string, visit: (file: string) => Promise<void>): Promise<void> { for (const entry of await readdir(current, { withFileTypes: true })) { const full = path.join(current, entry.name); if (entry.isDirectory() && entry.name !== ".git" && entry.name !== "node_modules" && entry.name !== ".agent-trash") await walk(root, full, visit); else if (entry.isFile()) await visit(full); } }
+async function walk(root: string, current: string, visit: (file: string) => Promise<void>): Promise<void> { for (const entry of await readdir(current, { withFileTypes: true })) { const full = path.join(current, entry.name); if (entry.isDirectory() && entry.name !== ".git" && entry.name !== "node_modules" && entry.name !== ".agent-trash" && entry.name !== ".agent-artifacts") await walk(root, full, visit); else if (entry.isFile()) await visit(full); } }
 
 async function grepFiles(root: string, args: { pattern: string; path?: string; maxResults?: number; literal?: boolean; ignoreCase?: boolean; contextLines?: number }, signal: AbortSignal): Promise<ToolResult> {
   const resolver = new WorkspaceResolver(root);
@@ -796,7 +798,7 @@ function patchResult(record: AppliedPatch, title: string): ToolResult {
   const text = record.files.map((file) => file.unifiedDiff).filter(Boolean).join("\n\n");
   return {
     ok: true,
-    output: { patchId: record.patchId, status: record.dryRun ? "preview" : "applied", dryRun: record.dryRun, files: record.files },
+    output: { patchId: record.patchId, status: record.dryRun ? "preview" : "applied", dryRun: record.dryRun, files: record.files, ...(record.artifactPath === undefined ? {} : { artifactPath: record.artifactPath }) },
     ...(record.files.length === 1 ? { diff: { path: record.files[0]!.path, before: record.before[record.files[0]!.path] ?? "", after: record.after[record.files[0]!.path] ?? "" } } : {}),
     presentation: { kind: "diff", title, text, data: { patchId: record.patchId, dryRun: record.dryRun, files: record.files } },
   };
