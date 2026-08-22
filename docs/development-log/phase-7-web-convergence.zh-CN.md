@@ -102,3 +102,32 @@ git diff --check               ✓
 - 新建 `read-only` Session、切换到 `workspace-write`、归档和恢复均返回成功；
 - 浏览器中的 New session 工作模式选择和对话中 Mode popover 均可用；
 - 真实 DeepSeek Session `ses_ef4121aa-b328-4260-95b4-ed3041522b27` 完成 `glob/read_file` 工具调用并返回仓库总结，6 个只读工具调用均为 `completed`，说明当前失败路径没有复现。
+
+## 2026-08-22：历史会话展示收敛
+
+### 问题定位
+
+- 同一个工具调用的 `tool/call` 和 `tool/result` 分别渲染为两张卡片，工具较多时会显著拉长对话；
+- `turn/queued`、`step/started`、`step/ended` 等生命周期事件对用户诊断价值较低，却占用了主要对话空间；
+- 打开长历史 Session 时逐条事件触发渲染，事件量较大时会造成页面重复布局和交互延迟。
+
+### 修复范围
+
+- Web 对话区按 `toolCallId` 合并工具调用、进度和结果，单个工具只保留一张可展开卡片；
+- 保留用户消息、助手消息、计划、待办、MCP、权限、交互和 Agent error，隐藏低价值生命周期事件；
+- 历史事件先批量写入内存，再进行一次渲染；SSE 新事件仍按增量方式更新。
+
+### 验证
+
+```text
+Web script syntax check       ✓
+pnpm typecheck                ✓
+pnpm test                     ✓
+git diff --check              ✓
+```
+
+浏览器回归：
+
+- 真实历史 Session 中 6 个工具调用各显示一张卡片，`call/result` 已合并；
+- 长历史加载后对话区保持可滚动，页面可以继续输入下一轮消息；
+- `Read only` 切换到 `Workspace write` 成功，并写入新的 Session 更新事件。
