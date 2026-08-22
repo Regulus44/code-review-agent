@@ -25,6 +25,29 @@
 ```text
 pnpm typecheck   ✓
 pnpm test        ✓
+
+## 2026-08-22：GFM 编号列表与表格渲染校正
+
+### 问题定位
+
+- 轻量 Markdown 渲染器在编号列表项目之间遇到空行时会刷新当前 `<ol>`，浏览器因此为每个项目重新从 1 开始编号。
+- 表格语法此前按普通段落处理，`|` 字符被直接展示，缺少 `<table>/<thead>/<tbody>` 结构。
+
+### 参考与变更
+
+- 对照 DSH `ui-primitives` 的 `MarkdownText`、GFM parser、direct renderer 和 markdown DOM fixtures，保持连续列表、嵌套列表和表格的语义结构。
+- 编号列表允许项目间空行继续归属于同一个 `<ol>`，缩进项目归入父项目的嵌套列表。
+- 识别 GFM 表头/分隔线/数据行，生成 `<table>`、`<thead>`、`<tbody>`、`<th>` 和 `<td>`；支持左/中/右对齐和横向滚动容器。
+- 表格单元格继续经过 Markdown inline renderer，支持粗体、代码和安全链接。
+
+### 验证
+
+```text
+Web script parse ✓
+Browser DOM smoke ✓（单个 5 项 `<ol>`、3 个嵌套列表、7 行 Markdown 表格）
+pnpm typecheck   ✓
+pnpm test        ✓
+```
 git diff --check ✓
 ```
 

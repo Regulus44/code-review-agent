@@ -83,6 +83,22 @@ ID:
 
 新增测试：浏览器 DOM smoke 验证多 Workspace 分组、搜索过滤、展开/折叠和 Session 操作菜单；API 合同测试覆盖软删除与事件历史保留。
 
+### DSH-005
+
+来源仓库：`D:/Develop/deepseek-harness-fork`
+
+来源路径：`packages/client/ui-primitives/src/markdown/MarkdownText.tsx`、`packages/client/ui-primitives/src/markdown/parse.ts`、`packages/client/ui-primitives/src/markdown/render.tsx`、`packages/client/ui-primitives/tests/fixtures/markdown-dom`。
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：`D:/Develop/deepseek-harness-fork/LICENSE` 为 MIT；本批没有复制 DSH Markdown parser 或 React renderer 实现。
+
+本项目路径：`apps/web/index.html`。
+
+范围：GFM 有序/无序列表的连续编号、嵌套列表、表格 header/body、列对齐、横向滚动、流式 Markdown 的稳定 DOM 行为和原始 HTML 安全策略。
+
+适配方式：当前静态 Web shell 保持无构建依赖，按 DSH 的 GFM DOM 语义适配轻量渲染器；表格和列表样式使用本项目 CSS token，HTTP(S) 链接和 HTML 转义继续由本项目安全规则控制。
+
 ### CC-001
 
 来源仓库：`D:/Develop/claude-code`
