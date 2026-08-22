@@ -1,6 +1,6 @@
 # Phase 3B：Coding Agent 工具池与工具 Prompt 强化
 
-状态：planned（2026-08-22）
+状态：completed（2026-08-22；3B.0–3B.final）
 
 本计划承接已完成的 Phase 1A 与 Phase 3。Phase 1A 已证明模型可以完成 read → edit → approve → test → summary；Phase 3 已提供统一的 ToolRegistry、ToolRuntime、PermissionPolicy、WorkspaceResolver、取消、输出预算和事件审计。本阶段重点把现有工具提升为可组合、可解释、可恢复的 Coding Agent 工具池。
 

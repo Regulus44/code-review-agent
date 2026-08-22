@@ -30,7 +30,7 @@ workspace 上运行流式 Agent Loop，把每个 Session 以 append-only 事件�
 ### 事件驱动的 Session
 
 - 所有状态变更以单调递增 sequence 追加到 SQLite event store。
-- Session、message、task、permission、plan、todo、terminal 的 projection
+- Session、message、task、goal、permission、plan、todo、terminal、job 的 projection
   在启动时从事件重建。
 - SSE 通过 `after_sequence` / `Last-Event-ID` 补发，replay 期间缓冲实时
   事件并按 sequence 去重。
@@ -51,6 +51,9 @@ workspace 上运行流式 Agent Loop，把每个 Session 以 append-only 事件�
 - 后台任务：`job_output`、`job_kill`、`job_list`；job 受 session/workspace
   隔离、权限、取消和 `job/*` 事件审计约束。
 - 交互与计划：`ask_user`、`plan`、`todo_write`
+- 长任务与恢复：`create_goal`、`update_goal`、`get_goal`、`session_query`；job 元数据从事件恢复，重启后不会伪造仍存活的进程
+- 可选只读能力：能力开关打开时提供 `read_image` 和配置的 `lsp_diagnostics` / `lsp_definition` / `lsp_references`
+- 扩展能力边界：`capability_status` 展示 Web/Skill/Subagent/Workflow 的 host policy；这些扩展默认关闭，不能通过 prompt 自行启用
 
 `ToolRuntime` 负责 JSON schema 校验、workspace 路径解析、风险级别
 （`read` / `write` / `execute` / `network`）、审批模式、permission preset

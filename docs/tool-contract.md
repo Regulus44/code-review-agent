@@ -86,6 +86,13 @@ discover
 | `ask_user` | read | auto | 追加 interaction 事件并暂停当前 turn |
 | `plan` | read | auto | 全量写入可回放的计划 projection |
 | `todo_write` | read | auto | 全量替换可回放的 todo projection |
+| `create_goal` | read | auto | 创建带 success criteria/budget 的 durable goal |
+| `update_goal` | read | auto | 只更新当前 session 已存在的 goal，终态写入 `goal/ended` |
+| `get_goal` | read | auto | 读取当前 session 的 goal projection |
+| `session_query` | read | auto | 只查询当前 session 的 bounded public events，不暴露 SQL |
+| `read_image` | read | auto | 仅在 vision capability 可见时提供，先做 media/size/workspace 检查 |
+| `lsp_diagnostics` / `lsp_definition` / `lsp_references` | read | auto | 只调用 host 配置的 LSP server，不接受任意 executable |
+| `capability_status` | read | auto | 展示 Web/Skill/Subagent/Workflow 的显式开关和预算/depth/iteration 限制 |
 
 ## 工具结果
 

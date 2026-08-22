@@ -115,6 +115,15 @@ Phase 3 的基础 ToolRuntime、权限和审计 checkpoint 已完成。对当前
 
 下一步进入 3B.final：完成真实 read/edit/test/long-task 验收，补齐 Web/Job/SSE presentation 和文档收口。
 
+## 2026-08-22：Phase 3B.final 验收完成
+
+- Web 工作台补齐 `goal/*`、`job/*`、`terminal/session` 的历史回放和 SSE 监听；工具结果继续只渲染有界 `modelView`，完整 audit 不进入 UI；
+- 完成 Goal/Job/Session query/read_image/LSP/capability 文档、工具表、事件契约和 source reuse register 收口；DSH 作为主行为参考，Claude Code 仅作 prompt/UX 补充，没有引入外部运行时依赖；
+- 验收命令：`pnpm typecheck`、`pnpm test`、`git diff --check`；全仓测试通过，tools 41 tests、storage 8、runtime 12、MCP 5、API 13，Windows `pwsh` smoke 和 job recovery smoke 通过；
+- 浏览器本地 Web smoke 确认页面 Connected、工具卡片、Goal/Job/Terminal 事件订阅字符串和现有 SSE replay 路径可见；
+- 真实 DeepSeek `read → edit → approve → test → summary` 既有 Phase 1A/Phase 7 证据继续作为模型链路门禁，本 checkpoint 未重复消耗 baseline 网络调用；本次新增能力均通过本地结构化 contract/recovery/policy 验证；
+- 3B 回滚点：`17a1038`（3B.5）和本 final checkpoint；后续 Web provider、Skill loader、Subagent lifecycle、Workflow executor 仍须经过各自 Phase 4/5/后续 capability 与 ToolRuntime 门禁。
+
 阶段计划：[phase-3-tools-permissions.zh-CN.md](../phase-plans/phase-3-tools-permissions.zh-CN.md)
 
 ## 2026-08-21：阶段启动
