@@ -183,3 +183,27 @@ git diff --check ✓
 ```
 
 新增 Runtime 合同测试确认模型收到 workspace 和工具使用约束；本地 API Web smoke 确认返回页面包含独立滚动布局和 near-bottom 自动滚动逻辑。
+
+## 2026-08-22：System Prompt 分层与动态上下文强化
+
+### 背景
+
+上一轮可用性修复已经阻止模型在有工具时声称“无法查看 workspace”，但默认 prompt 仍是单段短文本，没有清晰表达成熟 Coding Agent 所需的任务循环、权限、安全、验证和恢复规则，也没有把当前经过 policy 过滤的工具集合告诉模型。
+
+### 变更
+
+- 新增 `packages/runtime/src/system-prompt.ts`，按 identity、task execution、tool use、workspace、permission、safety、verification、communication、recovery 和 application instructions 分 section 组装；
+- 每个 turn 动态注入真实 workspace、可见工具名及 risk/approval/execution 元数据；工具描述继续由模型工具 schema 传递，避免把外部 MCP 描述直接当可信系统指令；
+- 增加搜索后断言、read-before-edit、保留用户改动、失败诊断、权限不可绕过、工具结果不可信和完成前验证规则；
+- 重启审批恢复明确带 recovery section；自定义 `AgentHostOptions.systemPrompt` 改为低优先级附加指令，不能覆盖安全基线；
+- 新增 [system-prompt-design.zh-CN.md](../system-prompt-design.zh-CN.md) 和 ADR-009，记录与 Claude Code section pipeline、DSH lifecycle/tool pipeline 的对应关系及当前明确不宣称的高级能力。
+
+### 验证
+
+```text
+pnpm typecheck   ✓
+pnpm test        ✓
+git diff --check ✓
+```
+
+`packages/runtime` 测试覆盖默认 prompt 的 workspace/tool-use contract、permission-filtered tool inventory、自定义应用指令和 recovery prompt。该更新仍属于 Phase 1A 退出后的行为强化，不新增 Subagent、A2A、LSP、Worktree 或其他未计划核心能力。

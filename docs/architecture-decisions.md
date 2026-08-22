@@ -92,6 +92,16 @@ apps/web
 
 DSH 和 Claude Code 的工具体验可以参考，但 workspace resolver、路径穿越防护、命令执行 policy、输出截断、权限审批和审计字段由本项目维护。任何 MCP、Subagent 或 A2A 调用都必须经过同一套权限和 workspace 检查。
 
+## ADR-009：System prompt 使用静态 section 与动态 turn context
+
+状态：accepted
+
+Coding Agent 的 system prompt 采用可测试的 section builder，而不是长期维护一段无法审计的字符串。静态部分约束身份、任务执行、工具优先、读后编辑、权限、安全、验证、沟通和恢复行为；动态部分只注入当前 Session 的 workspace、经过 policy 过滤的可见工具、可选 permission preset、恢复状态和应用级补充指令。
+
+选择这一结构是因为 Claude Code 的 prompt section pipeline 能清晰区分长期行为与 session/environment context，DSH 的生命周期和工具管线则要求 tool/permission/event 的事实来自运行时，而不是 prompt 自己声明。工具 schema 继续通过 `ModelRequest.tools` 传递，外部 MCP 描述不直接作为可信指令拼进系统规则。
+
+以下规则不可由应用级自定义 prompt 覆盖：workspace 边界、权限审批、工具结果信任边界、秘密保护和完成前验证。尚未进入真实 ToolRegistry 的 Subagent、A2A、LSP、Worktree、Web Search、Skills、上下文压缩和图像/Notebook 不得在 prompt 中宣称可用。
+
 ## 参考代码入口
 
 - DSH Agent Loop：`D:/Develop/deepseek-harness-fork/packages/core/agent-loop/src/agent.ts`

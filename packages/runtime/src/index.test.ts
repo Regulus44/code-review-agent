@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChatModel, ModelRequest, ModelStreamPart, PermissionId, ToolDefinition } from "@code-review-agent/contracts";
 import { InMemoryEventStore } from "@code-review-agent/storage";
-import { ToolRegistry, ToolRuntime } from "@code-review-agent/tools";
+import { DefaultPermissionPolicy, ToolRegistry, ToolRuntime } from "@code-review-agent/tools";
 import { AgentHost } from "./index.js";
 
 describe("AgentHost", () => {
@@ -22,6 +22,40 @@ describe("AgentHost", () => {
     expect(system).toContain("D:/repository-under-review");
     expect(system).toContain("Use the tools proactively");
     expect(system).toContain("Do not ask the user to run shell commands");
+    expect(system).toContain("Visible tools for this turn");
+    expect(system).toContain("read_file");
+    expect(system).toContain("Active permission preset: ask-on-write");
+    expect(system).toContain("Before editing, read the current file");
+  });
+
+  it("builds the prompt from the permission-filtered tool set and preserves custom instructions", async () => {
+    const requests: ModelRequest[] = [];
+    const store = new InMemoryEventStore();
+    const registry = new ToolRegistry();
+    registry.register({ name: "visible_read", description: "read", inputSchema: { type: "object" }, executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel", execute: async () => ({ ok: true, output: "ok" }) });
+    registry.register({ name: "hidden_write", description: "write", inputSchema: { type: "object" }, executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "cancel", execute: async () => ({ ok: true, output: "ok" }) });
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        requests.push(request);
+        yield { type: "text_delta", text: "done" };
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({
+      store,
+      model,
+      systemPrompt: "Prefer the repository's existing naming conventions.",
+      permissionPreset: "read-only",
+      toolRuntime: new ToolRuntime({ store, registry, policy: new DefaultPermissionPolicy({ preset: "read-only" }) }),
+    });
+    const session = await host.createSession("D:/filtered");
+    const turn = await host.sendMessage(session.id, "inspect");
+    await host.waitForTurn(turn);
+    const system = requests[0]?.messages.find((message) => message.role === "system")?.content ?? "";
+    expect(system).toContain("visible_read");
+    expect(system).not.toContain("hidden_write");
+    expect(system).toContain("Prefer the repository's existing naming conventions.");
+    expect(system).toContain("Active permission preset: read-only");
   });
 
   it("runs a streaming turn and persists every visible event", async () => {
@@ -127,14 +161,16 @@ describe("AgentHost", () => {
   it("replays a pending approval after host restart and continues the interrupted turn", async () => {
     const store = new InMemoryEventStore(); const registry = new ToolRegistry();
     registry.register({ name: "write_fixture", description: "write", inputSchema: { type: "object", additionalProperties: false }, executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "block", execute: async () => ({ ok: true, output: { written: true }, modelView: { written: true } }) });
+    const requests: ModelRequest[] = [];
     let calls = 0;
-    const model: ChatModel = { async *stream(): AsyncIterable<ModelStreamPart> { calls += 1; if (calls === 1) { yield { type: "tool_call_start", index: 0, id: "call_restart", name: "write_fixture" }; yield { type: "tool_call_delta", index: 0, arguments: "{}" }; } else yield { type: "text_delta", text: "Recovered and continued." }; yield { type: "done" }; } };
+    const model: ChatModel = { async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> { requests.push(request); calls += 1; if (calls === 1) { yield { type: "tool_call_start", index: 0, id: "call_restart", name: "write_fixture" }; yield { type: "tool_call_delta", index: 0, arguments: "{}" }; } else yield { type: "text_delta", text: "Recovered and continued." }; yield { type: "done" }; } };
     const first = new AgentHost({ store, model, toolRuntime: new ToolRuntime({ store, registry }) }); const session = await first.createSession("D:/workspace"); const turn = await first.sendMessage(session.id, "write after restart");
     let permissionId: PermissionId | undefined;
     for (let attempt = 0; attempt < 100 && permissionId === undefined; attempt += 1) { permissionId = (await first.getSession(session.id))?.permissions.find((permission) => permission.status === "pending")?.id; if (permissionId === undefined) await new Promise<void>((resolve) => setTimeout(resolve, 5)); }
     expect(permissionId).toBeDefined(); await store.append({ sessionId: session.id, turnId: turn, type: "agent/status", payload: { status: "interrupted", reason: "process_restart" } });
     const second = new AgentHost({ store, model, toolRuntime: new ToolRuntime({ store, registry }) }); expect((await second.getSession(session.id))?.status).toBe("interrupted");
     const approved = await second.resolvePermission(session.id, permissionId!, "approved"); expect(approved.status).toBe("completed"); await second.waitForTurn(turn, 2_000);
+    expect(requests[1]?.messages.find((message) => message.role === "system")?.content).toContain("# Recovery");
     expect((await second.getSession(session.id))?.messages.at(-1)?.content).toBe("Recovered and continued.");
     expect((await second.events(session.id)).filter((event) => event.type === "agent/status").at(-1)?.payload["status"]).toBe("running");
   });

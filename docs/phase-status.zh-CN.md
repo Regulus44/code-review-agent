@@ -84,6 +84,21 @@ Phase 1 的 provider-neutral adapter 现在已接入 API CLI 启动路径：通�
 
 该 smoke 证明真实 provider 已能驱动本项目的 model → tool → approval → tool → summary 闭环；自动化测试仍保持 fake/local model，不依赖网络或真实凭据。
 
+## Phase 1A 退出后的 System Prompt 行为强化（2026-08-22）
+
+本次更新没有扩大工具或协议范围，而是把现有 AgentHost 的短字符串 prompt 重构为可测试的 section builder：
+
+- 明确 Coding Agent 的任务目标和 `理解 → 检索 → 计划 → 修改 → 验证 → 总结` 工作循环；
+- 每个 turn 注入真实 workspace、经过 ToolRuntime policy 过滤的可见工具及风险/审批/调度元数据；
+- 增加 read-before-edit、保留用户修改、搜索后断言、失败诊断、权限不可绕过和完成前验证规则；
+- 把仓库内容、命令输出、工具/MCP 结果视为不可信数据，避免 prompt injection 改写运行规则；
+- 对重启审批恢复 turn 增加 recovery section；自定义 `systemPrompt` 只能追加低优先级应用指令，不能覆盖安全基线；
+- 明确不宣称当前尚未实现的 Subagent、A2A、LSP、Worktree、Web Search、Skills、上下文压缩和图像/Notebook 能力。
+
+实现与设计说明见 [system-prompt-design.zh-CN.md](system-prompt-design.zh-CN.md)。
+
+验证证据：`packages/runtime` 11 项测试覆盖 workspace/tool-use contract、动态工具过滤、自定义指令和 recovery prompt；全 workspace `pnpm typecheck` 与 `pnpm test` 作为本次 checkpoint 门禁。
+
 ## Phase 1A.0 迁移边界收尾（2026-08-22）
 
 新增 [工具迁移矩阵](tool-migration-matrix.zh-CN.md)，明确 Python legacy/reference 边界、DSH/Claude Code 行为参考、P0/P1 工具的 source/risk/execution/approval/workspace contract，以及行为 fixture 和安全回归索引。`packages/tools/src/behavior-fixtures.ts` 提供跨平台的 P0 contract fixture，新增 registry 对齐测试。
