@@ -2,108 +2,150 @@
 
 [中文文档](README.zh-CN.md)
 
-Code Review Agent is a small but deployable agent runtime for repository
-analysis and code review. It combines model providers, tool calling, workspace
-guardrails, persistent sessions, runtime events, diagnostics, and a built-in web
-UI into one local-first service.
+Code Review Agent is a TypeScript coding-agent runtime. It drives a streaming
+agent loop over a local workspace, persists every session as an append-only
+event log in SQLite, and serves a DSH-style web workspace for interactive
+coding sessions.
 
-The project is intended to demonstrate more than "calling an LLM with tools":
-it exposes an Agent-as-a-Service API, persists run/session history in SQLite,
-records observable model/tool events, and provides a repo-focused agent
-application on top of the shared runtime.
+The project is evolving from an earlier Python repo-analysis prototype into a
+web-based coding agent runtime. Active development follows the phased plan in
+`docs/coding-agent-migration-plan.zh-CN.md`; phase status and acceptance
+evidence live in `docs/phase-status.zh-CN.md`.
 
 ## Current Capabilities
 
-- Provider-neutral chat model interface.
-- OpenAI-compatible adapters for DeepSeek, SiliconFlow, and MiMo.
-- ReAct-style agent loop with tool calling.
-- Tool registry with schema export and per-run tool filtering.
-- Built-in repository tools:
-  - `list_files`
-  - `read_file`
-  - `search_text`
-  - `run_command`
-- Minimal command sandbox:
-  - workspace-bound working directory
-  - allowlisted commands
-  - timeout control
-  - output truncation
-  - no shell string execution
-- Context manager for large tool histories and prompt-size control.
-- Consecutive tool-error circuit breaker in the agent loop.
-- Runtime lifecycle:
-  - queued
-  - running
-  - completed
-  - failed
-  - cancelled
-  - max_iterations
-  - model_output_truncated
-- SQLite-backed runtime and session storage.
-- Runtime events, turn events, and diagnostics for observability.
-- Persistent multi-turn sessions.
-- Structured Repo Analyst app for repository overview and review reports.
-- FastAPI service.
-- Built-in single-page web UI.
+### Streaming agent loop
+
+- Turn → step → model → tool execution; tool results return to the model as
+  context for subsequent steps.
+- DeepSeek via an OpenAI-compatible streaming adapter, with a local Echo model
+  fallback when no API key is configured.
+- Runtime model switching between `deepseek-v4-flash`, `deepseek-v4-pro`, and
+  `deepseek-v4-flash-vision-exp`.
+- Parallel tool calls, max-step limits, cancellation, and malformed tool-call
+  handling.
+- Layered system prompt built from sections (identity, task execution, tool
+  use, workspace, permission, safety, verification, communication, recovery).
+  Every turn injects the actual workspace root and the policy-filtered tool
+  list with risk/approval/execution metadata.
+
+### Event-sourced sessions
+
+- Every state change appends an event to a SQLite event store with a monotonic
+  sequence number.
+- Projections for sessions, messages, tasks, permissions, plans, todos, and
+  terminals rebuild from events at startup.
+- SSE replay via `after_sequence` / `Last-Event-ID`, with buffered live events
+  during replay and sequence deduplication.
+- Recovery across process restarts: interrupted turns, pending permission
+  approvals that resume the original turn after resolution, and interrupted
+  terminals restored as metadata only.
+- Idempotent commands (send/cancel/resume/fork) and a per-session turn queue.
+
+### Tools and permissions
+
+Built-in tools registered in a shared `ToolRegistry` and executed through one
+`ToolRuntime`:
+
+- Files: `read_file`, `glob`, `grep`, `edit_file`, `write_file` (overwrite
+  requires explicit opt-in), `delete_file` (moves to `.agent-trash` by
+  default)
+- Git read tools: `git_status`, `git_diff`, `git_log`, `git_show`
+- Processes: `run_command`, `run_tests` (argv plus executable allowlist;
+  shell strings are rejected), and the persistent terminal set
+  `terminal_open` / `terminal_send` / `terminal_read` / `terminal_signal` /
+  `terminal_close` / `terminal_list`
+- Interaction and planning: `ask_user`, `plan`, `todo_write`
+
+The `ToolRuntime` enforces JSON-schema validation, workspace path resolution,
+risk levels (`read` / `write` / `execute` / `network`), approval modes,
+permission presets (`read-only`, `workspace-write`, `ask-on-write`,
+`ask-on-execute`, `danger-full-access`), timeouts, output budgets,
+cancellation, and cross-platform process-tree termination. Each result keeps a
+full audit record alongside a budget-limited model view. File edits produce
+diff previews.
+
+### MCP client
+
+- stdio, SSE-compatible, and Streamable HTTP transports built on the official
+  MCP TypeScript SDK.
+- Discovery for tools, resources, and prompts, with list-changed resync.
+- MCP tools register under `mcp__<server>__<tool>` and share the same
+  permission, approval, cancellation, timeout, and audit pipeline as built-in
+  tools.
+- Server enable / disable / reconnect; connection failures stay scoped to the
+  affected server.
+- Server secrets stay out of events, projections, and API responses.
+
+### Web workspace
+
+- Three-panel DSH-style layout: session sidebar, conversation column, session
+  details panel.
+- Workspace picker that validates a local directory before creating a session.
+- Streaming transcript, tool call/progress/result rows, diff cards, permission
+  approval cards (Approve / Deny / Cancel), `ask_user` interaction cards, and
+  MCP server status with reconnect controls.
+- SSE reconnect and event replay; the UI rebuilds its state from events.
 
 ## Architecture
 
 ```text
-FastAPI / Web UI
-        |
-        v
-Runtime services
-  - AgentRuntime
-  - SessionService
-  - RepoAnalystService
-        |
-        v
-Agent harness
-  - Agent loop
-  - Context manager
-  - Session history
-        |
-        +------------------+
-        |                  |
-        v                  v
-Model providers        Tool registry
-  - DeepSeek             - list_files
-  - SiliconFlow          - read_file
-  - MiMo                 - search_text
-                         - run_command
+Browser (apps/web)
+    |  REST commands + SSE events
+    v
+Node HTTP API (apps/api)
+    |
+    v
+AgentHost / SessionService (packages/runtime)
+    |  turn -> step -> model -> tool
+    +------------------+-------------------+
+    |                                      |
+    v                                      v
+ChatModel adapters (packages/llm)   ToolRuntime (packages/tools)
+  - DeepSeek streaming                - built-in tools
+  - Echo fallback                     - MCP bridge (packages/mcp-client)
+    |                                      |
+    +------------------+-------------------+
+                       v
+      EventStore + projections (packages/storage, SQLite)
 ```
 
-The runtime does not depend on a specific application. Repo Analyst is built as
-one app facade on top of the generic runtime. Session APIs use the same agent
-loop for continuous, chat-driven repository work.
+Events are written to the store first and then broadcast over SSE. The web UI
+derives all state from events.
 
-## Installation
+## Repository Layout
 
-Requirements:
+```text
+packages/
+  contracts/    shared event, tool, task, and model types
+  llm/          provider-neutral chat model and OpenAI-compatible adapters
+  runtime/      AgentHost, turn/step execution, system prompt
+  storage/      SQLite event store and projections
+  tools/        ToolRegistry, ToolRuntime, permission policy, built-in tools
+  workspace/    workspace path resolution and fs/process boundaries
+  mcp-client/   MCP config store, transports, discovery, tool bridge
+apps/
+  api/          Node HTTP/SSE host; also serves the web UI
+  web/          static DSH-style web workspace
+src/code_review_agent/   legacy Python prototype (reference only)
+docs/                    plans, contracts, development logs
+```
 
-- Python 3.10+
-- A model API key for at least one configured provider
-- Optional: `ripgrep` for faster `search_text`; Python fallback is available
+The TypeScript runtime has no dependency on `src/code_review_agent`. The
+Python package remains in the repository as a behavior and test reference
+during the migration.
 
-Create an environment and install the project:
+## Requirements
+
+- Node.js >= 22.19
+- pnpm (the `packageManager` field pins pnpm 11)
+- Optional: a DeepSeek API key for real model calls; the Echo model runs
+  without any key
+
+## Getting Started
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-```
-
-On Windows PowerShell:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
-```
-
-Create a local `.env` file:
-
-```bash
+pnpm install
 cp .env.example .env
 ```
 
@@ -113,336 +155,121 @@ On Windows PowerShell:
 Copy-Item .env.example .env
 ```
 
-Do not commit `.env`. It should contain local API keys and deployment-specific
-paths.
+Set `DEEPSEEK_API_KEY` in `.env` to use DeepSeek. Keep the key local; `.env`
+is ignored by Git.
+
+Start the API:
+
+```bash
+pnpm dev:api
+```
+
+Then open `http://127.0.0.1:3210/`. The server binds to `127.0.0.1`; set
+`PORT` to change the port.
+
+Sessions persist to `.data/code-review-agent.sqlite` relative to the working
+directory.
 
 ## Configuration
 
-Common `.env` values:
+`.env` values read by the TypeScript API:
 
-```env
-DEEPSEEK_API_KEY=
-DEEPSEEK_BASE_URL=https://api.deepseek.com
+| Key | Meaning |
+|---|---|
+| `MODEL_PROVIDER` | `auto` (default), `deepseek`, or `echo`. `auto` selects DeepSeek when `DEEPSEEK_API_KEY` is set and falls back to Echo otherwise. |
+| `DEEPSEEK_API_KEY` | DeepSeek API key. |
+| `DEEPSEEK_BASE_URL` | Defaults to `https://api.deepseek.com`. |
+| `DEEPSEEK_MODEL` | Default model; defaults to `deepseek-v4-flash`. |
+| `PORT` | API port; defaults to `3210`. |
 
-SILICONFLOW_API_KEY=
-SILICONFLOW_BASE_URL=https://api.siliconflow.cn/v1
-SILICONFLOW_MODEL=Qwen/Qwen2.5-Coder-32B-Instruct
-
-MIMO_API_KEY=
-MIMO_BASE_URL=https://api.xiaomi.com
-MIMO_MODEL=mimo-v2.5-pro
-
-DEFAULT_PROVIDER=deepseek
-DEFAULT_MODEL=deepseek-chat
-
-API_KEY=
-RUNTIME_WORKSPACE_ROOT=/path/to/allowed/workspaces
-DATABASE_URL=sqlite:///./runtime.db
-
-RUN_TIMEOUT_SECONDS=300
-MODEL_REQUEST_TIMEOUT_SECONDS=180
-MAX_CONCURRENT_RUNS=4
-
-ENABLED_TOOLS=list_files,read_file,search_text,run_command
-```
-
-Important settings:
-
-- `RUNTIME_WORKSPACE_ROOT` is the root allowlist for repository access. Runs and
-  sessions must use a `workspace_root` under this directory.
-- `DATABASE_URL` defaults to local SQLite.
-- `API_KEY` is required for non-local requests when configured. Local loopback
-  requests are allowed without the header for local development.
-- `ENABLED_TOOLS` controls globally enabled built-in tools. Leave it unset to
-  enable all built-in tools, set a comma-separated list to expose only selected
-  tools, or set it empty to disable all tools.
-- `MODEL_REQUEST_TIMEOUT_SECONDS` controls one provider HTTP request timeout.
-  Large review turns may need a larger value.
-
-## Start the Service
-
-```bash
-uvicorn code_review_agent.api.app:create_app --factory --reload
-```
-
-Then open:
-
-```text
-http://127.0.0.1:8000/
-```
-
-Health check:
-
-```bash
-curl http://127.0.0.1:8000/health
-```
-
-## Start with Docker Compose
-
-The Docker setup keeps service code, persisted data, and reviewed repositories
-on separate paths:
-
-```text
-/app         service code
-/data        SQLite runtime database
-/workspaces  allowed repository mount root
-```
-
-Build and start:
-
-```bash
-docker compose up --build
-```
-
-Then open `http://127.0.0.1:8000/`.
-
-By default, Compose mounts the current repository at:
-
-```text
-/workspaces/code-review-agent
-```
-
-Use that container path as `workspace_root` in the UI or API. To review another
-repository, set `CODE_REVIEW_WORKSPACE_HOST_ROOT` before starting Compose.
-
-## Web UI
-
-The built-in UI is a local, single-page workspace for persistent sessions.
-
-It supports:
-
-- session list and chat workspace
-- provider and model selection
-- repository workspace binding
-- tool permission selection
-- optimistic user messages
-- markdown rendering for assistant replies
-- turn status summaries
-- collapsible tool timelines
-- turn cancellation and session deletion
-
-The UI is intentionally lightweight and does not require a frontend build step.
+The remaining entries in `.env.example` belong to the legacy Python prototype
+and are ignored by the TypeScript API.
 
 ## API Overview
 
-Public endpoints:
+Health and discovery:
 
-- `GET /`
 - `GET /health`
+- `GET /v1/models`, `POST /v1/models`
+- `GET /v1/tools`
 
-Discovery:
+Sessions:
 
-- `GET /tools`
-- `GET /models/providers`
+- `POST /v1/sessions`
+- `GET /v1/sessions`
+- `GET /v1/sessions/{session_id}`
+- `POST /v1/sessions/{session_id}` — send a message and start a turn
+- `GET /v1/sessions/{session_id}/events` — SSE stream; supports
+  `after_sequence` and `Last-Event-ID`
+- `POST /v1/sessions/{session_id}/resume`
+- `POST /v1/sessions/{session_id}/cancel`
+- `POST /v1/sessions/{session_id}/fork`
+- `POST /v1/sessions/{session_id}/permissions/{permission_id}` — resolve a
+  pending approval
+- `POST /v1/sessions/{session_id}/interactions/{interaction_id}` — answer an
+  `ask_user` request
+- `POST /v1/sessions/{session_id}/tools` — execute a tool directly
+- `POST /v1/sessions/{session_id}/tools/{tool_call_id}/cancel`
 
-Generic runtime runs:
+Workspaces:
 
-- `GET /runs`
-- `POST /runs`
-- `GET /runs/{run_id}`
-- `GET /runs/{run_id}/events`
-- `POST /runs/{run_id}/cancel`
+- `POST /v1/workspaces/validate`
 
-Repo Analyst app:
+MCP servers:
 
-- `POST /repo-analyst/runs`
-- `GET /repo-analyst/runs`
-- `GET /repo-analyst/runs/{run_id}`
-- `GET /repo-analyst/runs/{run_id}/raw`
-- `GET /repo-analyst/runs/{run_id}/events`
-- `POST /repo-analyst/runs/{run_id}/cancel`
-
-Persistent sessions:
-
-- `POST /sessions`
-- `GET /sessions`
-- `GET /sessions/{session_id}`
-- `DELETE /sessions/{session_id}`
-- `POST /sessions/{session_id}/turns`
-- `GET /sessions/{session_id}/turns`
-- `POST /sessions/{session_id}/turns/{turn_id}/cancel`
-- `GET /sessions/{session_id}/turns/{turn_id}/events`
-- `GET /sessions/{session_id}/turns/{turn_id}/diagnostics`
-- `GET /sessions/{session_id}/messages`
-
-If `API_KEY` is configured and the request is not from loopback, send:
-
-```text
-X-API-Key: your_api_key
-```
-
-## Repo Analyst Example
-
-Create an overview run:
-
-```bash
-curl -X POST http://127.0.0.1:8000/repo-analyst/runs \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workspace_root": "/path/to/repository",
-    "mode": "overview",
-    "question": "Analyze the main purpose, modules, architecture, risks, and next steps.",
-    "provider": "deepseek",
-    "model": "deepseek-chat",
-    "max_iterations": 100
-  }'
-```
-
-Create a review run:
-
-```bash
-curl -X POST http://127.0.0.1:8000/repo-analyst/runs \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workspace_root": "/path/to/repository",
-    "mode": "review",
-    "question": "Review recent code changes and check whether tests pass.",
-    "enabled_tools": ["list_files", "read_file", "search_text", "run_command"],
-    "provider": "deepseek",
-    "model": "deepseek-chat",
-    "max_iterations": 100
-  }'
-```
-
-Check the result and event stream:
-
-```bash
-curl http://127.0.0.1:8000/repo-analyst/runs/<run_id>
-curl http://127.0.0.1:8000/repo-analyst/runs/<run_id>/events
-```
-
-## Session Example
-
-Create a session:
-
-```bash
-curl -X POST http://127.0.0.1:8000/sessions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workspace_root": "/path/to/repository",
-    "provider": "deepseek",
-    "model": "deepseek-chat",
-    "max_iterations": 100
-  }'
-```
-
-Start a turn:
-
-```bash
-curl -X POST http://127.0.0.1:8000/sessions/<session_id>/turns \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_input": "Review the recent changes and identify concrete issues."
-  }'
-```
-
-Inspect messages and diagnostics:
-
-```bash
-curl http://127.0.0.1:8000/sessions/<session_id>/messages
-curl http://127.0.0.1:8000/sessions/<session_id>/turns/<turn_id>/diagnostics
-curl http://127.0.0.1:8000/sessions/<session_id>/turns/<turn_id>/events
-```
-
-## Tools and Safety Model
-
-The runtime exposes tools through explicit schemas. Tools are registered in a
-registry and can be filtered by global environment configuration, application
-mode, and per-run request payload.
-
-File tools are workspace-bound:
-
-- absolute paths are rejected
-- `..` traversal is rejected
-- paths are resolved under the configured workspace root
-
-`run_command` is intentionally limited:
-
-- uses `asyncio.create_subprocess_exec(..., shell=False)`
-- accepts structured `program + args`, not shell strings
-- enforces an allowlist
-- rejects shell control operators
-- enforces timeout and output truncation
-- treats non-zero exit code as a successful observation, not a tool transport
-  failure
-
-This is not a Docker sandbox. It is a local command sandbox suitable for a
-controlled development environment.
-
-## Observability and Diagnostics
-
-Runs and session turns record events such as:
-
-- lifecycle changes
-- model request and response
-- tool started and finished
-- cancellation
-- failure details
-
-Diagnostics summarize:
-
-- total latency
-- model call count
-- tool call count
-- event count
-- token usage when provider data is available
-- slowest model/tool steps
-- failure reason
-
-These events are available through API endpoints and are used by the web UI to
-render turn timelines.
+- `GET /v1/mcp/servers`, `POST /v1/mcp/servers`
+- `GET /v1/mcp/servers/{server_id}`, `DELETE /v1/mcp/servers/{server_id}`
+- `POST /v1/mcp/servers/{server_id}/enable`
+- `POST /v1/mcp/servers/{server_id}/disable`
+- `POST /v1/mcp/servers/{server_id}/reconnect`
+- `GET /v1/mcp/servers/{server_id}/resources`
+- `POST /v1/mcp/servers/{server_id}/prompts`
 
 ## Development
 
-Run tests:
-
 ```bash
-python -m pytest
+pnpm typecheck   # tsc build across the workspace
+pnpm test        # vitest suites across all packages
 ```
 
-Run focused tests:
+Reference documents:
 
-```bash
-python -m pytest tests/test_agent_loop.py
-python -m pytest tests/test_context_manager.py
-python -m pytest tests/test_session_api.py
-```
+- `docs/coding-agent-migration-plan.zh-CN.md` — overall migration plan
+- `docs/phase-status.zh-CN.md` — current phase status and acceptance evidence
+- `docs/event-contract.md`, `docs/tool-contract.md` — event and tool
+  contracts
+- `docs/protocol-boundaries.md` — MCP / ACP / A2A boundary definitions
+- `docs/development-log/` — per-phase development logs
 
-Check the inline web script syntax:
+## Roadmap
 
-```bash
-node -e "const fs=require('fs');const h=fs.readFileSync('src/code_review_agent/web/index.html','utf8');for(const m of h.matchAll(/<script[^>]*>([\\s\\S]*?)<\\/script>/gi)) new Function(m[1]);console.log('ok')"
-```
+| Phase | Scope | Status |
+|---|---|---|
+| 0 | TypeScript baseline, contracts, governance docs | completed |
+| 1 | AgentHost and agentic coding core: tool-calling loop, P0/P1 tools, permission presets, restart recovery, real DeepSeek read → edit → approve → test smoke | completed |
+| 2 | Event persistence and recovery: SQLite event store, projections, SSE replay, idempotent commands | completed |
+| 3 | Tool runtime and permissions: registry, policy, hardening | completed |
+| 4 | MCP client: stdio/SSE/Streamable HTTP, discovery, registry bridge | completed |
+| 5 | Internal subagents / multi-agent delegation | pending |
+| 6 | A2A interoperability adapter | pending |
+| 7 | DSH-style web frontend convergence | in progress |
+| 8 | Productization: worktree, LSP, code mode, background jobs, scheduled tasks, model fallback, session fork/replay/export, multi-user auth, desktop wrapper | pending |
 
-## Current Limitations
+Near-term work in Phase 7: extract Diff, Terminal, Permission, Subagent, and
+MCP detail views into reusable components, add narrow-screen and SSE
+reconnect browser regressions, and evaluate moving the static shell into a
+TypeScript UI package while keeping the API contract stable.
 
-- Streaming model output is not implemented.
-- Command sandboxing is allowlist-based and local-process-based, not container
-  isolation.
-- Context management uses conservative character budgets rather than provider
-  tokenizers.
-- Repo Analyst structured output still depends on model compliance plus parser
-  validation.
-- The web UI is a single HTML file and intentionally avoids a frontend build
-  system.
-- SQLite is intended for single-instance local deployment.
+Phase 5 will add a `SubagentRegistry` with parent/child lifecycle, task and
+report contracts, and concurrency/depth/budget limits, built on the existing
+event, tool, and task contracts. Phase 6 will then add A2A as an adapter
+layer (agent card discovery, task create/get/cancel, streaming updates)
+mapped onto internal sessions.
 
-## Repository Layout
+## Legacy Python Prototype
 
-```text
-src/code_review_agent/
-  api/              FastAPI app and routes
-  apps/repo_analyst Structured repository analysis app
-  context/          Prompt/context compaction
-  formatters/       Provider payload formatting
-  harness/          Agent loop and run result types
-  messages/         Internal message and tool-call types
-  models/           Model interfaces and provider adapters
-  observability/    Event and diagnostics helpers
-  runtime/          Run/session runtime services
-  sandbox/          Workspace path and command policy checks
-  session/          Session types and interfaces
-  storage/          SQLite runtime/session stores
-  tools/            Tool abstractions and built-in tools
-  web/              Built-in single-page UI
-```
+`src/code_review_agent` contains the original Python implementation: a
+FastAPI service, a structured repo-analysis app, SQLite-backed runs and
+sessions, and a single-page web UI. It remains runnable via `pyproject.toml`
+and `docker-compose.yml` and serves as a behavior and test reference. New
+features are developed in the TypeScript packages.
