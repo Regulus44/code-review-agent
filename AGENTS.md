@@ -36,8 +36,8 @@
 
 本文件只保存长期有效的目标、边界和治理规则，不作为阶段进度看板。当前阶段、完成证据、下一阶段入口和暂缓事项统一以 `docs/phase-status.zh-CN.md` 及对应的阶段计划为准；阶段切换时应更新这些文档，而不是例行修改本文件。
 
-- `src/code_review_agent` 是旧 Python 原型，只作为行为、数据和测试参考；
 - 新 TypeScript Runtime 已建立并通过 Phase 1 验收；不能把 Python 模块作为新 Runtime 的 import dependency；
+- 旧 Python 原型、测试和启动入口已经移除；历史行为与决策通过 Git 提交和开发日志追溯；
 - 详细总计划位于 `docs/coding-agent-migration-plan.zh-CN.md`；
 - 阶段索引位于 `docs/phase-plans/README.zh-CN.md`；
 - Phase 0 执行清单位于 `docs/phase-0-checklist.zh-CN.md`，当前阶段状态和验收证据位于 `docs/phase-status.zh-CN.md`；
@@ -62,9 +62,8 @@
 ### 4.1 TypeScript 是目标后端
 
 - 新后端使用 TypeScript/Node.js；不以旧 Python Runtime 为底座。
-- 旧 Python 代码不进入新 Runtime 的依赖图，不共享 Python ORM、FastAPI 类型或业务对象。
-- 旧 Python 实现只允许作为行为样本、迁移输入、回归 fixture 和缺陷参考。
-- Python 目录是否归档或删除，必须等 TypeScript 版本通过 Read-only、Edit、Test 垂直场景后单独决策。
+- 旧 Python Runtime 不进入新 Runtime 的依赖图，也不共享 Python ORM、FastAPI 类型或业务对象；其源码已经从工作树移除。
+- 历史行为、迁移输入和缺陷记录通过 Git 提交、契约文档和开发日志保留。
 
 ### 4.2 DSH 是主骨架，Claude Code 是行为参考
 
@@ -162,15 +161,12 @@ discover → schema validate → workspace/policy check → approval
 提交前按改动范围运行相关检查。当前旧项目可用的检查包括：
 
 ```powershell
-# Python 原型回归（仅用于旧实现参考）
-pytest
-
-# 新 TypeScript workspace 建立后，以其 package.json 中的命令为准
+# TypeScript workspace checks
 pnpm typecheck
 pnpm test
 ```
 
-不要因为旧 Python 测试通过，就声称 TypeScript Runtime 已完成；也不要因为 TypeScript 编译通过，就跳过 workspace 安全和事件恢复测试。
+不要因为 TypeScript 编译通过，就跳过 workspace 安全和事件恢复测试。
 
 ## 8. Web 开发规则
 
@@ -202,7 +198,7 @@ pnpm test
 
 - 为了“像 DSH”引入完整插件平台，但没有本项目验收场景；
 - 为了“像 Claude Code”复制 CLI、账户、遥测或商业 provider；
-- 继续把旧 Python Runtime 修补成新后端底座；
+- 恢复已退役的旧 Runtime 作为后端底座；
 - MCP 工具绕过统一权限、workspace 或事件；
 - A2A 直接进入 ToolRegistry；
 - 子 Agent 共享父 Agent 全部上下文或权限；
