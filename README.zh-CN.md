@@ -151,6 +151,15 @@ pnpm dev:api
 
 Session 持久化到工作目录下的 `.data/code-review-agent.sqlite`。
 
+如需使用容器运行，先将 `.env.example` 复制为 `.env`，把
+`CODE_REVIEW_WORKSPACE_HOST_ROOT` 设置为需要暴露给 Agent 的本机目录，然后执行：
+
+```bash
+docker compose up --build
+```
+
+挂载后的 workspace 在容器内使用 `/workspaces/project`。
+
 ## 配置
 
 TypeScript API 读取的 `.env` 配置：

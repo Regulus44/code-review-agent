@@ -165,6 +165,16 @@ Then open `http://127.0.0.1:3210/`. The server binds to `127.0.0.1`; set
 Sessions persist to `.data/code-review-agent.sqlite` relative to the working
 directory.
 
+For a containerized run, copy `.env.example` to `.env`, set
+`CODE_REVIEW_WORKSPACE_HOST_ROOT` to the host directory you want to expose,
+and run:
+
+```bash
+docker compose up --build
+```
+
+The mounted workspace is available to the agent as `/workspaces/project`.
+
 ## Configuration
 
 `.env` values read by the TypeScript API:
