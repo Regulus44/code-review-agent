@@ -338,3 +338,20 @@ pnpm test
 - 本阶段没有引入 MCP、Subagent、A2A、Code Mode 或旧 Python Runtime 依赖。
 
 Phase 3 退出条件至此满足；后续工具扩展必须继续复用本阶段 ToolRegistry、PermissionPolicy、WorkspaceResolver 和 EventStore 管线。
+
+## 2026-08-22：Phase 3B.final 新增能力收口
+
+### 修复
+
+- `JobManager` 在 Windows 不再以 detached child 启动 PowerShell background job，避免 bundled `pwsh` 在重定向场景丢失 stdout/stderr；宿主仍通过 durable `job/*` 事件在重启后恢复元数据。
+- `JobManager` 恢复事件时保留 `EventStore.list` 的 receiver，修复 API `job_list` 在 SQLite session 上读取 `db` 失败的问题。
+- Web activity renderer 在 session 没有消息但已有工具、Goal、Todo、Job、LSP 或 patch 事件时不再显示空态 Hero，事件-only replay 与 SSE 增量事件均可见。
+
+### 新增能力验收
+
+- `packages/tools/src/jobs.test.ts`：6 项 targeted tests 通过，新增 event-store receiver 回归和 Windows PowerShell 输出捕获。
+- 隔离本地 session 验证 `job_list` 重启恢复、`job_output` durable spill、Goal projection、`session_query` 和 Web 刷新/SSE。
+- 真实 DeepSeek 隔离 long-task smoke 通过：模型完成 `plan → create_goal → todo_write → pwsh(background) → approval → job_output → update_goal`，后台命令 exit code 为 0，输出为 `deepseek-long-task` / `deepseek-done`，无文件修改；最终 plan 已清理、Goal completed、Todo 全部 completed。
+- `pnpm typecheck` 与 `git diff --check` 作为本次变更门禁；未重复执行普通 baseline test。
+
+Phase 3B 状态更新为 `completed`。后续 Web provider、Skill loader、Subagent lifecycle、Workflow executor 仍必须沿用 capability、permission、event 和 presentation 管线。

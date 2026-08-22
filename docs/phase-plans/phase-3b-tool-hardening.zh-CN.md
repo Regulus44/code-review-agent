@@ -1,6 +1,6 @@
 # Phase 3B：Coding Agent 工具池与工具 Prompt 强化
 
-状态：in_progress（2026-08-22；3B.0–3B.5 已有实现，3B.2 patch/diff 闭环继续开发）
+状态：completed（2026-08-22；3B.0–3B.5、patch/diff、LSP、background job、Web/SSE 与真实 DeepSeek long-task 验收已完成）
 
 本计划承接已完成的 Phase 1A 与 Phase 3。Phase 1A 已证明模型可以完成 read → edit → approve → test → summary；Phase 3 已提供统一的 ToolRegistry、ToolRuntime、PermissionPolicy、WorkspaceResolver、取消、输出预算和事件审计。本阶段重点把现有工具提升为可组合、可解释、可恢复的 Coding Agent 工具池。
 
@@ -267,6 +267,14 @@ P0 工具需要稳定的 call/result presentation：read/search card、diff/file
 
 每条场景验证真实 DeepSeek tool call、SSE 中间事件顺序、断线 replay、权限恢复、最终摘要和长输出滚动。
 
+### 9.4 本次 Phase 3B.final 证据
+
+- 隔离 workspace 通过 `plan → todo_write → create_goal → pwsh(background) → job_output → job_list → get_goal → session_query`；重启 API 后 `job_list` 从 `job/*` 事件恢复，状态与 workspace/session scope 保持一致。
+- Windows PowerShell background adapter 修复为保留宿主进程内的 stdout/stderr 捕获；durable spill artifact、bounded output、`exitCode` 和 `truncated` 字段均有直接证据。
+- Web 在无消息但存在工具/Goal/Job 事件的 session 中展示 activity card；刷新后历史 replay 恢复，SSE 继续接收 `get_goal`、`session_query` 和 plan 收束事件。
+- 真实 DeepSeek 隔离 long-task smoke 完成：模型创建并收束 plan/goal/todo，受控 `pwsh` 经 approval 执行，`job_output` 返回两行输出和 `exitCode: 0`，未修改文件。
+- 本次只执行新增能力的针对性测试与 smoke；普通 baseline test 按开发约定不重复执行。
+
 ## 10. Checkpoint 与回滚
 
 | checkpoint | 交付 | 门禁 | 回滚 |
@@ -310,14 +318,8 @@ feat(shell): add policy-bound bash and pwsh semantics
 - 长任务刷新、断线和重启后可继续，job/goal 状态不依赖进程内存；
 - 至少一条真实 DeepSeek long-task smoke 通过。
 
-### 下一步执行顺序
+### 本次执行结果与后续边界
 
-1. 提交本计划及索引/状态同步；
-2. 完成 3B.0：冻结 ToolPromptSpec、assembly、catalog fixture 和 DSH 对照测试；
-3. 完成 3B.1：为现有 P0/P1 工具补齐 prompt，不先改变执行语义；
-4. 完成 3B.2：强化 edit/diff/patch 和 stale/conflict；
-5. 完成 3B.3：强化 Bash/Pwsh/Terminal/job 和 Windows 工作区语义；
-6. 完成 patch/diff parser、apply/reject/rollback 的事件与恢复边界；
-7. 补齐 LSP 生命周期/取消/崩溃恢复和 background job spill/恢复；
-8. 用真实 DeepSeek 做新增能力隔离 smoke，再进入最终验收；
-9. 每个 checkpoint 更新 phase-status 和对应开发日志并立即 commit。
+1. Phase 3B 已完成并提交独立 checkpoint；后续修改继续复用 ToolRegistry、ToolRuntime、PermissionPolicy、WorkspaceResolver 和 EventStore。
+2. Web search/fetch、Skill loader、Subagent lifecycle、Workflow/Ralph executor 仍保持 capability-gated 设计，分别进入后续阶段实现。
+3. 若继续扩展 background job，应优先补充 cancel、duplicate-ended 幂等和更长输出滚动场景；这些不阻塞当前 Phase 3B 退出。

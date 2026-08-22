@@ -53,6 +53,36 @@ describe("JobManager", () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
+  it("preserves the event store receiver while recovering job metadata", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-job-store-receiver-"));
+    try {
+      const sessionId = "ses_job_store_receiver";
+      const events = [{ sessionId, type: "job/started", sequence: 1, createdAt: new Date().toISOString(), payload: { jobId: "job_receiver", sessionId, workspaceRoot: root, cwd: root, command: "node fixture" } }] as const;
+      const store = {
+        db: true,
+        async list(this: { db: boolean }) {
+          if (!this.db) throw new Error("receiver lost");
+          return events as never;
+        },
+      };
+      const jobs = new JobManager({ eventStore: store });
+      expect(await jobs.listForSession(sessionId, root)).toMatchObject([{ jobId: "job_receiver", status: "orphaned" }]);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("captures output from the Windows PowerShell background adapter", async () => {
+    if (process.platform !== "win32") return;
+    const root = await mkdtemp(path.join(tmpdir(), "cra-job-pwsh-"));
+    try {
+      const jobs = new JobManager();
+      const started = await jobs.start({ sessionId: "ses_job_pwsh", workspaceRoot: root, cwd: root, executable: process.env["CODE_REVIEW_AGENT_PWSH"] ?? "pwsh", args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "Write-Output 'job-pwsh-output'"], command: "pwsh fixture" });
+      const jobId = (started.output as { jobId: string }).jobId;
+      for (let attempt = 0; attempt < 40 && jobs.list("ses_job_pwsh", root)[0]?.status === "running"; attempt += 1) await new Promise<void>((resolve) => setTimeout(resolve, 25));
+      const output = await jobs.read("ses_job_pwsh", jobId, 100);
+      expect((output.output as { output: string }).output).toContain("job-pwsh-output");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it("spills complete output to a workspace artifact while bounding output events", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "cra-job-spill-"));
     try {

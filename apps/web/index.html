@@ -473,7 +473,8 @@
           conversation.innerHTML = '';
           const ordered = orderedEvents();
           const hasMessage = ordered.some((event) => event.type === 'user/message' || event.type === 'assistant/chunk' || event.type === 'assistant/message');
-          if (!hasMessage) { const hero = document.createElement('div'); hero.className = 'hero'; hero.innerHTML = `<div class="hero-inner"><div class="hero-mark">⌁</div><h1>Ready to review your code</h1><p>Ask the agent to inspect a repository, explain a file, or plan the next change.</p><span class="workspace-chip">${esc(state.session?.workspaceRoot || '.')}</span></div>`; conversation.append(hero); }
+          const hasActivity = ordered.some((event) => event.type !== 'session/created');
+          if (!hasMessage && !hasActivity) { const hero = document.createElement('div'); hero.className = 'hero'; hero.innerHTML = `<div class="hero-inner"><div class="hero-mark">⌁</div><h1>Ready to review your code</h1><p>Ask the agent to inspect a repository, explain a file, or plan the next change.</p><span class="workspace-chip">${esc(state.session?.workspaceRoot || '.')}</span></div>`; conversation.append(hero); }
           else {
             const body = document.createElement('div'); body.className = 'conversation-body'; conversation.append(body); const assistant = new Map(); const permissions = new Map(); const interactions = new Map(); const toolRows = new Map();
             const upsertTool = (id, name, text, statusText) => { const key = id || `${name}-${toolRows.size}`; let card = toolRows.get(key); if (!card) { card = appendTool(body, name || 'tool', text, statusText); toolRows.set(key, card); } else { card.toolStatus.textContent = statusText; card.pre.textContent = text; } return card; };

@@ -80,7 +80,11 @@ export class JobManager {
     catch (error) { return fail("JOB_SPILL_FAILED", `Unable to create the durable job output artifact: ${error instanceof Error ? error.message : String(error)}`); }
     let child: ChildProcessWithoutNullStreams;
     try {
-      child = spawn(input.executable, [...input.args], { cwd: input.cwd, detached: true, shell: false, windowsHide: true, env: { ...process.env, ...(input.env ?? {}) }, stdio: ["pipe", "pipe", "pipe"] });
+      // The bundled PowerShell runtime on Windows loses redirected stdout/stderr
+      // when launched detached. Jobs are already owned by this host and are
+      // marked orphaned from durable events after a restart, so keep the child
+      // attached on Windows to preserve output capture and spill semantics.
+      child = spawn(input.executable, [...input.args], { cwd: input.cwd, detached: process.platform !== "win32", shell: false, windowsHide: true, env: { ...process.env, ...(input.env ?? {}) }, stdio: ["pipe", "pipe", "pipe"] });
     } catch (error) { return fail("COMMAND_FAILED", error instanceof Error ? error.message : String(error)); }
     const record: JobRecord = { jobId, sessionId: input.sessionId, workspaceRoot: input.workspaceRoot, cwd: input.cwd, command: input.command, status: "running", startedAt, endedAt: undefined, exitCode: undefined, signal: undefined, child, output: "", readOffset: 0, readOffsetBytes: 0, totalBytes: 0, spillPath, spillWrite: Promise.resolve(), spillError: undefined, killed: false, endedNotified: false, error: undefined, ...(input.appendEvent === undefined ? {} : { appendEvent: input.appendEvent }) };
     this.jobs.set(jobId, record);
@@ -167,9 +171,9 @@ export class JobManager {
   }
 
   private async recoverSession(sessionId: string, workspaceRoot?: string): Promise<void> {
-    const list = this.options.eventStore?.list;
-    if (list === undefined) return;
-    const events = await list(brand<string, "SessionId">(sessionId), 0);
+    const eventStore = this.options.eventStore;
+    if (eventStore === undefined) return;
+    const events = await eventStore.list(brand<string, "SessionId">(sessionId), 0);
     const started = new Map<string, AgentEvent>();
     const output = new Map<string, string>();
     const ended = new Map<string, AgentEvent>();
