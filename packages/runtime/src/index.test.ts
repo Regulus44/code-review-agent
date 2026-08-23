@@ -38,6 +38,21 @@ describe("AgentHost", () => {
     expect(system).toContain("Before editing, read the current file");
   });
 
+  it("falls back to the next model before any partial output and records the recovery event", async () => {
+    const store = new InMemoryEventStore();
+    const failing: ChatModel = { async *stream(): AsyncIterable<ModelStreamPart> { throw new Error("PRIMARY_UNAVAILABLE"); } };
+    const fallback: ChatModel = { async *stream(): AsyncIterable<ModelStreamPart> { yield { type: "text_delta", text: "fallback-ok" }; yield { type: "done" }; } };
+    const host = new AgentHost({ store, model: failing, fallbackModels: [fallback] });
+    const session = await host.createSession("D:/fallback-fixture");
+    const turn = await host.sendMessage(session.id, "continue safely");
+    await host.waitForTurn(turn);
+    const events = await host.events(session.id);
+    expect(events.some((event) => event.type === "agent/error" && event.payload["code"] === "MODEL_FALLBACK")).toBe(true);
+    expect(events.some((event) => event.type === "assistant/message" && event.payload["content"] === "fallback-ok")).toBe(true);
+    expect(events.find((event) => event.type === "turn/ended")?.payload["status"]).toBe("completed");
+    expect(host.metrics()).toMatchObject({ turnsStarted: 1, turnsCompleted: 1, modelFallbacks: 1 });
+  });
+
   it("renames a session through an idempotent session/updated event", async () => {
     const store = new InMemoryEventStore();
     const host = new AgentHost({ store });

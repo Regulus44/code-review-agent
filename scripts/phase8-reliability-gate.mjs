@@ -49,6 +49,8 @@ try {
   assert(exportResponse.status === 200 && (await exportResponse.json()).session.id === sessionId, "session export route did not return replayable session state");
   const diagnosticsResponse = await fetch(`${baseUrl}/v1/diagnostics?sessionId=${sessionId}`);
   assert(diagnosticsResponse.status === 200 && (await diagnosticsResponse.json()).session.id === sessionId, "structured diagnostics route did not return session scope");
+  const metricsResponse = await fetch(`${baseUrl}/v1/metrics`);
+  assert(metricsResponse.status === 200 && typeof (await metricsResponse.json()).metrics?.turnsStarted === "number", "metrics route did not return runtime counters");
 
   console.log(JSON.stringify({ phase: "8.4", gate: "reliability-retry-deadline-shutdown-export", passed: true, retry: true, deadline: true, shutdown: true }));
 } finally {

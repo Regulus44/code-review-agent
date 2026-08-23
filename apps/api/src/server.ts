@@ -24,6 +24,7 @@ export interface ApiServerOptions {
   readonly databasePath?: string;
   readonly host?: AgentHost;
   readonly model?: ChatModel;
+  readonly fallbackModels?: readonly ChatModel[];
   readonly modelInfo?: ModelConfigView;
   readonly availableModels?: readonly string[];
   readonly modelSelector?: (model: string) => ModelSelection;
@@ -45,7 +46,7 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
   const ownsStore = options.store === undefined && options.host === undefined;
   const store = options.store ?? (options.host === undefined ? new SqliteEventStore({ databasePath: options.databasePath ?? defaultDatabasePath() }) : undefined);
   const subagentRuntime = options.subagentRuntime ?? new SubagentRuntime({ store: store as SessionEventStore });
-  const host = options.host ?? new AgentHost({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), ...(options.permissionPreset === undefined ? {} : { permissionPreset: options.permissionPreset }), ...(options.contextBudget === undefined ? {} : { contextBudget: options.contextBudget }), ...(options.codeMode === undefined ? {} : { codeMode: options.codeMode }), subagentRuntime });
+  const host = options.host ?? new AgentHost({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), ...(options.fallbackModels === undefined ? {} : { fallbackModels: options.fallbackModels }), ...(options.permissionPreset === undefined ? {} : { permissionPreset: options.permissionPreset }), ...(options.contextBudget === undefined ? {} : { contextBudget: options.contextBudget }), ...(options.codeMode === undefined ? {} : { codeMode: options.codeMode }), subagentRuntime });
   if (!subagentRuntime.providerCatalog().some((provider) => provider.name === "in-process")) subagentRuntime.registerProvider(createInProcessSubagentProvider({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), baseToolDefinitions: host.toolRegistry().listAll(), subagentRuntime }));
   const modelRuntime: ModelRuntimeState = {
     availableModels: options.availableModels ?? [],
@@ -126,6 +127,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "GET" && url.pathname === "/v1/diagnostics") {
       const rawSessionId = url.searchParams.get("sessionId");
       sendJson(response, 200, await host.diagnostics(rawSessionId === null ? undefined : sessionId(rawSessionId)));
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/v1/metrics") {
+      sendJson(response, 200, { runtime: "typescript", generatedAt: new Date().toISOString(), metrics: host.metrics() });
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/models") {

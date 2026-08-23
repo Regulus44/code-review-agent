@@ -40,6 +40,7 @@ import { buildAgentSystemPrompt } from "./system-prompt.js";
 export interface AgentHostOptions {
   readonly store: SessionEventStore;
   readonly model?: ChatModel;
+  readonly fallbackModels?: readonly ChatModel[];
   readonly systemPrompt?: string;
   readonly maxSteps?: number;
   readonly toolRuntime?: ToolRuntime;
@@ -70,6 +71,16 @@ export interface CodeModeSettings {
 export interface LspSettings {
   readonly configured: boolean;
   readonly servers: readonly string[];
+}
+
+export interface RuntimeMetricsSnapshot {
+  readonly turnsStarted: number;
+  readonly turnsCompleted: number;
+  readonly turnsFailed: number;
+  readonly turnsStopped: number;
+  readonly modelFallbacks: number;
+  readonly toolCalls: number;
+  readonly toolFailures: number;
 }
 
 interface PendingTurn {
@@ -106,6 +117,7 @@ interface CollectedModelResponse {
 /** Coordinates durable sessions, queued turns and model execution behind storage/model interfaces. */
 export class AgentHost {
   private model: ChatModel;
+  private readonly fallbackModels: readonly ChatModel[];
   private readonly customSystemPrompt: string | undefined;
   private readonly permissionPreset: PermissionPreset | undefined;
   private readonly controllers = new Map<TurnId, AbortController>();
@@ -126,9 +138,11 @@ export class AgentHost {
   private readonly compactionEnabled: boolean;
   private readonly contextBudget: Partial<ContextBudget> | undefined;
   private readonly worktreeOperations = new Map<SessionId, Promise<void>>();
+  private readonly metricCounters = { turnsStarted: 0, turnsCompleted: 0, turnsFailed: 0, turnsStopped: 0, modelFallbacks: 0, toolCalls: 0, toolFailures: 0 };
 
   constructor(private readonly options: AgentHostOptions) {
     this.model = options.model ?? new EchoChatModel();
+    this.fallbackModels = options.fallbackModels ?? [];
     this.compactionEnabled = options.compactionEnabled !== false;
     this.contextBudget = options.contextBudget;
     this.customSystemPrompt = options.systemPrompt;
@@ -236,7 +250,12 @@ export class AgentHost {
       activeTurns: this.activeTurns.size,
       queuedTurns: [...this.queues.values()].reduce((sum, queue) => sum + queue.length, 0),
       pendingPermissionWaiters: this.permissionWaiters.size,
+      metrics: this.metrics(),
     };
+  }
+
+  metrics(): RuntimeMetricsSnapshot {
+    return { ...this.metricCounters };
   }
 
   async shutdown(): Promise<void> {
@@ -1296,6 +1315,7 @@ export class AgentHost {
     content: string,
   ): Promise<void> {
     try {
+      this.metricCounters.turnsStarted += 1;
       await this.options.store.append({ sessionId, turnId, type: "turn/started", payload: {} });
       const messages: ChatMessage[] = [
         { role: "system", content: await this.systemMessage(sessionId) },
@@ -1310,6 +1330,7 @@ export class AgentHost {
 
   private async runRecoveredTurn(sessionId: SessionId, turnId: TurnId, controller: AbortController): Promise<void> {
     try {
+      this.metricCounters.turnsStarted += 1;
       await this.options.store.append({ sessionId, turnId, type: "agent/status", payload: { status: "running", reason: "permission_resolved_after_restart" } });
       const messages: ChatMessage[] = [{ role: "system", content: await this.systemMessage(sessionId, true) }, ...(await this.conversationMessages(sessionId))];
       await this.runSteps(sessionId, turnId, controller, messages);
@@ -1338,6 +1359,7 @@ export class AgentHost {
         }
         await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "completed" } });
         await this.options.store.append({ sessionId, turnId, type: "turn/ended", payload: { status: "completed" } });
+        this.metricCounters.turnsCompleted += 1;
         return;
       }
       messages.push({ role: "assistant", content: response.text, toolCalls: response.toolCalls });
@@ -1411,8 +1433,10 @@ export class AgentHost {
 
   private async finishTurnAfterError(sessionId: SessionId, turnId: TurnId, controller: AbortController, error: unknown): Promise<void> {
     if (controller.signal.aborted) {
+      this.metricCounters.turnsStopped += 1;
       await this.options.store.append({ sessionId, turnId, type: "turn/ended", payload: { status: "stopped" } });
     } else {
+      this.metricCounters.turnsFailed += 1;
       const message = error instanceof Error ? error.message : String(error);
       await this.options.store.append({ sessionId, turnId, type: "agent/error", payload: { message } });
       await this.options.store.append({ sessionId, turnId, type: "turn/ended", payload: { status: "failed", message } });
@@ -1433,29 +1457,43 @@ export class AgentHost {
     controller: AbortController,
     messages: readonly ChatMessage[],
   ): Promise<CollectedModelResponse> {
-    const textParts: string[] = [];
-    const calls = new Map<number, { id?: string; name?: string; arguments: string }>();
-    for await (const part of this.model.stream({ messages, tools: this.modelTools(sessionId), toolChoice: "auto", signal: controller.signal })) {
-      if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
-      if (part.type === "text_delta") {
-        textParts.push(part.text);
-        await this.options.store.append({ sessionId, turnId, type: "assistant/chunk", payload: { text: part.text } });
-      } else if (part.type === "tool_call_start") {
-        const current = calls.get(part.index) ?? { arguments: "" };
-        calls.set(part.index, { ...current, ...(part.id === undefined ? {} : { id: part.id }), ...(part.name === undefined ? {} : { name: part.name }) });
-      } else if (part.type === "tool_call_delta") {
-        const current = calls.get(part.index) ?? { arguments: "" };
-        calls.set(part.index, { ...current, arguments: `${current.arguments}${part.arguments}` });
-      } else if (part.type === "error") {
-        throw new Error(`${part.code}: ${part.message}`);
+    const candidates = [this.model, ...this.fallbackModels];
+    let lastError: unknown = new Error("No model configured");
+    for (let modelIndex = 0; modelIndex < candidates.length; modelIndex += 1) {
+      const model = candidates[modelIndex];
+      if (model === undefined) continue;
+      const textParts: string[] = [];
+      const calls = new Map<number, { id?: string; name?: string; arguments: string }>();
+      try {
+        for await (const part of model.stream({ messages, tools: this.modelTools(sessionId), toolChoice: "auto", signal: controller.signal })) {
+          if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
+          if (part.type === "text_delta") {
+            textParts.push(part.text);
+            await this.options.store.append({ sessionId, turnId, type: "assistant/chunk", payload: { text: part.text } });
+          } else if (part.type === "tool_call_start") {
+            const current = calls.get(part.index) ?? { arguments: "" };
+            calls.set(part.index, { ...current, ...(part.id === undefined ? {} : { id: part.id }), ...(part.name === undefined ? {} : { name: part.name }) });
+          } else if (part.type === "tool_call_delta") {
+            const current = calls.get(part.index) ?? { arguments: "" };
+            calls.set(part.index, { ...current, arguments: `${current.arguments}${part.arguments}` });
+          } else if (part.type === "error") {
+            throw new Error(`${part.code}: ${part.message}`);
+          }
+        }
+        const toolCalls: ModelToolCall[] = [];
+        for (const [index, call] of [...calls.entries()].sort(([left], [right]) => left - right)) {
+          if (call.name === undefined || call.name.trim() === "") throw new Error(`MALFORMED_TOOL_CALL: missing tool name at index ${index}`);
+          toolCalls.push({ id: call.id ?? `call_${randomUUID()}`, name: call.name, arguments: call.arguments });
+        }
+        return { text: textParts.join(""), toolCalls };
+      } catch (error) {
+        lastError = error;
+        if (controller.signal.aborted || textParts.length > 0 || modelIndex >= candidates.length - 1) throw error;
+        this.metricCounters.modelFallbacks += 1;
+        await this.options.store.append({ sessionId, turnId, type: "agent/error", payload: { code: "MODEL_FALLBACK", message: error instanceof Error ? error.message : String(error), failedModelIndex: modelIndex, fallbackModelIndex: modelIndex + 1 } });
       }
     }
-    const toolCalls: ModelToolCall[] = [];
-    for (const [index, call] of [...calls.entries()].sort(([left], [right]) => left - right)) {
-      if (call.name === undefined || call.name.trim() === "") throw new Error(`MALFORMED_TOOL_CALL: missing tool name at index ${index}`);
-      toolCalls.push({ id: call.id ?? `call_${randomUUID()}`, name: call.name, arguments: call.arguments });
-    }
-    return { text: textParts.join(""), toolCalls };
+    throw lastError;
   }
 
   private async executeModelToolCall(
@@ -1464,6 +1502,7 @@ export class AgentHost {
     controller: AbortController,
     toolCall: ModelToolCall,
   ): Promise<ExecuteToolOutput> {
+    this.metricCounters.toolCalls += 1;
     let input: unknown;
     try {
       input = toolCall.arguments.trim() === "" ? {} : JSON.parse(toolCall.arguments) as unknown;
@@ -1482,9 +1521,11 @@ export class AgentHost {
         signal: controller.signal,
         caller: "agent",
       });
+      if (output.status === "failed" || output.result?.ok === false) this.metricCounters.toolFailures += 1;
       if (output.status !== "awaiting_permission" || output.permission === undefined) return output;
       return this.waitForPermission(output.permission, controller);
     } catch (error) {
+      this.metricCounters.toolFailures += 1;
       return this.syntheticToolFailure(sessionId, turnId, toolCall, "TOOL_CALL_FAILED", error instanceof Error ? error.message : String(error));
     }
   }

@@ -276,6 +276,10 @@ export class WebApiClient {
     return this.request(sessionId === undefined ? "/v1/diagnostics" : `/v1/diagnostics?sessionId=${encodeURIComponent(sessionId)}`);
   }
 
+  metrics(): Promise<Readonly<Record<string, unknown>>> {
+    return this.request("/v1/metrics");
+  }
+
   sendMessage(sessionId: SessionId, content: string, commandId?: string): Promise<{ readonly turnId: TurnId }> {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}`, {
       method: "POST",
