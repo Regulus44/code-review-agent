@@ -35,6 +35,17 @@ Phase 7 的 DSH Web 调研与分步计划：
 - [DSH Web 前端与 Agent 能力调研](phase-7-dsh-web-research.zh-CN.md)
 - [Phase 7：DSH Web 前端收敛与可观测工作台](phase-plans/phase-7-web-convergence.zh-CN.md)
 
+## Phase 8.0.3 Goal/Plan/Todo/Question vertical slice（当前 checkpoint）
+
+- `apps/web/src/presentation/goal-presenter.ts`：从 durable GoalProjection 生成 GoalBar render intent；目标条件只有在 goal completed 事件存在时才标记 satisfied，缺少 host command surface 时明确标记 deferred；
+- `apps/web/src/presentation/plan-presenter.ts`：将 PlanProjection 转为 draft/active/approved/rejected/cleared review intent，bounded 内容和不可用原因来自 presenter；
+- `apps/web/src/presentation/todo-presenter.ts`：提供 pending/in_progress/completed/cancelled 的 TodoPanel 投影、计数、折叠提示和 bounded detail；
+- `apps/web/src/presentation/question-presenter.ts`：提供按 turn/standalone 批次筛选、多问题、选项、freeform、expiry、恢复标记和状态计数；
+- `apps/web/src/browser.ts`：typed Web bridge 暴露四个 presenter；`apps/web/index.html` 增加 GoalBar、Plan toolbar 入口和 Goal/Plan/Todo/Questions details panel，所有事实仍来自 SessionStore/SessionProjection；
+- 不新增 Event/Task/Permission contract，也没有把 deferred 的 Goal 编辑、暂停/恢复、Plan review 命令伪装成可用；这些能力进入下一切片，需先增加 host-backed idempotent command 和 CAS/replay contract；
+- 定向 presenter 测试 9 项、Web 全量测试 92 项、`pnpm typecheck`、`pnpm build:web`、`pnpm test:phase7:browser` 和 `git diff --check` 通过；browser gate 五场景、1,250 条 trajectory replay 继续通过；
+- 当前状态仍为 `pending`，该 checkpoint 只关闭 8.0.3 的 projection/presentation 基线，不代表 Phase 8 或 8.0 Web parity 完成。
+
 ## Phase 7 Workspace lifecycle controls（当前 checkpoint）
 
 - `packages/contracts` / `docs/event-contract.md`：新增 `workspace/updated` 事件和 Workspace 生命周期元数据字段；

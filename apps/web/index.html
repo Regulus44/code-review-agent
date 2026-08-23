@@ -281,6 +281,15 @@
       .detail-value { color: var(--text); font-size: 12px; line-height: 1.5; }
       .detail-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; color: var(--text-secondary); font-size: 11px; }
       .detail-line strong { max-width: 165px; overflow: hidden; color: var(--text); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+      .planning-heading { margin-bottom: 8px; color: var(--text); font-size: 12px; font-weight: 650; }
+      .planning-list { display: grid; gap: 4px; margin: 4px 0 8px; padding-left: 16px; color: var(--text-secondary); font-size: 11px; }
+      .goal-bar { display: flex; align-items: center; gap: 12px; margin: 12px auto 0; padding: 9px 12px; width: min(100% - 40px, 748px); border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+      .goal-bar-copy { min-width: 0; flex: 1; }
+      .goal-bar-title { display: block; overflow: hidden; color: var(--text); font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+      .goal-bar-meta { display: block; margin-top: 3px; overflow: hidden; color: var(--text-secondary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+      .goal-bar-status { flex: 0 0 auto; color: var(--green); font-size: 10px; }
+      .goal-bar-status.blocked { color: var(--red); }
+      .goal-bar-status.completed { color: var(--green); }
       .status-pill { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border-radius: 99px; color: var(--green); background: #edf9f1; font-size: 10px; }
       .status-pill::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
       .tool-list { display: grid; gap: 5px; }
@@ -503,6 +512,7 @@
         </header>
         <div id="connection-banner" class="connection-banner" role="status" aria-live="polite" hidden><span id="connection-banner-message" class="connection-banner-message"></span><button id="connection-retry" class="connection-retry" type="button" hidden>Retry</button></div>
         <section id="queue-dock" class="queue-dock" aria-label="Queued messages" hidden></section>
+        <section id="goal-bar" class="goal-bar" aria-label="Current goal" hidden></section>
         <section id="conversation" class="conversation" aria-live="polite"></section>
         <footer class="composer-shell">
           <form id="composer" class="composer-card">
@@ -511,7 +521,7 @@
             <div class="composer-toolbar">
               <button id="attach" class="toolbar-button" type="button" title="Attach files">＋ <span>Attach</span></button>
               <input id="attachment-input" type="file" hidden multiple />
-              <button class="toolbar-button" type="button" title="Plan mode">☷ <span>Plan</span></button>
+              <button id="plan-toggle" class="toolbar-button" type="button" title="Show plan and todo">☷ <span>Plan</span></button>
               <button id="mode-trigger" class="toolbar-button model-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">◉ Mode · Loading…</button>
               <span class="toolbar-spacer"></span>
               <button id="model-trigger" class="toolbar-button model-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">Model · Loading…</button>
@@ -596,6 +606,8 @@
         const sidebarToggle = document.querySelector('#sidebar-toggle');
         const detailsToggle = document.querySelector('#details-toggle');
         const details = document.querySelector('#details-content');
+        const goalBar = document.querySelector('#goal-bar');
+        const planToggle = document.querySelector('#plan-toggle');
          const renameTitle = document.querySelector('#rename-title');
          const renameDescription = document.querySelector('#rename-description');
          const renameLabel = document.querySelector('label[for="rename-input"]');
@@ -726,7 +738,7 @@
            connectionRetry.hidden = !intent.retryable;
            connectionRetry.disabled = false;
          };
-         const renderQueue = (snapshot) => {
+        const renderQueue = (snapshot) => {
            if (!queueDock) return;
            const intent = typedRuntime?.presentQueue ? typedRuntime.presentQueue(snapshot?.session) : { visible: false, pendingCount: 0, items: [], reorderSupported: false, reorderReason: '' };
            queueDock.hidden = !intent.visible;
@@ -1028,6 +1040,19 @@
             inspector.append(sectionView);
           }
         };
+        const renderGoalBar = (snapshot) => {
+          if (!goalBar) return;
+          const intent = typedRuntime?.presentGoalBar ? typedRuntime.presentGoalBar(snapshot?.session?.goals || state.session?.goals) : { visible: false };
+          goalBar.hidden = !intent.visible;
+          goalBar.innerHTML = '';
+          if (!intent.visible) return;
+          const copy = document.createElement('div'); copy.className = 'goal-bar-copy';
+          const heading = document.createElement('span'); heading.className = 'goal-bar-title'; heading.textContent = intent.title;
+          const meta = document.createElement('span'); meta.className = 'goal-bar-meta'; meta.textContent = `${intent.completion.label}${intent.unavailableReason ? ` · ${intent.unavailableReason}` : ''}`;
+          copy.append(heading, meta);
+          const statusBadge = document.createElement('span'); statusBadge.className = `goal-bar-status ${intent.status}`; statusBadge.textContent = intent.statusLabel;
+          goalBar.append(copy, statusBadge);
+        };
         const renderSettings = () => {
           if (!settingsContent) return;
           settingsContent.innerHTML = '';
@@ -1210,6 +1235,28 @@
           const pre = document.createElement('pre'); pre.textContent = intent.details.text; inspector.append(pre);
           if (intent.details.untrusted || intent.details.truncated) { const badge = document.createElement('span'); badge.className = 'trajectory-badge'; badge.textContent = intent.details.truncated ? 'bounded · untrusted' : 'untrusted'; inspector.append(badge); }
         };
+        const renderPlanningPanel = (snapshot) => {
+          let section = details.querySelector('#planning-panel');
+          if (!section) {
+            section = document.createElement('section'); section.id = 'planning-panel'; section.className = 'detail-section';
+            const label = document.createElement('div'); label.className = 'detail-label'; label.textContent = 'Goal · Plan · Todo · Questions'; section.append(label);
+            const body = document.createElement('div'); body.id = 'planning-body'; section.append(body); details.append(section);
+          }
+          const body = section.querySelector('#planning-body'); body.innerHTML = '';
+          const session = snapshot?.session || state.session;
+          const goal = typedRuntime?.presentGoalBar ? typedRuntime.presentGoalBar(session?.goals) : { visible: false, title: 'No goal', statusLabel: 'No goal', completion: { label: 'unknown' }, criteria: [], unavailableReason: 'Typed presenter unavailable.' };
+          const plan = typedRuntime?.presentPlan ? typedRuntime.presentPlan(session?.plan) : { visible: false, statusLabel: 'unknown', content: '', reviewable: false, unavailableReason: 'Typed presenter unavailable.' };
+          const todos = typedRuntime?.presentTodoPanel ? typedRuntime.presentTodoPanel(session?.todos) : { visible: false, summary: 'unknown', items: [] };
+          const questions = typedRuntime?.presentQuestionBatch ? typedRuntime.presentQuestionBatch(session?.interactions, { now: Date.now() }) : { visible: false, summary: 'unknown', questions: [] };
+          const heading = document.createElement('div'); heading.className = 'planning-heading'; heading.textContent = goal.visible ? `${goal.title} · ${goal.statusLabel}` : goal.title; body.append(heading);
+          const goalMeta = document.createElement('div'); goalMeta.className = 'detail-line'; const goalLabel = document.createElement('span'); goalLabel.textContent = 'Goal'; const goalValue = document.createElement('strong'); goalValue.textContent = goal.visible ? goal.completion.label : 'No durable goal'; goalMeta.append(goalLabel, goalValue); body.append(goalMeta);
+          if (goal.criteria?.length) { const criteria = document.createElement('ul'); criteria.className = 'planning-list'; for (const item of goal.criteria) { const row = document.createElement('li'); row.textContent = `${item.state === 'satisfied' ? '✓' : '·'} ${item.text}`; criteria.append(row); } body.append(criteria); }
+          const planMeta = document.createElement('div'); planMeta.className = 'detail-line'; const planLabel = document.createElement('span'); planLabel.textContent = 'Plan'; const planValue = document.createElement('strong'); planValue.textContent = plan.visible ? `${plan.statusLabel} · ${plan.content || 'empty'}` : 'No plan'; planMeta.append(planLabel, planValue); body.append(planMeta);
+          const todoMeta = document.createElement('div'); todoMeta.className = 'detail-line'; const todoLabel = document.createElement('span'); todoLabel.textContent = 'Todo'; const todoValue = document.createElement('strong'); todoValue.textContent = todos.summary; todoMeta.append(todoLabel, todoValue); body.append(todoMeta);
+          if (todos.items?.length) { const list = document.createElement('ul'); list.className = 'planning-list'; for (const item of todos.items.slice(0, 8)) { const row = document.createElement('li'); row.textContent = `${item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '→' : '·'} ${item.detail}`; list.append(row); } body.append(list); }
+          const questionMeta = document.createElement('div'); questionMeta.className = 'detail-line'; const questionLabel = document.createElement('span'); questionLabel.textContent = 'Questions'; const questionValue = document.createElement('strong'); questionValue.textContent = questions.summary; questionMeta.append(questionLabel, questionValue); body.append(questionMeta);
+          if (goal.unavailableReason || plan.unavailableReason) { const note = document.createElement('div'); note.className = 'empty-detail'; note.textContent = goal.unavailableReason || plan.unavailableReason; body.append(note); }
+        };
         const renderRequestRecoveryPanel = (snapshot) => {
           let section = details.querySelector('#request-recovery-panel');
           if (!section) {
@@ -1263,6 +1310,7 @@
           if (!details.querySelector('#mcp-inspector-panel')) renderMcpDetailsPanel();
           if (!details.querySelector('#request-recovery-panel')) renderRequestRecoveryPanel(typedConnection?.store.getSnapshot());
           if (!details.querySelector('#runtime-diagnostics-panel')) renderRuntimeDiagnosticsPanel(typedConnection?.store.getSnapshot());
+          if (!details.querySelector('#planning-panel')) renderPlanningPanel(typedConnection?.store.getSnapshot());
         });
         trajectoryDetailsObserver.observe(details, { childList: true });
         const render = () => {
@@ -1275,6 +1323,7 @@
           steer.hidden = runningTurn === undefined;
           steer.disabled = runningTurn === undefined || !input.value.trim();
           renderQueue(typedSnapshot || { session: state.session });
+          renderGoalBar(typedSnapshot || { session: state.session });
           const typedProjection = typedSnapshot?.conversation;
           if (typedProjection && typedProjection.nodes.length > 0) {
             const typedBody = document.createElement('div');
@@ -1288,6 +1337,7 @@
               renderMcpDetailsPanel();
               renderRequestRecoveryPanel(typedSnapshot);
               renderRuntimeDiagnosticsPanel(typedSnapshot);
+              renderPlanningPanel(typedSnapshot);
               requestAnimationFrame(() => { if (shouldFollowTail) conversation.scrollTop = conversation.scrollHeight; });
               return;
             }
@@ -1340,6 +1390,7 @@
           renderMcpDetailsPanel();
           renderRequestRecoveryPanel(typedSnapshot);
           renderRuntimeDiagnosticsPanel(typedSnapshot);
+          renderPlanningPanel(typedSnapshot);
           requestAnimationFrame(() => { if (shouldFollowTail) conversation.scrollTop = conversation.scrollHeight; });
         };
         const renderWorkspaceRecent = () => { workspaceRecent.innerHTML = ''; const roots = [...new Set(state.recentWorkspaces.filter(Boolean))].slice(0, 6); if (!roots.length) return; const label = document.createElement('div'); label.className = 'workspace-recent-label'; label.textContent = 'Recent workspaces'; workspaceRecent.append(label); roots.forEach((root) => { const button = document.createElement('button'); button.type = 'button'; button.className = 'workspace-recent-button'; button.textContent = root; button.onclick = () => { workspaceInput.value = root; workspaceError.textContent = ''; workspaceInput.focus(); }; workspaceRecent.append(button); }); };
@@ -1596,6 +1647,7 @@
         mobileMenu.onclick = () => { const viewport = typedRuntime?.shellViewport ? typedRuntime.shellViewport(window.innerWidth) : window.innerWidth <= 900 ? 'tablet' : 'desktop'; dispatchShellLayout({ type: viewport === 'desktop' ? 'toggle-sidebar' : state.layout.mobileSidebarOpen ? 'close-mobile-sidebar' : 'open-mobile-sidebar' }); };
         modelTrigger.onclick = () => { dispatchOverlay({ type: 'toggle', overlay: 'model-popover' }); };
         modeTrigger.onclick = () => { dispatchOverlay({ type: 'toggle', overlay: 'mode-popover' }); renderModes(); };
+        if (planToggle) planToggle.onclick = () => { if (state.layout.details === 'closed') dispatchShellLayout({ type: 'toggle-details' }); renderPlanningPanel(typedConnection?.store.getSnapshot() || { session: state.session }); };
         document.addEventListener('click', (event) => { if (!modelPopover.hidden && !modelPopover.contains(event.target) && event.target !== modelTrigger) dispatchOverlay({ type: 'close', overlay: 'model-popover' }); if (!modePopover.hidden && !modePopover.contains(event.target) && event.target !== modeTrigger) dispatchOverlay({ type: 'close', overlay: 'mode-popover' }); if (!sessionMenu.hidden && !sessionMenu.contains(event.target)) closeSessionMenu(); });
         input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 220)}px`; const snapshot = typedConnection?.store.getSnapshot(); const runningTurn = snapshot?.session?.turns.find((turn) => turn.status === 'running'); steer.hidden = runningTurn === undefined; steer.disabled = runningTurn === undefined || !input.value.trim(); });
         steer.addEventListener('click', async () => {

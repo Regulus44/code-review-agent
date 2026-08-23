@@ -16,6 +16,10 @@ import { presentConnection } from "./presentation/connection-presenter.js";
 import { buildNavigationModel, sessionLabel, sessionRelativeTime, workspaceKey, workspaceLabel } from "./presentation/navigation-presenter.js";
 import { presentQueue } from "./presentation/queue-presenter.js";
 import { presentRuntimeDiagnostics } from "./presentation/job-presenter.js";
+import { presentGoalBar } from "./presentation/goal-presenter.js";
+import { presentPlan } from "./presentation/plan-presenter.js";
+import { presentTodoPanel } from "./presentation/todo-presenter.js";
+import { presentQuestionBatch } from "./presentation/question-presenter.js";
 import { createShellLayoutState, presentShellLayout, reduceShellLayout, shellViewport } from "./shell/layout.js";
 import { createShellBootState, normalizeBootError, presentShellBoot, reduceShellBoot } from "./shell/boot.js";
 import { createShellOverlayState, presentShellOverlay, reduceShellOverlay } from "./shell/overlay.js";
@@ -48,6 +52,10 @@ export interface BrowserWebRuntime {
   readonly workspaceLabel: typeof workspaceLabel;
   readonly presentQueue: typeof presentQueue;
   readonly presentRuntimeDiagnostics: typeof presentRuntimeDiagnostics;
+  readonly presentGoalBar: typeof presentGoalBar;
+  readonly presentPlan: typeof presentPlan;
+  readonly presentTodoPanel: typeof presentTodoPanel;
+  readonly presentQuestionBatch: typeof presentQuestionBatch;
   readonly createShellLayoutState: typeof createShellLayoutState;
   readonly reduceShellLayout: typeof reduceShellLayout;
   readonly presentShellLayout: typeof presentShellLayout;
@@ -95,6 +103,10 @@ const runtime: BrowserWebRuntime = {
   workspaceLabel,
   presentQueue,
   presentRuntimeDiagnostics,
+  presentGoalBar,
+  presentPlan,
+  presentTodoPanel,
+  presentQuestionBatch,
   createShellLayoutState,
   reduceShellLayout,
   presentShellLayout,
