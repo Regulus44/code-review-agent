@@ -53,6 +53,8 @@ try {
   assert(metricsResponse.status === 200 && typeof (await metricsResponse.json()).metrics?.turnsStarted === "number", "metrics route did not return runtime counters");
   const browserBundle = await readFile(join(process.cwd(), "apps", "web", "dist", "browser.js"), "utf8");
   for (const symbol of ["cancelJob", "retryJob", "presentRuntimeDiagnostics"]) assert(browserBundle.includes(symbol), `browser bundle is missing ${symbol}`);
+  const webShell = await readFile(join(process.cwd(), "apps", "web", "index.html"), "utf8");
+  assert(webShell.includes("Cancel job") && webShell.includes("Retry job") && webShell.includes("Terminal & long-running jobs"), "Web Job Center recovery surface is missing");
 
   console.log(JSON.stringify({ phase: "8.4", gate: "reliability-retry-deadline-shutdown-export", passed: true, retry: true, deadline: true, shutdown: true }));
 } finally {
