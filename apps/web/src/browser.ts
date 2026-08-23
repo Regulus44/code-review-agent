@@ -4,6 +4,7 @@ import { SessionStore } from "./client/store.js";
 import { projectConversation } from "./projection/conversation.js";
 import { buildToolCallTree } from "./projection/tool-call-tree.js";
 import { projectTrajectory } from "./projection/trajectory.js";
+import { inspectTrajectory, queryTrajectory } from "./presentation/trajectory-presenter.js";
 import { presentToolCall } from "./presentation/tool-presenter.js";
 
 export interface BrowserWebRuntime {
@@ -12,6 +13,8 @@ export interface BrowserWebRuntime {
   readonly connection: SessionConnectionController;
   readonly projectConversation: typeof projectConversation;
   readonly projectTrajectory: typeof projectTrajectory;
+  readonly queryTrajectory: typeof queryTrajectory;
+  readonly inspectTrajectory: typeof inspectTrajectory;
   readonly buildToolCallTree: typeof buildToolCallTree;
   readonly presentToolCall: typeof presentToolCall;
 }
@@ -19,6 +22,16 @@ export interface BrowserWebRuntime {
 const api = new WebApiClient();
 const store = new SessionStore();
 const connection = new SessionConnectionController({ api, store });
-const runtime: BrowserWebRuntime = { api, store, connection, projectConversation, projectTrajectory, buildToolCallTree, presentToolCall };
+const runtime: BrowserWebRuntime = {
+  api,
+  store,
+  connection,
+  projectConversation,
+  projectTrajectory,
+  queryTrajectory,
+  inspectTrajectory,
+  buildToolCallTree,
+  presentToolCall,
+};
 
 Object.assign(window, { CodeReviewAgentWeb: runtime });

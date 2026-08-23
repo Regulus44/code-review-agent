@@ -1,4 +1,5 @@
 import type { ToolCallView } from "../projection/conversation.js";
+import { presentBoundedValue } from "./safe-value.js";
 
 export type ToolPresentationKind = "builtin" | "mcp" | "subagent" | "diff" | "terminal" | "generic";
 
@@ -29,7 +30,7 @@ export function presentToolCall(tool: ToolCallView, options: ToolPresenterOption
   const sourceLabel = sourceLabelFor(tool.name, kind);
   const title = presentationTitle(tool) ?? tool.name;
   const detailValue = resultModelView(tool.result) ?? tool.result ?? tool.input ?? tool.progress ?? {};
-  const bounded = boundedJson(redactValue(detailValue), Math.max(256, options.maxDetailChars ?? 8_000));
+  const bounded = presentBoundedValue(detailValue, options.maxDetailChars ?? 8_000);
   const summary = `${sourceLabel} · ${statusLabel(tool.status)}`;
   return {
     kind,
@@ -40,7 +41,7 @@ export function presentToolCall(tool: ToolCallView, options: ToolPresenterOption
     riskLevel: tool.riskLevel,
     details: bounded.text,
     truncated: bounded.truncated,
-    untrusted: true,
+    untrusted: bounded.untrusted,
     collapsedByDefault: tool.status !== "awaiting_permission" && tool.status !== "failed",
   };
 }
@@ -79,26 +80,4 @@ function resultModelView(value: unknown): unknown {
 
 function statusLabel(status: ToolCallView["status"]): string {
   return status.replace(/_/g, " ");
-}
-
-function boundedJson(value: unknown, maxChars: number): { readonly text: string; readonly truncated: boolean } {
-  let text: string;
-  try {
-    text = JSON.stringify(value, null, 2) ?? String(value);
-  } catch {
-    text = String(value);
-  }
-  if (text.length <= maxChars) return { text, truncated: false };
-  return { text: `${text.slice(0, Math.max(0, maxChars - 32))}\n… [output truncated]`, truncated: true };
-}
-
-function redactValue(value: unknown, key = ""): unknown {
-  if (isSensitiveKey(key)) return "[redacted]";
-  if (Array.isArray(value)) return value.map((item) => redactValue(item));
-  if (typeof value !== "object" || value === null) return value;
-  return Object.fromEntries(Object.entries(value).map(([entryKey, entryValue]) => [entryKey, redactValue(entryValue, entryKey)]));
-}
-
-function isSensitiveKey(key: string): boolean {
-  return /pass(word)?|secret|token|api[-_]?key|authorization|cookie|credential/i.test(key);
 }

@@ -48,6 +48,7 @@ Browser DOM smoke ✓（单个 5 项 `<ol>`、3 个嵌套列表、7 行 Markdown
 pnpm typecheck   ✓
 pnpm test        ✓
 ```
+
 git diff --check ✓
 ```
 
@@ -272,3 +273,40 @@ Browser DOM smoke ✓（有序列表为单个 <ol>，GFM 表格为语义化 <tab
 pnpm typecheck ✓
 pnpm test ✓
 ```
+
+## 2026-08-23：Trajectory ledger query 与 inspector
+
+### 目标与 DSH 对照
+
+- 对照 DSH `ui-trajectory` 的可搜索 ledger、lane/timeline 分组和 request inspector，把已有共享 `TrajectoryProjection` 接入可操作的 details surface。
+- 继续遵循 EventStore 唯一事实来源：Web 只查询 `SessionStoreSnapshot.trajectory`，搜索和选中记录属于可丢弃的 UI 状态，不创建第二套事件日志。
+- 按本项目安全边界统一处理 tool/trajectory detail：敏感 key 脱敏，JSON 有界截断，内容标记为 untrusted；running record 没有结束时间时不显示虚构 duration。
+
+### 变更范围
+
+- 新增 `apps/web/src/presentation/safe-value.ts`，集中提供 bounded JSON、循环引用保护、credential-like key redaction 和 trust/truncation 标记；Tool presenter 改用同一策略。
+- 新增 `apps/web/src/presentation/trajectory-presenter.ts`，提供 query、kind/runningOnly/limit 过滤、稳定 lane grouping 和 Overview/Timing/Source/Rendered detail inspector。
+- `apps/web/src/browser.ts` 暴露 `queryTrajectory`、`inspectTrajectory`；`apps/web/index.html` details panel 接入搜索、running-only、lane/record 选择和 inspector，并在 details 重建时自动恢复 panel。
+- 新增 safe-value/trajectory-presenter 单元测试，覆盖脱敏、截断、循环引用、过滤、limit、lane、timing、running duration 和 detail redaction。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/web test           ✓（25 tests）
+pnpm -F @code-review-agent/web run build:browser   ✓
+git diff --check                                    ✓
+```
+
+真实 API/browser smoke：
+
+- Trajectory ledger 显示 4 条真实记录、lane 计数和 sequence；
+- 搜索 `permission` 过滤为匹配记录，点击 `write_file` 记录后 inspector 切换到 permission 的 Overview/Timing/Source/Rendered detail；
+- running-only 在没有运行中记录时显示可解释空态；
+- inspector detail 中的事件内容显示 `untrusted`，credential-like 字段按统一策略脱敏；
+- 刷新后恢复为 `4 matched · 4 shown · sequence 10`、4 条记录，浏览器 console 无 warning/error。
+
+### 下一步
+
+- 继续补 Trajectory timeline 的折叠、tail-follow/pause-follow、load older 和大数据量虚拟化；
+- 完成 permission/interaction 过期与重启恢复、Subagent/Task/MCP details surface，并纳入统一 browser replay fixtures。

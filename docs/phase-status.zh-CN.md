@@ -15,7 +15,7 @@
 | Phase 4B：MCP 加固 | completed（2026-08-23） | 本 checkpoint；4B.0–4B.6、focused tests、API restart persistence 和 MCP browser smoke 通过；普通 baseline 未重复执行 |
 | Phase 5：内部 Subagent / 多 Agent | completed（2026-08-23） | 5.0–5.4：Task/Descriptor durable projection、one-shot/continuable child、FIFO/authority/cold resume、report/MCP scope、API/SSE/Web catalog；定向 typecheck、storage/subagent/runtime/API 测试和 API/Web smoke 通过 |
 | Phase 6：A2A | deferred（暂不作为 Phase 7 前置） | [ADR：Phase 7 Web 收敛不等待 A2A](adr/phase-7-web-with-a2a-deferred.zh-CN.md)；等待明确的外部 Agent 互操作需求 |
-| Phase 7：DSH Web 前端收敛 | in_progress | typed Web API/SessionStore/Conversation projection/SSE replay、Tool presenter/lineage guard、permission/interaction surface 和共享 Trajectory foundation 已接入主 Session 流；19 项 Web 测试、类型检查、browser bundle 和真实 API/browser smoke 通过；Shell 拆分、完整 capability surface、Trajectory timeline/inspector 仍在推进 |
+| Phase 7：DSH Web 前端收敛 | in_progress | typed Web API/SessionStore/Conversation projection/SSE replay、Tool presenter/lineage guard、permission/interaction surface、Trajectory query/lane/inspector 已接入主 Session 流；25 项 Web 测试、类型检查、browser bundle 和真实 API/browser smoke 通过；Shell 拆分、完整 capability surface、Trajectory timeline/虚拟化仍在推进 |
 | Phase 8：高级能力与产品化 | pending | 等前置阶段完成 |
 
 ## Phase 6 A2A 暂缓决策
@@ -29,7 +29,7 @@ Phase 7 的 DSH Web 调研与分步计划：
 - [DSH Web 前端与 Agent 能力调研](phase-7-dsh-web-research.zh-CN.md)
 - [Phase 7：DSH Web 前端收敛与可观测工作台](phase-plans/phase-7-web-convergence.zh-CN.md)
 
-## Phase 7 typed Web client、Tool surface 与 Trajectory foundation（当前 checkpoint）
+## Phase 7 typed Web client、Tool surface、Trajectory foundation 与 inspector（当前 checkpoint）
 
 - `apps/web/src/client/api.ts` 已统一 Web API 的 URL、JSON response、HTTP error 和 idempotency header；
 - `apps/web/src/client/store.ts` 已提供 Session baseline、事件去重、higher-sequence-wins、Session projection 和可订阅 immutable snapshot；
@@ -37,11 +37,13 @@ Phase 7 的 DSH Web 调研与分步计划：
 - `apps/web/src/projection/conversation.ts` 已提供 keyed Conversation/Tool/Permission/Interaction/Task projection，assistant chunk 合并和未知事件 generic fallback；
 - `apps/web/src/projection/tool-call-tree.ts`、`presentation/tool-presenter.ts` 已提供 bounded lineage、cycle/orphan/depth guard、source/risk/status summary、modelView 优先和敏感字段脱敏；
 - `apps/web/src/projection/trajectory.ts` 已从共享 event window 生成 turn/step/assistant/tool/task/permission/interaction/error ledger，running record 不虚构 duration；`SessionStoreSnapshot` 同时发布 Conversation、ToolCallTree 和 Trajectory；
+- `apps/web/src/presentation/safe-value.ts`、`trajectory-presenter.ts` 已提供统一 bounded JSON、敏感字段脱敏、untrusted/truncated 标记、query/kind/runningOnly/limit 过滤、稳定 lane 分组和 Overview/Timing/Source/Rendered detail inspector；
+- `apps/web/src/browser.ts` 已暴露 `queryTrajectory` 和 `inspectTrajectory`，静态 Web details panel 已接入搜索、running-only、record 选择、lane 列表和 inspector；UI 的搜索/选中项仅是可丢弃的交互状态，事实仍来自 `SessionStoreSnapshot`；
 - `conversation.ts` 和 Shell permission/interaction surface 已保留 caller、workspaceRoot、expiresAt、allowFreeform、cancelled/expired/resolved 状态；按钮命令使用 idempotency key；
 - 现有 Shell 通过 `/web/browser.js` bridge 使用 typed 主 Session 连接，并优先从统一 `SessionStoreSnapshot` 渲染 Conversation/Tool/Turn/Permission/Interaction 节点；旧 inline EventSource 和 event renderer 保留为 bundle 缺失时的 fallback，未改变 API/Runtime/EventStore 事实来源；
-- 定向验证：`pnpm typecheck`、`pnpm --filter @code-review-agent/web test`（19 tests）、`pnpm -F @code-review-agent/web run build:browser`、`git diff --check`；真实 API/browser smoke 验证 pending permission、取消、AskUser answer、Trajectory running→completed、刷新回放和 Connected 状态。
+- 定向验证：`pnpm typecheck`、`pnpm --filter @code-review-agent/web test`（25 tests）、`pnpm -F @code-review-agent/web run build:browser`、`git diff --check`；真实 API/browser smoke 验证 Trajectory 搜索、lane、record inspector、脱敏、running-only 空态、刷新回放和 console 无 warning/error。
 
-下一切片：完成 permission/interaction 的过期与重启恢复展示，补 Subagent/Task/MCP details surface，并继续实现 Trajectory timeline/search/inspector 和 browser replay fixtures。
+下一切片：完成 permission/interaction 的过期与重启恢复展示，补 Subagent/Task/MCP details surface，继续实现 Trajectory timeline/折叠/虚拟化，并补 browser replay fixtures。
 
 ## Phase 5 Subagent / Multi-Agent 验收证据（2026-08-23）
 
