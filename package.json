@@ -9,6 +9,8 @@
   },
   "scripts": {
     "build": "tsc -b",
+    "build:web": "pnpm --filter @code-review-agent/web build && pnpm --filter @code-review-agent/web build:browser",
+    "build:web:browser": "pnpm --filter @code-review-agent/web build:browser",
     "typecheck": "tsc -b",
     "test": "pnpm -r --if-present test",
     "test:contracts": "pnpm --filter @code-review-agent/contracts test",
@@ -18,6 +20,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
+    "esbuild": "^0.28.2",
     "tsx": "^4.19.3",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"

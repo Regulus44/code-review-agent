@@ -1,6 +1,19 @@
 # Phase 7：DSH Web 前端收敛与可观测工作台
 
-状态：`in_progress`（已有垂直切片；本计划定义完整收敛路径）
+状态：`in_progress`（7.2 连接与回放基础已完成；7.1 Shell 拆分、7.3 导航收敛和 7.4 renderer 迁移继续推进）
+
+## 当前执行 checkpoint：typed Web client 与 Session replay foundation
+
+本 checkpoint 对照 DSH 的 `client/connection`、Session snapshot 和 Conversation assembler，已落地以下基础：
+
+- `apps/web/src/client/api.ts`：统一 JSON/HTTP error、idempotency header、Session/Event/Permission/Interaction/Task/Model/MCP/Subagent 命令与查询；
+- `apps/web/src/client/store.ts`：Session baseline、事件 sequence 去重、higher-sequence-wins、projection fold、连接状态和订阅；
+- `apps/web/src/client/connection.ts`：generation、history baseline → SSE、after-sequence、backoff、旧连接隔离、断线恢复；
+- `apps/web/src/projection/conversation.ts`：user/assistant/reasoning/turn/tool/permission/interaction/task 与 generic event node，assistant chunk 合并和 ToolCallView；当前 contract 没有 root/parent call 时保留兼容字段，不虚构递归关系；
+- `apps/web/src/browser.ts` 与 API `/web/*` 静态资源：typed runtime 作为现有静态 Shell 的可回滚 bridge，主 Session 流已切换到 `SessionConnectionController`；旧 inline EventSource 仅作为 bundle 缺失时的 fallback；
+- Web 包已进入 TypeScript project reference，并有 API、Store、Connection、Conversation 定向测试。
+
+验证证据：`pnpm typecheck`、`pnpm --filter @code-review-agent/web test`、`pnpm -F @code-review-agent/web run build:browser` 通过；浏览器 smoke 已验证 typed bundle 加载、Session 切换、历史回放，以及 API 停止/重启后的 `Reconnecting… → Connected` 恢复。当前 inline renderer 仍按旧 event window 绘制，下一切片将改为直接消费 `SessionStoreSnapshot.conversation`。
 
 ## 1. 目标与边界
 

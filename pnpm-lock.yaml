@@ -11,6 +11,9 @@ importers:
       '@types/node':
         specifier: ^22.15.0
         version: 22.20.1
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
       tsx:
         specifier: ^4.19.3
         version: 4.23.12
@@ -45,7 +48,11 @@ importers:
         specifier: workspace:*
         version: link:../../packages/tools
 
-  apps/web: {}
+  apps/web:
+    dependencies:
+      '@code-review-agent/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
 
   packages/contracts: {}
 

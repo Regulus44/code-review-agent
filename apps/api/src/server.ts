@@ -1,4 +1,4 @@
-import { createReadStream, existsSync } from "node:fs";
+import { createReadStream, existsSync, statSync } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
@@ -180,6 +180,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     }
     if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
       serveIndex(response, webRoot);
+      return;
+    }
+    if (request.method === "GET" && url.pathname.startsWith("/web/")) {
+      serveWebAsset(response, webRoot, url.pathname.slice("/web/".length));
       return;
     }
     if (request.method === "POST" && url.pathname === "/v1/workspaces/validate") {
@@ -517,6 +521,27 @@ function serveIndex(response: ServerResponse, webRoot: string): void {
   const file = path.join(webRoot, "index.html");
   if (!existsSync(file)) throw new HttpError(404, "web shell not found");
   response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+  createReadStream(file).pipe(response);
+}
+
+function serveWebAsset(response: ServerResponse, webRoot: string, requestedPath: string): void {
+  const assetRoot = path.resolve(webRoot, "dist");
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(requestedPath);
+  } catch {
+    throw new HttpError(400, "invalid web asset encoding");
+  }
+  const file = path.resolve(assetRoot, decodedPath);
+  const relative = path.relative(assetRoot, file);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) throw new HttpError(403, "invalid web asset path");
+  if (!existsSync(file) || !statSync(file).isFile()) throw new HttpError(404, "web asset not found");
+  const extension = path.extname(file).toLowerCase();
+  const contentType = extension === ".js" ? "text/javascript; charset=utf-8"
+    : extension === ".map" ? "application/json; charset=utf-8"
+      : extension === ".css" ? "text/css; charset=utf-8"
+        : "application/octet-stream";
+  response.writeHead(200, { "cache-control": "no-cache", "content-type": contentType });
   createReadStream(file).pipe(response);
 }
 

@@ -6,6 +6,7 @@
   "main": "dist/server.js",
   "types": "dist/server.d.ts",
   "scripts": {
+    "predev": "pnpm --filter @code-review-agent/web build:browser",
     "dev": "node --env-file-if-exists=../../.env --import tsx src/server.ts",
     "start": "node --env-file-if-exists=../../.env dist/server.js",
     "test": "vitest run"
