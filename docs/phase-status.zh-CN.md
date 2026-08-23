@@ -88,7 +88,7 @@ Phase 7 的 DSH Web 调研与分步计划：
 - `scripts/phase8-web-gate.mjs` 已增加 Workspace view/sort 与 Settings model retry surface 检查；Web presenter 102 tests、`pnpm typecheck`、`pnpm build:web` 和 `pnpm test:phase8:web` 通过。
 - 新增 `scripts/phase8-settings-gate.mjs` 与 `PHASE8_MODEL_FAILURES` fixture：首个 `/v1/models` 请求返回 503，页面保持 Connected 并显示 Settings error/Retry，点击 Retry 后恢复 fixture-model；真实页面回归已通过。
 - 新增 `scripts/phase8-parity-gate.mjs` 与 `pnpm test:phase8:parity`，聚合 Goal/Plan/Question、Workspace、Job、LSP、Settings、Deliverables、Task/Subagent、typed presenters、响应式和可访问性 contract；gate 已通过。
-- 8.0 当前剩余 visual baseline、真实 Job 浏览器交互、更完整的 Settings section/响应式矩阵；provider failure/retry fixture 与 aggregate parity contract 已关闭。
+- 8.0 当前剩余 visual baseline 和更完整的 Settings section/响应式矩阵；真实 Job 浏览器 action/replay fixture、provider failure/retry fixture 与 aggregate parity contract 已关闭。
 
 ## Phase 7 Workspace lifecycle controls（当前 checkpoint）
 
