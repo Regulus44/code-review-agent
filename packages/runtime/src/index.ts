@@ -137,6 +137,32 @@ export class AgentHost {
     return updated;
   }
 
+  async renameSession(sessionId: SessionId, title: string, commandId?: string): Promise<SessionProjection> {
+    await this.ready;
+    const current = await this.options.store.project(sessionId);
+    if (current === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    const normalized = title.trim();
+    if (normalized.length === 0) throw new Error("Session title cannot be empty");
+    if (normalized.length > 120) throw new Error("Session title must be 120 characters or fewer");
+    const idempotencyKey = commandId ?? `cmd_${randomUUID()}`;
+    const claim = await this.options.store.claimCommand({
+      sessionId,
+      commandId: idempotencyKey,
+      kind: "rename_session",
+      request: { title: normalized },
+      result: { title: normalized },
+    });
+    if (!claim.created) {
+      const saved = await this.options.store.project(sessionId);
+      if (saved === undefined) throw new Error(`Session disappeared: ${sessionId}`);
+      return saved;
+    }
+    await this.options.store.append({ sessionId, correlationId: idempotencyKey, type: "session/updated", payload: { title: normalized } });
+    const updated = await this.options.store.project(sessionId);
+    if (updated === undefined) throw new Error(`Session disappeared: ${sessionId}`);
+    return updated;
+  }
+
   /** Soft-deletes a session through the event stream while retaining its history for audit/recovery. */
   async deleteSession(sessionId: SessionId): Promise<SessionProjection> {
     await this.ready;

@@ -9,6 +9,8 @@ describe("shell overlay state", () => {
     expect(presentShellOverlay(state)).toMatchObject({ workspaceOpen: false, settingsOpen: true });
     state = reduceShellOverlay(state, { type: "toggle", overlay: "settings" });
     expect(state).toEqual({ open: null });
+    state = reduceShellOverlay(state, { type: "open", overlay: "rename-session" });
+    expect(presentShellOverlay(state).renameSessionOpen).toBe(true);
   });
 
   it("closes only the requested overlay and supports escape", () => {

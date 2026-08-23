@@ -296,6 +296,23 @@ describe("Phase 2 API", () => {
     expect(await restored.json()).toMatchObject({ archived: false });
   });
 
+  it("renames a session through a durable idempotent command", async () => {
+    const created = await fetch(`${baseUrl}/v1/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspaceRoot: "D:/workspace/rename-fixture" }),
+    });
+    const session = await created.json() as { id: string };
+    const headers = { "content-type": "application/json", "idempotency-key": "api-rename-1" };
+    const renamed = await fetch(`${baseUrl}/v1/sessions/${session.id}/title`, { method: "POST", headers, body: JSON.stringify({ title: "  Review queue  " }) });
+    expect(renamed.status).toBe(200);
+    expect(await renamed.json()).toMatchObject({ id: session.id, title: "Review queue" });
+    const repeated = await fetch(`${baseUrl}/v1/sessions/${session.id}/title`, { method: "POST", headers, body: JSON.stringify({ title: "Review queue" }) });
+    expect(await repeated.json()).toMatchObject({ title: "Review queue" });
+    const history = await (await fetch(`${baseUrl}/v1/sessions/${session.id}/events?format=json`)).json() as { type: string; payload: Record<string, unknown> }[];
+    expect(history.filter((event) => event.type === "session/updated" && event.payload.title === "Review queue")).toHaveLength(1);
+  });
+
   it("soft-deletes a session and keeps its event history out of active lists", async () => {
     const created = await fetch(`${baseUrl}/v1/sessions`, {
       method: "POST",

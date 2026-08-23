@@ -170,6 +170,14 @@ export class WebApiClient {
     });
   }
 
+  renameSession(sessionId: SessionId, title: string, commandId?: string): Promise<SessionProjection> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/title`, {
+      method: "POST",
+      commandId,
+      body: { title },
+    });
+  }
+
   archiveSession(sessionId: SessionId, archived = true, commandId?: string): Promise<SessionProjection> {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/archive`, {
       method: "POST",

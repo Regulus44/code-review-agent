@@ -1,4 +1,4 @@
-export type ShellOverlayId = "workspace" | "settings" | "session-menu" | "model-popover" | "mode-popover";
+export type ShellOverlayId = "workspace" | "settings" | "rename-session" | "session-menu" | "model-popover" | "mode-popover";
 
 export interface ShellOverlayState {
   readonly open: ShellOverlayId | null;
@@ -13,6 +13,7 @@ export type ShellOverlayAction =
 export interface ShellOverlayRenderIntent {
   readonly workspaceOpen: boolean;
   readonly settingsOpen: boolean;
+  readonly renameSessionOpen: boolean;
   readonly sessionMenuOpen: boolean;
   readonly modelPopoverOpen: boolean;
   readonly modePopoverOpen: boolean;
@@ -39,6 +40,7 @@ export function presentShellOverlay(state: ShellOverlayState): ShellOverlayRende
   return {
     workspaceOpen: state.open === "workspace",
     settingsOpen: state.open === "settings",
+    renameSessionOpen: state.open === "rename-session",
     sessionMenuOpen: state.open === "session-menu",
     modelPopoverOpen: state.open === "model-popover",
     modePopoverOpen: state.open === "mode-popover",

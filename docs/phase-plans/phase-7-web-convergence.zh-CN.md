@@ -1,6 +1,6 @@
 # Phase 7：DSH Web 前端收敛与可观测工作台
 
-状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection、7.1 shell layout state/reducer、mobile sidebar 行为、typed overlay state/reducer 和 queue dock/cancel surface 已完成；物理 Shell 拆分、Workspace/Session 生命周期 API、7.6 queue reorder/steer/attachment 深化、长任务 terminal/job 失败诊断和窄屏视觉基线继续推进）
+状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection、7.1 shell layout state/reducer、mobile sidebar 行为、typed overlay state/reducer、queue dock/cancel surface 和 Session rename 生命周期已完成；物理 Shell 拆分、Workspace reorder 生命周期、7.6 queue reorder/steer/attachment 深化、长任务 terminal/job 失败诊断和窄屏视觉基线继续推进）
 
 ## 当前执行 checkpoint：typed Web client 与 Session replay foundation
 
@@ -165,6 +165,17 @@
 - 没有新增前端队列事实、没有模拟 reorder，也没有把 attachment/steer 能力伪造为已实现。
 
 验证：`pnpm typecheck`、Web 65 项测试、`pnpm --filter @code-review-agent/web run build:browser`、`pnpm test:phase7:browser`（五场景通过，trajectory full replay 18.91ms）和 `git diff --check` 通过。该切片可通过移除 queue dock 恢复原有 composer，不影响 Runtime/EventStore。
+
+## 当前执行 checkpoint：Session rename 生命周期（2026-08-23）
+
+本 checkpoint 对照 DSH `ui-workspace` 的 Session lifecycle，补齐可回放、幂等的 Session rename：
+
+- `packages/runtime` 新增 `renameSession()`，校验非空/120 字符上限，通过 `store.claimCommand()` 和 `session/updated` 事件保证幂等；
+- `packages/storage` 持久化显式 session title，Session summary 优先使用用户标题，缺失时继续回退首条用户消息；
+- `apps/api` 新增 `POST /v1/sessions/:id/title`，`apps/web/src/client/api.ts` 暴露 typed `renameSession()`；
+- `apps/web/index.html` 增加可访问 Rename dialog、focus trap、Escape/outside click、错误提示和 Session menu 入口；重命名后刷新导航并更新当前标题。
+
+验证：`pnpm typecheck`、Runtime 14 项、API 20 项、Web 66 项测试、browser bundle、`pnpm test:phase7:browser`（五场景通过，trajectory full replay 20.42ms）和 `pnpm test` 全部通过。该切片不改变 Workspace 安全边界或 EventStore 事实来源，可回滚为隐藏 Rename action/API。
 
 ## 1. 目标与边界
 

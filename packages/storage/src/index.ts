@@ -259,6 +259,7 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
   if (event.type === "session/created" || event.type === "session/updated" || event.type === "session/deleted") {
     const workspaceRoot = event.payload["workspaceRoot"];
     if (typeof workspaceRoot === "string") next = { ...next, workspaceRoot };
+    if (typeof event.payload["title"] === "string") next = { ...next, title: event.payload["title"] as string };
     const permissionPreset = event.payload["permissionPreset"];
     if (isPermissionPreset(permissionPreset)) next = { ...next, permissionPreset };
     const parentSessionId = event.payload["parentSessionId"];
@@ -1112,9 +1113,10 @@ export class SqliteEventStore implements SessionEventStore, McpConfigBackend {
 function toSummary(projection: SessionProjection): SessionSummary {
   const { id, workspaceRoot, permissionPreset, archived, deleted, createdAt, updatedAt, status, lastSequence } = projection;
   const firstUserMessage = projection.messages.find((message) => message.role === "user")?.content.trim();
-  const title = firstUserMessage === undefined || firstUserMessage.length === 0
+  const derivedTitle = firstUserMessage === undefined || firstUserMessage.length === 0
     ? undefined
     : firstUserMessage.length > 58 ? `${firstUserMessage.slice(0, 55)}…` : firstUserMessage;
+  const title = projection.title?.trim() || derivedTitle;
   return { id, ...(title === undefined ? {} : { title }), workspaceRoot, permissionPreset, archived: archived ?? false, deleted: deleted ?? false, createdAt, updatedAt, status, lastSequence,
     ...(projection.parentSessionId === undefined ? {} : { parentSessionId: projection.parentSessionId }),
     ...(projection.parentTaskId === undefined ? {} : { parentTaskId: projection.parentTaskId }),
@@ -1127,9 +1129,10 @@ function toSummary(projection: SessionProjection): SessionSummary {
 function readSummary(row: SqliteRow): SessionSummary {
   const projection = typeof row["projection_json"] === "string" ? JSON.parse(row["projection_json"] as string) as Partial<SessionProjection> : undefined;
   const firstUserMessage = projection?.messages?.find((message) => message.role === "user")?.content.trim();
-  const title = firstUserMessage === undefined || firstUserMessage.length === 0
+  const derivedTitle = firstUserMessage === undefined || firstUserMessage.length === 0
     ? undefined
     : firstUserMessage.length > 58 ? `${firstUserMessage.slice(0, 55)}…` : firstUserMessage;
+  const title = projection?.title?.trim() || derivedTitle;
   return {
     id: brand<string, "SessionId">(String(row["id"])),
     ...(title === undefined ? {} : { title }),

@@ -270,6 +270,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       sendJson(response, 200, await host.setSessionPermissionPreset(id, parsePermissionPreset(body.permissionPreset)));
       return;
     }
+    const titleMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/title$/u);
+    if (request.method === "POST" && titleMatch?.[1] !== undefined) {
+      const id = sessionId(decodeURIComponent(titleMatch[1]));
+      const body = await readJson(request);
+      if (typeof body.title !== "string") throw new HttpError(400, "title is required");
+      sendJson(response, 200, await host.renameSession(id, body.title, commandId(request, body)));
+      return;
+    }
     const archiveMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/archive$/u);
     if (request.method === "POST" && archiveMatch?.[1] !== undefined) {
       const id = sessionId(decodeURIComponent(archiveMatch[1]));

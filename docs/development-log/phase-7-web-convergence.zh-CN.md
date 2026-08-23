@@ -832,6 +832,44 @@ git diff --check                                    ✓
 
 下一切片：继续物理拆分 Conversation/Details，或在 host contract 允许后补 queue reorder/steer；附件能力先补 capability gate、大小/type rejection 和 receipt contract，再接入 UI。
 
+## 2026-08-23：Session rename 生命周期
+
+### 目标与 DSH 对照
+
+- 对照 DSH `ui-workspace` 的 Session lifecycle，补齐可回放的 Session rename；
+- 标题变更必须经过 AgentHost/EventStore，刷新、重连和导航列表都读取同一 projection。
+
+### 变更范围
+
+- `packages/runtime/src/index.ts`：新增 `renameSession()`，非空/120 字符校验、command claim、`session/updated` 事件和重复命令幂等；
+- `packages/storage/src/index.ts`：持久化显式 title，Session summary 显式标题优先，缺失时回退首条用户消息；
+- `apps/api/src/server.ts`：新增 `POST /v1/sessions/:id/title`；
+- `apps/web/src/client/api.ts`：新增 typed `renameSession()`；
+- `apps/web/index.html`：Session menu 增加 Rename action，使用可访问 dialog、focus trap、Escape/outside click、错误状态和成功后的导航刷新。
+
+### 根治理七问
+
+1. **Phase**：Phase 7.3 Workspace/Session navigation lifecycle。
+2. **问题类型**：Session lifecycle API、projection replay 和 Web navigation UX。
+3. **契约影响**：复用 `session/updated` 与 command idempotency；SessionProjection 增加对已有 title 字段的持久化优先级，不新增事件类型。
+4. **参考入口**：DSH `ui-workspace`、Session action menu；实现继续使用本项目 AgentHost、EventStore 和 typed API client。
+5. **上游来源**：只做行为参考，没有复制代码或资产。
+6. **验收场景**：Rename dialog 键盘/焦点、成功后列表和当前 header 更新、刷新/重连保留标题、重复命令不追加事件、非法标题有错误提示。
+7. **回滚**：隐藏 Rename action 和 endpoint，保留原有自动标题；不影响 Session history、工具、权限或 workspace 安全。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/runtime test -- --run ✓（14 tests）
+pnpm --filter @code-review-agent/api test -- --run src/server.test.ts ✓（20 tests）
+pnpm --filter @code-review-agent/web test -- --run  ✓（66 tests）
+pnpm --filter @code-review-agent/web run build:browser ✓
+pnpm test:phase7:browser                            ✓（五场景；trajectory full replay 20.42ms）
+pnpm test                                           ✓
+git diff --check                                    ✓
+```
+
 ## 2026-08-23：统一 Phase 7.10 browser/replay gate
 
 ### 目标

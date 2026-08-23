@@ -30,6 +30,20 @@ describe("AgentHost", () => {
     expect(system).toContain("Before editing, read the current file");
   });
 
+  it("renames a session through an idempotent session/updated event", async () => {
+    const store = new InMemoryEventStore();
+    const host = new AgentHost({ store });
+    const session = await host.createSession("D:/rename-fixture");
+
+    const renamed = await host.renameSession(session.id, "  Review queue  ", "rename-command-1");
+    const repeated = await host.renameSession(session.id, "  Review queue  ", "rename-command-1");
+
+    expect(renamed.title).toBe("Review queue");
+    expect(repeated.title).toBe("Review queue");
+    expect((await host.events(session.id)).filter((event) => event.type === "session/updated")).toHaveLength(1);
+    await expect(host.renameSession(session.id, " ")).rejects.toThrow("Session title cannot be empty");
+  });
+
   it("builds the prompt from the permission-filtered tool set and preserves custom instructions", async () => {
     const requests: ModelRequest[] = [];
     const store = new InMemoryEventStore();
