@@ -1,6 +1,6 @@
 # Phase 7：DSH Web 前端收敛与可观测工作台
 
-状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection、7.1 shell layout state/reducer 和 mobile sidebar 行为已完成；boot error boundary、物理 Shell 拆分、Workspace/Session 生命周期 API、7.6 queue/steer/attachment 深化、长任务 terminal/job 失败诊断和窄屏视觉基线继续推进）
+状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection、7.1 shell layout state/reducer 和 mobile sidebar 行为已完成；物理 Shell 拆分、Workspace/Session 生命周期 API、7.6 queue/steer/attachment 深化、长任务 terminal/job 失败诊断和窄屏视觉基线继续推进）
 
 ## 当前执行 checkpoint：typed Web client 与 Session replay foundation
 
@@ -132,6 +132,17 @@
 - `apps/web/src/browser.ts` 与 `apps/web/index.html` 接入 typed connection banner：loading/reconnecting/failed 显示可访问 banner，failed 提供 Retry，connected/idle 自动隐藏；
 
 验证：`pnpm typecheck`、Web 50 项测试、browser bundle 和 `git diff --check` 通过。真实 browser smoke 在正常 API 下确认 header 为 `Connected`、connection banner `hidden=true`、banner 文案为空，console warn/error 为空；异常分支由 presenter/store 测试覆盖。
+
+## 当前执行 checkpoint：Typed boot error boundary（2026-08-23）
+
+本 checkpoint 把静态 Shell 的启动生命周期收敛为可测试的 typed boundary，避免失败状态只由 inline HTML 字符串临时拼接：
+
+- `apps/web/src/shell/boot.ts` 定义 `booting / ready / failed` 状态、action reducer、错误归一化和 bounded render intent；未知异常统一转为安全、可重试的用户提示；
+- `apps/web/src/shell/boot.test.ts` 覆盖初始 loading、ready transition、未知错误、retryable failure 和错误长度限制；
+- `apps/web/src/browser.ts` 暴露 boot state/presenter bridge；`apps/web/index.html` 用该 bridge 驱动 `aria-busy`、composer disabled、加载/失败 hero 和 Retry，成功后恢复正常 Conversation renderer；
+- boot retry 重新走既有 `/v1/sessions`、tools、models、MCP 和 Session/SSE 入口，不写入 EventStore，也不创建第二套连接事实状态。
+
+验证：`pnpm typecheck`、Web 60 项测试、`pnpm --filter @code-review-agent/web run build:browser` 和 `git diff --check` 通过。该切片只改变 Web Shell state boundary，不改变 Event、Tool、Task、Permission 或 Workspace contract；可通过移除 boot bridge 恢复原有静态启动 fallback。
 
 ## 1. 目标与边界
 

@@ -726,6 +726,41 @@ git diff --check                                    ✓
 - 补齐 loading/error、键盘焦点恢复、窄屏布局、长任务 terminal/job 输出与失败诊断；
 - 推进 Shell 拆分、Workspace/Session 导航和 1,000+ trajectory 多页性能基线。
 
+## 2026-08-23：Typed boot error boundary
+
+### 目标与 DSH 对照
+
+- 对照 DSH Web boot 与 error boundary 的职责，把静态 Shell 的启动过程显式建模为 `booting / ready / failed`；
+- 启动失败需要可解释、可重试，并且不能把失败 UI 当成新的事件事实。
+
+### 变更范围
+
+- `apps/web/src/shell/boot.ts`：新增 `ShellBootState`、`ShellBootAction`、reducer、错误归一化和 bounded `ShellBootRenderIntent`；
+- `apps/web/src/shell/boot.test.ts`：覆盖 loading、ready、未知异常、retryable failure 和 bounded error；
+- `apps/web/src/browser.ts`：将 boot presenter/state 作为 typed browser bridge 暴露；
+- `apps/web/index.html`：启动时设置 `aria-busy` 并禁用 composer，loading/failed 使用 typed hero，失败状态提供 Retry；Retry 重新执行既有 boot/API/SSE 流程，成功后恢复正常 Conversation renderer。
+
+### 根治理七问
+
+1. **Phase**：Phase 7.1 Web Shell boot boundary。
+2. **问题类型**：UI state boundary、错误呈现和恢复入口。
+3. **契约影响**：只增加 Web 内部 boot state/render intent；不改变 Event、Tool、Task、Permission 或 Workspace contract。
+4. **参考入口**：DSH Web boot、`client/connection` 和 `ui-primitives` error boundary 行为；实现继续使用本项目 API/SessionConnectionController。
+5. **上游来源**：只做行为参考，没有复制代码或资产。
+6. **验收场景**：初始 loading、成功 ready、API 启动失败 hero、Retry 后恢复、composer 在 boot 期间不可提交、browser console 无 warning/error。
+7. **回滚**：移除 boot bridge 与 typed hero，保留原静态 Shell 和既有 connection banner；不影响 EventStore、SessionStore 或 API。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/web test -- --run  ✓（60 tests）
+pnpm --filter @code-review-agent/web run build:browser ✓
+git diff --check                                    ✓
+```
+
+下一切片：继续物理拆分 Conversation、Details 和 Overlay，随后补 Workspace/Session rename/reorder 等真实生命周期 API、queue/steer/attachment、长任务 terminal/job 失败诊断和窄屏视觉基线。
+
 ## 2026-08-23：统一 Phase 7.10 browser/replay gate
 
 ### 目标

@@ -15,6 +15,7 @@ import { createFocusTrap, FOCUSABLE_SELECTOR, nextFocusableIndex } from "./prese
 import { presentConnection } from "./presentation/connection-presenter.js";
 import { buildNavigationModel, sessionLabel, sessionRelativeTime, workspaceKey, workspaceLabel } from "./presentation/navigation-presenter.js";
 import { createShellLayoutState, presentShellLayout, reduceShellLayout, shellViewport } from "./shell/layout.js";
+import { createShellBootState, normalizeBootError, presentShellBoot, reduceShellBoot } from "./shell/boot.js";
 
 export interface BrowserWebRuntime {
   readonly api: WebApiClient;
@@ -45,6 +46,10 @@ export interface BrowserWebRuntime {
   readonly reduceShellLayout: typeof reduceShellLayout;
   readonly presentShellLayout: typeof presentShellLayout;
   readonly shellViewport: typeof shellViewport;
+  readonly createShellBootState: typeof createShellBootState;
+  readonly reduceShellBoot: typeof reduceShellBoot;
+  readonly presentShellBoot: typeof presentShellBoot;
+  readonly normalizeBootError: typeof normalizeBootError;
   readonly buildToolCallTree: typeof buildToolCallTree;
   readonly presentToolCall: typeof presentToolCall;
 }
@@ -81,6 +86,10 @@ const runtime: BrowserWebRuntime = {
   reduceShellLayout,
   presentShellLayout,
   shellViewport,
+  createShellBootState,
+  reduceShellBoot,
+  presentShellBoot,
+  normalizeBootError,
   buildToolCallTree,
   presentToolCall,
 };

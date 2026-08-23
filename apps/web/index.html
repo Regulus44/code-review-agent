@@ -520,7 +520,7 @@
       (() => {
         const typedRuntime = window.CodeReviewAgentWeb;
         const typedConnection = typedRuntime?.connection || null;
-        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], models: null, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', details: 'open', mobileSidebarOpen: false }, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
+        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], models: null, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', details: 'open', mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
         const app = document.querySelector('#app');
         const list = document.querySelector('#session-list');
         const mcpList = document.querySelector('#mcp-list');
@@ -584,6 +584,25 @@
         };
         window.addEventListener('resize', applyShellLayout, { passive: true });
         const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+        const reduceBoot = (action) => {
+          if (typedRuntime?.reduceShellBoot) { state.boot = typedRuntime.reduceShellBoot(state.boot, action); return; }
+          if (action.type === 'booting') state.boot = { status: 'booting' };
+          else if (action.type === 'ready') state.boot = { status: 'ready' };
+          else state.boot = { status: 'failed', error: action.error instanceof Error ? action.error.message : String(action.error || 'The Coding Agent host did not respond.'), retryable: action.retryable !== false };
+        };
+        const presentBoot = () => typedRuntime?.presentShellBoot ? typedRuntime.presentShellBoot(state.boot) : state.boot.status === 'booting' ? { status: 'booting', appBusy: true, title: 'Loading workspace', message: 'Connecting to the Coding Agent host…', mark: '…', retryable: false } : state.boot.status === 'failed' ? { status: 'failed', appBusy: false, title: 'Unable to connect', message: state.boot.error, mark: '!', retryable: state.boot.retryable } : { status: 'ready', appBusy: false, title: '', message: '', mark: '', retryable: false };
+        const renderBootBoundary = () => {
+          const intent = presentBoot();
+          app.dataset.bootState = intent.status;
+          app.setAttribute('aria-busy', String(intent.appBusy));
+          input.disabled = intent.status !== 'ready';
+          send.disabled = intent.status !== 'ready';
+          if (intent.status === 'ready') return;
+          conversation.innerHTML = `<div class="hero"><div class="hero-inner"><div class="hero-mark">${esc(intent.mark)}</div><h1>${esc(intent.title)}</h1><p>${esc(intent.message)}</p>${intent.retryable ? '<button id="boot-retry" class="workspace-create" type="button">Retry</button>' : ''}</div></div>`;
+          const retry = conversation.querySelector('#boot-retry');
+          if (retry) retry.onclick = () => { void startBoot(); };
+        };
+        const transitionBoot = (action) => { reduceBoot(action); renderBootBoundary(); };
         const currentModel = () => state.models?.current || state.models?.defaultModel || 'deepseek-v4-flash';
         const modeLabels = { 'read-only': 'Read only', 'workspace-write': 'Workspace write', 'ask-on-write': 'Ask on write', 'ask-on-execute': 'Ask on execute', 'danger-full-access': 'Full access' };
         const currentMode = () => state.session?.permissionPreset || 'ask-on-write';
@@ -1329,12 +1348,13 @@
         const createSession = async (workspaceRoot) => { const checked = await api('/v1/workspaces/validate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspaceRoot }) }); const session = await api('/v1/sessions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspaceRoot: checked.workspaceRoot, permissionPreset: permissionPreset.value }) }); await openSession(session.id); };
         const newSession = () => openWorkspacePicker();
         modeTrigger.textContent = '◉ Mode · Ask on write';
-        const boot = async () => { const result = await api('/v1/sessions'); const tools = await api('/v1/tools'); state.tools = new Map((tools.tools || []).map((tool) => [tool.name, tool])); renderModels(await api('/v1/models')); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); if (result.sessions?.length) await openSession(result.sessions[0].id); else await createSession('.'); };
+        async function boot() { transitionBoot({ type: 'booting' }); const result = await api('/v1/sessions'); const tools = await api('/v1/tools'); state.tools = new Map((tools.tools || []).map((tool) => [tool.name, tool])); renderModels(await api('/v1/models')); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); if (result.sessions?.length) await openSession(result.sessions[0].id); else await createSession('.'); transitionBoot({ type: 'ready' }); render(); }
+        const startBoot = () => boot().catch((error) => { transitionBoot({ type: 'failed', error }); setStatus(typedRuntime?.normalizeBootError ? typedRuntime.normalizeBootError(error) : error instanceof Error ? error.message : String(error), false); });
         document.querySelector('#sidebar-toggle').onclick = () => { dispatchShellLayout({ type: 'toggle-sidebar' }); };
         document.querySelector('#details-toggle').onclick = () => { dispatchShellLayout({ type: 'toggle-details' }); };
         document.querySelector('#details-close').onclick = () => { dispatchShellLayout({ type: 'close-details' }); };
          document.querySelector('#new-session').onclick = () => newSession();
-         connectionRetry.onclick = () => { void retryConnection(); };
+         connectionRetry.onclick = () => { if (state.boot.status === 'failed') void startBoot(); else void retryConnection(); };
         settingsButton.onclick = () => openSettings();
         settingsClose.onclick = () => closeSettings();
         settingsDismiss.onclick = () => closeSettings();
@@ -1355,7 +1375,8 @@
         input.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); document.querySelector('#composer').requestSubmit(); } });
         document.querySelector('#composer').addEventListener('submit', async (event) => { event.preventDefault(); const content = input.value.trim(); if (!content || !state.session) return; send.disabled = true; input.value = ''; input.style.height = 'auto'; try { await api(`/v1/sessions/${encodeURIComponent(state.session.id)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content }) }); } catch (error) { setStatus(error.message, false); } finally { send.disabled = false; input.focus(); } });
         applyShellLayout();
-        boot().catch((error) => { setStatus(error.message, false); conversation.innerHTML = `<div class="hero"><div class="hero-inner"><div class="hero-mark">!</div><h1>Unable to connect</h1><p>${esc(error.message)}</p></div></div>`; });
+        renderBootBoundary();
+        void startBoot();
       })();
     </script>
   </body>
