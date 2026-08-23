@@ -379,3 +379,37 @@ git diff --check                                    ✓
 
 - 建立真实非空 Delegation replay fixture，验证 parent/child Task、report/artifact、child history 和 cancel；
 - 继续处理 permission/interaction expiry/restart 与 Trajectory timeline。
+
+## 2026-08-23：Permission/Interaction expiry 与 restart recovery
+
+### 目标与 DSH 对照
+
+- 对照 DSH approvals/questions 的 server-request 语义，把 Permission/Interaction 的 pending、resolved、expired、reconnecting 和恢复提示统一纳入 Web render intent；
+- 保持 EventStore 为事实来源：Web 只根据 Conversation projection 和当前 Session/connection 状态计算可丢弃的显示状态，不在浏览器写入 request 状态；
+- 修复 API/AgentHost 重启后只恢复 Permission、没有恢复 Interaction 的缺口，确保 question answer 能继续原 turn。
+
+### 变更范围
+
+- 新增 `apps/web/src/presentation/request-presenter.ts`：根据 `expiresAt` 计算 deadline-safe display status；过期请求不暴露 approve/answer action；interrupted/reconnecting session 标记 `Recovered request`；详情统一 bounded JSON、敏感字段脱敏和 untrusted marker；
+- `apps/web/index.html`：Permission/Interaction card 显示 expired/recovery 状态，details 增加 pending/recovered/expired 计数；fallback renderer 同样保留终态记录；
+- `packages/tools/src/runtime.ts`：`restorePending()` 重建 Interaction waiter，重启后支持 answer/cancel；恢复 answer 追加合成的 bounded `tool/result`，过期恢复请求追加 `interaction/resolved(expired)` 和失败结果；
+- `packages/runtime/src/index.ts`：RecoveredTurn 同时跟踪 permission/interaction，等待所有阻塞请求解决后恢复原 turn；reconcile 处理 expiry timer 在无 API command 时产生的终态；
+- `packages/tools/src/index.test.ts`、`packages/runtime/src/index.test.ts`、`apps/api/src/server.test.ts`：增加 runtime、AgentHost、API restart recovery fixtures。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/web test           ✓（34 tests）
+pnpm --filter @code-review-agent/tools test -- --run src/index.test.ts   ✓（30 tests）
+pnpm --filter @code-review-agent/runtime test -- --run src/index.test.ts ✓（13 tests）
+pnpm --filter @code-review-agent/api test -- --run src/server.test.ts    ✓（16 tests）
+pnpm -F @code-review-agent/web run build:browser   ✓
+git diff --check                                    ✓
+```
+
+### 下一步
+
+- 建立隔离、可回放的非空 Delegation fixture，验证 parent/child tree、child history、report/artifact 和 cancel；
+- 补 browser replay fixture，把恢复请求的显示、回答和终态纳入真实 Web smoke；
+- 继续 Trajectory timeline、折叠、tail-follow/pause-follow、load older 和大数据量虚拟化。

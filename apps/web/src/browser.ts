@@ -8,6 +8,7 @@ import { inspectTrajectory, queryTrajectory } from "./presentation/trajectory-pr
 import { presentTask } from "./presentation/task-presenter.js";
 import { presentMcpServer } from "./presentation/mcp-presenter.js";
 import { presentToolCall } from "./presentation/tool-presenter.js";
+import { presentInteraction, presentPermission } from "./presentation/request-presenter.js";
 
 export interface BrowserWebRuntime {
   readonly api: WebApiClient;
@@ -19,6 +20,8 @@ export interface BrowserWebRuntime {
   readonly inspectTrajectory: typeof inspectTrajectory;
   readonly presentTask: typeof presentTask;
   readonly presentMcpServer: typeof presentMcpServer;
+  readonly presentPermission: typeof presentPermission;
+  readonly presentInteraction: typeof presentInteraction;
   readonly buildToolCallTree: typeof buildToolCallTree;
   readonly presentToolCall: typeof presentToolCall;
 }
@@ -36,6 +39,8 @@ const runtime: BrowserWebRuntime = {
   inspectTrajectory,
   presentTask,
   presentMcpServer,
+  presentPermission,
+  presentInteraction,
   buildToolCallTree,
   presentToolCall,
 };

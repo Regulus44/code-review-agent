@@ -71,6 +71,8 @@ interface PendingInteraction {
   readonly controller: AbortController;
   readonly resolve: (answer: UserInteractionAnswer) => void;
   readonly reject: (error: unknown) => void;
+  /** True when the request was reconstructed after a host restart. */
+  readonly restored?: boolean;
 }
 
 /** Durable tool execution pipeline: discover, validate, policy, approval, execute, result. */
@@ -129,6 +131,8 @@ export class ToolRuntime {
     });
     const requests = new Map<string, PermissionRequest>();
     const resolved = new Set<string>();
+    const interactions = new Map<string, UserInteractionRequest>();
+    const resolvedInteractions = new Set<string>();
     for (const event of events) {
       if (event.type === "permission/requested") {
         const payload = event.payload;
@@ -149,6 +153,24 @@ export class ToolRuntime {
         });
       }
       if (event.type === "permission/resolved" && typeof event.payload.permissionId === "string") resolved.add(event.payload.permissionId);
+      if (event.type === "interaction/requested") {
+        const payload = event.payload;
+        if (typeof payload.interactionId !== "string" || typeof payload.toolCallId !== "string" || typeof payload.question !== "string") continue;
+        const options = interactionOptions(payload.options);
+        interactions.set(payload.interactionId, {
+          id: brand<string, "InteractionId">(payload.interactionId),
+          sessionId,
+          ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
+          toolCallId: brand<string, "ToolCallId">(payload.toolCallId),
+          question: payload.question,
+          options,
+          allowFreeform: payload.allowFreeform !== false,
+          caller: payload.caller === "user" || payload.caller === "system" ? payload.caller : "agent",
+          createdAt: typeof payload.createdAt === "string" ? payload.createdAt : event.createdAt,
+          expiresAt: typeof payload.expiresAt === "string" ? payload.expiresAt : new Date(Date.parse(event.createdAt) + this.permissionTtlMs).toISOString(),
+        });
+      }
+      if (event.type === "interaction/resolved" && typeof event.payload.interactionId === "string") resolvedInteractions.add(event.payload.interactionId);
     }
     for (const permission of requests.values()) {
       if (resolved.has(permission.id) || this.pending.has(permission.id)) continue;
@@ -168,6 +190,22 @@ export class ToolRuntime {
       });
       if (Date.parse(permission.expiresAt) <= Date.now()) await this.resolvePermission(permission.id, "cancelled");
       else this.scheduleExpiry(permission.id, permission.expiresAt);
+    }
+
+    for (const interaction of interactions.values()) {
+      if (resolvedInteractions.has(interaction.id) || this.pendingInteractions.has(interaction.id)) continue;
+      if (Date.parse(interaction.expiresAt) <= Date.now()) {
+        await this.resolveRestoredInteraction(interaction, "expired");
+        continue;
+      }
+      this.pendingInteractions.set(interaction.id, {
+        request: interaction,
+        controller: new AbortController(),
+        resolve: () => undefined,
+        reject: () => undefined,
+        restored: true,
+      });
+      this.scheduleInteractionExpiry(interaction.id, interaction.expiresAt);
     }
   }
 
@@ -329,6 +367,18 @@ export class ToolRuntime {
       },
     });
     this.resolvedInteractions.set(interactionId, resolved);
+    if (pending.restored === true) {
+      const result = status === "answered"
+        ? { ok: true, output: { interactionId, answer: answer ?? "" }, presentation: { kind: "tool", title: "Completed" } }
+        : this.errorResult(status === "expired" ? "INTERACTION_EXPIRED" : "INTERACTION_CANCELLED", `User interaction ${status}`);
+      await this.options.store.append({
+        sessionId: pending.request.sessionId,
+        ...(pending.request.turnId === undefined ? {} : { turnId: pending.request.turnId }),
+        type: "tool/result",
+        payload: { toolCallId: pending.request.toolCallId, status: status === "answered" ? "completed" : "cancelled", result },
+      });
+      return resolved;
+    }
     if (status === "answered") {
       pending.resolve(resolved);
     } else {
@@ -457,12 +507,54 @@ export class ToolRuntime {
     timer.unref();
     this.expiryTimers.set(permissionId, timer);
   }
+
+  private scheduleInteractionExpiry(interactionId: InteractionId, expiresAt: string): void {
+    const delay = Math.max(0, Date.parse(expiresAt) - Date.now());
+    const timer = setTimeout(() => { void this.resolveInteraction(interactionId, "expired").catch(() => undefined); }, delay);
+    timer.unref();
+    this.interactionExpiryTimers.set(interactionId, timer);
+  }
+
+  private async resolveRestoredInteraction(interaction: UserInteractionRequest, status: "expired" | "cancelled"): Promise<void> {
+    await this.options.store.append({
+      sessionId: interaction.sessionId,
+      ...(interaction.turnId === undefined ? {} : { turnId: interaction.turnId }),
+      type: "interaction/resolved",
+      payload: {
+        interactionId: interaction.id,
+        toolCallId: interaction.toolCallId,
+        question: interaction.question,
+        options: interaction.options,
+        allowFreeform: interaction.allowFreeform,
+        status,
+      },
+    });
+    const result = this.errorResult(status === "expired" ? "INTERACTION_EXPIRED" : "INTERACTION_CANCELLED", `User interaction ${status}`);
+    await this.options.store.append({
+      sessionId: interaction.sessionId,
+      ...(interaction.turnId === undefined ? {} : { turnId: interaction.turnId }),
+      type: "tool/result",
+      payload: { toolCallId: interaction.toolCallId, status: "cancelled", result },
+    });
+    this.resolvedInteractions.set(interaction.id, { interactionId: interaction.id, status });
+  }
 }
 
 function errorCodeOf(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null || !("code" in error)) return undefined;
   const code = (error as { code?: unknown }).code;
   return typeof code === "string" && /^[A-Z][A-Z0-9_]{2,63}$/u.test(code) ? code : undefined;
+}
+
+function interactionOptions(value: unknown): readonly InteractionOption[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): InteractionOption[] => {
+    if (typeof item !== "object" || item === null) return [];
+    const option = item as Record<string, unknown>;
+    return typeof option.label === "string" && typeof option.value === "string"
+      ? [{ label: option.label, value: option.value }]
+      : [];
+  });
 }
 
 function defaultCallPresentation(definition: ToolDefinition): { readonly kind: "tool" | "diff" | "terminal"; readonly title: string; readonly data: { readonly riskLevel: string; readonly executionMode: string } } {

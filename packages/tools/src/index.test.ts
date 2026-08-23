@@ -314,4 +314,32 @@ describe("ToolRuntime", () => {
     for (let attempt = 0; attempt < 100 && interactionId === undefined; attempt += 1) { interactionId = store.events.find((event) => event.type === "interaction/requested")?.payload["interactionId"] as string | undefined; if (interactionId === undefined) await new Promise<void>((resolve) => setTimeout(resolve, 5)); }
     expect(interactionId).toEqual(expect.any(String)); const answer = await runtime.resolveInteraction(brand<string, "InteractionId">(interactionId!), "answered", "yes"); expect(answer).toMatchObject({ status: "answered", answer: "yes" }); expect((await running).result?.output).toMatchObject({ answer: "yes" }); expect(store.events.map((event) => event.type)).toEqual(expect.arrayContaining(["interaction/requested", "interaction/resolved"]));
   });
+
+  it("restores a pending ask_user interaction after a runtime restart", async () => {
+    const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools()); const sessionId = brand<string, "SessionId">("ses_interaction_restore");
+    const first = new ToolRuntime({ store, registry, permissionTtlMs: 5_000 });
+    void first.execute({ sessionId, workspaceRoot: process.cwd(), name: "ask_user", input: { question: "Continue after restart?", options: [{ label: "Yes", value: "yes" }] } });
+    let interactionId: string | undefined;
+    for (let attempt = 0; attempt < 100 && interactionId === undefined; attempt += 1) { interactionId = store.events.find((event) => event.type === "interaction/requested")?.payload["interactionId"] as string | undefined; if (interactionId === undefined) await new Promise<void>((resolve) => setTimeout(resolve, 5)); }
+    expect(interactionId).toEqual(expect.any(String));
+    const restored = new ToolRuntime({ store, registry, permissionTtlMs: 5_000 });
+    await restored.restorePending(sessionId, process.cwd(), store.events);
+    expect(restored.pendingUserInteractions()).toHaveLength(1);
+    const answer = await restored.resolveInteraction(brand<string, "InteractionId">(interactionId!), "answered", "yes");
+    expect(answer).toMatchObject({ status: "answered", answer: "yes" });
+    const toolCallId = store.events.find((event) => event.type === "tool/call")?.payload["toolCallId"];
+    expect(store.events.at(-1)?.type).toBe("tool/result");
+    expect(store.events.at(-1)?.payload).toMatchObject({ toolCallId: toolCallId, status: "completed" });
+  });
+
+  it("settles an already expired restored interaction without exposing an answer action", async () => {
+    const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools()); const sessionId = brand<string, "SessionId">("ses_interaction_expired_restore");
+    const now = new Date().toISOString(); const expired = new Date(Date.now() - 1).toISOString();
+    await store.append({ sessionId, turnId: brand<string, "TurnId">("turn_expired_interaction"), type: "tool/call", payload: { toolCallId: "tool_expired_interaction", name: "ask_user", input: { question: "Too late" }, riskLevel: "read", approvalMode: "auto", caller: "agent", workspaceRoot: process.cwd() } });
+    await store.append({ sessionId, turnId: brand<string, "TurnId">("turn_expired_interaction"), type: "interaction/requested", payload: { interactionId: "interaction_expired_restore", toolCallId: "tool_expired_interaction", question: "Too late", createdAt: now, expiresAt: expired } });
+    const restored = new ToolRuntime({ store, registry }); await restored.restorePending(sessionId, process.cwd(), store.events);
+    expect(restored.pendingUserInteractions()).toHaveLength(0);
+    expect(store.events.at(-2)?.payload).toMatchObject({ interactionId: "interaction_expired_restore", status: "expired" });
+    expect(store.events.at(-1)?.payload).toMatchObject({ toolCallId: "tool_expired_interaction", status: "cancelled" });
+  });
 });

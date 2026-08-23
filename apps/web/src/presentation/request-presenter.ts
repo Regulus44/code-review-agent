@@ -1,0 +1,132 @@
+import type { InteractionNode, PermissionNode } from "../projection/conversation.js";
+import { presentBoundedValue, type BoundedDisplayValue } from "./safe-value.js";
+
+export type RequestRecoveryState = "none" | "restored" | "expired";
+export type PermissionDisplayStatus = PermissionNode["status"];
+export type InteractionDisplayStatus = InteractionNode["status"];
+
+export interface RequestPresenterOptions {
+  readonly now?: number;
+  readonly sessionStatus?: string;
+  readonly connection?: string;
+  readonly maxDetailChars?: number;
+}
+
+export interface PermissionRenderIntent {
+  readonly id: string;
+  readonly toolName: string;
+  readonly status: PermissionDisplayStatus;
+  readonly originalStatus: PermissionNode["status"];
+  readonly recovery: RequestRecoveryState;
+  readonly recoveryLabel?: string;
+  readonly interactive: boolean;
+  readonly expiresAt?: string;
+  readonly expiresInMs?: number;
+  readonly summary: string;
+  readonly details: BoundedDisplayValue;
+  readonly actions: readonly ("approved" | "denied" | "cancelled")[];
+}
+
+export interface InteractionRenderIntent {
+  readonly id: string;
+  readonly question: string;
+  readonly status: InteractionDisplayStatus;
+  readonly originalStatus: InteractionNode["status"];
+  readonly recovery: RequestRecoveryState;
+  readonly recoveryLabel?: string;
+  readonly interactive: boolean;
+  readonly expiresAt?: string;
+  readonly expiresInMs?: number;
+  readonly summary: string;
+  readonly details: BoundedDisplayValue;
+  readonly actions: readonly ("answered" | "cancelled")[];
+}
+
+/**
+ * Convert a permission node into a bounded, time-aware render intent. A
+ * pending request that has crossed its deadline is displayed as expired and
+ * cannot expose an approval action, even if the settlement event has not
+ * reached the browser yet.
+ */
+export function presentPermission(node: PermissionNode, options: RequestPresenterOptions = {}): PermissionRenderIntent {
+  const timing = requestTiming(node.status, node.expiresAt, options);
+  const status = timing.expired ? "expired" : node.status;
+  const recovery = recoveryState(status, options);
+  return {
+    id: String(node.permissionId),
+    toolName: node.toolName,
+    status,
+    originalStatus: node.status,
+    recovery: recovery.state,
+    ...(recovery.label === undefined ? {} : { recoveryLabel: recovery.label }),
+    interactive: status === "pending" && !timing.expired,
+    ...(node.expiresAt === undefined ? {} : { expiresAt: node.expiresAt }),
+    ...(timing.expiresInMs === undefined ? {} : { expiresInMs: timing.expiresInMs }),
+    summary: permissionSummary(status, node.toolName),
+    details: presentBoundedValue({
+      reason: node.reason,
+      caller: node.caller,
+      workspaceRoot: node.workspaceRoot,
+      expiresAt: node.expiresAt,
+      input: node.input,
+    }, options.maxDetailChars ?? 8_000),
+    actions: status === "pending" && !timing.expired ? ["approved", "denied", "cancelled"] : [],
+  };
+}
+
+/** Convert an interaction node into a bounded, restart-aware render intent. */
+export function presentInteraction(node: InteractionNode, options: RequestPresenterOptions = {}): InteractionRenderIntent {
+  const timing = requestTiming(node.status, node.expiresAt, options);
+  const status = timing.expired ? "expired" : node.status;
+  const recovery = recoveryState(status, options);
+  return {
+    id: String(node.interactionId),
+    question: node.question,
+    status,
+    originalStatus: node.status,
+    recovery: recovery.state,
+    ...(recovery.label === undefined ? {} : { recoveryLabel: recovery.label }),
+    interactive: status === "pending" && !timing.expired,
+    ...(node.expiresAt === undefined ? {} : { expiresAt: node.expiresAt }),
+    ...(timing.expiresInMs === undefined ? {} : { expiresInMs: timing.expiresInMs }),
+    summary: interactionSummary(status),
+    details: presentBoundedValue({
+      question: node.question,
+      caller: node.caller,
+      options: node.options,
+      allowFreeform: node.allowFreeform,
+      answer: node.answer,
+      expiresAt: node.expiresAt,
+    }, options.maxDetailChars ?? 8_000),
+    actions: status === "pending" && !timing.expired ? ["answered", "cancelled"] : [],
+  };
+}
+
+function requestTiming(status: string, expiresAt: string | undefined, options: RequestPresenterOptions): { readonly expired: boolean; readonly expiresInMs?: number } {
+  if (status !== "pending" || expiresAt === undefined) return { expired: false };
+  const expiresAtMs = Date.parse(expiresAt);
+  if (!Number.isFinite(expiresAtMs)) return { expired: false };
+  const now = options.now ?? Date.now();
+  const expiresInMs = expiresAtMs - now;
+  return { expired: expiresInMs <= 0, expiresInMs };
+}
+
+function recoveryState(status: string, options: RequestPresenterOptions): { readonly state: RequestRecoveryState; readonly label?: string } {
+  if (status === "expired") return { state: "expired", label: "Expired · response disabled" };
+  if (status === "pending" && (options.sessionStatus === "interrupted" || options.connection === "reconnecting" || options.connection === "connecting")) {
+    return { state: "restored", label: "Recovered request · response will continue the turn" };
+  }
+  return { state: "none" };
+}
+
+function permissionSummary(status: PermissionDisplayStatus, toolName: string): string {
+  if (status === "pending") return `Approval required · ${toolName}`;
+  if (status === "expired") return `Approval expired · ${toolName}`;
+  return `Permission ${status} · ${toolName}`;
+}
+
+function interactionSummary(status: InteractionDisplayStatus): string {
+  if (status === "pending") return "Agent needs your input";
+  if (status === "expired") return "Question expired";
+  return `Interaction ${status}`;
+}

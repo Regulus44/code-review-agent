@@ -201,7 +201,10 @@
       .tool-details pre { margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary); font: 11px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
       .permission-card { margin: 12px 0 16px 40px; padding: 13px; border: 1px solid rgba(199,131,39,.28); border-radius: 13px; background: #fffaf0; }
       .permission-card.resolved, .interaction-card.resolved { opacity: .76; }
+      .permission-card.expired, .interaction-card.expired { border-color: rgba(179,72,72,.28); background: #fff5f5; }
+      .permission-card.recovery, .interaction-card.recovery { box-shadow: inset 3px 0 0 rgba(65,118,230,.48); }
       .permission-card strong { display: block; color: #8f5c13; font-size: 12px; }
+      .permission-card.expired strong, .interaction-card.expired strong { color: #a13c3c; }
       .permission-card pre { margin: 8px 0 0; color: #765d35; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
       .permission-actions { display: flex; gap: 7px; margin-top: 11px; }
       .permission-actions button { padding: 6px 10px; border-radius: 8px; color: #fff; background: var(--blue); font-size: 11px; font-weight: 600; }
@@ -210,6 +213,7 @@
       .interaction-card { margin: 12px 0 16px 40px; padding: 13px; border: 1px solid rgba(65,118,230,.26); border-radius: 13px; background: #f5f8ff; }
       .interaction-card strong { display: block; color: #315da9; font-size: 12px; }
       .interaction-card pre { margin: 8px 0 0; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
+      .request-recovery { display: inline-block; margin-top: 7px; color: #315da9; font-size: 10px; }
       .trajectory-summary { margin-left: 40px; color: var(--text-tertiary); }
       .composer-shell { position: relative; z-index: 2; padding: 0 20px 20px; background: linear-gradient(to bottom, transparent, var(--bg) 25%); }
       .composer-card { position: relative; width: min(780px, 100%); margin: 0 auto; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow); }
@@ -535,8 +539,46 @@
         const setMessageContent = (body, content) => { const value = String(content ?? ''); body.dataset.rawContent = value; if (body.classList.contains('markdown')) body.innerHTML = renderMarkdown(value); else body.textContent = value; };
         const appendMessage = (parent, role, content) => { const row = document.createElement('div'); row.className = `message ${role}`; const avatar = document.createElement('div'); avatar.className = 'avatar'; avatar.textContent = role === 'user' ? 'You' : 'AI'; const body = document.createElement('div'); body.className = `message-body ${role === 'assistant' ? 'markdown' : ''}`; setMessageContent(body, content); row.append(avatar, body); parent.append(row); return body; };
         const appendTool = (parent, name, text, statusText = 'Completed') => { const row = document.createElement('div'); row.className = 'tool-row'; const summary = document.createElement('button'); summary.className = 'tool-summary'; summary.type = 'button'; const icon = document.createElement('span'); icon.className = 'tool-icon'; icon.textContent = '⌘'; const heading = document.createElement('span'); heading.className = 'tool-title'; const source = state.tools.get(name)?.source; heading.textContent = source?.kind === 'mcp' ? `MCP · ${source.serverName} · ${source.rawName}` : `Tool · ${name}`; const toolStatus = document.createElement('span'); toolStatus.className = 'tool-status'; toolStatus.textContent = statusText; const chevron = document.createElement('span'); chevron.className = 'tool-chevron'; chevron.textContent = '⌄'; const details = document.createElement('div'); details.className = 'tool-details'; const pre = document.createElement('pre'); pre.textContent = text; details.append(pre); summary.append(icon, heading, toolStatus, chevron); summary.onclick = () => row.classList.toggle('open'); row.append(summary, details); parent.append(row); return { row, heading, toolStatus, pre }; };
-        const appendPermission = (parent, payload) => { const row = document.createElement('div'); row.className = `permission-card ${payload.status && payload.status !== 'pending' ? 'resolved' : ''}`; const heading = document.createElement('strong'); heading.textContent = `${payload.status && payload.status !== 'pending' ? `Permission ${payload.status}` : 'Approval required'} · ${payload.toolName || 'tool'}`; const body = document.createElement('pre'); body.textContent = `${payload.reason || 'This tool needs permission'}\ncaller: ${payload.caller || 'agent'}\nworkspace: ${payload.workspaceRoot || state.session?.workspaceRoot || '.'}\nexpires: ${payload.expiresAt || 'unknown'}\n${JSON.stringify(payload.input || {}, null, 2)}`; const actions = document.createElement('div'); actions.className = 'permission-actions'; if (!payload.status || payload.status === 'pending') { for (const [label, value, className] of [['Approve','approved',''],['Deny','denied','deny'],['Cancel','cancelled','cancel']]) { const button = document.createElement('button'); button.type = 'button'; button.textContent = label; if (className) button.className = className; button.onclick = async () => { button.disabled = true; try { await commandApi(`/v1/sessions/${encodeURIComponent(state.session.id)}/permissions/${encodeURIComponent(payload.permissionId)}`, { status: value }); } catch (error) { setStatus(error.message, false); button.disabled = false; } }; actions.append(button); } } row.append(heading, body); if (actions.childNodes.length) row.append(actions); parent.append(row); };
-        const appendInteraction = (parent, payload) => { const row = document.createElement('div'); row.className = `interaction-card ${payload.status && payload.status !== 'pending' ? 'resolved' : ''}`; const heading = document.createElement('strong'); heading.textContent = `${payload.status && payload.status !== 'pending' ? `Interaction ${payload.status}` : 'Agent needs your input'}`; const body = document.createElement('pre'); body.textContent = `${payload.question || 'Question'}\ncaller: ${payload.caller || 'agent'}\nexpires: ${payload.expiresAt || 'unknown'}${payload.answer ? `\nanswer: ${payload.answer}` : ''}`; const actions = document.createElement('div'); actions.className = 'permission-actions'; if (!payload.status || payload.status === 'pending') { const options = Array.isArray(payload.options) ? payload.options : []; for (const option of options) { const button = document.createElement('button'); button.type = 'button'; button.textContent = option.label || option.value; button.onclick = async () => { button.disabled = true; try { await commandApi(`/v1/sessions/${encodeURIComponent(state.session.id)}/interactions/${encodeURIComponent(payload.interactionId)}`, { status: 'answered', answer: option.value }); } catch (error) { setStatus(error.message, false); button.disabled = false; } }; actions.append(button); } if (payload.allowFreeform !== false) { const input = document.createElement('input'); input.className = 'workspace-input'; input.placeholder = 'Type an answer'; const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Send'; button.onclick = async () => { if (!input.value.trim()) return; button.disabled = true; try { await commandApi(`/v1/sessions/${encodeURIComponent(state.session.id)}/interactions/${encodeURIComponent(payload.interactionId)}`, { status: 'answered', answer: input.value }); } catch (error) { setStatus(error.message, false); button.disabled = false; } }; actions.append(input, button); } } row.append(heading, body); if (actions.childNodes.length) row.append(actions); parent.append(row); };
+        const appendPermission = (parent, payload) => {
+          const status = payload.displayStatus || payload.status || 'pending';
+          const interactive = payload.interactive === undefined ? status === 'pending' : payload.interactive === true;
+          const recovery = payload.recovery || 'none';
+          const row = document.createElement('div');
+          row.className = `permission-card ${status !== 'pending' ? 'resolved' : ''} ${status === 'expired' ? 'expired' : ''} ${recovery === 'restored' ? 'recovery' : ''}`;
+          const heading = document.createElement('strong');
+          heading.textContent = payload.summary || `${status !== 'pending' ? `Permission ${status}` : 'Approval required'} · ${payload.toolName || 'tool'}`;
+          const body = document.createElement('pre');
+          body.textContent = payload.details || `${payload.reason || 'This tool needs permission'}\ncaller: ${payload.caller || 'agent'}\nworkspace: ${payload.workspaceRoot || state.session?.workspaceRoot || '.'}\nexpires: ${payload.expiresAt || 'unknown'}\n${JSON.stringify(payload.input || {}, null, 2)}`;
+          row.append(heading, body);
+          if (payload.recoveryLabel) { const note = document.createElement('span'); note.className = 'request-recovery'; note.textContent = payload.recoveryLabel; row.append(note); }
+          const actions = document.createElement('div'); actions.className = 'permission-actions';
+          if (interactive) {
+            for (const [label, value, className] of [['Approve','approved',''],['Deny','denied','deny'],['Cancel','cancelled','cancel']]) {
+              const button = document.createElement('button'); button.type = 'button'; button.textContent = label; if (className) button.className = className;
+              button.onclick = async () => { button.disabled = true; try { await commandApi(`/v1/sessions/${encodeURIComponent(state.session.id)}/permissions/${encodeURIComponent(payload.permissionId)}`, { status: value }); } catch (error) { setStatus(error.message, false); button.disabled = false; } };
+              actions.append(button);
+            }
+          }
+          if (actions.childNodes.length) row.append(actions); parent.append(row);
+        };
+        const appendInteraction = (parent, payload) => {
+          const status = payload.displayStatus || payload.status || 'pending';
+          const interactive = payload.interactive === undefined ? status === 'pending' : payload.interactive === true;
+          const recovery = payload.recovery || 'none';
+          const row = document.createElement('div');
+          row.className = `interaction-card ${status !== 'pending' ? 'resolved' : ''} ${status === 'expired' ? 'expired' : ''} ${recovery === 'restored' ? 'recovery' : ''}`;
+          const heading = document.createElement('strong'); heading.textContent = payload.summary || `${status !== 'pending' ? `Interaction ${status}` : 'Agent needs your input'}`;
+          const body = document.createElement('pre'); body.textContent = payload.details || `${payload.question || 'Question'}\ncaller: ${payload.caller || 'agent'}\nexpires: ${payload.expiresAt || 'unknown'}${payload.answer ? `\nanswer: ${payload.answer}` : ''}`;
+          row.append(heading, body);
+          if (payload.recoveryLabel) { const note = document.createElement('span'); note.className = 'request-recovery'; note.textContent = payload.recoveryLabel; row.append(note); }
+          const actions = document.createElement('div'); actions.className = 'permission-actions';
+          if (interactive) {
+            const options = Array.isArray(payload.options) ? payload.options : [];
+            for (const option of options) { const button = document.createElement('button'); button.type = 'button'; button.textContent = option.label || option.value; button.onclick = async () => { button.disabled = true; try { await commandApi(`/v1/sessions/${encodeURIComponent(state.session.id)}/interactions/${encodeURIComponent(payload.interactionId)}`, { status: 'answered', answer: option.value }); } catch (error) { setStatus(error.message, false); button.disabled = false; } }; actions.append(button); }
+            if (payload.allowFreeform !== false) { const input = document.createElement('input'); input.className = 'workspace-input'; input.placeholder = 'Type an answer'; const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Send'; button.onclick = async () => { if (!input.value.trim()) return; button.disabled = true; try { await commandApi(`/v1/sessions/${encodeURIComponent(state.session.id)}/interactions/${encodeURIComponent(payload.interactionId)}`, { status: 'answered', answer: input.value }); } catch (error) { setStatus(error.message, false); button.disabled = false; } }; actions.append(input, button); }
+          }
+          if (actions.childNodes.length) row.append(actions); parent.append(row);
+        };
         const renderTypedConversation = (projection, body, snapshot) => {
           if (!projection || !Array.isArray(projection.nodes) || projection.nodes.length === 0) return false;
           const assistant = new Map();
@@ -568,8 +610,14 @@
               const label = node.status === 'running' ? 'Agent is working…' : node.status === 'completed' ? 'Turn completed' : `Turn ${node.status}`;
               addTurnStateRow(body, label, node.status === 'completed' ? 'completed' : node.status === 'running' ? 'running' : 'failed');
             } else if (node.kind === 'tool') upsertTool(node.tool);
-            else if (node.kind === 'permission') appendPermission(body, { permissionId: node.permissionId, toolCallId: node.toolCallId, toolName: node.toolName, status: node.status, reason: node.reason, caller: node.caller, workspaceRoot: node.workspaceRoot, expiresAt: node.expiresAt, input: node.input });
-            else if (node.kind === 'interaction') appendInteraction(body, { interactionId: node.interactionId, toolCallId: node.toolCallId, question: node.question, options: node.options, status: node.status, caller: node.caller, expiresAt: node.expiresAt, allowFreeform: node.allowFreeform, answer: node.answer });
+            else if (node.kind === 'permission') {
+              const intent = typedRuntime?.presentPermission ? typedRuntime.presentPermission(node, { sessionStatus: snapshot?.session?.status, connection: snapshot?.connection }) : null;
+              appendPermission(body, { permissionId: node.permissionId, toolCallId: node.toolCallId, toolName: node.toolName, status: node.status, displayStatus: intent?.status, summary: intent?.summary, recovery: intent?.recovery, recoveryLabel: intent?.recoveryLabel, interactive: intent?.interactive, details: intent?.details?.text, reason: node.reason, caller: node.caller, workspaceRoot: node.workspaceRoot, expiresAt: node.expiresAt, input: node.input });
+            }
+            else if (node.kind === 'interaction') {
+              const intent = typedRuntime?.presentInteraction ? typedRuntime.presentInteraction(node, { sessionStatus: snapshot?.session?.status, connection: snapshot?.connection }) : null;
+              appendInteraction(body, { interactionId: node.interactionId, toolCallId: node.toolCallId, question: node.question, options: node.options, status: node.status, displayStatus: intent?.status, summary: intent?.summary, recovery: intent?.recovery, recoveryLabel: intent?.recoveryLabel, interactive: intent?.interactive, details: intent?.details?.text, caller: node.caller, expiresAt: node.expiresAt, allowFreeform: node.allowFreeform, answer: node.answer });
+            }
             else if (node.kind === 'task') addEventRow(body, `Task · ${node.title || node.taskId} · ${node.status}${node.summary ? ` · ${node.summary}` : ''}`);
             else if (node.kind === 'event' && node.eventType !== 'session/created') addEventRow(body, `${node.eventType} · ${node.key}`);
           }
@@ -734,10 +782,30 @@
           const pre = document.createElement('pre'); pre.textContent = intent.details.text; inspector.append(pre);
           if (intent.details.untrusted || intent.details.truncated) { const badge = document.createElement('span'); badge.className = 'trajectory-badge'; badge.textContent = intent.details.truncated ? 'bounded · untrusted' : 'untrusted'; inspector.append(badge); }
         };
+        const renderRequestRecoveryPanel = (snapshot) => {
+          let section = details.querySelector('#request-recovery-panel');
+          if (!section) {
+            section = document.createElement('section'); section.id = 'request-recovery-panel'; section.className = 'detail-section';
+            const label = document.createElement('div'); label.className = 'detail-label'; label.textContent = 'Permission & interaction recovery'; section.append(label);
+            const meta = document.createElement('div'); meta.className = 'trajectory-meta'; meta.id = 'request-recovery-meta'; section.append(meta);
+            const body = document.createElement('div'); body.id = 'request-recovery-body'; section.append(body); details.append(section);
+          }
+          const meta = section.querySelector('#request-recovery-meta'); const body = section.querySelector('#request-recovery-body'); body.innerHTML = '';
+          const nodes = snapshot?.conversation?.nodes || [];
+          const permissions = nodes.filter((node) => node.kind === 'permission').map((node) => typedRuntime?.presentPermission ? typedRuntime.presentPermission(node, { now: Date.now(), sessionStatus: snapshot?.session?.status, connection: snapshot?.connection }) : null).filter(Boolean);
+          const interactions = nodes.filter((node) => node.kind === 'interaction').map((node) => typedRuntime?.presentInteraction ? typedRuntime.presentInteraction(node, { now: Date.now(), sessionStatus: snapshot?.session?.status, connection: snapshot?.connection }) : null).filter(Boolean);
+          const pendingPermissions = permissions.filter((view) => view.status === 'pending'); const expiredPermissions = permissions.filter((view) => view.status === 'expired'); const recoveredPermissions = permissions.filter((view) => view.recovery === 'restored');
+          const pendingInteractions = interactions.filter((view) => view.status === 'pending'); const expiredInteractions = interactions.filter((view) => view.status === 'expired'); const recoveredInteractions = interactions.filter((view) => view.recovery === 'restored');
+          meta.textContent = `${permissions.length} approval record${permissions.length === 1 ? '' : 's'} · ${interactions.length} question record${interactions.length === 1 ? '' : 's'}`;
+          const rows = [['Pending approvals', pendingPermissions.length], ['Recovered approvals', recoveredPermissions.length], ['Expired approvals', expiredPermissions.length], ['Pending questions', pendingInteractions.length], ['Recovered questions', recoveredInteractions.length], ['Expired questions', expiredInteractions.length]];
+          for (const [label, value] of rows) { const row = document.createElement('div'); row.className = 'detail-line'; const left = document.createElement('span'); left.textContent = label; const right = document.createElement('strong'); right.textContent = String(value); row.append(left, right); body.append(row); }
+          if (!permissions.length && !interactions.length) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = 'No permission or interaction requests.'; body.append(empty); }
+        };
         const trajectoryDetailsObserver = new MutationObserver(() => {
           if (!details.querySelector('#trajectory-inspector-panel')) renderTrajectoryPanel(typedConnection?.store.getSnapshot()?.trajectory);
           if (!details.querySelector('#task-inspector-panel')) renderTaskPanel(typedConnection?.store.getSnapshot());
           if (!details.querySelector('#mcp-inspector-panel')) renderMcpDetailsPanel();
+          if (!details.querySelector('#request-recovery-panel')) renderRequestRecoveryPanel(typedConnection?.store.getSnapshot());
         });
         trajectoryDetailsObserver.observe(details, { childList: true });
         const render = () => {
@@ -755,6 +823,7 @@
               renderTrajectoryPanel(typedSnapshot?.trajectory);
               renderTaskPanel(typedSnapshot);
               renderMcpDetailsPanel();
+              renderRequestRecoveryPanel(typedSnapshot);
               requestAnimationFrame(() => { if (wasNearBottom) conversation.scrollTop = conversation.scrollHeight; });
               return;
             }
@@ -796,13 +865,14 @@
               else if (event.type === 'mcp/prompt') addEventRow(body, `MCP prompt · ${event.payload?.serverName || 'server'} · ${event.payload?.action || 'get'} · untrusted context`);
               else if (event.type === 'agent/error') addEventRow(body, `Agent error · ${event.payload?.message || event.payload?.error || 'The agent reported an error.'}`);
             }
-            for (const permission of permissions.values()) if (!permission.status || permission.status === 'pending') appendPermission(body, permission);
-            for (const interaction of interactions.values()) if (!interaction.status || interaction.status === 'pending') appendInteraction(body, interaction);
+            for (const permission of permissions.values()) appendPermission(body, permission);
+            for (const interaction of interactions.values()) appendInteraction(body, interaction);
           }
           renderDetails();
           renderTrajectoryPanel(typedSnapshot?.trajectory);
           renderTaskPanel(typedSnapshot);
           renderMcpDetailsPanel();
+          renderRequestRecoveryPanel(typedSnapshot);
           requestAnimationFrame(() => { if (wasNearBottom) conversation.scrollTop = conversation.scrollHeight; });
         };
         const renderWorkspaceRecent = () => { workspaceRecent.innerHTML = ''; const roots = [...new Set(state.recentWorkspaces.filter(Boolean))].slice(0, 6); if (!roots.length) return; const label = document.createElement('div'); label.className = 'workspace-recent-label'; label.textContent = 'Recent workspaces'; workspaceRecent.append(label); roots.forEach((root) => { const button = document.createElement('button'); button.type = 'button'; button.className = 'workspace-recent-button'; button.textContent = root; button.onclick = () => { workspaceInput.value = root; workspaceError.textContent = ''; workspaceInput.focus(); }; workspaceRecent.append(button); }); };

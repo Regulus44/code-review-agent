@@ -53,10 +53,11 @@ interface PendingPermissionWaiter {
   readonly reject: (error: unknown) => void;
 }
 
-interface RecoveredPermissionTurn {
+interface RecoveredTurn {
   readonly sessionId: SessionId;
   readonly turnId: TurnId;
   readonly permissionIds: Set<PermissionId>;
+  readonly interactionIds: Set<InteractionId>;
 }
 
 interface CollectedModelResponse {
@@ -73,8 +74,9 @@ export class AgentHost {
   private readonly activeTurns = new Map<SessionId, TurnId>();
   private readonly queues = new Map<SessionId, PendingTurn[]>();
   private readonly permissionWaiters = new Map<PermissionId, PendingPermissionWaiter>();
-  private readonly recoveredPermissionTurns = new Map<TurnId, RecoveredPermissionTurn>();
+  private readonly recoveredTurns = new Map<TurnId, RecoveredTurn>();
   private readonly recoveredPermissionIndex = new Map<PermissionId, TurnId>();
+  private readonly recoveredInteractionIndex = new Map<InteractionId, TurnId>();
   private readonly maxSteps: number;
   private readonly ready: Promise<void>;
   private readonly toolRuntime: ToolRuntime;
@@ -230,12 +232,12 @@ export class AgentHost {
       if (call === undefined) throw new Error(`Tool call ${permission.toolCallId} is not available`);
       const output = { toolCallId: call.id, status: call.status === "completed" ? "completed" : call.status === "cancelled" ? "cancelled" : call.status === "denied" ? "denied" : call.status === "awaiting_permission" ? "awaiting_permission" : "failed", ...(call.result === undefined ? {} : { result: call.result }) } as ExecuteToolOutput;
       this.settlePermissionWaiter(permissionId, output);
-      void this.maybeResumeRecoveredTurn(permissionId);
+      void this.maybeResumeRecoveredPermission(permissionId);
       return output;
     }
     const output = await this.toolRuntime.resolvePermission(permissionId, status);
     this.settlePermissionWaiter(permissionId, output);
-    void this.maybeResumeRecoveredTurn(permissionId);
+    void this.maybeResumeRecoveredPermission(permissionId);
     return output;
   }
 
@@ -262,9 +264,12 @@ export class AgentHost {
       const resolvedStatus = interaction.status === "answered" || interaction.status === "cancelled" || interaction.status === "expired" ? interaction.status : saved.status;
       if (resolvedStatus !== "answered" && resolvedStatus !== "cancelled" && resolvedStatus !== "expired") throw new Error(`Interaction ${interactionId} has not been resolved`);
       const resolvedAnswer = typeof interaction.answer === "string" ? interaction.answer : typeof saved.answer === "string" ? saved.answer : undefined;
+      void this.maybeResumeRecoveredInteraction(interactionId);
       return { interactionId, status: resolvedStatus, ...(resolvedAnswer === undefined ? {} : { answer: resolvedAnswer }) };
     }
-    return this.toolRuntime.resolveInteraction(interactionId, status, answer);
+    const resolved = await this.toolRuntime.resolveInteraction(interactionId, status, answer);
+    void this.maybeResumeRecoveredInteraction(interactionId);
+    return resolved;
   }
 
   async cancelTool(sessionId: SessionId, toolCallId: ToolCallId, commandId?: string): Promise<boolean> {
@@ -425,12 +430,19 @@ export class AgentHost {
       const sessions = await this.options.store.listSessions();
       for (const session of sessions) {
         const projection = await this.options.store.project(session.id);
+        if (projection === undefined) continue;
         const turn = projection?.turns.find((item) => item.id === turnId);
         if (turn === undefined || turn.status === "queued" || turn.status === "running") continue;
         // An interrupted turn with restored approvals is still live from the
         // caller's perspective; it will become running once every approval is
         // resolved and must not make waitForTurn return early.
-        if (turn.status === "interrupted" && (this.recoveredPermissionTurns.has(turnId) || this.activeTurns.get(session.id) === turnId)) continue;
+        if (turn.status === "interrupted") {
+          const recovered = this.recoveredTurns.get(turnId);
+          if (recovered !== undefined) {
+            await this.reconcileRecoveredTurn(recovered, projection);
+            if (this.recoveredTurns.has(turnId) || this.activeTurns.get(session.id) === turnId) continue;
+          }
+        }
         const events = await this.options.store.list(session.id);
         const ended = [...events].reverse().find((event) => event.turnId === turnId && event.type === "turn/ended");
         if (ended !== undefined) return;
@@ -458,23 +470,39 @@ export class AgentHost {
       }
       for (const turn of projection.turns.filter((item) => item.status === "interrupted")) {
         const permissionIds = new Set(projection.permissions.filter((permission) => permission.status === "pending" && permission.turnId === turn.id).map((permission) => permission.id));
-        if (permissionIds.size === 0) continue;
-        const recovered: RecoveredPermissionTurn = { sessionId: summary.id, turnId: turn.id, permissionIds };
-        this.recoveredPermissionTurns.set(turn.id, recovered);
+        const interactionIds = new Set(projection.interactions.filter((interaction) => interaction.status === "pending" && interaction.turnId === turn.id).map((interaction) => interaction.id));
+        if (permissionIds.size === 0 && interactionIds.size === 0) continue;
+        const recovered: RecoveredTurn = { sessionId: summary.id, turnId: turn.id, permissionIds, interactionIds };
+        this.recoveredTurns.set(turn.id, recovered);
         for (const permissionId of permissionIds) this.recoveredPermissionIndex.set(permissionId, turn.id);
+        for (const interactionId of interactionIds) this.recoveredInteractionIndex.set(interactionId, turn.id);
       }
     }
   }
 
-  private async maybeResumeRecoveredTurn(permissionId: PermissionId): Promise<void> {
+  private async maybeResumeRecoveredPermission(permissionId: PermissionId): Promise<void> {
     const turnId = this.recoveredPermissionIndex.get(permissionId);
     if (turnId === undefined) return;
-    const recovered = this.recoveredPermissionTurns.get(turnId);
+    const recovered = this.recoveredTurns.get(turnId);
     if (recovered === undefined) return;
     recovered.permissionIds.delete(permissionId);
     this.recoveredPermissionIndex.delete(permissionId);
-    if (recovered.permissionIds.size > 0 || this.activeTurns.has(recovered.sessionId)) return;
-    this.recoveredPermissionTurns.delete(turnId);
+    await this.maybeStartRecoveredTurn(recovered);
+  }
+
+  private async maybeResumeRecoveredInteraction(interactionId: InteractionId): Promise<void> {
+    const turnId = this.recoveredInteractionIndex.get(interactionId);
+    if (turnId === undefined) return;
+    const recovered = this.recoveredTurns.get(turnId);
+    if (recovered === undefined) return;
+    recovered.interactionIds.delete(interactionId);
+    this.recoveredInteractionIndex.delete(interactionId);
+    await this.maybeStartRecoveredTurn(recovered);
+  }
+
+  private async maybeStartRecoveredTurn(recovered: RecoveredTurn): Promise<void> {
+    if (recovered.permissionIds.size > 0 || recovered.interactionIds.size > 0 || this.activeTurns.has(recovered.sessionId)) return;
+    this.recoveredTurns.delete(recovered.turnId);
     const controller = new AbortController();
     this.activeTurns.set(recovered.sessionId, recovered.turnId);
     this.controllers.set(recovered.turnId, controller);
@@ -483,6 +511,22 @@ export class AgentHost {
       this.activeTurns.delete(recovered.sessionId);
       void this.drainSession(recovered.sessionId);
     });
+  }
+
+  private async reconcileRecoveredTurn(recovered: RecoveredTurn, projection: SessionProjection): Promise<void> {
+    const pendingPermissions = new Set(projection.permissions.filter((permission) => permission.status === "pending").map((permission) => permission.id));
+    const pendingInteractions = new Set(projection.interactions.filter((interaction) => interaction.status === "pending").map((interaction) => interaction.id));
+    for (const permissionId of [...recovered.permissionIds]) {
+      if (pendingPermissions.has(permissionId)) continue;
+      recovered.permissionIds.delete(permissionId);
+      this.recoveredPermissionIndex.delete(permissionId);
+    }
+    for (const interactionId of [...recovered.interactionIds]) {
+      if (pendingInteractions.has(interactionId)) continue;
+      recovered.interactionIds.delete(interactionId);
+      this.recoveredInteractionIndex.delete(interactionId);
+    }
+    await this.maybeStartRecoveredTurn(recovered);
   }
 
   private async conversationMessages(sessionId: SessionId, beforeTurnId?: TurnId): Promise<readonly ChatMessage[]> {

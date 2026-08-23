@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { ChatModel, ModelRequest, ModelStreamPart, PermissionId, ToolDefinition } from "@code-review-agent/contracts";
+import type { ChatModel, InteractionId, ModelRequest, ModelStreamPart, PermissionId, ToolDefinition } from "@code-review-agent/contracts";
 import { InMemoryEventStore } from "@code-review-agent/storage";
-import { DefaultPermissionPolicy, ToolRegistry, ToolRuntime } from "@code-review-agent/tools";
+import { createBuiltinTools, DefaultPermissionPolicy, ToolRegistry, ToolRuntime } from "@code-review-agent/tools";
 import { AgentHost } from "./index.js";
 
 describe("AgentHost", () => {
@@ -196,6 +196,35 @@ describe("AgentHost", () => {
     expect(requests[1]?.messages.find((message) => message.role === "system")?.content).toContain("# Recovery");
     expect((await second.getSession(session.id))?.messages.at(-1)?.content).toBe("Recovered and continued.");
     expect((await second.events(session.id)).filter((event) => event.type === "agent/status").at(-1)?.payload["status"]).toBe("running");
+  });
+
+  it("replays a pending user interaction after host restart and continues the interrupted turn", async () => {
+    const store = new InMemoryEventStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools());
+    const requests: ModelRequest[] = [];
+    let calls = 0;
+    const model: ChatModel = { async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+      requests.push(request); calls += 1;
+      if (calls === 1) {
+        yield { type: "tool_call_start", index: 0, id: "call_interaction_restart", name: "ask_user" };
+        yield { type: "tool_call_delta", index: 0, arguments: JSON.stringify({ question: "Continue after restart?", options: [{ label: "Yes", value: "yes" }] }) };
+      } else {
+        yield { type: "text_delta", text: "Interaction recovered and continued." };
+      }
+      yield { type: "done" };
+    } };
+    const first = new AgentHost({ store, model, toolRuntime: new ToolRuntime({ store, registry, permissionTtlMs: 5_000 }) });
+    const session = await first.createSession("D:/workspace"); const turn = await first.sendMessage(session.id, "ask me something");
+    let interactionId: InteractionId | undefined;
+    for (let attempt = 0; attempt < 100 && interactionId === undefined; attempt += 1) { interactionId = (await first.getSession(session.id))?.interactions.find((interaction) => interaction.status === "pending")?.id; if (interactionId === undefined) await new Promise<void>((resolve) => setTimeout(resolve, 5)); }
+    expect(interactionId).toBeDefined();
+    await store.append({ sessionId: session.id, turnId: turn, type: "agent/status", payload: { status: "interrupted", reason: "process_restart" } });
+    const second = new AgentHost({ store, model, toolRuntime: new ToolRuntime({ store, registry, permissionTtlMs: 5_000 }) });
+    expect((await second.getSession(session.id))?.interactions.find((interaction) => interaction.id === interactionId)?.status).toBe("pending");
+    const answer = await second.resolveInteraction(session.id, interactionId!, "answered", "yes");
+    expect(answer).toMatchObject({ status: "answered", answer: "yes" });
+    await second.waitForTurn(turn, 2_000);
+    expect(requests[1]?.messages.at(-1)).toMatchObject({ role: "tool", toolCallId: "call_interaction_restart" });
+    expect((await second.getSession(session.id))?.messages.at(-1)?.content).toBe("Interaction recovered and continued.");
   });
 
   it("cancels a permission-paused turn without continuing the model", async () => {

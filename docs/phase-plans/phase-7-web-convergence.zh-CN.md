@@ -1,6 +1,6 @@
 # Phase 7：DSH Web 前端收敛与可观测工作台
 
-状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.7 Task/Subagent/MCP details 切片，以及 7.8 Trajectory ledger 的 query/lane/inspector 切片已完成；7.1 Shell 拆分、7.3 导航收敛、7.6–7.10 继续推进）
+状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 切片，以及 7.8 Trajectory ledger 的 query/lane/inspector 切片已完成；7.1 Shell 拆分、7.3 导航收敛、7.6 queue/steer/attachment 深化、7.8 timeline/virtualization、7.9–7.10 继续推进）
 
 ## 当前执行 checkpoint：typed Web client 与 Session replay foundation
 
@@ -16,6 +16,7 @@
 - `apps/web/index.html`：details panel 已消费 typed trajectory presenter，提供搜索、running-only、lane/record 选择和安全 inspector；搜索与选择不建立第二套事实状态；
 - `apps/web/src/presentation/task-presenter.ts`、`apps/web/index.html`：details panel 已消费 Session task projection 与 Subagent catalog，展示 task status、mode/provider、parent/child lineage、report/artifact、bounded diagnostics，child session 和 live cancel 使用既有 API；
 - `apps/web/src/presentation/mcp-presenter.ts`、`apps/web/index.html`：details panel 已消费 MCP server view，展示 scope、transport、revision/generation、auth、catalog enabled/disabled reason、retry/error 和 bounded redacted detail；
+- `apps/web/src/presentation/request-presenter.ts`、`packages/tools/src/runtime.ts`、`packages/runtime/src/index.ts`：Permission/Interaction 详情使用统一 expiry/recovery/redaction intent；pending question 在 API/AgentHost 重启后可重新回答，过期 request 不暴露 action；
 - `apps/web/src/client/store.ts`：`SessionStoreSnapshot` 同时发布 Conversation、ToolCallTree 和 Trajectory，避免 UI 维护第二套事实窗口；
 - `apps/web/src/browser.ts` 与 API `/web/*` 静态资源：typed runtime 作为现有静态 Shell 的可回滚 bridge，主 Session 流已切换到 `SessionConnectionController`；旧 inline EventSource 仅作为 bundle 缺失时的 fallback；
 - Web 包已进入 TypeScript project reference，并有 API、Store、Connection、Conversation 定向测试。

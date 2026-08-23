@@ -15,7 +15,7 @@
 | Phase 4B：MCP 加固 | completed（2026-08-23） | 本 checkpoint；4B.0–4B.6、focused tests、API restart persistence 和 MCP browser smoke 通过；普通 baseline 未重复执行 |
 | Phase 5：内部 Subagent / 多 Agent | completed（2026-08-23） | 5.0–5.4：Task/Descriptor durable projection、one-shot/continuable child、FIFO/authority/cold resume、report/MCP scope、API/SSE/Web catalog；定向 typecheck、storage/subagent/runtime/API 测试和 API/Web smoke 通过 |
 | Phase 6：A2A | deferred（暂不作为 Phase 7 前置） | [ADR：Phase 7 Web 收敛不等待 A2A](adr/phase-7-web-with-a2a-deferred.zh-CN.md)；等待明确的外部 Agent 互操作需求 |
-| Phase 7：DSH Web 前端收敛 | in_progress | typed Web API/SessionStore/Conversation projection/SSE replay、Tool presenter/lineage guard、permission/interaction surface、Trajectory query/lane/inspector、Task/Subagent/MCP details 已接入主 Session 流；31 项 Web 测试、类型检查、browser bundle 和真实 API/browser smoke 通过；Shell 拆分、完整 capability surface、Trajectory timeline/虚拟化和非空 Delegation e2e 仍在推进 |
+| Phase 7：DSH Web 前端收敛 | in_progress | typed Web API/SessionStore/Conversation projection/SSE replay、Tool presenter/lineage guard、permission/interaction surface、过期与重启恢复 render intent、Trajectory query/lane/inspector、Task/Subagent/MCP details 已接入主 Session 流；34 项 Web 测试、tools/runtime/API recovery 定向测试、类型检查和 browser bundle 通过；Shell 拆分、完整 capability surface、Trajectory timeline/虚拟化和非空 Delegation e2e 仍在推进 |
 | Phase 8：高级能力与产品化 | pending | 等前置阶段完成 |
 
 ## Phase 6 A2A 暂缓决策
@@ -41,11 +41,13 @@ Phase 7 的 DSH Web 调研与分步计划：
 - `apps/web/src/browser.ts` 已暴露 `queryTrajectory` 和 `inspectTrajectory`，静态 Web details panel 已接入搜索、running-only、record 选择、lane 列表和 inspector；UI 的搜索/选中项仅是可丢弃的交互状态，事实仍来自 `SessionStoreSnapshot`；
 - `apps/web/src/presentation/task-presenter.ts` 已把 TaskProjection 转为 bounded task/child-agent render intent，包含 mode/provider、parent/child lineage、report/artifact、diagnostics、resumable/cancellable；details panel 同时消费 Session task projection 和 Subagent catalog，不复制 Task 事实；
 - `apps/web/src/presentation/mcp-presenter.ts` 已把 MCP server/config/catalog/retry view 转为 bounded render intent，details panel 展示 scope、transport、revision/generation、auth、catalog policy、retry/error 和安全 raw detail；MCP config/env/credential 仍由 host/API 提供脱敏值；
+- `apps/web/src/presentation/request-presenter.ts` 已把 Permission/Interaction node 转为 time-aware、bounded、redacted render intent；pending request 在 deadline 到达但 resolved event 尚未抵达时会先禁用操作并显示 expired，interrupted/reconnecting session 会标记可恢复请求；details panel 增加 pending/recovered/expired 计数；
+- `packages/tools/src/runtime.ts` 与 `packages/runtime/src/index.ts` 已恢复 durable Interaction：API/AgentHost 重启后可以重新挂载 pending question，回答会追加 synthetic `tool/result` 并恢复原 turn；过期恢复请求会追加 `interaction/resolved(expired)` 和 bounded tool result；
 - `conversation.ts` 和 Shell permission/interaction surface 已保留 caller、workspaceRoot、expiresAt、allowFreeform、cancelled/expired/resolved 状态；按钮命令使用 idempotency key；
 - 现有 Shell 通过 `/web/browser.js` bridge 使用 typed 主 Session 连接，并优先从统一 `SessionStoreSnapshot` 渲染 Conversation/Tool/Turn/Permission/Interaction 节点；旧 inline EventSource 和 event renderer 保留为 bundle 缺失时的 fallback，未改变 API/Runtime/EventStore 事实来源；
-- 定向验证：`pnpm typecheck`、`pnpm --filter @code-review-agent/web test`（31 tests）、`pnpm -F @code-review-agent/web run build:browser`、`git diff --check`；真实 API/browser smoke 验证 Trajectory 搜索、lane、record inspector、脱敏、running-only 空态、Task/Subagent 空态、MCP disabled/non-empty server inspector、fixture cleanup、刷新回放和 console 无 warning/error。
+- 定向验证：`pnpm typecheck`、`pnpm --filter @code-review-agent/web test`（34 tests）、`pnpm --filter @code-review-agent/tools test -- --run src/index.test.ts`、`pnpm --filter @code-review-agent/runtime test -- --run src/index.test.ts`、`pnpm --filter @code-review-agent/api test -- --run src/server.test.ts`、`pnpm -F @code-review-agent/web run build:browser`、`git diff --check`；API/AgentHost recovery fixture 验证 pending Interaction 的重启、回答、tool result 和原 turn continuation。
 
-下一切片：完成 permission/interaction 的过期与重启恢复展示，补真实非空 Delegation fixture，继续实现 Trajectory timeline/折叠/虚拟化，并补 browser replay fixtures。
+下一切片：补真实非空 Delegation fixture，继续实现 Trajectory timeline/折叠/虚拟化，并补 browser replay fixtures。
 
 ## Phase 5 Subagent / Multi-Agent 验收证据（2026-08-23）
 

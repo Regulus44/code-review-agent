@@ -454,4 +454,60 @@ describe("Phase 2 API", () => {
     await new Promise<void>((resolve, reject) => second.close((error) => (error ? reject(error) : resolve())));
     rmSync(directory, { recursive: true, force: true });
   });
+
+  it("restores a pending user interaction after an API restart", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-interaction-recovery-"));
+    const databasePath = join(directory, "agent.sqlite");
+    let modelCalls = 0;
+    const model = {
+      async *stream() {
+        if (modelCalls++ === 0) {
+          yield { type: "tool_call_start" as const, index: 0, id: "call_api_interaction_restart", name: "ask_user" };
+          yield { type: "tool_call_delta" as const, index: 0, arguments: JSON.stringify({ question: "Continue after API restart?", options: [{ label: "Yes", value: "yes" }] }) };
+          yield { type: "done" as const };
+        } else {
+          yield { type: "text_delta" as const, text: "API interaction recovered." };
+          yield { type: "done" as const };
+        }
+      },
+    };
+    const first = createApiServer({ databasePath, model });
+    await new Promise<void>((resolve) => first.listen(0, "127.0.0.1", resolve));
+    try {
+      const firstAddress = first.address();
+      if (firstAddress === null || typeof firstAddress === "string") throw new Error("API did not bind");
+      const firstUrl = `http://127.0.0.1:${firstAddress.port}`;
+      const session = await (await fetch(`${firstUrl}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: directory }) })).json() as { id: string };
+      await fetch(`${firstUrl}/v1/sessions/${session.id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: "ask before continuing" }) });
+      let interactionId: string | undefined;
+      for (let attempt = 0; attempt < 100 && interactionId === undefined; attempt += 1) {
+        const projection = await (await fetch(`${firstUrl}/v1/sessions/${session.id}`)).json() as { interactions?: { id: string; status: string }[] };
+        interactionId = projection.interactions?.find((item) => item.status === "pending")?.id;
+        if (interactionId === undefined) await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      }
+      expect(interactionId).toBeDefined();
+      await new Promise<void>((resolve, reject) => first.close((error) => (error ? reject(error) : resolve())));
+
+      const second = createApiServer({ databasePath, model });
+      await new Promise<void>((resolve) => second.listen(0, "127.0.0.1", resolve));
+      try {
+        const secondAddress = second.address();
+        if (secondAddress === null || typeof secondAddress === "string") throw new Error("API did not bind");
+        const secondUrl = `http://127.0.0.1:${secondAddress.port}`;
+        const restored = await (await fetch(`${secondUrl}/v1/sessions/${session.id}`)).json() as { status: string; interactions?: { id: string; status: string }[] };
+        expect(restored.status).toBe("interrupted");
+        expect(restored.interactions?.find((item) => item.id === interactionId)?.status).toBe("pending");
+        const answered = await fetch(`${secondUrl}/v1/sessions/${session.id}/interactions/${interactionId}`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "restart-interaction-answer-1" }, body: JSON.stringify({ status: "answered", answer: "yes" }) });
+        expect(answered.status).toBe(200);
+        let projection: { messages: { content: string }[] } = { messages: [] };
+        for (let attempt = 0; attempt < 100; attempt += 1) { projection = await (await fetch(`${secondUrl}/v1/sessions/${session.id}`)).json() as typeof projection; if (projection.messages.some((message) => message.content.includes("API interaction recovered"))) break; await new Promise<void>((resolve) => setTimeout(resolve, 5)); }
+        expect(projection.messages.some((message) => message.content.includes("API interaction recovered"))).toBe(true);
+      } finally {
+        await new Promise<void>((resolve, reject) => second.close((error) => (error ? reject(error) : resolve())));
+      }
+    } finally {
+      if ((first as { listening?: boolean }).listening) await new Promise<void>((resolve, reject) => first.close((error) => (error ? reject(error) : resolve())));
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
