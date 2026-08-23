@@ -65,6 +65,23 @@ describe("WebApiClient", () => {
     expect(calls[0]?.init?.body).toBe(JSON.stringify({ content: "focus on tests" }));
   });
 
+  it("builds capability and attachment upload commands", async () => {
+    const calls: { url: string; init?: RequestInit | undefined }[] = [];
+    const client = new WebApiClient({
+      baseUrl: "http://localhost:4317",
+      fetcher: async (input, init) => {
+        calls.push({ url: String(input), init });
+        return new Response(JSON.stringify({ attachments: { enabled: true, maxBytes: 524288, allowedMediaTypes: ["text/plain"], imagesEnabled: false } }), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+    await client.listCapabilities();
+    await client.uploadAttachment("ses_attach" as never, { fileName: "notes.txt", mediaType: "text/plain", data: "aGVsbG8=" }, "attach_cmd_1");
+    expect(calls[0]?.url).toBe("http://localhost:4317/v1/capabilities");
+    expect(calls[1]?.url).toBe("http://localhost:4317/v1/sessions/ses_attach/attachments");
+    expect(new Headers(calls[1]?.init?.headers).get("idempotency-key")).toBe("attach_cmd_1");
+    expect(calls[1]?.init?.body).toBe(JSON.stringify({ fileName: "notes.txt", mediaType: "text/plain", data: "aGVsbG8=" }));
+  });
+
   it("normalizes non-2xx JSON responses as ApiError", async () => {
     const client = new WebApiClient({
       fetcher: async () => new Response(JSON.stringify({ error: "permission denied" }), { status: 403, headers: { "content-type": "application/json" } }),

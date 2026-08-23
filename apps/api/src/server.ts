@@ -1,5 +1,6 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
@@ -11,6 +12,7 @@ import { createConfiguredChatModel, DEEPSEEK_MODELS, type ModelConfigView } from
 import { McpConnectionManager, type McpServerConfig } from "@code-review-agent/mcp-client";
 import type { PermissionPreset } from "@code-review-agent/tools";
 import { artifactAccessResponse, inspectArtifact, isAvailableArtifact, type ArtifactAccess } from "./artifacts.js";
+import { attachmentCapability, AttachmentInputError, stageAttachment, type AttachmentPolicy } from "./attachments.js";
 
 export interface ModelSelection {
   readonly model: ChatModel;
@@ -28,6 +30,7 @@ export interface ApiServerOptions {
   readonly permissionPreset?: PermissionPreset;
   readonly mcp?: McpConnectionManager;
   readonly subagentRuntime?: SubagentRuntime;
+  readonly attachmentPolicy?: AttachmentPolicy;
   readonly webRoot?: string;
 }
 
@@ -52,7 +55,7 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
   const persistence = store instanceof SqliteEventStore ? "sqlite" : "custom";
   const webRoot = options.webRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web");
   const server = createServer((request, response) => {
-    void handleRequest(request, response, host, mcp, subagentRuntime, webRoot, persistence, modelRuntime);
+    void handleRequest(request, response, host, mcp, subagentRuntime, webRoot, persistence, modelRuntime, options.attachmentPolicy);
   });
   if (ownsStore && store instanceof SqliteEventStore) server.on("close", () => store.close());
   if (ownsMcp) server.on("close", () => { void mcp.close(); });
@@ -94,7 +97,11 @@ interface ModelRuntimeState {
   readonly selector?: (model: string) => ModelSelection;
 }
 
-async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, mcp: McpConnectionManager, subagents: SubagentRuntime, webRoot: string, persistence: string, modelRuntime: ModelRuntimeState): Promise<void> {
+function currentAttachmentCapability(policy: AttachmentPolicy | undefined, modelRuntime: ModelRuntimeState) {
+  return attachmentCapability(policy, modelRuntime.info?.model.includes("vision") === true);
+}
+
+async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, mcp: McpConnectionManager, subagents: SubagentRuntime, webRoot: string, persistence: string, modelRuntime: ModelRuntimeState, attachmentPolicy: AttachmentPolicy | undefined): Promise<void> {
   response.setHeader("access-control-allow-origin", "*");
   response.setHeader("access-control-allow-headers", "content-type, idempotency-key, last-event-id");
   response.setHeader("access-control-allow-methods", "GET,POST,DELETE,OPTIONS");
@@ -130,6 +137,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     }
     if (request.method === "GET" && url.pathname === "/v1/tools") {
       sendJson(response, 200, { tools: host.listTools() });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/v1/capabilities") {
+      sendJson(response, 200, { attachments: currentAttachmentCapability(attachmentPolicy, modelRuntime) });
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/mcp/servers") {
@@ -211,6 +222,26 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     }
     if (request.method === "GET" && url.pathname === "/v1/sessions") {
       sendJson(response, 200, { sessions: await host.listSessions(url.searchParams.get("include_archived") === "true") });
+      return;
+    }
+    const attachmentMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/attachments$/u);
+    if (request.method === "POST" && attachmentMatch?.[1] !== undefined) {
+      const id = sessionId(decodeURIComponent(attachmentMatch[1]));
+      const session = await host.getSession(id);
+      if (session === undefined) throw new HttpError(404, "session not found");
+      const body = await readJson(request);
+      if (typeof body.fileName !== "string") throw new HttpError(400, "fileName is required");
+      if (typeof body.mediaType !== "string") throw new HttpError(400, "mediaType is required");
+      if (typeof body.data !== "string") throw new HttpError(400, "data is required");
+      const idempotencyKey = commandId(request, body) ?? `attachment_${randomUUID()}`;
+      let receipt;
+      try {
+        receipt = await stageAttachment(session, { fileName: body.fileName, mediaType: body.mediaType, data: body.data }, currentAttachmentCapability(attachmentPolicy, modelRuntime), idempotencyKey);
+      } catch (error) {
+        if (error instanceof AttachmentInputError) throw new HttpError(400, error.message);
+        throw error;
+      }
+      sendJson(response, receipt.status === "accepted" ? 201 : 200, await host.recordAttachment(id, receipt, idempotencyKey));
       return;
     }
     const eventsMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/events$/u);

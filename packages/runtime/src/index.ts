@@ -1,6 +1,7 @@
 import {
   brand,
   type AgentEvent,
+  type AttachmentReceipt,
   type ChatMessage,
   type ChatModel,
   type ModelToolCall,
@@ -465,6 +466,34 @@ export class AgentHost {
       payload: { content: normalized, receiptId, status: "accepted" },
     });
     return result;
+  }
+
+  /** Records a host-validated browser attachment receipt without exposing file bytes in the event log. */
+  async recordAttachment(sessionId: SessionId, receipt: AttachmentReceipt, commandId?: string): Promise<AttachmentReceipt> {
+    await this.ready;
+    if (await this.options.store.project(sessionId) === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    const idempotencyKey = commandId ?? `cmd_${randomUUID()}`;
+    const claim = await this.options.store.claimCommand({
+      sessionId,
+      commandId: idempotencyKey,
+      kind: "record_attachment",
+      request: {
+        id: receipt.id,
+        fileName: receipt.fileName,
+        mediaType: receipt.mediaType,
+        sizeBytes: receipt.sizeBytes,
+        status: receipt.status,
+      },
+      result: { ...receipt },
+    });
+    if (!claim.created) return claim.record.result as AttachmentReceipt;
+    await this.options.store.append({
+      sessionId,
+      correlationId: idempotencyKey,
+      type: receipt.status === "accepted" ? "attachment/received" : "attachment/rejected",
+      payload: { ...receipt },
+    });
+    return receipt;
   }
 
   async reorderQueue(sessionId: SessionId, turnId: TurnId, position: number, commandId?: string): Promise<{ readonly reordered: boolean; readonly queuedTurnIds: readonly TurnId[] }> {

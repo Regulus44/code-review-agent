@@ -21,6 +21,8 @@ export type AgentEventType =
   | "session/deleted"
   | "user/message"
   | "turn/steered"
+  | "attachment/received"
+  | "attachment/rejected"
   | "turn/queued"
   | "queue/changed"
   | "turn/started"
@@ -493,6 +495,23 @@ export interface CreateSessionInput {
 
 export interface SendMessageInput {
   readonly content: string;
+}
+
+export type AttachmentKind = "file" | "image";
+export type AttachmentStatus = "accepted" | "rejected";
+
+/** Durable, workspace-relative receipt for one browser-provided attachment. */
+export interface AttachmentReceipt {
+  readonly id: string;
+  readonly status: AttachmentStatus;
+  readonly fileName: string;
+  readonly mediaType: string;
+  readonly sizeBytes: number;
+  readonly kind: AttachmentKind;
+  readonly createdAt: string;
+  readonly relativePath?: string;
+  readonly code?: string;
+  readonly reason?: string;
 }
 
 export interface ModelToolCall {

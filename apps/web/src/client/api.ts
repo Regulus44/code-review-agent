@@ -1,5 +1,6 @@
 import type {
   AgentEvent,
+  AttachmentReceipt,
   ArtifactRef,
   InteractionId,
   PermissionId,
@@ -30,6 +31,18 @@ export interface ModelCatalogResponse {
   readonly current: string;
   readonly configured: boolean;
   readonly models: readonly string[];
+}
+
+export interface AttachmentCapability {
+  readonly enabled: boolean;
+  readonly maxBytes: number;
+  readonly allowedMediaTypes: readonly string[];
+  readonly imagesEnabled: boolean;
+  readonly reason?: string;
+}
+
+export interface CapabilityResponse {
+  readonly attachments: AttachmentCapability;
 }
 
 export interface HealthResponse {
@@ -237,6 +250,18 @@ export class WebApiClient {
   listTools(sessionId?: SessionId): Promise<{ readonly tools: readonly ToolCatalogEntry[] }> {
     const suffix = sessionId === undefined ? "" : `?session_id=${encodeURIComponent(sessionId)}`;
     return this.request(`/v1/tools${suffix}`);
+  }
+
+  listCapabilities(): Promise<CapabilityResponse> {
+    return this.request("/v1/capabilities");
+  }
+
+  uploadAttachment(sessionId: SessionId, input: { readonly fileName: string; readonly mediaType: string; readonly data: string }, commandId?: string): Promise<AttachmentReceipt> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/attachments`, {
+      method: "POST",
+      commandId,
+      body: input,
+    });
   }
 
   listModels(): Promise<ModelCatalogResponse> {

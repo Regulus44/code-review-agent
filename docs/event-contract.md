@@ -27,6 +27,8 @@ session/created
 session/updated
 user/message
 turn/steered
+attachment/received
+attachment/rejected
 turn/queued
 turn/started
 step/started
@@ -92,6 +94,8 @@ mcp/prompt
 MCP 生命周期事件只携带 `serverName`、状态、动作和脱敏错误；env/header/token 等配置秘密不得进入 payload。MCP 工具调用本身仍使用公共 `tool/*` 和 `permission/*` 事件。`mcp/resource` / `mcp/prompt` 只记录 server、资源 URI 或 prompt name、动作、bounded bytes/truncated 和 trust marker，不记录远端原始内容。
 
 `turn/steered` 表示用户向当前运行中的 turn 追加一条指导。payload 至少包含 `{ content, receiptId, status: "accepted" }`，并通过 `correlationId` 关联幂等 command。该事件先落盘，再注入下一次模型请求；它不会覆盖原始 `user/message`，回放时作为同一 turn 下的独立 user message。非运行中的 turn 返回 `accepted: false`，不追加 steer 事件。
+
+`attachment/received` / `attachment/rejected` 记录浏览器上传的文件 receipt，不记录 base64 或原始内容。payload 是 `AttachmentReceipt`：包含 attachment id、原始文件名、归一化 MIME、字节数、`file`/`image` kind、状态、workspace-relative artifact path 或结构化拒绝 code/reason。上传必须先通过 host capability、大小、类型、workspace 和 symlink 检查，再写入 `.agent-artifacts/attachments/`；重复 command 返回同一 receipt。
 
 ## 不变量
 

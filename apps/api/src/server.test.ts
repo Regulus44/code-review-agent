@@ -354,6 +354,29 @@ describe("Phase 2 API", () => {
     expect(await repeated.json()).toEqual({ accepted: false, turnId: "turn_missing" });
   });
 
+  it("serves attachment capability, bounded upload receipts and rejection replay", async () => {
+    const root = mkdtempSync(join(tmpdir(), "code-review-agent-api-attachment-"));
+    try {
+      const capability = await (await fetch(`${baseUrl}/v1/capabilities`)).json() as { attachments: { enabled: boolean; maxBytes: number; imagesEnabled: boolean } };
+      expect(capability.attachments).toMatchObject({ enabled: true, maxBytes: 524288, imagesEnabled: false });
+      const created = await fetch(`${baseUrl}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: root }) });
+      const session = await created.json() as { id: string };
+      const headers = { "content-type": "application/json", "idempotency-key": "api-attachment-1" };
+      const body = { fileName: "notes.md", mediaType: "text/markdown", data: Buffer.from("hello").toString("base64") };
+      const uploaded = await fetch(`${baseUrl}/v1/sessions/${session.id}/attachments`, { method: "POST", headers, body: JSON.stringify(body) });
+      expect(uploaded.status).toBe(201);
+      const receipt = await uploaded.json() as { status: string; relativePath: string; sizeBytes: number };
+      expect(receipt).toMatchObject({ status: "accepted", sizeBytes: 5 });
+      expect(readFileSync(join(root, receipt.relativePath), "utf8")).toBe("hello");
+      const repeated = await fetch(`${baseUrl}/v1/sessions/${session.id}/attachments`, { method: "POST", headers, body: JSON.stringify(body) });
+      expect(await repeated.json()).toEqual(receipt);
+      const rejected = await fetch(`${baseUrl}/v1/sessions/${session.id}/attachments`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "api-attachment-2" }, body: JSON.stringify({ fileName: "run.exe", mediaType: "application/x-msdownload", data: Buffer.from("x").toString("base64") }) });
+      expect(await rejected.json()).toMatchObject({ status: "rejected", code: "ATTACHMENT_MEDIA_TYPE_DENIED" });
+      const events = await (await fetch(`${baseUrl}/v1/sessions/${session.id}/events?format=json`)).json() as { type: string; payload: Record<string, unknown> }[];
+      expect(events.filter((event) => event.type === "attachment/received" || event.type === "attachment/rejected")).toHaveLength(2);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   it("soft-deletes a session and keeps its event history out of active lists", async () => {
     const created = await fetch(`${baseUrl}/v1/sessions`, {
       method: "POST",
@@ -545,6 +568,8 @@ describe("Phase 2 API", () => {
       const switched = await fetch(`${configuredUrl}/v1/models`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "deepseek-v4-pro" }) });
       expect(switched.status).toBe(200);
       expect(await switched.json()).toMatchObject({ model: { model: "deepseek-v4-pro" } });
+      const standardCapabilities = await (await fetch(`${configuredUrl}/v1/capabilities`)).json() as { attachments: { imagesEnabled: boolean } };
+      expect(standardCapabilities.attachments.imagesEnabled).toBe(false);
       const session = await (await fetch(`${configuredUrl}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: "D:/workspace" }) })).json() as { id: string };
       await fetch(`${configuredUrl}/v1/sessions/${session.id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: "use selected model" }) });
       let projection: { status: string; messages: { content: string }[] };
@@ -554,6 +579,10 @@ describe("Phase 2 API", () => {
         await new Promise<void>((resolve) => setTimeout(resolve, 5));
       }
       expect(projection!.messages.at(-1)?.content).toBe("deepseek-v4-pro");
+      const vision = await fetch(`${configuredUrl}/v1/models`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "deepseek-v4-flash-vision-exp" }) });
+      expect(vision.status).toBe(200);
+      const visionCapabilities = await (await fetch(`${configuredUrl}/v1/capabilities`)).json() as { attachments: { imagesEnabled: boolean } };
+      expect(visionCapabilities.attachments.imagesEnabled).toBe(true);
       const rejected = await fetch(`${configuredUrl}/v1/models`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "not-a-deepseek-model" }) });
       expect(rejected.status).toBe(400);
     } finally {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ChatModel, InteractionId, ModelRequest, ModelStreamPart, PermissionId, ToolDefinition } from "@code-review-agent/contracts";
+import type { AttachmentReceipt, ChatModel, InteractionId, ModelRequest, ModelStreamPart, PermissionId, ToolDefinition } from "@code-review-agent/contracts";
 import { InMemoryEventStore } from "@code-review-agent/storage";
 import { createBuiltinTools, DefaultPermissionPolicy, ToolRegistry, ToolRuntime } from "@code-review-agent/tools";
 import { AgentHost } from "./index.js";
@@ -336,6 +336,18 @@ describe("AgentHost", () => {
     expect(requests[1]?.messages.at(-1)).toEqual({ role: "user", content: "focus on the failing test" });
     expect((await host.events(session.id)).some((event) => event.type === "turn/steered" && event.payload["receiptId"] === receipt.receiptId)).toBe(true);
     expect((await host.steerTurn(session.id, turn, "too late", "steer-late")).accepted).toBe(false);
+  });
+
+  it("records attachment receipts idempotently without storing bytes in events", async () => {
+    const store = new InMemoryEventStore();
+    const host = new AgentHost({ store });
+    const session = await host.createSession("D:/attachment-fixture");
+    const receipt: AttachmentReceipt = { id: "att_fixture", status: "accepted", fileName: "notes.md", mediaType: "text/markdown", sizeBytes: 5, kind: "file", createdAt: "2026-08-23T00:00:00.000Z", relativePath: ".agent-artifacts/attachments/att_fixture-notes.md" };
+    expect(await host.recordAttachment(session.id, receipt, "attachment-1")).toEqual(receipt);
+    expect(await host.recordAttachment(session.id, receipt, "attachment-1")).toEqual(receipt);
+    const event = (await host.events(session.id)).find((item) => item.type === "attachment/received");
+    expect(event?.payload).toMatchObject({ id: "att_fixture", fileName: "notes.md", sizeBytes: 5 });
+    expect(JSON.stringify(event?.payload)).not.toContain("hello");
   });
 
   it("reorders queued turns durably and keeps the command idempotent", async () => {

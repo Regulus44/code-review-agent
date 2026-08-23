@@ -107,6 +107,23 @@ async function runCodingScenarios() {
     const readEvents = (await request(fixture.baseUrl, `/v1/sessions/${readId}/events?format=json`)).body;
     assert(Array.isArray(readEvents) && eventTypes(readEvents).has("tool/call") && eventTypes(readEvents).has("tool/result"), "Read-only replay is incomplete");
 
+    const capabilities = (await request(fixture.baseUrl, "/v1/capabilities")).body;
+    assert(capabilities.attachments?.enabled === true && capabilities.attachments.maxBytes === 524_288, "Attachment capability metadata is missing or unbounded");
+    const attachmentHeaders = { "content-type": "application/json", "idempotency-key": "phase7-gate-attachment-accepted" };
+    const attachmentBody = { fileName: "browser-note.txt", mediaType: "text/plain", data: Buffer.from("phase7 browser attachment\n", "utf8").toString("base64") };
+    const attachment = await request(fixture.baseUrl, `/v1/sessions/${readId}/attachments`, { method: "POST", headers: attachmentHeaders, body: JSON.stringify(attachmentBody) }, 201);
+    assert(attachment.body?.status === "accepted" && typeof attachment.body.relativePath === "string", "Accepted attachment receipt is incomplete");
+    const attachmentRepeat = await request(fixture.baseUrl, `/v1/sessions/${readId}/attachments`, { method: "POST", headers: attachmentHeaders, body: JSON.stringify(attachmentBody) }, 201);
+    assert(JSON.stringify(attachmentRepeat.body) === JSON.stringify(attachment.body), "Repeated attachment upload did not return the durable receipt");
+    const attachmentRejected = await request(fixture.baseUrl, `/v1/sessions/${readId}/attachments`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "phase7-gate-attachment-rejected" },
+      body: JSON.stringify({ fileName: "browser-note.exe", mediaType: "application/x-msdownload", data: Buffer.from("blocked", "utf8").toString("base64") }),
+    });
+    assert(attachmentRejected.body?.status === "rejected" && attachmentRejected.body.code === "ATTACHMENT_MEDIA_TYPE_DENIED", "Attachment rejection receipt is missing the type policy code");
+    const attachmentEvents = (await request(fixture.baseUrl, `/v1/sessions/${readId}/events?format=json`)).body;
+    assert(eventTypes(attachmentEvents).has("attachment/received") && eventTypes(attachmentEvents).has("attachment/rejected"), "Attachment receipts are not present in event replay");
+
     const editId = fixture.scenarios.edit.sessionId;
     const editBefore = await (await request(fixture.baseUrl, `/v1/sessions/${editId}`)).body;
     const editPermission = editBefore.permissions.find((permission) => permission.status === "pending");
@@ -149,7 +166,7 @@ async function runCodingScenarios() {
     assert(eventTypes(recoveryEventsAfter).has("agent/status"), "Recovery replay lacks agent status transition");
 
     return {
-      readOnly: { sessionId: readId, events: readEvents.length },
+      readOnly: { sessionId: readId, events: attachmentEvents.length, attachment: attachment.body.id },
       edit: { sessionId: editId, events: editEvents.length, permission: editPermission.id },
       testRecovery: { sessionId: recoveryId, events: recoveryEventsAfter.length, permission: recoveryPermission.id },
     };

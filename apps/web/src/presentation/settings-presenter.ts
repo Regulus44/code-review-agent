@@ -1,5 +1,5 @@
 import type { PermissionPreset, SessionProjection } from "@code-review-agent/contracts";
-import type { ModelCatalogResponse, McpServerView, ToolCatalogEntry } from "../client/api.js";
+import type { AttachmentCapability, ModelCatalogResponse, McpServerView, ToolCatalogEntry } from "../client/api.js";
 
 export interface SettingsCapability {
   readonly key: string;
@@ -37,6 +37,7 @@ export interface SettingsRenderIntent {
 export interface SettingsPresenterOptions {
   readonly hasSubagentRuntime?: boolean;
   readonly a2aStatus?: "deferred" | "available" | "unavailable";
+  readonly attachmentCapability?: AttachmentCapability;
 }
 
 const permissionDescriptions: Record<PermissionPreset, { readonly label: string; readonly description: string }> = {
@@ -71,10 +72,12 @@ export function presentSettings(
   const connected = mcpServers.filter((server) => server.status === "connected").length;
   const attention = mcpServers.filter((server) => ["disabled", "failed", "needs_auth"].includes(String(server.status))).length;
   const a2aStatus = options.a2aStatus ?? "deferred";
+  const attachment = options.attachmentCapability;
   const capabilities: SettingsCapability[] = [
     { key: "coding-tools", label: "Coding tools", status: tools.length > 0 ? "available" : "unavailable", detail: `${tools.length} host-approved tool${tools.length === 1 ? "" : "s"} in the current catalog.` },
     { key: "mcp", label: "MCP", status: mcpServers.length > 0 ? "configured" : "available", detail: mcpServers.length > 0 ? `${connected}/${mcpServers.length} configured server${mcpServers.length === 1 ? "" : "s"} connected.` : "No MCP server is configured." },
     { key: "subagent", label: "Internal subagents", status: options.hasSubagentRuntime === false ? "unavailable" : "available", detail: options.hasSubagentRuntime === false ? "The host did not expose the internal Subagent service." : "Parent/child Task and Session controls are available." },
+    { key: "attachments", label: "Attachments", status: attachment === undefined ? "unavailable" : attachment.enabled ? "available" : "unavailable", detail: attachment === undefined ? "The host did not expose attachment capability metadata." : attachment.enabled ? `Files up to ${Math.floor(attachment.maxBytes / 1024)} KiB; images ${attachment.imagesEnabled ? "enabled" : "disabled"}.` : attachment.reason ?? "Attachments are disabled by the host policy." },
     { key: "a2a", label: "A2A interoperability", status: a2aStatus, detail: a2aStatus === "deferred" ? "Deferred until an external Agent interoperability scenario is accepted." : a2aStatus === "available" ? "External Agent adapter is enabled." : "External Agent adapter is unavailable." },
   ];
   return {

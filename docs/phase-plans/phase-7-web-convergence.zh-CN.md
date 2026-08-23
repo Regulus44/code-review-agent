@@ -1,6 +1,6 @@
 # Phase 7：DSH Web 前端收敛与可观测工作台
 
-状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、terminal/job diagnostics、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection、7.1 shell layout state/reducer、mobile sidebar 行为、typed overlay state/reducer、queue dock/cancel/reorder surface 和 Session rename 生命周期已完成；物理 Shell 拆分、Workspace reorder 生命周期、steer/attachment 深化和窄屏视觉基线继续推进）
+状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、terminal/job diagnostics、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection、7.1 shell layout state/reducer、mobile sidebar 行为、typed overlay state/reducer、queue dock/cancel/reorder surface、Session rename 生命周期、host-backed steer receipt、attachment capability gate/upload receipt 已完成；物理 Shell 拆分、Workspace reorder 生命周期和窄屏视觉基线继续推进）
 
 ## 当前执行 checkpoint：Host-backed steer receipt（2026-08-23）
 
@@ -13,6 +13,18 @@
 - Runtime、API、Store、Conversation 和 Web API client 均有定向测试。
 
 验证：`pnpm typecheck`、Runtime/API/Web 定向测试通过；完整 workspace 与 Phase 7 browser gate 在提交前执行。
+
+## 当前执行 checkpoint：Attachment capability gate 与 upload receipt（2026-08-23）
+
+本 checkpoint 完成 attachment 的 host-backed 最小闭环：
+
+- `attachment/received` / `attachment/rejected` 纳入 Event contract 和 SSE typed event list；事件只保存 bounded receipt，不保存 base64 或原始内容；
+- API `/v1/capabilities` 暴露 enabled、最大字节数、MIME 白名单和 image capability；默认上限为 512 KiB，图片需要 image-capable model 或显式 host policy；
+- `POST /v1/sessions/:id/attachments` 接收受限 JSON/base64，执行 MIME、大小、文件名、workspace、regular-file 和 symlink 检查，写入 workspace 内 `.agent-artifacts/attachments/`；
+- `AgentHost.recordAttachment()` 负责 durable receipt 与 command idempotency；重复请求返回同一 receipt，拒绝也可回放；
+- composer 的 Attach 按 capability gate 启用/禁用，文件选择和 receipt 状态通过 typed API/事件进入 Web；Settings capability surface 同步显示 attachment 状态；模型切换后重新拉取 capability，避免 vision/image 能力显示过期。
+
+验证：attachment unit、Runtime、API、Web API client 和 Settings 定向测试通过；统一 browser/replay gate 覆盖 accepted/rejected receipt、幂等重放与事件回放；完整 workspace、browser bundle 与 Phase 7 gate 在提交前执行。
 
 ## 当前执行 checkpoint：typed Web client 与 Session replay foundation
 

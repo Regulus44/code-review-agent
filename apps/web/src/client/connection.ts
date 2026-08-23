@@ -8,6 +8,8 @@ export const AGENT_EVENT_TYPES: readonly AgentEventType[] = [
   "session/deleted",
   "user/message",
   "turn/steered",
+  "attachment/received",
+  "attachment/rejected",
   "turn/queued",
   "turn/started",
   "step/started",

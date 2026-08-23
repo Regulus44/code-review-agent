@@ -1,5 +1,30 @@
 # Phase 7：DSH Web 前端收敛
 
+## 2026-08-23：Attachment capability gate 与 upload receipt
+
+### 变更范围
+
+- 新增 `apps/api/src/attachments.ts`，对上传文件执行 MIME 白名单、512 KiB 默认上限、文件名、workspace、regular-file 和 symlink 边界检查；文件写入 workspace 内 `.agent-artifacts/attachments/`。
+- `attachment/received` / `attachment/rejected` 事件只记录 bounded receipt，不把 base64 或原始内容写入 EventStore。
+- `AgentHost.recordAttachment()` 提供 durable receipt 和 command idempotency；API `/v1/capabilities` 暴露 attachment 能力，图片默认关闭，image-capable model 或显式 policy 才能启用。
+- Web typed client 增加 capability/upload API；composer Attach 根据 capability gate 启用，Settings 显示上传能力，回放 renderer 显示 accepted/rejected receipt；切换模型后重新拉取 capability，确保图片能力状态与 host 当前模型一致。
+- `scripts/phase7-browser-gate.mjs` 增加真实 fixture 上传场景，验证 accepted/rejected receipt、重复 command 返回同一 receipt，以及 `attachment/received` / `attachment/rejected` replay。
+
+### 验证
+
+```text
+pnpm typecheck ✓
+attachment/Runtime/API/Web 定向测试 ✓（50 tests）
+pnpm test ✓（全 workspace）
+pnpm test:phase7:browser ✓（五场景 + attachment replay，1.89s）
+git diff --check ✓
+```
+
+### 下一步
+
+- 物理拆分 Conversation、Details、Overlay；
+- Workspace reorder 生命周期与窄屏视觉回归。
+
 ## 2026-08-23：Host-backed steer receipt
 
 ### 变更范围
