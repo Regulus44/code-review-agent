@@ -1,6 +1,6 @@
 # ADR：Phase 8 Web 与 DSH 前端行为对齐
 
-状态：`proposed`
+状态：`accepted`
 
 日期：2026-08-23
 
