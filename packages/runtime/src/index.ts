@@ -261,7 +261,12 @@ export class AgentHost {
   }
 
   async shutdown(): Promise<void> {
-    for (const controller of this.controllers.values()) controller.abort();
+    // Preserve turns paused on a durable user interaction. Aborting those
+    // controllers would append an interaction/resolved(cancelled) event during
+    // server shutdown, destroying the recovery point before the next host can
+    // restore and answer it. Other active turns still receive cancellation.
+    const waitingTurnIds = new Set(this.toolRuntime.pendingUserInteractions().map((interaction) => interaction.turnId).filter((turnId): turnId is TurnId => turnId !== undefined));
+    for (const [turnId, controller] of this.controllers) if (!waitingTurnIds.has(turnId)) controller.abort();
     await this.terminalManager?.shutdown();
     await this.jobManager?.shutdown();
   }

@@ -63,6 +63,7 @@ git diff --check                             ✓
 - API 增加 `/v1/sessions/:id/jobs`、`/retry`、`/cancel`、`/export` 与 `/v1/diagnostics`；Web API client 与 Job center 增加 Cancel/Retry 操作；
 - 新增 `scripts/phase8-reliability-gate.mjs`，覆盖 retry、deadline、shutdown、session export 和 diagnostics 的真实运行路径。
 - Reliability gate 增加 Web Job Center recovery surface 检查，确认 Cancel/Retry/diagnostics 文案和 typed browser action symbols 随构建产物存在；真实带 Job 的浏览器交互 fixture 仍未宣称完成。
+- 修复 API restart recovery race：shutdown 只取消普通 active turn，保留等待 durable user interaction 的 turn，让下一次 AgentHost 从 pending interaction 恢复；同时避免 SQLite close 后异步 `finishTurnAfterError` 写入失败。
 
 ### 验证
 
