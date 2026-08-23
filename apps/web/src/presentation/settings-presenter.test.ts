@@ -52,8 +52,17 @@ describe("presentSettings", () => {
     expect(view.workspaceRoot).toBe(".");
     expect(view.permissionPreset).toBe("ask-on-write");
     expect(view.model.available).toEqual([]);
+    expect(view.model.status).toBe("loading");
     expect(view.capabilities.find((capability) => capability.key === "subagent")).toMatchObject({ status: "unavailable" });
     expect(view.capabilities.find((capability) => capability.key === "a2a")).toMatchObject({ status: "unavailable" });
     expect(view.capabilities.find((capability) => capability.key === "context-compaction")).toMatchObject({ status: "unavailable" });
+  });
+
+  it("preserves provider failure and selection receipt as explicit UI state", () => {
+    const failed = presentSettings(session, undefined, [], [], { modelState: { status: "error", error: "provider unavailable" } });
+    expect(failed.model).toMatchObject({ status: "error", error: "provider unavailable" });
+
+    const selected = presentSettings(session, { provider: "deepseek", current: "deepseek-v4-pro", configured: true, models: ["deepseek-v4-pro"] }, [], [], { modelState: { status: "ready", receipt: "Selected deepseek-v4-pro" } });
+    expect(selected.model).toMatchObject({ status: "ready", receipt: "Selected deepseek-v4-pro" });
   });
 });

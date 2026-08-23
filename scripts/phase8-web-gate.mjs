@@ -44,6 +44,8 @@ try {
   assert(health.runtime === "typescript" && health.persistence === "sqlite", "fixture is not the durable TypeScript runtime");
   const shell = await request("/");
   assert(typeof shell === "string" && shell.includes("/web/browser.js"), "Web shell does not use the typed bridge");
+  assert(shell.includes('Workspace view') && shell.includes('Workspace sort'), "Workspace Browser view/sort controls are missing");
+  assert(shell.includes('Catalog status') && shell.includes('Retry model catalog'), "Settings model loading/failure/retry surface is missing");
   const browserAsset = await request("/web/browser.js");
   for (const symbol of ["presentGoalBar", "presentPlan", "presentTodoPanel", "presentQuestionBatch"]) {
     assert(typeof browserAsset === "string" && browserAsset.includes(symbol), `browser bundle is missing ${symbol}`);

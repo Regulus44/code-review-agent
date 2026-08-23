@@ -75,7 +75,9 @@ Phase 7 的 DSH Web 调研与分步计划：
 - 新增 `scripts/phase8-reliability-gate.mjs`，覆盖 retry、deadline、shutdown、session export、diagnostics 和 metrics；`pnpm test:phase8:reliability` 已通过。当前 8.4 仍未整体完成，更完整的 browser recovery matrix 仍是后续工作。
 - 当前 Web parity 收口新增 Workspace Browser 的 Tree/Flat 视图与 Recent/Name/Path 确定性排序；搜索、Archived 筛选、父子 Session 展示和 active Session 保持现有回放状态；真实页面切换回归已通过。
 - 本次导航改动验证：`pnpm typecheck`、Web 101 tests、`pnpm build:web`、`pnpm test:phase8:web`、`pnpm test:phase8:reliability` 和 `git diff --check` 均通过；独立 checkpoint 为本次提交。
-- 当前 Phase 8 仍为 `pending`。8.0 的 Workspace Flat/Tree、sorting/picker、Settings failure/retry、visual baseline 和总 parity gate 仍未关闭。
+- Settings 的 Model section 现在保留 host-backed loading/ready/error 状态、provider failure 文案、Retry model catalog 操作和模型选择 receipt；模型目录失败不会把整个 Web boot 误判为连接失败。
+- `scripts/phase8-web-gate.mjs` 已增加 Workspace view/sort 与 Settings model retry surface 检查；Web presenter 102 tests、`pnpm typecheck`、`pnpm build:web` 和 `pnpm test:phase8:web` 通过。
+- 当前 Phase 8 仍为 `pending`。8.0 的真实 provider failure fixture、visual baseline 和总 parity gate 仍未关闭。
 
 ## Phase 7 Workspace lifecycle controls（当前 checkpoint）
 

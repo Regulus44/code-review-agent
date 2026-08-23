@@ -25,7 +25,32 @@ git diff --check                             ✓
 
 ### 尚未关闭
 
-8.0 的 Settings failure/retry、visual baseline 和总 parity gate 仍待补齐；8.3 完整退出审计、8.4 browser recovery matrix 与 8.5 产品化也未完成。
+8.0 的真实 provider failure fixture、visual baseline 和总 parity gate 仍待补齐；8.3 完整退出审计、8.4 browser recovery matrix 与 8.5 产品化也未完成。
+
+## 2026-08-24：8.0 Settings provider/model failure surface
+
+本次工作继续 Phase 8.0 Web 对齐，目标是让 provider/model catalog 的加载、失败、重试和选择结果在 Settings 中保持可解释且可恢复。
+
+### 已完成
+
+- `presentSettings` 增加 model loading/ready/error 状态、错误详情和 selection receipt；
+- Web boot 将 model catalog 失败从全局 boot failure 中隔离，Settings 显示 `Catalog status`、provider failure 文案和 `Retry model catalog`；
+- 模型切换成功后展示 host-backed `Selected <model>` receipt，失败后保留错误状态并允许再次重试；
+- Phase 8 Web gate 增加 Workspace view/sort 与 Settings retry surface 静态门禁。
+
+### 验证
+
+```text
+pnpm typecheck                              ✓
+pnpm --filter @code-review-agent/web test   ✓ (102 tests)
+pnpm test:phase8:web                         ✓
+pnpm build:web                               ✓
+git diff --check                             ✓
+```
+
+### 尚未关闭
+
+仍需真实 provider failure fixture、visual baseline 和总 Web parity gate；8.3 完整退出审计、8.4 browser recovery matrix 与 8.5 产品化也未完成。
 
 ## 2026-08-24：8.4 Reliability 第一阶段收口
 

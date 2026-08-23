@@ -15,10 +15,13 @@ export interface SettingsRenderIntent {
   readonly permissionLabel: string;
   readonly permissionDescription: string;
   readonly model: {
+    readonly status: "loading" | "ready" | "error";
     readonly provider: string;
     readonly current: string;
     readonly configured: boolean;
     readonly available: readonly string[];
+    readonly error?: string;
+    readonly receipt?: string;
   };
   readonly tools: {
     readonly total: number;
@@ -41,6 +44,11 @@ export interface SettingsPresenterOptions {
   readonly contextCapability?: ContextCapability;
   readonly codeModeCapability?: CodeModeCapability;
   readonly lspCapability?: LspCapability;
+  readonly modelState?: {
+    readonly status: "loading" | "ready" | "error";
+    readonly error?: string;
+    readonly receipt?: string;
+  };
 }
 
 const permissionDescriptions: Record<PermissionPreset, { readonly label: string; readonly description: string }> = {
@@ -79,6 +87,7 @@ export function presentSettings(
   const context = options.contextCapability;
   const codeMode = options.codeModeCapability;
   const lsp = options.lspCapability;
+  const modelState = options.modelState ?? { status: models === undefined ? "loading" : "ready" };
   const capabilities: SettingsCapability[] = [
     { key: "coding-tools", label: "Coding tools", status: tools.length > 0 ? "available" : "unavailable", detail: `${tools.length} host-approved tool${tools.length === 1 ? "" : "s"} in the current catalog.` },
     { key: "mcp", label: "MCP", status: mcpServers.length > 0 ? "configured" : "available", detail: mcpServers.length > 0 ? `${connected}/${mcpServers.length} configured server${mcpServers.length === 1 ? "" : "s"} connected.` : "No MCP server is configured." },
@@ -96,10 +105,13 @@ export function presentSettings(
     permissionLabel: permission.label,
     permissionDescription: permission.description,
     model: {
+      status: modelState.status,
       provider: models?.provider ?? "unknown",
       current: models?.current ?? "unknown",
       configured: models?.configured === true,
       available: (models?.models ?? []).slice(0, 32),
+      ...(modelState.error ? { error: modelState.error } : {}),
+      ...(modelState.receipt ? { receipt: modelState.receipt } : {}),
     },
     tools: { total: tools.length, builtin, mcp, riskCounts },
     mcp: { configured: mcpServers.length, connected, attention },
