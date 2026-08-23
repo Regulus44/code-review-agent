@@ -344,3 +344,38 @@ git diff --check                                    ✓
 
 - 建立一个隔离、可回放的真实 Delegation fixture，验证 parent/child tree、child history、report/artifact 和 cancel；
 - 补 MCP details surface，并继续处理 permission/interaction expiry/restart 与 Trajectory timeline。
+
+## 2026-08-23：MCP details surface
+
+### 目标与 DSH 对照
+
+- 对照 DSH MCP roster、tool catalog、scope/generation 和 retry diagnostics，把 Phase 4B 已稳定的 MCP server view 纳入 Phase 7 details inspector。
+- Web 只消费 API 返回的 public server/config/catalog projection；不读取 credential provider、MCP manager 或 ToolRegistry 内部对象，也不把 MCP details 作为执行事实来源。
+
+### 变更范围
+
+- 新增 `apps/web/src/presentation/mcp-presenter.ts`，统一呈现 server status、scope、transport、revision/generation、auth、catalog enabled/disabled reason、retry/error 和 bounded raw detail。
+- 新增 MCP presenter 测试，覆盖 catalog policy、retry/error、credential reference 和统一 redaction。
+- `apps/web/src/browser.ts` 暴露 `presentMcpServer`；`apps/web/index.html` details panel 增加 server ledger、选择式 inspector 和 catalog policy 详情。
+- MCP config、env、headers 和 credential reference 继续经过 API/host 脱敏与 Web `safe-value` 双重边界；面板只读，不新增未经授权的连接或工具命令。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/web test           ✓（31 tests）
+pnpm -F @code-review-agent/web run build:browser   ✓
+git diff --check                                    ✓
+```
+
+真实 API/browser smoke：
+
+- 空态显示 `0 servers · 0 connected`，刷新后 panel identity 稳定；
+- 临时创建 disabled/project/stdio MCP fixture 后，面板展示 status/scope/transport/revision/generation/auth/catalog 计数；
+- `AUTH_TOKEN` 和 credential reference 在 inspector 中显示 `[redacted]`，detail 标记为 `untrusted`；
+- fixture 已通过 DELETE 清理，API 再次返回空 server 列表，浏览器 console 无 warning/error。
+
+### 下一步
+
+- 建立真实非空 Delegation replay fixture，验证 parent/child Task、report/artifact、child history 和 cancel；
+- 继续处理 permission/interaction expiry/restart 与 Trajectory timeline。

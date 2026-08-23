@@ -287,6 +287,20 @@
       .task-inspector { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--border); }
       .task-inspector-title { margin-bottom: 6px; color: var(--text); font-size: 12px; font-weight: 650; }
       .task-inspector pre { max-height: 180px; margin: 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary); font: 10px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+      .mcp-ledger { display: grid; gap: 6px; }
+      .mcp-record { display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; padding: 7px; border: 1px solid transparent; border-radius: 8px; color: var(--text-secondary); background: var(--surface-subtle); text-align: left; font-size: 10px; }
+      .mcp-record:hover, .mcp-record.selected { border-color: rgba(65,118,230,.28); color: var(--text); background: var(--blue-soft); }
+      .mcp-record-copy { min-width: 0; flex: 1; overflow: hidden; }
+      .mcp-record-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; }
+      .mcp-record-meta { display: block; margin-top: 2px; overflow: hidden; color: var(--text-tertiary); text-overflow: ellipsis; white-space: nowrap; }
+      .mcp-record-status { flex: 0 0 auto; padding: 2px 5px; border-radius: 5px; color: var(--text-tertiary); background: var(--surface); font-size: 9px; }
+      .mcp-record-status.connected { color: var(--green); background: #edf9f1; }
+      .mcp-record-status.failed, .mcp-record-status.needs_auth, .mcp-record-status.disabled { color: var(--red); background: #fff0f0; }
+      .mcp-inspector { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--border); }
+      .mcp-inspector-title { margin-bottom: 7px; color: var(--text); font-size: 12px; font-weight: 650; }
+      .mcp-catalog { display: grid; gap: 4px; margin-top: 8px; }
+      .mcp-catalog-item { padding: 5px 6px; border-radius: 6px; color: var(--text-secondary); background: var(--surface-subtle); font-size: 10px; }
+      .mcp-catalog-item.disabled { color: var(--text-tertiary); }
       .subagent-row { display: flex; align-items: center; gap: 7px; min-height: 34px; padding: 7px 8px; border-radius: 9px; color: var(--text-secondary); background: var(--surface-subtle); font-size: 11px; }
       .subagent-row + .subagent-row { margin-top: 5px; }
       .subagent-copy { min-width: 0; flex: 1; overflow: hidden; }
@@ -419,7 +433,7 @@
       (() => {
         const typedRuntime = window.CodeReviewAgentWeb;
         const typedConnection = typedRuntime?.connection || null;
-        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], models: null, sidebarCollapsed: false, detailsOpen: true, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, taskSelectedId: null };
+        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], models: null, sidebarCollapsed: false, detailsOpen: true, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, taskSelectedId: null, mcpSelectedName: null };
         const app = document.querySelector('#app');
         const list = document.querySelector('#session-list');
         const mcpList = document.querySelector('#mcp-list');
@@ -679,9 +693,51 @@
           if (selected.task.childSessionId) { const open = document.createElement('button'); open.type = 'button'; open.className = 'toolbar-button'; open.textContent = 'Open child session'; open.onclick = () => openSession(selected.task.childSessionId); inspector.append(open); }
           if (selectedIntent.cancellable) { const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'subagent-cancel'; cancel.textContent = 'Cancel task'; cancel.onclick = async () => { cancel.disabled = true; try { await typedRuntime.api.cancelTask(state.session.id, selected.task.id, commandKey()); await refreshSubagents(); renderTaskPanel(typedConnection?.store.getSnapshot()); } catch (error) { setStatus(error.message, false); cancel.disabled = false; } }; inspector.append(cancel); }
         };
+        const renderMcpDetailsPanel = () => {
+          let section = details.querySelector('#mcp-inspector-panel');
+          if (!section) {
+            section = document.createElement('section');
+            section.id = 'mcp-inspector-panel';
+            section.className = 'detail-section';
+            const label = document.createElement('div'); label.className = 'detail-label'; label.textContent = 'MCP server details'; section.append(label);
+            const meta = document.createElement('div'); meta.className = 'trajectory-meta'; meta.id = 'mcp-ledger-meta'; section.append(meta);
+            const ledger = document.createElement('div'); ledger.className = 'mcp-ledger'; ledger.id = 'mcp-ledger'; section.append(ledger);
+            const inspector = document.createElement('div'); inspector.className = 'mcp-inspector'; inspector.id = 'mcp-record-inspector'; section.append(inspector);
+            details.append(section);
+          }
+          const meta = section.querySelector('#mcp-ledger-meta');
+          const ledger = section.querySelector('#mcp-ledger');
+          const inspector = section.querySelector('#mcp-record-inspector');
+          ledger.innerHTML = ''; inspector.innerHTML = '';
+          const servers = Array.isArray(state.mcp) ? state.mcp : [];
+          meta.textContent = `${servers.length} server${servers.length === 1 ? '' : 's'} · ${servers.filter((server) => server.status === 'connected').length} connected`;
+          if (!servers.length || !typedRuntime?.presentMcpServer) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = 'No MCP servers configured.'; ledger.append(empty); return; }
+          const intents = servers.map((server) => ({ server, intent: typedRuntime.presentMcpServer(server, { maxDetailChars: 4_000 }) }));
+          const selected = intents.find((entry) => entry.intent.name === state.mcpSelectedName) || intents[0];
+          state.mcpSelectedName = selected.intent.name;
+          for (const entry of intents) {
+            const button = document.createElement('button'); button.type = 'button'; button.className = `mcp-record ${entry.intent.name === state.mcpSelectedName ? 'selected' : ''}`;
+            const copy = document.createElement('span'); copy.className = 'mcp-record-copy';
+            const name = document.createElement('span'); name.className = 'mcp-record-name'; name.textContent = entry.intent.name;
+            const detail = document.createElement('span'); detail.className = 'mcp-record-meta'; detail.textContent = `${entry.intent.scope} · ${entry.intent.transport} · r${entry.intent.revision} · g${entry.intent.generation} · ${entry.intent.activeCount}/${entry.intent.catalog.length} active`;
+            const status = document.createElement('span'); status.className = `mcp-record-status ${entry.intent.status}`; status.textContent = entry.intent.status;
+            copy.append(name, detail); button.append(copy, status); button.onclick = () => { state.mcpSelectedName = entry.intent.name; renderMcpDetailsPanel(); }; ledger.append(button);
+          }
+          const intent = selected.intent;
+          const inspectorTitle = document.createElement('div'); inspectorTitle.className = 'mcp-inspector-title'; inspectorTitle.textContent = intent.name; inspector.append(inspectorTitle);
+          const fields = [['Status', intent.status], ['Scope', intent.scope], ['Transport', intent.transport], ['Revision', String(intent.revision)], ['Generation', String(intent.generation)], ['Auth', intent.auth], ['Catalog', `${intent.activeCount} active · ${intent.disabledCount} disabled`], ['Retry', intent.retryAt || 'none']];
+          for (const [label, value] of fields) { const row = document.createElement('div'); row.className = 'detail-line'; const left = document.createElement('span'); left.textContent = label; const right = document.createElement('strong'); right.textContent = value; row.append(left, right); inspector.append(row); }
+          if (intent.lastError) { const error = document.createElement('div'); error.className = 'empty-detail'; error.textContent = `Last error · ${intent.lastError}`; inspector.append(error); }
+          const catalog = document.createElement('div'); catalog.className = 'mcp-catalog';
+          for (const item of intent.catalog) { const row = document.createElement('div'); row.className = `mcp-catalog-item ${item.enabled ? '' : 'disabled'}`; row.textContent = `${item.name} · ${item.riskLevel} · ${item.approvalMode}${item.enabled ? '' : ` · disabled${item.disabledReason ? ` · ${item.disabledReason}` : ''}`}${item.schemaWarning ? ` · ${item.schemaWarning}` : ''}`; catalog.append(row); }
+          if (intent.catalog.length) inspector.append(catalog);
+          const pre = document.createElement('pre'); pre.textContent = intent.details.text; inspector.append(pre);
+          if (intent.details.untrusted || intent.details.truncated) { const badge = document.createElement('span'); badge.className = 'trajectory-badge'; badge.textContent = intent.details.truncated ? 'bounded · untrusted' : 'untrusted'; inspector.append(badge); }
+        };
         const trajectoryDetailsObserver = new MutationObserver(() => {
           if (!details.querySelector('#trajectory-inspector-panel')) renderTrajectoryPanel(typedConnection?.store.getSnapshot()?.trajectory);
           if (!details.querySelector('#task-inspector-panel')) renderTaskPanel(typedConnection?.store.getSnapshot());
+          if (!details.querySelector('#mcp-inspector-panel')) renderMcpDetailsPanel();
         });
         trajectoryDetailsObserver.observe(details, { childList: true });
         const render = () => {
@@ -698,6 +754,7 @@
               renderDetails();
               renderTrajectoryPanel(typedSnapshot?.trajectory);
               renderTaskPanel(typedSnapshot);
+              renderMcpDetailsPanel();
               requestAnimationFrame(() => { if (wasNearBottom) conversation.scrollTop = conversation.scrollHeight; });
               return;
             }
@@ -745,6 +802,7 @@
           renderDetails();
           renderTrajectoryPanel(typedSnapshot?.trajectory);
           renderTaskPanel(typedSnapshot);
+          renderMcpDetailsPanel();
           requestAnimationFrame(() => { if (wasNearBottom) conversation.scrollTop = conversation.scrollHeight; });
         };
         const renderWorkspaceRecent = () => { workspaceRecent.innerHTML = ''; const roots = [...new Set(state.recentWorkspaces.filter(Boolean))].slice(0, 6); if (!roots.length) return; const label = document.createElement('div'); label.className = 'workspace-recent-label'; label.textContent = 'Recent workspaces'; workspaceRecent.append(label); roots.forEach((root) => { const button = document.createElement('button'); button.type = 'button'; button.className = 'workspace-recent-button'; button.textContent = root; button.onclick = () => { workspaceInput.value = root; workspaceError.textContent = ''; workspaceInput.focus(); }; workspaceRecent.append(button); }); };
