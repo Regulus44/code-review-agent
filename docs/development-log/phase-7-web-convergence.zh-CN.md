@@ -1,5 +1,46 @@
 # Phase 7：DSH Web 前端收敛
 
+## 2026-08-23：Responsive viewport baseline
+
+### 变更范围
+
+- 修正 `apps/web/index.html` 的响应式 grid 选择器优先级：600px 主区占满 viewport，900px 使用 56px sidebar rail，details collapsed 不再由边框制造 1px 横向溢出。
+- 900px rail 隐藏冗余 sidebar 文案与控制，600px mobile drawer 打开时恢复完整 Workspace/Session 内容；Workspace tree、composer 和 queue dock 保持 `min-width: 0` 与 bounded overflow。
+- Sidebar/mobile menu/details toggle 增加 `aria-controls`、动态 `aria-expanded` 和状态化 `aria-label`；移动 drawer 打开后焦点进入 sidebar close control，关闭后恢复到 mobile menu。
+- 只调整 Web shell CSS 与交互语义，typed bridge 缺失时继续使用静态 fallback；没有改变 Event、Tool、Task、Permission 或 Workspace contract。
+
+### 根治理七问
+
+1. **Phase**：Phase 7.1/7.9 responsive shell 与 accessibility baseline。
+2. **问题类型**：Web UI layout、viewport smoke、ARIA 和 keyboard focus。
+3. **契约影响**：仅 Web shell 内部 DOM/CSS 与 focus 语义；公共事件和 API contract 不变。
+4. **参考入口**：DSH `ui-layout/AppFrame`、`ui-sidebar` 的 rail/drawer 行为；未复制上游代码。
+5. **上游来源**：行为参考，无代码复用或许可证新增。
+6. **验收场景**：600×800、900×800、1024×800 下无横向溢出；sidebar rail/drawer、details 隐藏/恢复、composer、ARIA 和焦点恢复通过。
+7. **回滚**：回滚本 checkpoint 即可恢复原响应式 CSS；API、Runtime、SessionStore 和 EventStore 不受影响。
+
+### 验证
+
+```text
+pnpm typecheck                              ✓
+pnpm --filter @code-review-agent/web test -- --run ✓（80 tests）
+pnpm build:web                              ✓
+pnpm test:phase7:browser                    ✓（五场景，1.92s；trajectory full replay 18.74ms）
+git diff --check                             ✓
+```
+
+真实 browser viewport smoke：
+
+- 600×800：主区宽度 600px、details/sidebar 按预期隐藏；Open sidebar → Close sidebar，`aria-expanded` 与焦点恢复正确；
+- 900×800：56px rail、details 轨道宽度 0、document/body 无横向溢出；mobile drawer 可打开并显示完整 sidebar；
+- 1024×800：300px sidebar + 464px conversation + 260px details；details toggle 的 `aria-expanded` 在隐藏/恢复时同步；
+- browser console warn/error 为空。
+
+### 下一步
+
+- Workspace rename/archive/delete 生命周期；
+- 将本次 viewport smoke 固化为可重复的浏览器验收入口，并继续检查长输出、queue dock 和窄屏空态。
+
 ## 2026-08-23：Physical Shell frame mount/apply
 
 ### 变更范围

@@ -271,6 +271,7 @@
       .model-meta { display: block; margin-top: 2px; color: var(--text-tertiary); font-size: 10px; }
       .details-panel { display: flex; flex-direction: column; border-left: 1px solid var(--border); transition: opacity .2s var(--ease); }
       .details-collapsed .details-panel { opacity: 0; pointer-events: none; }
+      .details-collapsed .details-panel { border-left: 0; }
       .details-header { display: flex; align-items: center; justify-content: space-between; height: 60px; padding: 0 14px 0 18px; border-bottom: 1px solid var(--border); }
       .details-header strong { font-size: 13px; }
       .details-content { flex: 1; overflow: auto; padding: 14px; }
@@ -422,7 +423,18 @@
       .settings-muted { color: var(--text-tertiary); font-size: 10px; line-height: 1.5; }
       @media (max-width: 1120px) { :root { --details-width: 260px; } }
       @media (max-width: 900px) {
-        .app-shell, .app-shell.sidebar-collapsed { grid-template-columns: var(--rail-width) minmax(0, 1fr) 0; }
+        .app-shell,
+        .app-shell.details-collapsed,
+        .app-shell.sidebar-collapsed,
+        .app-shell.sidebar-collapsed.details-collapsed { grid-template-columns: var(--rail-width) minmax(0, 1fr) 0; }
+        .app-shell:not(.mobile-sidebar-open) .sidebar .section-label,
+        .app-shell:not(.mobile-sidebar-open) .sidebar .session-copy,
+        .app-shell:not(.mobile-sidebar-open) .sidebar .mcp-copy,
+        .app-shell:not(.mobile-sidebar-open) .sidebar .sidebar-footer-copy { display: none; }
+        .app-shell:not(.mobile-sidebar-open) .new-session { width: 36px; margin-inline: auto; font-size: 0; }
+        .app-shell:not(.mobile-sidebar-open) .new-session .plus { font-size: 20px; }
+        .app-shell:not(.mobile-sidebar-open) .sidebar-footer button { justify-content: center; padding-inline: 0; }
+        .app-shell:not(.mobile-sidebar-open) #sidebar-toggle { display: none; }
         .sidebar .brand, .sidebar .collapse-symbol { display: none; }
         .sidebar-header { justify-content: center; padding-inline: 0; }
         .sidebar-collapsed .brand { display: flex; }
@@ -442,7 +454,10 @@
         .app-shell.mobile-sidebar-open .sidebar-header { justify-content: space-between; padding-inline: 13px; }
       }
       @media (max-width: 600px) {
-        .app-shell, .app-shell.sidebar-collapsed { grid-template-columns: 1fr 0 0; }
+        .app-shell,
+        .app-shell.details-collapsed,
+        .app-shell.sidebar-collapsed,
+        .app-shell.sidebar-collapsed.details-collapsed { grid-template-columns: 1fr 0 0; }
         .sidebar, .details-panel { display: none; }
         .workspace-header { height: 54px; }
         .conversation-body { width: min(100% - 24px, 748px); padding-top: 20px; }
@@ -460,10 +475,10 @@
   </head>
   <body>
     <div id="app" class="app-shell">
-      <aside class="sidebar" aria-label="Sessions and MCP">
+      <aside id="sidebar-panel" class="sidebar" aria-label="Sessions and MCP">
         <div class="sidebar-header">
           <div class="brand"><span class="brand-mark">⌁</span><span>Code Review Agent</span></div>
-          <button id="sidebar-toggle" class="icon-button" type="button" aria-label="Collapse sidebar"><span class="collapse-symbol">‹</span></button>
+          <button id="sidebar-toggle" class="icon-button" type="button" aria-label="Collapse sidebar" aria-controls="sidebar-panel" aria-expanded="true"><span class="collapse-symbol">‹</span></button>
         </div>
         <div class="sidebar-content">
           <button id="new-session" class="new-session" type="button"><span class="plus">＋</span><span>New session</span></button>
@@ -481,10 +496,10 @@
       </aside>
       <main class="workspace">
         <header class="workspace-header">
-          <button id="mobile-menu" class="icon-button mobile-menu" type="button" aria-label="Open sidebar">☰</button>
+          <button id="mobile-menu" class="icon-button mobile-menu" type="button" aria-label="Open sidebar" aria-controls="sidebar-panel" aria-expanded="false">☰</button>
           <div class="session-heading"><strong id="session-title">New coding session</strong><button id="session-path" class="session-path-button" type="button">Workspace · .</button></div>
           <span id="status" class="connection-state disconnected" role="status" aria-live="polite">Connecting…</span>
-          <button id="details-toggle" class="icon-button details-toggle" type="button" aria-label="Toggle details panel">☷</button>
+          <button id="details-toggle" class="icon-button details-toggle" type="button" aria-label="Open details panel" aria-controls="details-panel" aria-expanded="false">☷</button>
         </header>
         <div id="connection-banner" class="connection-banner" role="status" aria-live="polite" hidden><span id="connection-banner-message" class="connection-banner-message"></span><button id="connection-retry" class="connection-retry" type="button" hidden>Retry</button></div>
         <section id="queue-dock" class="queue-dock" aria-label="Queued messages" hidden></section>
@@ -509,7 +524,7 @@
           </form>
         </footer>
       </main>
-      <aside class="details-panel" aria-label="Session details">
+      <aside id="details-panel" class="details-panel" aria-label="Session details">
         <div class="details-header"><strong>Session details</strong><button id="details-close" class="icon-button" type="button" aria-label="Close details">›</button></div>
         <div id="details-content" class="details-content"></div>
       </aside>
@@ -578,6 +593,8 @@
         const modeTrigger = document.querySelector('#mode-trigger');
         const modePopover = document.querySelector('#mode-popover');
         const mobileMenu = document.querySelector('#mobile-menu');
+        const sidebarToggle = document.querySelector('#sidebar-toggle');
+        const detailsToggle = document.querySelector('#details-toggle');
         const details = document.querySelector('#details-content');
         const workspaceModal = document.querySelector('#workspace-modal');
         const settingsButton = document.querySelector('#settings-button');
@@ -646,14 +663,25 @@
               mobileMenu.setAttribute('aria-expanded', String(intent.mobileSidebarOpen));
               mobileMenu.setAttribute('aria-label', intent.mobileSidebarOpen ? 'Close sidebar' : 'Open sidebar');
             }
+            sidebarToggle.setAttribute('aria-expanded', String(!intent.sidebarCollapsed || intent.mobileSidebarOpen));
+            sidebarToggle.setAttribute('aria-label', intent.mobileSidebarOpen ? 'Close sidebar' : 'Collapse sidebar');
+            detailsToggle.setAttribute('aria-expanded', String(intent.detailsOpen));
+            detailsToggle.setAttribute('aria-label', intent.detailsOpen ? 'Close details panel' : 'Open details panel');
             return;
           }
           app.classList.toggle('sidebar-collapsed', state.layout.sidebar === 'collapsed');
           app.classList.toggle('details-collapsed', state.layout.details === 'closed');
+          sidebarToggle.setAttribute('aria-expanded', String(state.layout.sidebar === 'expanded' || state.layout.mobileSidebarOpen));
+          sidebarToggle.setAttribute('aria-label', state.layout.mobileSidebarOpen ? 'Close sidebar' : 'Collapse sidebar');
+          detailsToggle.setAttribute('aria-expanded', String(state.layout.details === 'open'));
+          detailsToggle.setAttribute('aria-label', state.layout.details === 'open' ? 'Close details panel' : 'Open details panel');
         };
         const dispatchShellLayout = (action) => {
+          const wasMobileSidebarOpen = state.layout.mobileSidebarOpen;
           state.layout = typedRuntime?.reduceShellLayout ? typedRuntime.reduceShellLayout(state.layout, action) : state.layout;
           applyShellLayout();
+          if (action.type === 'open-mobile-sidebar' && !wasMobileSidebarOpen) sidebarToggle.focus();
+          if ((action.type === 'close-mobile-sidebar' || action.type === 'toggle-sidebar') && wasMobileSidebarOpen && !state.layout.mobileSidebarOpen) mobileMenu.focus();
         };
         window.addEventListener('resize', applyShellLayout, { passive: true });
         const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);

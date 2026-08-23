@@ -1,6 +1,19 @@
 # Phase 7：DSH Web 前端收敛与可观测工作台
 
-状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、terminal/job diagnostics、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection、7.1 shell layout state/reducer、mobile sidebar 行为、typed overlay state/reducer、物理 Shell frame mount/apply、queue dock/cancel/reorder surface、Session rename 生命周期、host-backed steer receipt、attachment capability gate/upload receipt 已完成；Workspace reorder 生命周期和窄屏视觉基线继续推进）
+状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、terminal/job diagnostics、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection、7.1 shell layout state/reducer、mobile sidebar 行为、typed overlay state/reducer、物理 Shell frame mount/apply、queue dock/cancel/reorder surface、Session rename 生命周期、host-backed steer receipt、attachment capability gate/upload receipt、Workspace reorder lifecycle、窄屏视觉基线已完成；Workspace rename/archive/delete 生命周期继续推进）
+
+## 当前执行 checkpoint：Responsive viewport baseline（2026-08-23）
+
+本 checkpoint 完成 Phase 7.1/7.9 的真实窄屏布局与可访问性 smoke：
+
+- 修正 `.details-collapsed` 与媒体查询的 CSS 优先级，使 600px 主区占满 viewport，900px 使用 56px rail，details 轨道不会因边框产生 1px 横向溢出；
+- 900px rail 隐藏冗余 sidebar 文案，600px mobile drawer 保持完整 Workspace/Session 内容；drawer open/close 与 details open/close 均更新 `aria-expanded`、`aria-label`、`aria-controls`；
+- mobile drawer 打开后焦点进入 sidebar close control，关闭后恢复到 mobile menu；details toggle 在打开/关闭时同步焦点可见的状态语义；
+- `apps/web/index.html` 继续保留 typed bridge 缺失时的静态 fallback，未改变 Event、Tool、Task、Permission 或 Workspace contract。
+
+真实 browser viewport 验证：600×800、900×800、1024×800；检查横向溢出、rail/drawer、details 隐藏/恢复、composer、ARIA 和焦点恢复均通过。
+
+验证：`pnpm typecheck`、Web 80 tests、`pnpm build:web`、`pnpm test:phase7:browser`、`git diff --check` 通过；Phase 7 browser/replay gate 1.92s，trajectory full replay 18.74ms。
 
 ## 当前执行 checkpoint：Physical Shell frame mount/apply（2026-08-23）
 
