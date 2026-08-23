@@ -1,6 +1,6 @@
 # Phase 7：DSH Web 前端收敛与可观测工作台
 
-状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片已完成；7.1 Shell 拆分、7.3 导航收敛、7.6 queue/steer/attachment 深化、7.9–7.10 继续推进）
+状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.10 Read-only/Edit/Test-Recovery Coding fixture 已完成；7.1 Shell 拆分、7.3 导航收敛、7.6 queue/steer/attachment 深化、7.9 capability surface、统一五场景 browser gate、性能基线继续推进）
 
 ## 当前执行 checkpoint：typed Web client 与 Session replay foundation
 
@@ -60,6 +60,17 @@
 - `apps/web/src/presentation/trajectory-presenter.test.ts` 覆盖 1,200 条记录的搜索、200 条 ledger window 和 1,000 行 timeline bounded render。
 
 验证：`pnpm typecheck`、`pnpm test`、Web 39 项测试、API 18 项测试、Storage 10 项测试、browser bundle 和 `git diff --check` 通过。真实浏览器 smoke 使用 1,250-record fixture：初始加载显示 100 条 tool records，点击 `Load older` 后显示 200 条并保留 sequence 2501；精确搜索命中单条记录；`Following tail`/`Paused` 在 live append 后状态正确；browser console warn/error 为空，临时 fixture API 已关闭。
+
+## 当前执行 checkpoint：Read-only、Edit、Test/Recovery Coding fixture（2026-08-23）
+
+本 checkpoint 对照 DSH `ui-conversation`、`ui-tool`、`ui-permission-presets`、`ui-jobs` 和 `ui-trajectory` 的真实 Coding 工作流，补齐使用本项目真实 `AgentHost`、`ToolRuntime` 和 SQLite EventStore 的可重复场景 fixture。它只补 Web 验收所需的权限、diff 和恢复证据，不改变生产 Agent Loop、EventStore 或 A2A 边界：
+
+- `apps/api/src/fixtures/coding.ts` 提供三个隔离 workspace/session：Read-only 真实完成 `read_file`；Edit 真实产生待审批的 `edit_file`，批准后写入文件并产生 `diff/preview`；Test/Recovery 真实产生待审批的 `run_tests`，API/AgentHost 重启后恢复为可解释的 `Recovered request`；
+- `apps/api/src/fixtures/coding.test.ts` 验证 read-only projection、edit permission → file mutation → diff 和 test/recovery pending permission；
+- `scripts/phase7-coding-fixture-server.mjs` 使用 SQLite 先 seed、再关闭并重开 API/AgentHost，浏览器通过正常 Session/SSE/permission API 完成批准和回放；
+- fixture 的权限 preset、workspaceRoot、tool call、turn 和 approval 都走既有 contract；没有新增未经后端事件支持的 UI 状态，也没有把 A2A 作为内部 Multi-Agent transport。
+
+验证：`pnpm typecheck`、`pnpm test`、API 19 项测试、Web 39 项测试、Storage 10 项测试、browser bundle 和 `git diff --check` 通过。真实 browser smoke 已验证：Read-only assistant summary 与 completed trajectory；Edit 批准后的 unified diff 和 completed turn；Test/Recovery 重启后的 `Recovered request`、批准后 `run_tests` completed、trajectory 从 interrupted 收敛为 completed；browser console 无 warning/error。
 
 ## 1. 目标与边界
 

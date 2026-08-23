@@ -535,3 +535,50 @@ git diff --check                                    ✓
 
 - 将 Read-only、Edit、Test/Recovery、Delegation、Inspection browser fixture 汇总为 Phase 7.10 门禁；
 - 补充 load-older 多页性能测量、真实 Read/Edit/Test trajectory fixture 和 shell 拆分/导航收敛。
+
+## 2026-08-23：Read-only、Edit、Test/Recovery Coding fixture
+
+### 目标与 DSH 对照
+
+- 对照 DSH `ui-conversation`、`ui-tool`、`ui-permission-presets`、`ui-jobs` 和 `ui-trajectory` 的 Coding 工作流，把前面已验证的 projection、permission、diff、job/recovery surface 连接到真实可回放的 Web 场景；
+- 使用真实 `AgentHost`、`ToolRuntime` 和 SQLite EventStore，不在 fixture 中伪造 tool/result 或浏览器成功状态；
+- 保持 Phase 5 内部 Task/Subagent 和 Phase 6 A2A 的边界：本切片不实现 A2A，也不把 A2A 当作内部 Multi-Agent transport。
+
+### 变更范围
+
+- `apps/api/src/fixtures/coding.ts`：新增 Read-only、Edit、Test/Recovery 三个隔离 workspace/session。Read-only 完成 `read_file`；Edit 在 `ask-on-write` 下等待批准，批准后产生真实文件修改和 `diff/preview`；Test/Recovery 在 `ask-on-execute` 下等待 `run_tests`，通过 SQLite API/AgentHost 重启验证 pending permission 恢复；
+- `apps/api/src/fixtures/coding.test.ts`：覆盖 completed read-only projection、edit approval 后的文件内容与 diff，以及 test/recovery pending permission；
+- `scripts/phase7-coding-fixture-server.mjs`：提供真实 browser smoke harness，seed 后关闭并重开同一 SQLite 数据库，再通过正常 API/SSE/permission 路径继续任务。
+
+### 根治理七问
+
+1. **Phase**：Phase 7.10 browser/replay fixture 基线。
+2. **问题类型**：Web 验收、事件回放、权限交互和恢复证据；不重写 Runtime。
+3. **契约影响**：复用已有 Event/Tool/Permission/Workspace contract；没有新增生产事件类型。
+4. **参考入口**：DSH `ui-conversation`、`ui-tool`、`ui-permission-presets`、`ui-jobs`、`ui-trajectory`；Claude Code 只作流式 Coding 行为参考。
+5. **上游来源**：只做行为对照，没有复制 DSH 或 Claude Code 代码；无需新增许可证登记。
+6. **验收场景**：Read-only、Edit、Test/Recovery 的真实浏览器批准、回放和重启恢复。
+7. **回滚**：删除 fixture server/fixture 文件或关闭 browser gate，不影响生产 AgentHost、Web fallback、MCP、内部 Subagent 和 A2A deferred 状态。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm test                                            ✓
+pnpm --filter @code-review-agent/api test -- --run  ✓（19 tests）
+pnpm -F @code-review-agent/web run build:browser    ✓
+git diff --check                                    ✓
+```
+
+真实 browser smoke：
+
+- Read-only Session 的 `read_file` completed，assistant summary 显示 `fixtureValue = 42`，trajectory 收敛为 completed；
+- Edit Session 批准 `edit_file` 后真实 workspace 的 `notes.txt` 从 `before` 变为 `after`，页面显示 unified diff 和 `diff/preview`，turn completed；
+- Test/Recovery Session 在 API/AgentHost 重启后显示 `Recovered request · response will continue the turn`，批准后 `run_tests` completed，trajectory 从 interrupted 收敛为 completed；
+- 三个场景刷新/回放后无重复 tool execution，浏览器 console 无 warning/error。
+
+### 下一步
+
+- 将三个 Coding fixture 与 Delegation、Inspection 汇总为单一可重复的 Phase 7.10 browser gate；
+- 补 Test/Recovery 的长任务 terminal/job output、失败诊断，以及 1,000+ Trajectory 多页性能测量；
+- 继续 Shell 拆分、Workspace/Session 导航和 Settings/Deliverables/accessibility 收敛。

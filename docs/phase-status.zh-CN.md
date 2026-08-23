@@ -15,7 +15,7 @@
 | Phase 4B：MCP 加固 | completed（2026-08-23） | 本 checkpoint；4B.0–4B.6、focused tests、API restart persistence 和 MCP browser smoke 通过；普通 baseline 未重复执行 |
 | Phase 5：内部 Subagent / 多 Agent | completed（2026-08-23） | 5.0–5.4：Task/Descriptor durable projection、one-shot/continuable child、FIFO/authority/cold resume、report/MCP scope、API/SSE/Web catalog；定向 typecheck、storage/subagent/runtime/API 测试和 API/Web smoke 通过 |
 | Phase 6：A2A | deferred（暂不作为 Phase 7 前置） | [ADR：Phase 7 Web 收敛不等待 A2A](adr/phase-7-web-with-a2a-deferred.zh-CN.md)；等待明确的外部 Agent 互操作需求 |
-| Phase 7：DSH Web 前端收敛 | in_progress | typed Web API/SessionStore/Conversation projection/SSE replay、Tool presenter/lineage guard、permission/interaction surface、过期与重启恢复 render intent、Trajectory query/lane/inspector/timeline/fold/tail-follow、Task/Subagent/MCP details、非空 Delegation browser fixture、Trajectory history paging/prepend replay 和 1,250-record bounded fixture 已接入主 Session 流；`pnpm typecheck`、`pnpm test`、Web 39 项测试、API 18 项测试、Storage 10 项测试、browser bundle 和真实 browser replay/cancel/timeline/paging/tail-append smoke 通过；Shell 拆分、完整 capability surface、Read/Edit/Test/Recovery 完整 browser fixtures、性能基线和 Phase 7.9–7.10 仍在推进 |
+| Phase 7：DSH Web 前端收敛 | in_progress | typed Web API/SessionStore/Conversation projection/SSE replay、Tool presenter/lineage guard、permission/interaction surface、过期与重启恢复 render intent、Trajectory query/lane/inspector/timeline/fold/tail-follow、Task/Subagent/MCP details、非空 Delegation browser fixture、Trajectory history paging/prepend replay、1,250-record bounded fixture 和 Read-only/Edit/Test-Recovery Coding browser fixture 已接入主 Session 流；`pnpm typecheck`、`pnpm test`、Web 39 项测试、API 19 项测试、Storage 10 项测试、browser bundle 和真实 Read-only/Edit/Test-Recovery/Delegation/Trajectory replay smoke 通过；Shell 拆分、完整 capability surface、统一五场景 browser gate、性能基线和 Phase 7.9–7.10 仍在推进 |
 | Phase 8：高级能力与产品化 | pending | 等前置阶段完成 |
 
 ## Phase 6 A2A 暂缓决策
@@ -55,7 +55,7 @@ Phase 7 的 DSH Web 调研与分步计划：
 - 现有 Shell 通过 `/web/browser.js` bridge 使用 typed 主 Session 连接，并优先从统一 `SessionStoreSnapshot` 渲染 Conversation/Tool/Turn/Permission/Interaction 节点；旧 inline EventSource 和 event renderer 保留为 bundle 缺失时的 fallback，未改变 API/Runtime/EventStore 事实来源；
 - 定向与全量验证：`pnpm typecheck`、`pnpm test`（全 workspace 通过）、`pnpm --filter @code-review-agent/web test`（39 tests）、`pnpm --filter @code-review-agent/tools test -- --run src/index.test.ts`（30 tests）、`pnpm --filter @code-review-agent/runtime test -- --run src/index.test.ts`（13 tests）、`pnpm --filter @code-review-agent/api test -- --run src/server.test.ts`（18 tests）、`pnpm --filter @code-review-agent/storage test -- --run src/index.test.ts`（10 tests）、`pnpm -F @code-review-agent/web run build:browser`、`git diff --check`；API/AgentHost recovery fixture、Delegation browser replay/cancel、child Session identity、Trajectory timeline/fold/tail-follow、load older/prepend、1,250-record search/bounded render 和 paused tail append smoke 均通过，browser console 无 warning/error。
 
-下一切片：进入 Phase 7.9–7.10，补齐 Read-only、Edit、Test/Recovery、Delegation、Inspection 的可重复 browser fixtures，推进 Shell 拆分、Workspace/Session 导航、完整 capability surface 和 1,000+ trajectory 多页性能基线；继续保持 EventStore replay、权限和 workspace 安全边界不变。
+下一切片：将 Read-only、Edit、Test/Recovery、Delegation、Inspection fixture 汇总为可重复的 Phase 7.10 browser gate，补齐长任务 terminal/job 输出与失败诊断，推进 Shell 拆分、Workspace/Session 导航、完整 capability surface 和 1,000+ trajectory 多页性能基线；继续保持 EventStore replay、权限和 workspace 安全边界不变。
 
 ## Phase 5 Subagent / Multi-Agent 验收证据（2026-08-23）
 
