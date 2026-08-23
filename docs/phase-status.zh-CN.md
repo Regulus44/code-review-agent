@@ -16,13 +16,13 @@
 | Phase 5：内部 Subagent / 多 Agent | completed（2026-08-23） | 5.0–5.4：Task/Descriptor durable projection、one-shot/continuable child、FIFO/authority/cold resume、report/MCP scope、API/SSE/Web catalog；定向 typecheck、storage/subagent/runtime/API 测试和 API/Web smoke 通过 |
 | Phase 6：A2A | deferred（暂不作为 Phase 7 前置） | [ADR：Phase 7 Web 收敛不等待 A2A](adr/phase-7-web-with-a2a-deferred.zh-CN.md)；等待明确的外部 Agent 互操作需求 |
 | Phase 7：DSH Web 前端收敛 | completed | 7.1–7.10 Web shell、连接与回放、Workspace/Session navigation、Conversation/Tool/Permission/Interaction、Trajectory、Task/Subagent/MCP、Settings/Deliverables、响应式与可访问性、五场景 browser/replay gate、Workspace reorder 与 Workspace rename/archive/delete lifecycle 已完成；`pnpm typecheck`、`pnpm test`、`pnpm test:phase7:browser` 和 `git diff --check` 通过；browser gate 总耗时 2.14s、trajectory full replay 19.03ms；独立 checkpoint `82326d6` |
-| Phase 8：高级能力与产品化 | pending | 等前置阶段完成 |
+| Phase 8：高级能力与产品化 | in_progress | 8.1/8.2 已完成；8.0 aggregate Web parity gate 已通过；8.3/8.4/8.5 仍在推进 |
 
 ## Phase 8 计划范围（accepted）
 
 - [Phase 8：高级能力、DSH Web 对齐与产品化](phase-plans/phase-8-productization.zh-CN.md) 已扩展为 8.0 Web 对齐、8.1 Context Compaction、8.2 Worktree、8.3 LSP/Code Mode、8.4 后台任务与可靠性、8.5 产品化；
 - [ADR：Phase 8 Web 与 DSH 前端行为对齐](adr/phase-8-web-dsh-alignment.zh-CN.md) 已接受，记录行为参考、REST/SSE 边界、typed Web 拆分、契约变更和回滚规则；
-- Phase 8 仍为 `pending`。进入 8.0.0 编码前已复核 Phase 7 browser/replay gate、工作树和前端 parity matrix。
+- Phase 8 已进入 `in_progress`。8.0 的 aggregate Web parity contract gate 已建立并通过；视觉基线、真实 Job 浏览器矩阵、8.3 完整退出审计和 8.5 产品化仍未完成。
 
 ## Phase 6 A2A 暂缓决策
 
@@ -82,7 +82,8 @@ Phase 7 的 DSH Web 调研与分步计划：
 - Settings 的 Model section 现在保留 host-backed loading/ready/error 状态、provider failure 文案、Retry model catalog 操作和模型选择 receipt；模型目录失败不会把整个 Web boot 误判为连接失败。
 - `scripts/phase8-web-gate.mjs` 已增加 Workspace view/sort 与 Settings model retry surface 检查；Web presenter 102 tests、`pnpm typecheck`、`pnpm build:web` 和 `pnpm test:phase8:web` 通过。
 - 新增 `scripts/phase8-settings-gate.mjs` 与 `PHASE8_MODEL_FAILURES` fixture：首个 `/v1/models` 请求返回 503，页面保持 Connected 并显示 Settings error/Retry，点击 Retry 后恢复 fixture-model；真实页面回归已通过。
-- 8.0 当前剩余 visual baseline、总 parity gate 和更完整的 Settings section/响应式矩阵；provider failure/retry fixture 已关闭。
+- 新增 `scripts/phase8-parity-gate.mjs` 与 `pnpm test:phase8:parity`，聚合 Goal/Plan/Question、Workspace、Job、LSP、Settings、Deliverables、Task/Subagent、typed presenters、响应式和可访问性 contract；gate 已通过。
+- 8.0 当前剩余 visual baseline、真实 Job 浏览器交互、更完整的 Settings section/响应式矩阵；provider failure/retry fixture 与 aggregate parity contract 已关闭。
 
 ## Phase 7 Workspace lifecycle controls（当前 checkpoint）
 

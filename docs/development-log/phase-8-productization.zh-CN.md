@@ -1,5 +1,27 @@
 # Phase 8 开发日志
 
+## 2026-08-24：8.0 Aggregate Web parity contract gate
+
+本次 checkpoint 收口 Phase 8.0 的静态 Web parity 合同门禁，继续从现有实现和事件投影验证 DSH 对齐能力；A2A 保持 `deferred`，不进入本次实现。
+
+### 已完成
+
+- 新增 `scripts/phase8-parity-gate.mjs`，检查 Goal/Plan/Question、Workspace Tree/Flat 与排序、Job Cancel/Retry、LSP details、Settings provider failure/retry、Produced Files、Tasks/child agents 以及 typed browser presenters；
+- 门禁同时检查 600/900 响应式断点、`aria-live`、browser bundle focus trap 和既有 presenter symbol，避免只检查旧 HTML 文案；
+- `package.json` 新增 `pnpm test:phase8:parity`，作为 8.0 aggregate contract 的可重复入口。
+
+### 验证
+
+```text
+pnpm test:phase8:parity  ✓
+  aggregate-web-parity-contract: passed
+git diff --check         ✓
+```
+
+### 尚未关闭
+
+该门禁不替代视觉截图基线和真实交互证据。8.0 仍需 600/900/1024 视觉矩阵、完整 Settings section（含 Plugins 的明确状态）和真实 Job 浏览器取消/重试/恢复；8.3 完整审计、8.4 browser recovery matrix 与 8.5 产品化也未完成。
+
 ## 2026-08-24：8.0 Workspace Browser 导航 parity 收口
 
 本次工作属于 Phase 8.0 Web 对齐，目标是补齐 Workspace Browser 的视图与排序入口，并验证其与现有 Session 回放、搜索和归档状态保持一致。A2A 保持 `deferred`，不进入本次实现。
