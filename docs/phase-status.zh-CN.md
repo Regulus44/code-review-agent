@@ -71,7 +71,7 @@ Phase 7 的 DSH Web 调研与分步计划：
 - Code Mode 的网络策略继续保持 deny-by-default，并额外拦截 `globalThis.fetch`、`globalThis.WebSocket` 与 `process.getBuiltinModule` 入口；该策略仍是进程内策略检查，不等同于 OS 级网络隔离。
 - `scripts/phase8-lsp-codemode-gate.mjs` 现在同时检查 Web LSP details 文案和 typed browser bundle；`pnpm test:phase8:lsp` 与 Code Mode 定向测试通过。
 - `pnpm test:phase8:web` 已通过（planning/question replay gate）；`pnpm test:phase8:lsp` 已通过（LSP/Code Mode safety/recovery gate）；Web 100 tests、Tools 56 tests、API 27 tests、Runtime 25 tests 和 `pnpm typecheck` 通过；
-- `6ac8e7e`：8.3 第一阶段 checkpoint 已建立；`8.3` 的真实 Web fixture、OS 级网络隔离评估和完整退出审计仍待补齐。
+- `6ac8e7e`：8.3 第一阶段 checkpoint 已建立；随后新增 `scripts/phase8-lsp-fixture-server.mjs` 与 `scripts/phase8-lsp-web-gate.mjs`，真实 SQLite/API/AgentHost/Web replay 已覆盖 diagnostics、definition、references、Code Mode 成功结果和网络拒绝结果；`pnpm test:phase8:lsp:web` 已通过。OS 级网络隔离评估和完整退出审计仍待补齐。
 - 当前已进入 `Phase 8.4 Reliability`：`JobManager` 已持久化可重试 executable/args 元数据，支持 bounded retry、deadline 结构化失败、取消原因和 graceful shutdown；`AgentHost` 提供 job action、session export/replay 和 structured diagnostics；API 暴露 `/v1/sessions/:id/jobs`、`/retry`、`/cancel`、`/export` 与 `/v1/diagnostics`；Web Job center 已提供 Cancel/Retry actions。
 - `AgentHost` 已支持显式 `fallbackModels`：主模型在产生部分输出前失败时切换到下一个模型，并追加 `MODEL_FALLBACK` 审计事件；`metrics()` 与 API `/v1/metrics` 提供 turns、fallback、tool failure counters；每个 turn 的 `traceId` 会在 started/ended/error 边界中保持一致。
 - 新增 `scripts/phase8-job-fixture-server.mjs` 与 `scripts/phase8-job-browser-gate.mjs`，使用真实 SQLite、AgentHost、ToolRuntime、API 和 Web bundle 验证 running/failed job、Cancel、Retry、spill metadata、job lifecycle replay、diagnostics、session export 以及重复 action 的幂等行为；`pnpm test:phase8:jobs` 已通过。
