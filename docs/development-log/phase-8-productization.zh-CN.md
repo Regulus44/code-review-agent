@@ -1,5 +1,32 @@
 # Phase 8 开发日志
 
+## 2026-08-24：8.0 Workspace Browser 导航 parity 收口
+
+本次工作属于 Phase 8.0 Web 对齐，目标是补齐 Workspace Browser 的视图与排序入口，并验证其与现有 Session 回放、搜索和归档状态保持一致。A2A 保持 `deferred`，不进入本次实现。
+
+### 已完成
+
+- `navigation-presenter.ts` 增加 Tree/Flat 视图模型；Flat 模式展平父子 Session，保留 workspace 和 lineage 元数据；
+- 增加 Recent/Name/Path 确定性排序，避免不同刷新顺序造成导航漂移；
+- `apps/web/index.html` 暴露 Workspace view/sort 控件并接入 typed navigation model；
+- 增加 presenter 单元测试，覆盖 Flat 展平和三种排序；
+- 真实页面回归覆盖 Tree/Flat、Recent/Name/Path、搜索、Archived 切换和状态恢复。
+
+### 验证
+
+```text
+pnpm typecheck                              ✓
+pnpm --filter @code-review-agent/web test   ✓ (101 tests)
+pnpm build:web                               ✓
+pnpm test:phase8:web                         ✓
+pnpm test:phase8:reliability                 ✓
+git diff --check                             ✓
+```
+
+### 尚未关闭
+
+8.0 的 Settings failure/retry、visual baseline 和总 parity gate 仍待补齐；8.3 完整退出审计、8.4 browser recovery matrix 与 8.5 产品化也未完成。
+
 ## 2026-08-24：8.4 Reliability 第一阶段收口
 
 本次工作属于 Phase 8.4，目标是让后台 Job、Session export/replay、诊断和 Web Job center 具备可恢复的可靠性边界。A2A 保持 `deferred`，不进入本次实现。

@@ -86,4 +86,16 @@ describe("buildNavigationModel", () => {
     expect(model.groups.map((group) => group.root)).toEqual(["D:/repo"]);
     expect(model.allSessions.map((item) => item.id)).toEqual(["ses_active", "ses_deleted_workspace"]);
   });
+
+  it("supports flat navigation and deterministic name/path sorting", () => {
+    const zulu = session("ses_zulu", { title: "Zulu", workspaceRoot: "D:/zulu" });
+    const alpha = session("ses_alpha", { title: "Alpha", workspaceRoot: "D:/alpha" });
+    const flat = buildNavigationModel([zulu, alpha], { viewMode: "flat", sort: "name" });
+    expect(flat.viewMode).toBe("flat");
+    expect(flat.sort).toBe("name");
+    expect(flat.groups.map((group) => group.root)).toEqual(["D:/alpha", "D:/zulu"]);
+    expect(flat.groups.every((group) => group.sessions.every((item) => item.children.length === 0))).toBe(true);
+    const byPath = buildNavigationModel([zulu, alpha], { sort: "path" });
+    expect(byPath.groups.map((group) => group.root)).toEqual(["D:/alpha", "D:/zulu"]);
+  });
 });

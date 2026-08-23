@@ -85,6 +85,8 @@
       .workspace-search { width: 105px; height: 27px; padding: 0 8px; border: 1px solid var(--border); border-radius: 7px; outline: 0; color: var(--text); background: var(--surface-subtle); font-size: 10px; }
       .workspace-search:focus { border-color: rgba(65,118,230,.45); box-shadow: 0 0 0 2px rgba(65,118,230,.1); }
       .workspace-search::placeholder { color: var(--text-tertiary); }
+      .workspace-view-control { height: 27px; padding: 0 5px; border: 1px solid var(--border); border-radius: 7px; color: var(--text-secondary); background: var(--surface-subtle); font-size: 9px; }
+      .workspace-view-control:focus { border-color: rgba(65,118,230,.45); outline: 0; box-shadow: 0 0 0 2px rgba(65,118,230,.1); }
       .workspace-group { display: grid; gap: 2px; }
       .workspace-group-header { display: flex; align-items: center; gap: 4px; min-width: 0; min-height: 34px; padding: 4px 5px 4px 6px; border-radius: 9px; color: var(--text-secondary); background: transparent; text-align: left; transition: background .15s var(--ease), color .15s var(--ease); }
       .workspace-group-header:hover, .workspace-group-header.active { color: var(--text); background: var(--surface-hover); }
@@ -514,7 +516,7 @@
           <button id="new-session" class="new-session" type="button"><span class="plus">＋</span><span>New session</span></button>
           <div class="session-section-heading"><div class="section-label">Sessions</div><button id="archive-toggle" class="archive-toggle" type="button" aria-pressed="false">Archived</button></div>
           <div class="workspace-browser">
-            <div class="workspace-browser-toolbar"><span class="workspace-browser-title">Workspaces</span><input id="session-search" class="workspace-search" type="search" placeholder="Search" aria-label="Search sessions" /></div>
+            <div class="workspace-browser-toolbar"><span class="workspace-browser-title">Workspaces</span><select id="workspace-view-mode" class="workspace-view-control" aria-label="Workspace view"><option value="tree">Tree</option><option value="flat">Flat</option></select><select id="workspace-sort" class="workspace-view-control" aria-label="Workspace sort"><option value="recent">Recent</option><option value="name">Name</option><option value="path">Path</option></select><input id="session-search" class="workspace-search" type="search" placeholder="Search" aria-label="Search sessions" /></div>
             <div id="session-list" class="session-list"></div>
           </div>
           <div class="section-label">MCP servers</div>
@@ -603,7 +605,7 @@
       (() => {
         const typedRuntime = window.CodeReviewAgentWeb;
         const typedConnection = typedRuntime?.connection || null;
-        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, capabilities: null, workspaces: null, lastWorkspaceOrderSequence: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', details: 'open', mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
+        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, capabilities: null, workspaces: null, lastWorkspaceOrderSequence: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', details: 'open', mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', workspaceViewMode: 'tree', workspaceSort: 'recent', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
         const app = document.querySelector('#app');
         const shellFrame = typedRuntime?.mountShellFrame ? typedRuntime.mountShellFrame(document) : null;
         const list = document.querySelector('#session-list');
@@ -646,6 +648,8 @@
         const workspaceCreate = document.querySelector('#workspace-create');
          const permissionPreset = document.querySelector('#permission-preset');
          const sessionSearch = document.querySelector('#session-search');
+         const workspaceViewMode = document.querySelector('#workspace-view-mode');
+         const workspaceSort = document.querySelector('#workspace-sort');
          const sessionMenu = document.querySelector('#session-menu');
          const connectionBanner = document.querySelector('#connection-banner');
          const connectionBannerMessage = document.querySelector('#connection-banner-message');
@@ -1595,7 +1599,7 @@
         };
         const showSessionsTree = (payload) => {
           const sessions = Array.isArray(payload) ? payload : payload.sessions || [];
-          const navigation = typedRuntime?.buildNavigationModel?.(sessions, { showArchived: state.showArchived, query: state.sessionSearch, activeSessionId: state.session?.id, workspaceOrder: state.workspaces?.workspaces?.map((workspace) => workspace.key || workspace.root), workspaceCatalog: state.workspaces?.workspaces });
+          const navigation = typedRuntime?.buildNavigationModel?.(sessions, { showArchived: state.showArchived, query: state.sessionSearch, activeSessionId: state.session?.id, viewMode: state.workspaceViewMode, sort: state.workspaceSort, workspaceOrder: state.workspaces?.workspaces?.map((workspace) => workspace.key || workspace.root), workspaceCatalog: state.workspaces?.workspaces });
           if (navigation) {
             state.sidebarSessions = navigation.allSessions;
             state.recentWorkspaces = [...navigation.recentWorkspaces];
@@ -1765,6 +1769,8 @@
         document.addEventListener('keydown', (event) => { if (event.key !== 'Escape') return; if (!settingsModal.hidden) closeSettings(); else if (!workspaceModal.hidden) closeWorkspacePicker(); else if (!renameModal.hidden) closeRenameSession(); else if (!sessionMenu.hidden) closeSessionMenu(); else if (!modelPopover.hidden) dispatchOverlay({ type: 'close', overlay: 'model-popover' }); else if (!modePopover.hidden) dispatchOverlay({ type: 'close', overlay: 'mode-popover' }); else dispatchOverlay({ type: 'escape' }); });
         archiveToggle.onclick = async () => { state.showArchived = !state.showArchived; try { await refreshSessionList(); } catch (error) { setStatus(error.message, false); } };
         sessionSearch.addEventListener('input', () => { state.sessionSearch = sessionSearch.value; showSessionsTree({ sessions: state.sidebarSessions }); });
+        workspaceViewMode.addEventListener('change', () => { state.workspaceViewMode = workspaceViewMode.value === 'flat' ? 'flat' : 'tree'; showSessionsTree({ sessions: state.sidebarSessions }); });
+        workspaceSort.addEventListener('change', () => { state.workspaceSort = workspaceSort.value === 'name' || workspaceSort.value === 'path' ? workspaceSort.value : 'recent'; showSessionsTree({ sessions: state.sidebarSessions }); });
         document.querySelector('#session-path').onclick = () => openWorkspacePicker();
         document.querySelector('#workspace-close').onclick = () => closeWorkspacePicker();
         document.querySelector('#workspace-cancel').onclick = () => closeWorkspacePicker();

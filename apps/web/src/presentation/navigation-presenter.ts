@@ -20,7 +20,12 @@ export interface NavigationRenderIntent {
   readonly recentWorkspaces: readonly string[];
   readonly activeWorkspaceKey?: string;
   readonly emptyState: "none" | "search" | "archived";
+  readonly viewMode: "tree" | "flat";
+  readonly sort: "recent" | "name" | "path";
 }
+
+export type NavigationViewMode = NavigationRenderIntent["viewMode"];
+export type NavigationSort = NavigationRenderIntent["sort"];
 
 export interface NavigationOptions {
   readonly showArchived?: boolean;
@@ -29,6 +34,8 @@ export interface NavigationOptions {
   readonly maxDepth?: number;
   readonly workspaceOrder?: readonly string[];
   readonly workspaceCatalog?: readonly WorkspaceSummary[];
+  readonly viewMode?: NavigationViewMode;
+  readonly sort?: NavigationSort;
 }
 
 /**
@@ -44,6 +51,8 @@ export function buildNavigationModel(
   const showArchived = options.showArchived === true;
   const query = normalizeQuery(options.query);
   const maxDepth = boundedDepth(options.maxDepth);
+  const viewMode: NavigationViewMode = options.viewMode === "flat" ? "flat" : "tree";
+  const sort: NavigationSort = options.sort === "name" || options.sort === "path" ? options.sort : "recent";
   const allSessions = input.filter((session) => session.deleted !== true);
   const workspaceByKey = new Map((options.workspaceCatalog ?? []).map((workspace) => [workspaceKey(workspace.key), workspace] as const));
   const candidates = allSessions.filter((session) => {
@@ -68,14 +77,14 @@ export function buildNavigationModel(
   const buildNode = (session: SessionSummary, depth: number, lineage: Set<SessionId>): NavigationSession => {
     if (depth >= maxDepth || lineage.has(session.id)) return { ...session, children: [] };
     const nextLineage = new Set(lineage).add(session.id);
-    const children = sortSessions(childrenByParent.get(session.id) ?? [])
+    const children = viewMode === "flat" ? [] : sortSessions(childrenByParent.get(session.id) ?? [], sort)
       .map((child) => buildNode(child, depth + 1, nextLineage));
     return { ...session, children };
   };
 
-  const roots = sortSessions(candidates
+  const roots = sortSessions((viewMode === "flat" ? candidates : candidates
     .filter((session) => session.parentSessionId === undefined || !byId.has(session.parentSessionId)))
-    .map((session) => buildNode(session, 0, new Set()));
+    .map((session) => buildNode(session, 0, new Set())), sort);
   const grouped = new Map<string, { root: string; sessions: NavigationSession[] }>();
   for (const session of roots) {
     const root = session.workspaceRoot || ".";
@@ -104,7 +113,7 @@ export function buildNavigationModel(
       const leftPosition = order.findIndex((root) => workspaceKey(root) === left.key);
       const rightPosition = order.findIndex((root) => workspaceKey(root) === right.key);
       if (leftPosition >= 0 || rightPosition >= 0) return (leftPosition < 0 ? Number.MAX_SAFE_INTEGER : leftPosition) - (rightPosition < 0 ? Number.MAX_SAFE_INTEGER : rightPosition);
-      return compareTimestamp(right.latestUpdatedAt) - compareTimestamp(left.latestUpdatedAt);
+      return compareNavigationGroup(left, right, sort);
     });
   const activeWorkspaceKey = options.activeSessionId === undefined
     ? undefined
@@ -118,6 +127,8 @@ export function buildNavigationModel(
     recentWorkspaces: uniqueWorkspaces(allSessions),
     ...(activeWorkspaceKey === undefined ? {} : { activeWorkspaceKey }),
     emptyState: groups.length > 0 ? "none" : query.length > 0 ? "search" : showArchived ? "archived" : "none",
+    viewMode,
+    sort,
   };
 }
 
@@ -163,8 +174,18 @@ function containsSession(session: NavigationSession, id: SessionId): boolean {
   return session.id === id || session.children.some((child) => containsSession(child, id));
 }
 
-function sortSessions(sessions: readonly SessionSummary[]): SessionSummary[] {
-  return [...sessions].sort((left, right) => compareTimestamp(right.updatedAt || right.createdAt) - compareTimestamp(left.updatedAt || left.createdAt));
+function sortSessions<T extends SessionSummary>(sessions: readonly T[], sort: NavigationSort): T[] {
+  return [...sessions].sort((left, right) => {
+    if (sort === "name") return sessionLabel(left).localeCompare(sessionLabel(right), undefined, { sensitivity: "base" }) || compareTimestamp(right.updatedAt || right.createdAt) - compareTimestamp(left.updatedAt || left.createdAt);
+    if (sort === "path") return `${left.workspaceRoot}\u0000${sessionLabel(left)}`.localeCompare(`${right.workspaceRoot}\u0000${sessionLabel(right)}`, undefined, { sensitivity: "base" }) || compareTimestamp(right.updatedAt || right.createdAt) - compareTimestamp(left.updatedAt || left.createdAt);
+    return compareTimestamp(right.updatedAt || right.createdAt) - compareTimestamp(left.updatedAt || left.createdAt);
+  });
+}
+
+function compareNavigationGroup(left: WorkspaceNavigationGroup, right: WorkspaceNavigationGroup, sort: NavigationSort): number {
+  if (sort === "name") return (left.label ?? workspaceLabel(left.root)).localeCompare(right.label ?? workspaceLabel(right.root), undefined, { sensitivity: "base" });
+  if (sort === "path") return left.root.localeCompare(right.root, undefined, { sensitivity: "base" });
+  return compareTimestamp(right.latestUpdatedAt) - compareTimestamp(left.latestUpdatedAt);
 }
 
 function latestTimestamp(sessions: readonly NavigationSession[]): string | undefined {
