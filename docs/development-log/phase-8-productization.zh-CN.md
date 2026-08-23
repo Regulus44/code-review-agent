@@ -1,5 +1,27 @@
 # Phase 8 开发日志
 
+## 2026-08-24：8.4 Job recovery 重复重启矩阵
+
+本次 checkpoint 属于 Phase 8.4 可靠性，扩展 API/SQLite recovery slice 的重复重启与 Web Job Center 回放证据。A2A 保持 `deferred`。
+
+### 已完成
+
+- 新增 `scripts/phase8-job-recovery-matrix-gate.mjs` 与 `pnpm test:phase8:job-recovery:matrix`；
+- 真实 fixture 执行 seed → reopen → reopen-again，验证 interrupted Session、orphaned/completed jobs、SSE job/terminal replay、terminal `after_sequence` tail cursor、export/diagnostics 和无重复 orphaned projection；
+- 同一矩阵检查 Web shell 的 Job Center surface 与 typed browser bundle 的 recovery statuses，确保恢复事实仍来自 host/API replay。
+
+### 验证
+
+```text
+pnpm test:phase8:job-recovery:matrix ✓
+  job-recovery-restart-matrix: passed
+  scenarios: seed, reopen, reopen-again, sse-replay, tail-cursor, export-diagnostics
+```
+
+### 尚未关闭
+
+8.4 仍需更长任务、并发 action、真实浏览器交互和跨场景恢复矩阵；8.3 OS 隔离证据与 8.5 产品化也未完成。
+
 ## 2026-08-24：8.3 LSP/Code Mode 有界退出审计
 
 本次 checkpoint 属于 Phase 8.3 安全退出审计，固化当前可证明的边界和残余风险。A2A 保持 `deferred`。
