@@ -1,5 +1,5 @@
 /** Phase 8.4 reliability gate for retry, deadline, shutdown, export, and diagnostics. */
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { JobManager } from "../packages/tools/dist/index.js";
@@ -51,6 +51,8 @@ try {
   assert(diagnosticsResponse.status === 200 && (await diagnosticsResponse.json()).session.id === sessionId, "structured diagnostics route did not return session scope");
   const metricsResponse = await fetch(`${baseUrl}/v1/metrics`);
   assert(metricsResponse.status === 200 && typeof (await metricsResponse.json()).metrics?.turnsStarted === "number", "metrics route did not return runtime counters");
+  const browserBundle = await readFile(join(process.cwd(), "apps", "web", "dist", "browser.js"), "utf8");
+  for (const symbol of ["cancelJob", "retryJob", "presentRuntimeDiagnostics"]) assert(browserBundle.includes(symbol), `browser bundle is missing ${symbol}`);
 
   console.log(JSON.stringify({ phase: "8.4", gate: "reliability-retry-deadline-shutdown-export", passed: true, retry: true, deadline: true, shutdown: true }));
 } finally {
