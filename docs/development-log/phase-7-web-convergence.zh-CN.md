@@ -310,3 +310,37 @@ git diff --check                                    ✓
 
 - 继续补 Trajectory timeline 的折叠、tail-follow/pause-follow、load older 和大数据量虚拟化；
 - 完成 permission/interaction 过期与重启恢复、Subagent/Task/MCP details surface，并纳入统一 browser replay fixtures。
+
+## 2026-08-23：Task/Subagent details surface
+
+### 目标与 DSH 对照
+
+- 对照 DSH `ui-subagent` 和 Host `subagents` API 的 parent/child catalog、child history、report/artifact 与控制入口，把 Phase 5 的内部 Task/Subagent projection 纳入 Web details。
+- Web 不读取 live Agent 对象，也不把 Subagent catalog 变成事实来源；details 同时消费 `SessionStoreSnapshot.session.tasks` 和现有 typed Subagent catalog，重复 task 按 id 去重。
+
+### 变更范围
+
+- 新增 `apps/web/src/presentation/task-presenter.ts`，将 `TaskProjection` 转换为 bounded render intent：status、mode/provider、parent/child lineage、report summary、artifact labels、diagnostics、resumable/cancellable。
+- 新增 task presenter 测试，覆盖 lineage、live cancellable/resumable、report summary 和 credential redaction。
+- `apps/web/src/browser.ts` 暴露 `presentTask`；`apps/web/index.html` details panel 增加 Tasks & child agents ledger、选择式 inspector、child session navigation 和 live task cancel。
+- Task details 使用统一 `safe-value` redaction/truncation policy；未加载或不存在的 task 保持明确空态，不伪造 child 状态。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/web test           ✓（28 tests）
+pnpm -F @code-review-agent/web run build:browser   ✓
+git diff --check                                    ✓
+```
+
+真实 API/browser smoke：
+
+- 当前真实 Session 没有 child task，details 显示 `0 tasks · 0 live` 空态；
+- 页面刷新后 Task/Subagent panel、Trajectory panel 均只出现一次，浏览器 console 无 warning/error；
+- 非空 TaskProjection 的 lineage、report/artifact、redaction 和 cancelability 由 presenter 单元测试覆盖。
+
+### 下一步
+
+- 建立一个隔离、可回放的真实 Delegation fixture，验证 parent/child tree、child history、report/artifact 和 cancel；
+- 补 MCP details surface，并继续处理 permission/interaction expiry/restart 与 Trajectory timeline。

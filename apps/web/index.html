@@ -274,6 +274,19 @@
       .trajectory-inspector-entry-value { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
       .trajectory-inspector-entry-value pre { max-height: 180px; margin: 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
       .trajectory-badge { display: inline-block; margin-left: 4px; padding: 2px 4px; border-radius: 4px; color: #8f5c13; background: #fff3d9; font-size: 9px; }
+      .task-ledger { display: grid; gap: 6px; }
+      .task-record { display: flex; align-items: flex-start; gap: 7px; width: 100%; min-width: 0; padding: 7px; border: 1px solid transparent; border-radius: 8px; color: var(--text-secondary); background: var(--surface-subtle); text-align: left; font-size: 10px; }
+      .task-record:hover, .task-record.selected { border-color: rgba(65,118,230,.28); color: var(--text); background: var(--blue-soft); }
+      .task-record-copy { min-width: 0; flex: 1; overflow: hidden; }
+      .task-record-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; }
+      .task-record-meta { display: block; margin-top: 2px; overflow: hidden; color: var(--text-tertiary); text-overflow: ellipsis; white-space: nowrap; }
+      .task-record-summary { display: block; margin-top: 4px; overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; }
+      .task-status { flex: 0 0 auto; padding: 2px 5px; border-radius: 5px; color: var(--text-tertiary); background: var(--surface); font-size: 9px; }
+      .task-status.running, .task-status.waiting { color: var(--blue); background: var(--blue-soft); }
+      .task-status.failed, .task-status.cancelled, .task-status.blocked { color: var(--red); background: #fff0f0; }
+      .task-inspector { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--border); }
+      .task-inspector-title { margin-bottom: 6px; color: var(--text); font-size: 12px; font-weight: 650; }
+      .task-inspector pre { max-height: 180px; margin: 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary); font: 10px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
       .subagent-row { display: flex; align-items: center; gap: 7px; min-height: 34px; padding: 7px 8px; border-radius: 9px; color: var(--text-secondary); background: var(--surface-subtle); font-size: 11px; }
       .subagent-row + .subagent-row { margin-top: 5px; }
       .subagent-copy { min-width: 0; flex: 1; overflow: hidden; }
@@ -406,7 +419,7 @@
       (() => {
         const typedRuntime = window.CodeReviewAgentWeb;
         const typedConnection = typedRuntime?.connection || null;
-        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], models: null, sidebarCollapsed: false, detailsOpen: true, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null };
+        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], models: null, sidebarCollapsed: false, detailsOpen: true, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, taskSelectedId: null };
         const app = document.querySelector('#app');
         const list = document.querySelector('#session-list');
         const mcpList = document.querySelector('#mcp-list');
@@ -611,8 +624,64 @@
             inspector.append(sectionView);
           }
         };
+        const renderTaskPanel = (snapshot) => {
+          let section = details.querySelector('#task-inspector-panel');
+          if (!section) {
+            section = document.createElement('section');
+            section.id = 'task-inspector-panel';
+            section.className = 'detail-section';
+            const label = document.createElement('div'); label.className = 'detail-label'; label.textContent = 'Tasks & child agents'; section.append(label);
+            const meta = document.createElement('div'); meta.className = 'trajectory-meta'; meta.id = 'task-ledger-meta'; section.append(meta);
+            const ledger = document.createElement('div'); ledger.className = 'task-ledger'; ledger.id = 'task-ledger'; section.append(ledger);
+            const inspector = document.createElement('div'); inspector.className = 'task-inspector'; inspector.id = 'task-record-inspector'; section.append(inspector);
+            details.append(section);
+          }
+          const meta = section.querySelector('#task-ledger-meta');
+          const ledger = section.querySelector('#task-ledger');
+          const inspector = section.querySelector('#task-record-inspector');
+          ledger.innerHTML = ''; inspector.innerHTML = '';
+          const byId = new Map();
+          for (const entry of state.subagents || []) {
+            const task = entry?.task;
+            if (task?.id !== undefined) byId.set(String(task.id), { task, live: entry.live === true, resumable: entry.resumable === true });
+          }
+          for (const task of snapshot?.session?.tasks || []) {
+            if (task?.id !== undefined && !byId.has(String(task.id))) byId.set(String(task.id), { task, live: false, resumable: false });
+          }
+          const entries = [...byId.values()];
+          meta.textContent = `${entries.length} task${entries.length === 1 ? '' : 's'} · ${entries.filter((entry) => entry.live).length} live`;
+          if (!entries.length || !typedRuntime?.presentTask) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = 'No delegated tasks or child agents.'; ledger.append(empty); return; }
+          const selected = entries.find((entry) => String(entry.task.id) === state.taskSelectedId) || entries[0];
+          state.taskSelectedId = String(selected.task.id);
+          for (const entry of entries) {
+            const intent = typedRuntime.presentTask(entry.task, { live: entry.live, resumable: entry.resumable, maxDetailChars: 4_000 });
+            const button = document.createElement('button'); button.type = 'button'; button.className = `task-record ${String(entry.task.id) === state.taskSelectedId ? 'selected' : ''}`;
+            const copy = document.createElement('span'); copy.className = 'task-record-copy';
+            const taskTitle = document.createElement('span'); taskTitle.className = 'task-record-title'; taskTitle.textContent = intent.title;
+            const taskMeta = document.createElement('span'); taskMeta.className = 'task-record-meta'; taskMeta.textContent = `${intent.mode} · ${intent.provider} · ${intent.lineage}`;
+            const taskSummary = document.createElement('span'); taskSummary.className = 'task-record-summary'; taskSummary.textContent = intent.summary;
+            const taskStatus = document.createElement('span'); taskStatus.className = `task-status ${intent.status}`; taskStatus.textContent = intent.status;
+            copy.append(taskTitle, taskMeta, taskSummary); button.append(copy, taskStatus); button.onclick = () => { state.taskSelectedId = String(entry.task.id); renderTaskPanel(typedConnection?.store.getSnapshot()); }; ledger.append(button);
+          }
+          const selectedIntent = typedRuntime.presentTask(selected.task, { live: selected.live, resumable: selected.resumable, maxDetailChars: 8_000 });
+          const inspectorTitle = document.createElement('div'); inspectorTitle.className = 'task-inspector-title'; inspectorTitle.textContent = selectedIntent.title; inspector.append(inspectorTitle);
+          const fields = [
+            ['Status', selectedIntent.status],
+            ['Mode', selectedIntent.mode],
+            ['Provider', selectedIntent.provider],
+            ['Lineage', selectedIntent.lineage],
+            ['Artifacts', selectedIntent.artifacts.length ? selectedIntent.artifacts.join(', ') : 'none'],
+            ['Resumable', selectedIntent.resumable ? 'yes' : 'no'],
+          ];
+          for (const [label, value] of fields) { const row = document.createElement('div'); row.className = 'detail-line'; const left = document.createElement('span'); left.textContent = label; const right = document.createElement('strong'); right.textContent = value; row.append(left, right); inspector.append(row); }
+          if (selectedIntent.details.text !== '{}') { const pre = document.createElement('pre'); pre.textContent = selectedIntent.details.text; inspector.append(pre); }
+          if (selectedIntent.details.untrusted || selectedIntent.details.truncated) { const badge = document.createElement('span'); badge.className = 'trajectory-badge'; badge.textContent = selectedIntent.details.truncated ? 'bounded · untrusted' : 'untrusted'; inspector.append(badge); }
+          if (selected.task.childSessionId) { const open = document.createElement('button'); open.type = 'button'; open.className = 'toolbar-button'; open.textContent = 'Open child session'; open.onclick = () => openSession(selected.task.childSessionId); inspector.append(open); }
+          if (selectedIntent.cancellable) { const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'subagent-cancel'; cancel.textContent = 'Cancel task'; cancel.onclick = async () => { cancel.disabled = true; try { await typedRuntime.api.cancelTask(state.session.id, selected.task.id, commandKey()); await refreshSubagents(); renderTaskPanel(typedConnection?.store.getSnapshot()); } catch (error) { setStatus(error.message, false); cancel.disabled = false; } }; inspector.append(cancel); }
+        };
         const trajectoryDetailsObserver = new MutationObserver(() => {
           if (!details.querySelector('#trajectory-inspector-panel')) renderTrajectoryPanel(typedConnection?.store.getSnapshot()?.trajectory);
+          if (!details.querySelector('#task-inspector-panel')) renderTaskPanel(typedConnection?.store.getSnapshot());
         });
         trajectoryDetailsObserver.observe(details, { childList: true });
         const render = () => {
@@ -628,6 +697,7 @@
             if (renderTypedConversation(typedProjection, typedBody, typedSnapshot)) {
               renderDetails();
               renderTrajectoryPanel(typedSnapshot?.trajectory);
+              renderTaskPanel(typedSnapshot);
               requestAnimationFrame(() => { if (wasNearBottom) conversation.scrollTop = conversation.scrollHeight; });
               return;
             }
@@ -674,6 +744,7 @@
           }
           renderDetails();
           renderTrajectoryPanel(typedSnapshot?.trajectory);
+          renderTaskPanel(typedSnapshot);
           requestAnimationFrame(() => { if (wasNearBottom) conversation.scrollTop = conversation.scrollHeight; });
         };
         const renderWorkspaceRecent = () => { workspaceRecent.innerHTML = ''; const roots = [...new Set(state.recentWorkspaces.filter(Boolean))].slice(0, 6); if (!roots.length) return; const label = document.createElement('div'); label.className = 'workspace-recent-label'; label.textContent = 'Recent workspaces'; workspaceRecent.append(label); roots.forEach((root) => { const button = document.createElement('button'); button.type = 'button'; button.className = 'workspace-recent-button'; button.textContent = root; button.onclick = () => { workspaceInput.value = root; workspaceError.textContent = ''; workspaceInput.focus(); }; workspaceRecent.append(button); }); };
@@ -768,7 +839,7 @@
         const renderModes = () => { modeTrigger.textContent = `◉ Mode · ${modeLabels[currentMode()] || currentMode()}`; modePopover.innerHTML = '<div class="popover-label">Choose a work mode for this session</div>'; for (const [value, label] of Object.entries(modeLabels)) { const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${value === currentMode() ? 'selected' : ''}`; option.innerHTML = `<span class="model-check">${value === currentMode() ? '✓' : ''}</span><span>${label}<span class="model-meta">${value === 'read-only' ? 'Inspect without changing files' : value === 'danger-full-access' ? 'Run tools without approval' : 'Permission-controlled coding workflow'}</span></span>`; option.onclick = async () => { modePopover.hidden = true; modeTrigger.setAttribute('aria-expanded', 'false'); if (value === currentMode() || !state.session) return; modeTrigger.disabled = true; try { state.session = await api(`/v1/sessions/${encodeURIComponent(state.session.id)}/mode`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ permissionPreset: value }) }); renderModes(); renderDetails(); setStatus(`Mode · ${label}`); } catch (error) { setStatus(error.message, false); } finally { modeTrigger.disabled = false; } }; modePopover.append(option); } };
         const renderDetails = () => { const connected = state.mcp.filter((server) => !['disabled', 'failed', 'needs_auth'].includes(server.status)).length; const typedSnapshot = typedConnection?.store.getSnapshot(); const trajectory = typedSnapshot?.trajectory; const treeWarnings = typedSnapshot?.toolCallTree?.warnings || []; const pendingPermissions = typedSnapshot?.conversation?.nodes?.filter((node) => node.kind === 'permission' && node.status === 'pending').length || 0; const pendingInteractions = typedSnapshot?.conversation?.nodes?.filter((node) => node.kind === 'interaction' && node.status === 'pending').length || 0; const diagnostics = state.mcp.map((server) => { const name = server.config?.name || server.name; const catalog = Array.isArray(server.catalog) ? server.catalog : []; const disabled = catalog.filter((item) => item.enabled === false).length; const active = server.status === 'connected' ? catalog.length - disabled : 0; return `<div class="detail-line"><span>${esc(name)}</span><strong>${esc(server.status)} · g${server.generation || 0} · ${active}/${catalog.length} active</strong></div><div class="detail-line"><span>Auth</span><strong>${server.status === 'needs_auth' ? 'Needs authorization' : server.config?.credentialRef ? 'Credential reference configured' : 'No credential reference'}</strong></div>${server.retry?.nextAttemptAt ? `<div class="detail-line"><span>Next retry</span><strong>${esc(server.retry.nextAttemptAt)}</strong></div>` : ''}`; }).join(''); details.innerHTML = `<div class="detail-section"><div class="detail-label">Model</div><div class="detail-value">${esc(currentModel())}</div><div class="detail-line"><span>Provider</span><strong>${esc(state.models?.provider || 'DeepSeek-compatible')}</strong></div><div class="detail-line"><span>Default</span><strong>${esc(state.models?.defaultModel || 'deepseek-v4-flash')}</strong></div></div><div class="detail-section"><div class="detail-label">Session</div><div class="detail-line"><span>Status</span><span class="status-pill">Connected</span></div><div class="detail-line"><span>Events</span><strong>${state.events.size}</strong></div><div class="detail-line"><span>Workspace</span><strong title="${esc(state.session?.workspaceRoot || '.')}">${esc(state.session?.workspaceRoot || '.')}</strong></div></div><div class="detail-section"><div class="detail-label">Trajectory</div><div class="detail-line"><span>Records</span><strong>${trajectory?.records.length || 0} · seq ${trajectory?.lastSequence || 0}</strong></div><div class="detail-line"><span>Running</span><strong>${trajectory?.records.filter((record) => record.running).length || 0}</strong></div><div class="detail-line"><span>Lineage warnings</span><strong>${treeWarnings.length}</strong></div></div><div class="detail-section"><div class="detail-label">MCP diagnostics</div><div class="detail-line"><span>Servers</span><strong>${connected}/${state.mcp.length} connected</strong></div><div class="detail-line"><span>Tools</span><strong>${state.tools.size}</strong></div>${diagnostics || '<div class="empty-detail">No MCP servers configured.</div>'}</div><div class="detail-section"><div class="detail-label">Tools</div><div id="detail-tools" class="tool-list"></div></div><div class="detail-section"><div class="detail-label">Permissions</div><div class="detail-line"><span>Pending approvals</span><strong>${pendingPermissions}</strong></div><div class="detail-line"><span>Pending questions</span><strong>${pendingInteractions}</strong></div></div>`; const toolList = details.querySelector('#detail-tools'); const names = [...state.tools.keys()].slice(0, 8); if (!names.length) toolList.innerHTML = '<div class="empty-detail">No tools discovered.</div>'; else names.forEach((name) => { const row = document.createElement('div'); row.className = 'tool-list-item'; row.textContent = name; toolList.append(row); }); };
         const openSession = async (id) => {
-          state.trajectoryQuery = ''; state.trajectoryRunningOnly = false; state.trajectorySelectedKey = null;
+          state.trajectoryQuery = ''; state.trajectoryRunningOnly = false; state.trajectorySelectedKey = null; state.taskSelectedId = null;
           if (state.storeUnsubscribe) { state.storeUnsubscribe(); state.storeUnsubscribe = null; }
           if (state.source) state.source.close();
           if (state.scopedSource) state.scopedSource.close();

@@ -5,6 +5,7 @@ import { projectConversation } from "./projection/conversation.js";
 import { buildToolCallTree } from "./projection/tool-call-tree.js";
 import { projectTrajectory } from "./projection/trajectory.js";
 import { inspectTrajectory, queryTrajectory } from "./presentation/trajectory-presenter.js";
+import { presentTask } from "./presentation/task-presenter.js";
 import { presentToolCall } from "./presentation/tool-presenter.js";
 
 export interface BrowserWebRuntime {
@@ -15,6 +16,7 @@ export interface BrowserWebRuntime {
   readonly projectTrajectory: typeof projectTrajectory;
   readonly queryTrajectory: typeof queryTrajectory;
   readonly inspectTrajectory: typeof inspectTrajectory;
+  readonly presentTask: typeof presentTask;
   readonly buildToolCallTree: typeof buildToolCallTree;
   readonly presentToolCall: typeof presentToolCall;
 }
@@ -30,6 +32,7 @@ const runtime: BrowserWebRuntime = {
   projectTrajectory,
   queryTrajectory,
   inspectTrajectory,
+  presentTask,
   buildToolCallTree,
   presentToolCall,
 };
