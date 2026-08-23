@@ -1,5 +1,6 @@
 import type {
   AgentEvent,
+  ArtifactRef,
   InteractionId,
   PermissionId,
   PermissionPreset,
@@ -58,6 +59,17 @@ export interface TaskOutputResponse {
   readonly task: TaskProjection;
   readonly report?: Readonly<Record<string, unknown>>;
   readonly events: readonly AgentEvent[];
+}
+
+export type ArtifactAvailability = "available" | "external" | "blocked" | "missing" | "not_file" | "too_large" | "unavailable";
+
+export interface ArtifactAccessResponse {
+  readonly taskId: string;
+  readonly artifact: ArtifactRef;
+  readonly availability: ArtifactAvailability;
+  readonly reason: string;
+  readonly sizeBytes?: number;
+  readonly contentType?: string;
 }
 
 export interface EventPageResponse {
@@ -221,6 +233,15 @@ export class WebApiClient {
 
   taskOutput(sessionId: SessionId, taskId: TaskId): Promise<TaskOutputResponse> {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/tasks/${encodeURIComponent(taskId)}/output`);
+  }
+
+  inspectArtifact(sessionId: SessionId, artifactId: string): Promise<ArtifactAccessResponse> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/artifacts/${encodeURIComponent(artifactId)}`);
+  }
+
+  artifactContentUrl(sessionId: SessionId, artifactId: string, download = false): string {
+    const suffix = download ? "?download=true" : "";
+    return this.url(`/v1/sessions/${encodeURIComponent(sessionId)}/artifacts/${encodeURIComponent(artifactId)}/content${suffix}`);
   }
 
   cancelTask(sessionId: SessionId, taskId: TaskId, commandId?: string): Promise<unknown> {

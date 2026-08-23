@@ -37,6 +37,7 @@ describe("WebApiClient", () => {
   it("builds replay URLs from the last sequence", () => {
     const client = new WebApiClient({ baseUrl: "http://localhost:4317" });
     expect(client.eventsUrl("ses/with space" as never, 12)).toBe("http://localhost:4317/v1/sessions/ses%2Fwith%20space/events?after_sequence=12");
+    expect(client.artifactContentUrl("ses/with space" as never, "artifact/file", true)).toBe("http://localhost:4317/v1/sessions/ses%2Fwith%20space/artifacts/artifact%2Ffile/content?download=true");
   });
 
   it("builds bounded history page queries and normalizes the page envelope", async () => {

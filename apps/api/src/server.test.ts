@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Server } from "node:http";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import path from "node:path";
 import { createApiServer } from "./server.js";
 import { InMemoryEventStore } from "@code-review-agent/storage";
 import { sessionId } from "@code-review-agent/runtime";
@@ -138,6 +139,53 @@ describe("Phase 2 API", () => {
       const scoped = await (await fetch(`${url}/v1/sessions/${parent.id}/subagents/events?format=json`)).json() as { sessionId: string; event: { type: string } }[];
       expect(scoped.some((entry) => entry.sessionId === seeded.completed.childSessionId && entry.event.type === "assistant/message")).toBe(true);
       expect(scoped.some((entry) => entry.sessionId === seeded.cancellable.childSessionId && entry.event.type === "subagent/descriptor")).toBe(true);
+
+      const workspaceArtifactId = `artifact_${seeded.completed.taskId}`;
+      const artifactInfo = await (await fetch(`${url}/v1/sessions/${parent.id}/artifacts/${workspaceArtifactId}`)).json() as { availability: string; sizeBytes?: number; contentType?: string; taskId: string };
+      expect(artifactInfo).toMatchObject({ availability: "available", taskId: seeded.completed.taskId, contentType: "application/json" });
+      expect(artifactInfo.sizeBytes).toBeGreaterThan(0);
+      const artifactContent = await fetch(`${url}/v1/sessions/${parent.id}/artifacts/${workspaceArtifactId}/content`);
+      expect(artifactContent.status).toBe(200);
+      expect(artifactContent.headers.get("content-disposition")).toContain("inline");
+      expect(await artifactContent.text()).toContain(String(seeded.completed.taskId));
+      const artifactDownload = await fetch(`${url}/v1/sessions/${parent.id}/artifacts/${workspaceArtifactId}/content?download=true`);
+      expect(artifactDownload.status).toBe(200);
+      expect(artifactDownload.headers.get("content-disposition")).toContain("attachment");
+
+      const externalId = `artifact_${seeded.completed.taskId}_external`;
+      const externalInfo = await (await fetch(`${url}/v1/sessions/${parent.id}/artifacts/${externalId}`)).json() as { availability: string; reason: string };
+      expect(externalInfo).toMatchObject({ availability: "external" });
+      const externalContent = await fetch(`${url}/v1/sessions/${parent.id}/artifacts/${externalId}/content`);
+      expect(externalContent.status).toBe(409);
+      expect((await externalContent.json()).error).toContain("External artifacts");
+
+      const unsafeId = `artifact_${seeded.completed.taskId}_unsafe`;
+      const unsafeInfo = await (await fetch(`${url}/v1/sessions/${parent.id}/artifacts/${unsafeId}`)).json() as { availability: string; reason: string };
+      expect(unsafeInfo).toMatchObject({ availability: "blocked" });
+      const unsafeContent = await fetch(`${url}/v1/sessions/${parent.id}/artifacts/${unsafeId}/content`);
+      expect(unsafeContent.status).toBe(403);
+      expect((await unsafeContent.json()).error).toContain("workspace");
+      const childArtifactLookup = await fetch(`${url}/v1/sessions/${seeded.completed.childSessionId}/artifacts/${workspaceArtifactId}`);
+      expect(childArtifactLookup.status).toBe(404);
+
+      const outsideRoot = mkdtempSync(join(tmpdir(), "code-review-agent-artifact-outside-"));
+      try {
+        writeFileSync(join(outsideRoot, "secret.txt"), "secret");
+        const link = join(childCompletedRoot, "escape-link");
+        symlinkSync(outsideRoot, link, process.platform === "win32" ? "junction" : "dir");
+        await fixtureStore.append({
+          sessionId: sessionId(parent.id),
+          type: "task/artifact",
+          payload: {
+            taskId: seeded.completed.taskId,
+            artifact: { id: `artifact_${seeded.completed.taskId}_symlink`, kind: "file", label: "symlink escape", path: path.join(path.relative(root, link), "secret.txt") },
+          },
+        });
+        const symlinkContent = await fetch(`${url}/v1/sessions/${parent.id}/artifacts/artifact_${seeded.completed.taskId}_symlink/content`);
+        expect(symlinkContent.status).toBe(403);
+      } finally {
+        rmSync(outsideRoot, { recursive: true, force: true });
+      }
 
       const forbidden = await fetch(`${url}/v1/sessions/${sibling.id}/tasks/${seeded.completed.taskId}/output`);
       expect(forbidden.status, await forbidden.text()).toBe(404);

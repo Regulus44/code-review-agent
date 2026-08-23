@@ -670,12 +670,58 @@ git diff --check                                    ✓
 真实 browser smoke：
 
 - Delegation parent 的 completed child 显示 3 个 artifact：workspace JSON 显示 `workspace`，URL 显示 `external`，越界绝对路径显示 `blocked`；
-- 三个 `Open unavailable` 按钮均 disabled，workspace preview、external host policy、workspace boundary 原因分别可见；没有根据 event path 执行打开或下载；
+- 在该 render-surface 初始 checkpoint 中，三个 `Open unavailable` 按钮均 disabled，workspace preview、external host policy、workspace boundary 原因分别可见；没有根据 event path 执行打开或下载。后续 workspace-scoped artifact API checkpoint 已将 workspace artifact 升级为 host-backed Open/Download，external/blocked 仍保持 disabled；
 - 打开 completed child Session 后显示 `0 artifacts`，不会残留 parent artifact；新建空 Session 显示 `No produced files or artifacts.`；
 - 浏览器 console warn/error 为空。
 
 ### 下一步
 
-- 实现 workspace-scoped artifact API：按 Session workspace 与 artifact id 查找，使用 `WorkspaceResolver.resolveExisting()`，拒绝路径穿越、绝对越界和 symlink 越界；
-- 为受控 inline/download 增加 API/security/replay 测试，再把 action 从 unavailable 提升为 host-backed capability；
-- 将 Read-only、Edit、Test/Recovery、Delegation、Inspection、Settings、Deliverables 汇总为统一 Phase 7.10 browser gate。
+- 已在后续 `Workspace-scoped artifact API` checkpoint 完成受控读取；当前转入统一 Phase 7.10 browser gate、loading/error、键盘/窄屏和性能证据收敛。
+
+## 2026-08-23：Workspace-scoped artifact API
+
+### 目标与 DSH 对照
+
+- 对照 DSH `ui-deliverables` 的 host-backed artifact 读取边界，让 workspace artifact 在 Web 中具备可验证的 inline preview 与 download 能力；
+- 将 artifact 内容请求重新绑定到当前 Session 的 workspace 和 artifact manifest，避免把事件中的 path 当作浏览器可直接访问的权限凭证；
+- 保持 Phase 5 Task/Artifact projection、EventStore 事实来源和 Phase 6 A2A `deferred` 边界不变。
+
+### 变更范围
+
+- `apps/api/src/artifacts.ts`：新增 artifact lookup/inspection，按 Session workspace 与 artifact id 解析状态，区分 workspace、external、blocked、missing、not_file、too_large、unavailable/pathless；
+- `apps/api/src/server.ts`：新增 metadata 与 content 路由，支持 `inline`/`attachment`，设置 `nosniff`、`no-store`、安全 MIME fallback 和 Content-Disposition；每次读取重新执行 lexical、绝对路径、regular-file 与 symlink 越界检查；
+- `apps/web/src/client/api.ts`、`apps/web/index.html`、`apps/web/src/presentation/deliverables-presenter.ts`：workspace artifact 生成 host API Open/Download URL，其他 scope 继续显示 disabled reason；Web 不直接读取本地路径；
+- `apps/api/src/fixtures/delegation.ts`、`scripts/phase7-delegation-fixture-server.mjs`：写入真实 `delegation-report.json`，使用临时 workspace 并在退出时清理；
+- `apps/api/src/server.test.ts`、`apps/web/src/client/api.test.ts`、presenter tests：覆盖 inline、download、external 409、absolute outside 403、child scope 404、symlink escape 403、artifact replay/projection 和 URL 编码。
+
+### 根治理七问
+
+1. **Phase**：Phase 7.10 Deliverables/Produced Files host-backed access。
+2. **问题类型**：Web 产物访问、API 安全、workspace 边界和恢复/回放验证。
+3. **契约影响**：新增 API 路由与 DTO，不改变 Event、Tool、Task、Permission 或 Workspace 公共事件 contract；artifact 事实仍来自 TaskProjection/EventStore。
+4. **参考入口**：DSH `ui-deliverables` 与 host-backed artifact boundary；Claude Code 仅作结果呈现行为参考。
+5. **上游来源**：只做行为对照，没有复制 DSH 或 Claude Code 代码或资产，无需新增许可证登记。
+6. **验收场景**：workspace artifact inline 读取和 download 成功；external、越界、missing child scope、symlink escape 被明确拒绝；刷新/回放后列表与 action 保持一致。
+7. **回滚**：移除 artifact API 路由与 workspace action，恢复 Deliverables disabled 状态；不影响 Task projection、内部 Subagent、MCP 或 A2A deferred 状态。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/api test -- --run src/server.test.ts ✓（18 tests）
+pnpm --filter @code-review-agent/web test -- --run  ✓（43 tests）
+pnpm -F @code-review-agent/web run build:browser    ✓
+git diff --check                                    ✓
+```
+
+真实 smoke：
+
+- workspace artifact metadata/content API 返回 200；inline 使用 `application/json` 与 `Content-Disposition: inline`，download 使用 `Content-Disposition: attachment`；
+- external artifact 返回 409，workspace 外绝对路径和 symlink escape 返回 403，child Session 不能读取 parent artifact；
+- Deliverables workspace artifact 显示 Open/Download，external/blocked 仍 disabled；Node fetch 与浏览器页面均无 console warning/error；直接在浏览器 tab 打开本地内容 URL 的 `ERR_BLOCKED_BY_CLIENT` 被记录为客户端限制，未改变 API fetch 与 UI href 验收结论。
+
+### 下一步
+
+- 将 Read-only、Edit、Test/Recovery、Delegation、Inspection、Settings、Deliverables 和 artifact access 汇总为统一 Phase 7.10 browser gate；
+- 补齐 loading/error、键盘焦点恢复、窄屏布局、长任务 terminal/job 输出与失败诊断；
+- 推进 Shell 拆分、Workspace/Session 导航和 1,000+ trajectory 多页性能基线。

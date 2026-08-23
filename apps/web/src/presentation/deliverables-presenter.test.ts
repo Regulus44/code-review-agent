@@ -24,7 +24,7 @@ describe("presentDeliverables", () => {
     ], "D:/workspace");
 
     expect(view.items).toHaveLength(4);
-    expect(view.items[0]).toMatchObject({ id: "file-1", scope: "workspace", scopeLabel: "workspace", action: "unavailable" });
+    expect(view.items[0]).toMatchObject({ id: "file-1", scope: "workspace", scopeLabel: "workspace", action: "open" });
     expect(view.items[0]?.actionReason).toContain("Preview");
     expect(view.items[1]).toMatchObject({ scope: "unsafe", scopeLabel: "blocked" });
     expect(view.items[2]).toMatchObject({ scope: "unsafe", scopeLabel: "blocked" });

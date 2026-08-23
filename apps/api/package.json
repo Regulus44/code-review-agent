@@ -18,6 +18,7 @@
     "@code-review-agent/runtime": "workspace:*",
     "@code-review-agent/subagent": "workspace:*",
     "@code-review-agent/storage": "workspace:*",
-    "@code-review-agent/tools": "workspace:*"
+    "@code-review-agent/tools": "workspace:*",
+    "@code-review-agent/workspace": "workspace:*"
   }
 }

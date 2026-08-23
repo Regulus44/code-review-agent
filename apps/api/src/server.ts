@@ -10,6 +10,7 @@ import { SubagentRuntime } from "@code-review-agent/subagent";
 import { createConfiguredChatModel, DEEPSEEK_MODELS, type ModelConfigView } from "@code-review-agent/llm";
 import { McpConnectionManager, type McpServerConfig } from "@code-review-agent/mcp-client";
 import type { PermissionPreset } from "@code-review-agent/tools";
+import { artifactAccessResponse, inspectArtifact, isAvailableArtifact, type ArtifactAccess } from "./artifacts.js";
 
 export interface ModelSelection {
   readonly model: ChatModel;
@@ -229,6 +230,21 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         return;
       }
       await streamEvents(request, response, host, id, after);
+      return;
+    }
+    const artifactMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/artifacts\/([^/]+)(?:\/(content))?$/u);
+    if (request.method === "GET" && artifactMatch?.[1] !== undefined && artifactMatch[2] !== undefined) {
+      const id = sessionId(decodeURIComponent(artifactMatch[1]));
+      const session = await host.getSession(id);
+      if (session === undefined) throw new HttpError(404, "session not found");
+      const access = await inspectArtifact(session, decodeURIComponent(artifactMatch[2]));
+      if (access === undefined) throw new HttpError(404, "artifact not found");
+      if (artifactMatch[3] === "content") {
+        if (!isAvailableArtifact(access)) throw new HttpError(artifactFailureStatus(access), access.reason);
+        serveArtifactContent(response, access, url.searchParams.get("download") === "true");
+      } else {
+        sendJson(response, 200, artifactAccessResponse(access));
+      }
       return;
     }
     const scopedEventsMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/subagents\/events$/u);
@@ -549,6 +565,34 @@ function serveWebAsset(response: ServerResponse, webRoot: string, requestedPath:
         : "application/octet-stream";
   response.writeHead(200, { "cache-control": "no-cache", "content-type": contentType });
   createReadStream(file).pipe(response);
+}
+
+function serveArtifactContent(response: ServerResponse, access: Extract<ArtifactAccess, { availability: "available" }>, download: boolean): void {
+  const disposition = download ? "attachment" : "inline";
+  const filename = encodeURIComponent(access.fileName);
+  const asciiFilename = access.fileName.replace(/[^\x20-\x7E]/gu, "_");
+  response.writeHead(200, {
+    "cache-control": "no-store",
+    "content-disposition": `${disposition}; filename="${asciiFilename}"; filename*=UTF-8''${filename}`,
+    "content-length": String(access.sizeBytes),
+    "content-type": access.contentType,
+    "x-content-type-options": "nosniff",
+  });
+  const stream = createReadStream(access.filePath);
+  stream.on("error", () => { if (!response.destroyed) response.destroy(); });
+  stream.pipe(response);
+}
+
+function artifactFailureStatus(access: ArtifactAccess): number {
+  switch (access.availability) {
+    case "blocked": return 403;
+    case "missing": return 404;
+    case "too_large": return 413;
+    case "external":
+    case "not_file":
+    case "unavailable": return 409;
+    case "available": return 200;
+  }
 }
 
 function writeEvent(response: ServerResponse, event: { sequence: number; type: string; payload: unknown }): void {

@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
 import {
   brand,
   type ArtifactRef,
@@ -136,6 +137,8 @@ export function createDelegationFixtureProvider(options: DelegationFixtureProvid
           });
         }
 
+        await mkdir(context.descriptor.workspaceRoot, { recursive: true });
+        await writeFile(join(context.descriptor.workspaceRoot, "delegation-report.json"), JSON.stringify({ taskId: context.taskId, status: "completed", fixture: true }), "utf8");
         const report = fixtureReport(context, "completed", "completed", `Fixture completed: ${request.prompt}`);
         await finish(report);
         return report;

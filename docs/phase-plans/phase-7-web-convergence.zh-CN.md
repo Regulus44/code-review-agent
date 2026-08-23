@@ -1,6 +1,6 @@
 # Phase 7：DSH Web 前端收敛与可观测工作台
 
-状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/model/permission/capability surface、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface 已完成；7.1 Shell 拆分、7.3 导航收敛、7.6 queue/steer/attachment 深化、workspace-scoped artifact API、统一五场景 browser gate、性能基线继续推进）
+状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API 已完成；7.1 Shell 拆分、7.3 导航收敛、7.6 queue/steer/attachment 深化、统一五场景 browser gate、性能基线继续推进）
 
 ## 当前执行 checkpoint：typed Web client 与 Session replay foundation
 
@@ -87,15 +87,28 @@
 
 本 checkpoint 对照 DSH `ui-deliverables` 的产物清单与详情行为，把 Phase 5 TaskProjection.artifacts 接入 Web details panel，同时保持 EventStore 为事实来源和 workspace 安全边界：
 
-- `apps/web/src/presentation/deliverables-presenter.ts` 将 parent Session 的 task artifacts 去重并转换为 bounded render intent，分类 workspace、external、unsafe、unknown，保留 kind/path/mediaType/size/preview/source task；
-- `apps/web/src/browser.ts` 暴露 typed `presentDeliverables`，`apps/web/index.html` 增加 `Produced files & artifacts` 面板，空态、bounded 状态、路径、预览、scope 和 action reason 使用 DOM textContent 渲染；
-- artifact action 当前明确为 disabled/unavailable，不根据不可信路径执行打开或下载；external artifact 需要 host policy，workspace-scoped action 等待后续受控 API；
+- `apps/web/src/presentation/deliverables-presenter.ts` 将 parent Session 的 task artifacts 去重并转换为 bounded render intent，分类 workspace、external、unsafe、unknown，保留 kind/path/mediaType/size/preview/source task 和 action reason；
+- `apps/web/src/browser.ts` 暴露 typed `presentDeliverables`，`apps/web/index.html` 增加 `Produced files & artifacts` 面板，空态、bounded 状态、路径、预览、scope、Open/Download 和 action reason 使用 DOM textContent/host URL 渲染；
+- artifact action 只对 workspace artifact 暴露 host-backed Open/Download URL；external/unsafe/pathless artifact 保持 unavailable，API 每次请求都重新验证 Session workspace、真实路径和 symlink 边界；
 - Delegation fixture 增加 workspace、external URL 和 workspace 外绝对路径三类 artifact，验证 Web 能显示 `workspace`、`external`、`blocked`，child Session 仍为 `0 artifacts`；
 - `apps/api/src/server.test.ts` 与 presenter tests 同步覆盖三类 artifact projection，未改变生产 Event、Tool、Task、Permission 或 Workspace contract。
 
 验证：`pnpm typecheck`、`pnpm --filter @code-review-agent/api test -- --run src/server.test.ts`（18 tests）、`pnpm --filter @code-review-agent/web test -- --run`（43 tests）、`pnpm -F @code-review-agent/web run build:browser` 和 `git diff --check` 通过。真实 browser smoke 已验证 completed parent 的三类 artifact、external/unsafe action 禁用、child Session artifact 隔离和空 Session 空态；console 无 warning/error。
 
-下一步：实现 workspace-scoped artifact API，在读取前通过 Session workspace 与 artifact id 重新解析路径并执行 path traversal/symlink 越界安全检查；随后把 Read-only、Edit、Test/Recovery、Delegation、Inspection、Settings、Deliverables 汇总为统一 Phase 7.10 browser gate。
+下一步：将 Read-only、Edit、Test/Recovery、Delegation、Inspection、Settings、Deliverables 汇总为统一 Phase 7.10 browser gate，并补齐 loading/error、窄屏/keyboard 和性能证据。
+
+## 当前执行 checkpoint：Workspace-scoped artifact API（2026-08-23）
+
+本 checkpoint 对照 DSH `ui-deliverables` 的 host-backed artifact 读取边界，把 Produced Files 从只读清单推进为受控 inline/download surface：
+
+- `apps/api/src/artifacts.ts` 新增 artifact lookup/inspection，按 Session `workspaceRoot` 查找 artifact id；workspace、external、blocked、missing、not_file、too_large 和 pathless 状态有明确 response reason；
+- `WorkspaceResolver.resolve()`、`resolveExisting()` 和真实 `stat` 组合检查 lexical traversal、绝对越界、symlink 越界、文件存在性和 regular-file 类型；内容大小限制为 8 MiB；
+- `apps/api/src/server.ts` 新增 `GET /v1/sessions/:sessionId/artifacts/:artifactId` metadata 与 `/content` inline/download endpoint；响应使用 `nosniff`、`no-store`、安全 MIME fallback 和安全 Content-Disposition；external/blocked artifact 不会进入文件流；
+- `apps/web/src/client/api.ts` 暴露 `inspectArtifact()` 和 `artifactContentUrl()`；workspace artifact 的 Deliverables panel 显示 Open/Download，其他 scope 继续 disabled；Web 不直接读取或拼接本地路径；
+- Delegation fixture 写入真实 `delegation-report.json`，API/replay/security 测试覆盖 inline、download、external、absolute outside、missing child scope 和 symlink escape；
+- `scripts/phase7-delegation-fixture-server.mjs` 使用临时 workspace 并在退出时清理，避免 browser fixture 污染仓库。
+
+验证：`pnpm typecheck`、API 18 项定向测试、Web 43 项定向测试、browser bundle 和 `git diff --check` 通过。真实 browser smoke 已验证 workspace artifact 出现 Open/Download，external/blocked 仍为 disabled；Node fetch 复核 inline 返回 `application/json` + `inline`，download 返回 `attachment`；浏览器页面无 console warning/error。
 
 ## 1. 目标与边界
 

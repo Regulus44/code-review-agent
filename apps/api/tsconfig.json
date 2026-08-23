@@ -4,6 +4,6 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "references": [{ "path": "../../packages/contracts" }, { "path": "../../packages/llm" }, { "path": "../../packages/runtime" }, { "path": "../../packages/storage" }, { "path": "../../packages/tools" }],
+  "references": [{ "path": "../../packages/contracts" }, { "path": "../../packages/llm" }, { "path": "../../packages/runtime" }, { "path": "../../packages/storage" }, { "path": "../../packages/tools" }, { "path": "../../packages/workspace" }],
   "include": ["src/**/*.ts"]
 }

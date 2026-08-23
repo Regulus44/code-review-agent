@@ -322,7 +322,8 @@
       .deliverable-path { margin-top: 6px; overflow-wrap: anywhere; color: var(--text-secondary); font: 10px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
       .deliverable-preview { max-height: 130px; margin: 6px 0 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary); font: 10px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
       .deliverable-footer { display: flex; align-items: flex-start; gap: 7px; margin-top: 7px; }
-      .deliverable-action { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-tertiary); background: var(--surface); font-size: 9px; }
+      .deliverable-action { display: inline-flex; flex: 0 0 auto; align-items: center; padding: 3px 6px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-secondary); background: var(--surface); font-size: 9px; text-decoration: none; }
+      .deliverable-action:hover { border-color: rgba(65,118,230,.28); color: var(--blue); background: var(--blue-soft); }
       .deliverable-action:disabled { cursor: not-allowed; opacity: .72; }
       .deliverable-reason { min-width: 0; color: var(--text-tertiary); font-size: 9px; line-height: 1.4; }
       .mcp-ledger { display: grid; gap: 6px; }
@@ -932,9 +933,15 @@
             if (item.path) { const path = document.createElement('div'); path.className = 'deliverable-path'; path.textContent = item.path; record.append(path); }
             if (item.preview) { const preview = document.createElement('pre'); preview.className = 'deliverable-preview'; preview.textContent = item.preview; record.append(preview); }
             const footer = document.createElement('div'); footer.className = 'deliverable-footer';
-            const action = document.createElement('button'); action.type = 'button'; action.className = 'deliverable-action'; action.disabled = true; action.textContent = 'Open unavailable'; action.title = item.actionReason;
+            if (item.action === 'open' && state.session?.id && typedRuntime?.api?.artifactContentUrl) {
+              const open = document.createElement('a'); open.className = 'deliverable-action'; open.href = typedRuntime.api.artifactContentUrl(state.session.id, item.id); open.target = '_blank'; open.rel = 'noopener noreferrer'; open.textContent = 'Open'; open.title = item.actionReason;
+              const download = document.createElement('a'); download.className = 'deliverable-action'; download.href = typedRuntime.api.artifactContentUrl(state.session.id, item.id, true); download.target = '_blank'; download.rel = 'noopener noreferrer'; download.textContent = 'Download'; download.title = 'Host revalidates the workspace path and sends the artifact as an attachment.';
+              footer.append(open, download);
+            } else {
+              const action = document.createElement('button'); action.type = 'button'; action.className = 'deliverable-action'; action.disabled = true; action.textContent = 'Unavailable'; action.title = item.actionReason; footer.append(action);
+            }
             const reason = document.createElement('span'); reason.className = 'deliverable-reason'; reason.textContent = item.actionReason;
-            footer.append(action, reason); record.append(footer); ledger.append(record);
+            footer.append(reason); record.append(footer); ledger.append(record);
           }
         };
         const renderMcpDetailsPanel = () => {

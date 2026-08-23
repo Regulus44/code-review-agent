@@ -47,6 +47,9 @@ importers:
       '@code-review-agent/tools':
         specifier: workspace:*
         version: link:../../packages/tools
+      '@code-review-agent/workspace':
+        specifier: workspace:*
+        version: link:../../packages/workspace
 
   apps/web:
     dependencies:

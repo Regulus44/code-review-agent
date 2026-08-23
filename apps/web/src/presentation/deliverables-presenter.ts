@@ -13,7 +13,7 @@ export interface DeliverableRenderIntent {
   readonly mediaType?: string;
   readonly sizeBytes?: number;
   readonly preview?: string;
-  readonly action: "unavailable";
+  readonly action: "open" | "unavailable";
   readonly actionReason: string;
 }
 
@@ -24,9 +24,9 @@ export interface DeliverablesRenderIntent {
 
 /**
  * Convert durable task artifacts into a bounded, workspace-aware render view.
- * Artifact actions stay disabled until a host endpoint can re-check the
- * session workspace and artifact identity; the Web layer never opens a path
- * based only on an untrusted event payload.
+ * Workspace artifact actions point only to a host endpoint that re-checks the
+ * session workspace and artifact identity; external/unsafe/pathless actions
+ * remain unavailable, and the Web layer never opens a path directly.
  */
 export function presentDeliverables(
   tasks: readonly TaskProjection[],
@@ -55,7 +55,7 @@ export function presentDeliverables(
       ...(artifact.mediaType === undefined ? {} : { mediaType: artifact.mediaType }),
       ...(artifact.sizeBytes === undefined ? {} : { sizeBytes: artifact.sizeBytes }),
       ...(artifact.preview === undefined ? {} : { preview: artifact.preview.slice(0, Math.max(1, maxPreviewChars)) }),
-      action: "unavailable" as const,
+      action: scope === "workspace" ? "open" as const : "unavailable" as const,
       actionReason: actionReason(scope, artifact),
     };
   });
@@ -79,7 +79,7 @@ function normalize(value: string): string {
 }
 
 function actionReason(scope: DeliverableScope, artifact: ArtifactRef): string {
-  if (scope === "workspace") return artifact.preview === undefined ? "Host artifact action is not exposed yet." : "Preview is available; host action is not exposed yet.";
+  if (scope === "workspace") return artifact.preview === undefined ? "Host validates the workspace path before opening or downloading." : "Preview is available; host revalidates the workspace path before opening or downloading.";
   if (scope === "external") return "External artifact opening requires an explicit host policy.";
   if (scope === "unsafe") return "Path is outside the current workspace scope.";
   return "Artifact has no readable workspace path.";
