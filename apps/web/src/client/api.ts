@@ -57,9 +57,22 @@ export interface ContextCapability {
   };
 }
 
+export interface CodeModeCapability {
+  readonly configured: boolean;
+  readonly enabled: boolean;
+  readonly limits?: Readonly<Record<string, unknown>>;
+}
+
+export interface LspCapability {
+  readonly configured: boolean;
+  readonly servers: readonly string[];
+}
+
 export interface CapabilityResponse {
   readonly attachments: AttachmentCapability;
   readonly context: ContextCapability;
+  readonly codeMode: CodeModeCapability;
+  readonly lsp: LspCapability;
 }
 
 export interface HealthResponse {

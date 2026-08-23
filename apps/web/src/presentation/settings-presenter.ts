@@ -1,5 +1,5 @@
 import type { PermissionPreset, SessionProjection } from "@code-review-agent/contracts";
-import type { AttachmentCapability, ContextCapability, ModelCatalogResponse, McpServerView, ToolCatalogEntry } from "../client/api.js";
+import type { AttachmentCapability, CodeModeCapability, ContextCapability, LspCapability, ModelCatalogResponse, McpServerView, ToolCatalogEntry } from "../client/api.js";
 
 export interface SettingsCapability {
   readonly key: string;
@@ -39,6 +39,8 @@ export interface SettingsPresenterOptions {
   readonly a2aStatus?: "deferred" | "available" | "unavailable";
   readonly attachmentCapability?: AttachmentCapability;
   readonly contextCapability?: ContextCapability;
+  readonly codeModeCapability?: CodeModeCapability;
+  readonly lspCapability?: LspCapability;
 }
 
 const permissionDescriptions: Record<PermissionPreset, { readonly label: string; readonly description: string }> = {
@@ -75,12 +77,16 @@ export function presentSettings(
   const a2aStatus = options.a2aStatus ?? "deferred";
   const attachment = options.attachmentCapability;
   const context = options.contextCapability;
+  const codeMode = options.codeModeCapability;
+  const lsp = options.lspCapability;
   const capabilities: SettingsCapability[] = [
     { key: "coding-tools", label: "Coding tools", status: tools.length > 0 ? "available" : "unavailable", detail: `${tools.length} host-approved tool${tools.length === 1 ? "" : "s"} in the current catalog.` },
     { key: "mcp", label: "MCP", status: mcpServers.length > 0 ? "configured" : "available", detail: mcpServers.length > 0 ? `${connected}/${mcpServers.length} configured server${mcpServers.length === 1 ? "" : "s"} connected.` : "No MCP server is configured." },
     { key: "subagent", label: "Internal subagents", status: options.hasSubagentRuntime === false ? "unavailable" : "available", detail: options.hasSubagentRuntime === false ? "The host did not expose the internal Subagent service." : "Parent/child Task and Session controls are available." },
     { key: "attachments", label: "Attachments", status: attachment === undefined ? "unavailable" : attachment.enabled ? "available" : "unavailable", detail: attachment === undefined ? "The host did not expose attachment capability metadata." : attachment.enabled ? `Files up to ${Math.floor(attachment.maxBytes / 1024)} KiB; images ${attachment.imagesEnabled ? "enabled" : "disabled"}.` : attachment.reason ?? "Attachments are disabled by the host policy." },
     { key: "context-compaction", label: "Context compaction", status: context === undefined ? "unavailable" : context.enabled ? (context.configured ? "configured" : "available") : "unavailable", detail: context === undefined ? "The host did not expose context budget metadata." : !context.enabled ? "Context compaction is disabled by the host." : context.budget?.maxTokens === undefined ? "Compaction is enabled; provider context budget is unknown." : `Compaction budget: ${context.budget.maxTokens} tokens.` },
+    { key: "code-mode", label: "Code Mode", status: codeMode === undefined ? "unavailable" : codeMode.enabled ? "configured" : codeMode.configured ? "unavailable" : "unavailable", detail: codeMode === undefined ? "The host did not expose Code Mode policy metadata." : codeMode.enabled ? `Sandbox enabled; output/runtime limits are host-controlled.` : codeMode.configured ? "Code Mode is configured but disabled by policy." : "Code Mode is not configured." },
+    { key: "lsp", label: "Language server", status: lsp === undefined ? "unavailable" : lsp.configured ? "configured" : "available", detail: lsp === undefined ? "The host did not expose LSP server metadata." : lsp.configured ? `${lsp.servers.length} configured server${lsp.servers.length === 1 ? "" : "s"}: ${lsp.servers.join(", ")}.` : "No language server is configured." },
     { key: "a2a", label: "A2A interoperability", status: a2aStatus, detail: a2aStatus === "deferred" ? "Deferred until an external Agent interoperability scenario is accepted." : a2aStatus === "available" ? "External Agent adapter is enabled." : "External Agent adapter is unavailable." },
   ];
   return {

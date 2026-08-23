@@ -14,6 +14,7 @@ import { WorkspaceResolver } from "@code-review-agent/workspace";
 import { JobManager } from "./jobs.js";
 import { readWorkspaceImage } from "./image.js";
 import { LspManager, type LspServerConfig } from "./lsp.js";
+import type { CodeModeSandbox } from "./code-mode.js";
 import { CapabilityRegistry, CapabilityError } from "./capabilities.js";
 import { applyPreview, loadPatchRecord, PatchConflictError, PatchParseError, persistPatchRecord, previewUnifiedPatch, removePatchRecord, type AppliedPatch } from "./patch.js";
 
@@ -259,7 +260,7 @@ export class TerminalManager {
   }
 }
 
-export function createBuiltinTools(options: { readonly terminalManager?: TerminalManager; readonly jobManager?: JobManager; readonly eventStore?: Pick<EventStore, "list" | "project">; readonly visionEnabled?: boolean; readonly lspServers?: Readonly<Record<string, LspServerConfig>>; readonly lspManager?: LspManager; readonly capabilities?: CapabilityRegistry } = {}): readonly ToolDefinition[] {
+export function createBuiltinTools(options: { readonly terminalManager?: TerminalManager; readonly jobManager?: JobManager; readonly eventStore?: Pick<EventStore, "list" | "project">; readonly visionEnabled?: boolean; readonly lspServers?: Readonly<Record<string, LspServerConfig>>; readonly lspManager?: LspManager; readonly codeMode?: CodeModeSandbox; readonly capabilities?: CapabilityRegistry } = {}): readonly ToolDefinition[] {
   const terminals = options.terminalManager ?? new TerminalManager();
   const jobs = options.jobManager ?? new JobManager(options.eventStore === undefined ? {} : { eventStore: options.eventStore });
   const lsp = options.lspManager ?? new LspManager(options.lspServers);
@@ -454,6 +455,16 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
       { name: "lsp_references", description: "Request read-only references from a configured workspace LSP server.", inputSchema: object({ serverId: string, path: string, line: integer(0, Number.MAX_SAFE_INTEGER), character: integer(0, Number.MAX_SAFE_INTEGER), includeDeclaration: boolean }, ["path", "line", "character"]), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel", execute: async (input, context) => lsp.references(input as { serverId?: string; path: string; line: number; character: number; includeDeclaration?: boolean }, context.workspaceRoot, context.signal, { sessionId: context.sessionId, toolCallId: context.toolCallId, appendEvent: context.appendEvent }) },
     );
   }
+  if (options.codeMode !== undefined) tools.push({
+    name: "code_mode",
+    description: "Run bounded JavaScript in the host-controlled Code Mode sandbox.",
+    inputSchema: object({ code: string, language: { type: "string" as const, enum: ["javascript"] }, args: { type: "array" as const, maxItems: 16, items: string }, cwd: string }, ["code"]),
+    executionMode: "exclusive",
+    riskLevel: "execute",
+    approvalMode: "ask",
+    interruptBehavior: "cancel",
+    execute: async (input, context) => options.codeMode!.run(input as { code: string; language?: "javascript"; args?: readonly string[]; cwd?: string }, { workspaceRoot: context.workspaceRoot, signal: context.signal, reportProgress: context.reportProgress }),
+  });
   return tools;
 }
 

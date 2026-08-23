@@ -63,6 +63,14 @@ Phase 7 的 DSH Web 调研与分步计划：
 - 已新增 linked worktree、SQLite reopen/replay、pending side-effect recovery、并发 create 去重、dirty cleanup protection 和 API/Web client tests；
 - `pnpm typecheck`、Workspace 6 项、Runtime 24 项、Storage 12 项、API 26 项、Web 98 项、`pnpm build:web`、`pnpm test:phase7:browser`、`pnpm test:phase8:worktree` 和 `git diff --check` 通过；本组变更建立独立的 Phase 8.2 Git checkpoint。
 
+## Phase 8.0 Web parity 与 Phase 8.3 LSP/Code Mode（进行中）
+
+- `c0cf1d3`：新增独立 `scripts/phase8-web-gate.mjs`，使用真实 SQLite/API/AgentHost fixture 验证 Goal/Plan/Todo/Question replay、回答/取消、Plan review、Goal CAS conflict、Todo idempotency 和 browser bundle；Trajectory Inspector 增加 Options、Usage、Diff、Request、Tool catalog、Rendered、Raw、Input、Output、Schema 等 bounded sections；
+- `presentLspTool` 与 Web LSP details surface 已接入，diagnostics、definition、references、source location、restart/crash 和失败状态均保持 host-backed；
+- `CodeModeSandbox` 已接入可选 `code_mode` builtin，默认 disabled；支持 workspace-bound child process、`node` allowlist、网络禁用、runtime/output/code budget 和取消；API `/v1/capabilities` 与 Settings 暴露 Code Mode/LSP metadata；
+- `pnpm test:phase8:web` 已通过（planning/question replay gate）；`pnpm test:phase8:lsp` 已通过（LSP/Code Mode safety/recovery gate）；Web 100 tests、Tools 56 tests、API 27 tests、Runtime 25 tests 和 `pnpm typecheck` 通过；
+- 当前 Phase 8 仍为 `pending`。8.0 的 Workspace Flat/Tree、sorting/picker、Settings failure/retry、visual baseline 和总 parity gate 仍未关闭；8.3 仍需真实 Web fixture、OS 级网络隔离评估和退出审计，尚未进入 8.4。
+
 ## Phase 7 Workspace lifecycle controls（当前 checkpoint）
 
 - `packages/contracts` / `docs/event-contract.md`：新增 `workspace/updated` 事件和 Workspace 生命周期元数据字段；

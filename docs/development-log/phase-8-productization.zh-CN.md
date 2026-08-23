@@ -1,5 +1,35 @@
 # Phase 8 开发日志
 
+## 2026-08-24：8.3 LSP/Code Mode 第一阶段收口
+
+本次工作属于 Phase 8.3，补齐受控 Code Mode、LSP Web source-location surface 和 capability metadata。A2A 保持 deferred。
+
+### 已完成
+
+- 新增 `CodeModeSandbox`：独立子进程、无 shell、Node permission 文件范围、最小环境、`node` 命令 allowlist、网络禁用、代码/运行时/输出预算和 AbortSignal 取消；
+- `createBuiltinTools` 和 `AgentHost` 支持通过显式 `codeMode` 配置暴露 `code_mode`，默认不启用；
+- 新增 Code Mode prompt contract、disabled/路径穿越/网络模块/恶意 executable/超时/输出上限/取消测试；
+- 新增 `presentLspTool`，把 diagnostics、definition、references、source location、server restart/crash 和失败原因投影为 bounded Web render intent；
+- Web Details 增加 LSP diagnostics & source locations surface；Settings capabilities 公开 Code Mode 与 LSP 的真实 host 状态；
+- 新增 `scripts/phase8-lsp-codemode-gate.mjs`，覆盖 Code Mode 成功、网络越权、输出预算、LSP diagnostics/definition、server crash restart 和 cancellation。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/tools test         ✓ (56 tests)
+pnpm --filter @code-review-agent/api test -- --run src/server.test.ts ✓ (27 tests)
+pnpm --filter @code-review-agent/runtime test -- --run src/index.test.ts ✓ (25 tests)
+pnpm --filter @code-review-agent/web test           ✓ (100 tests)
+pnpm build:web                                      ✓
+pnpm test:phase8:lsp                                ✓
+git diff --check                                     ✓
+```
+
+### 尚未关闭
+
+8.3 仍需继续补充真实 Web/browser fixture、网络策略的更强 OS 级隔离评估和完整 Phase 8.3 退出审计；8.4 可靠性与 8.5 产品化尚未开始。
+
 ## 2026-08-24：8.2 Worktree 收口
 
 本次工作属于 Phase 8.2，解决 Workspace/Worktree runtime、事件回放、安全和 Web 诊断问题。A2A 保持 deferred，不在本次范围内。

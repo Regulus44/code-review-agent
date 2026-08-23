@@ -35,7 +35,7 @@ describe("presentSettings", () => {
       { name: "read_file", description: "read", inputSchema: {}, executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel", source: { kind: "builtin" } },
       { name: "run_tests", description: "test", inputSchema: {}, executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel", source: { kind: "builtin" } },
       { name: "search", description: "search", inputSchema: {}, executionMode: "parallel", riskLevel: "network", approvalMode: "ask", interruptBehavior: "block", source: { kind: "mcp", serverName: "docs", rawName: "search" } },
-    ], [{ name: "docs", status: "connected" }, { name: "broken", status: "failed" }], { hasSubagentRuntime: true, attachmentCapability: { enabled: true, maxBytes: 524288, allowedMediaTypes: ["text/plain"], imagesEnabled: false }, contextCapability: { enabled: true, configured: true, budget: { maxTokens: 12000 } } });
+    ], [{ name: "docs", status: "connected" }, { name: "broken", status: "failed" }], { hasSubagentRuntime: true, attachmentCapability: { enabled: true, maxBytes: 524288, allowedMediaTypes: ["text/plain"], imagesEnabled: false }, contextCapability: { enabled: true, configured: true, budget: { maxTokens: 12000 } }, codeModeCapability: { configured: true, enabled: true, limits: { maxRuntimeMs: 5000 } }, lspCapability: { configured: true, servers: ["typescript"] } });
 
     expect(view.permissionLabel).toBe("Ask on write");
     expect(view.tools).toMatchObject({ total: 3, builtin: 2, mcp: 1, riskCounts: { read: 1, execute: 1, network: 1 } });
@@ -43,6 +43,8 @@ describe("presentSettings", () => {
     expect(view.capabilities.find((capability) => capability.key === "a2a")).toMatchObject({ status: "deferred" });
     expect(view.capabilities.find((capability) => capability.key === "attachments")).toMatchObject({ status: "available" });
     expect(view.capabilities.find((capability) => capability.key === "context-compaction")).toMatchObject({ status: "configured", detail: expect.stringContaining("12000") });
+    expect(view.capabilities.find((capability) => capability.key === "code-mode")).toMatchObject({ status: "configured" });
+    expect(view.capabilities.find((capability) => capability.key === "lsp")).toMatchObject({ status: "configured", detail: expect.stringContaining("typescript") });
   });
 
   it("uses safe defaults when optional host data is unavailable", () => {

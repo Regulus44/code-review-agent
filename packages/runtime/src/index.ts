@@ -32,7 +32,7 @@ import {
 import { EchoChatModel } from "@code-review-agent/llm";
 import { compactMessages, type ContextBudget } from "@code-review-agent/compaction";
 import { randomUUID } from "node:crypto";
-import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type ExecuteToolOutput, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
+import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModeSandbox, type ExecuteToolOutput, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
 import type { SubagentRuntime } from "@code-review-agent/subagent";
 import { GitWorktreeManager } from "@code-review-agent/workspace";
 import { buildAgentSystemPrompt } from "./system-prompt.js";
@@ -48,6 +48,7 @@ export interface AgentHostOptions {
   readonly toolPromptRegistry?: ToolPromptRegistry;
   readonly visionEnabled?: boolean;
   readonly lspServers?: Readonly<Record<string, LspServerConfig>>;
+  readonly codeMode?: CodeModeSandbox;
   readonly capabilities?: CapabilityRegistry;
   readonly subagentRuntime?: SubagentRuntime;
   readonly compactionEnabled?: boolean;
@@ -58,6 +59,17 @@ export interface ContextSettings {
   readonly enabled: boolean;
   readonly configured: boolean;
   readonly budget?: Partial<ContextBudget>;
+}
+
+export interface CodeModeSettings {
+  readonly configured: boolean;
+  readonly enabled: boolean;
+  readonly limits?: Readonly<Record<string, unknown>>;
+}
+
+export interface LspSettings {
+  readonly configured: boolean;
+  readonly servers: readonly string[];
 }
 
 interface PendingTurn {
@@ -128,7 +140,7 @@ export class AgentHost {
     if (options.toolRuntime === undefined) {
       this.terminalManager = new TerminalManager();
       this.jobManager = new JobManager({ eventStore: options.store });
-      if (options.toolRegistry === undefined) registry.registerMany(createBuiltinTools({ terminalManager: this.terminalManager, jobManager: this.jobManager, eventStore: options.store, ...(options.visionEnabled === undefined ? {} : { visionEnabled: options.visionEnabled }), ...(options.lspServers === undefined ? {} : { lspServers: options.lspServers }), ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }) }));
+      if (options.toolRegistry === undefined) registry.registerMany(createBuiltinTools({ terminalManager: this.terminalManager, jobManager: this.jobManager, eventStore: options.store, ...(options.visionEnabled === undefined ? {} : { visionEnabled: options.visionEnabled }), ...(options.lspServers === undefined ? {} : { lspServers: options.lspServers }), ...(options.codeMode === undefined ? {} : { codeMode: options.codeMode }), ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }) }));
       this.permissionPreset = options.permissionPreset ?? "ask-on-write";
     } else {
       this.permissionPreset = options.permissionPreset;
@@ -149,6 +161,19 @@ export class AgentHost {
       configured: this.contextBudget !== undefined,
       ...(this.contextBudget === undefined ? {} : { budget: { ...this.contextBudget } }),
     };
+  }
+
+  codeModeSettings(): CodeModeSettings {
+    const snapshot = this.options.codeMode?.snapshot();
+    return {
+      configured: snapshot !== undefined,
+      enabled: snapshot?.enabled === true,
+      ...(snapshot === undefined ? {} : { limits: snapshot }),
+    };
+  }
+
+  lspSettings(): LspSettings {
+    return { configured: Object.keys(this.options.lspServers ?? {}).length > 0, servers: Object.keys(this.options.lspServers ?? {}).sort() };
   }
 
   async createSession(workspaceRoot: string, permissionPreset?: PermissionPreset, metadata?: ChildSessionMetadata): Promise<SessionProjection> {

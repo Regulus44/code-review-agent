@@ -1097,7 +1097,7 @@
           if (!settingsContent) return;
           settingsContent.innerHTML = '';
           const view = typedRuntime?.presentSettings
-            ? typedRuntime.presentSettings(state.session, state.models, [...state.tools.values()], state.mcp, { hasSubagentRuntime: true, a2aStatus: 'deferred', attachmentCapability: state.capabilities?.attachments, contextCapability: state.capabilities?.context })
+            ? typedRuntime.presentSettings(state.session, state.models, [...state.tools.values()], state.mcp, { hasSubagentRuntime: true, a2aStatus: 'deferred', attachmentCapability: state.capabilities?.attachments, contextCapability: state.capabilities?.context, codeModeCapability: state.capabilities?.codeMode, lspCapability: state.capabilities?.lsp })
             : null;
           if (!view) {
             const empty = document.createElement('div'); empty.className = 'settings-muted'; empty.textContent = 'Typed settings projection is unavailable.'; settingsContent.append(empty); return;
@@ -1386,6 +1386,27 @@
             card.append(actions); ledger.append(card);
           }
         };
+        const renderLspPanel = (snapshot) => {
+          let section = details.querySelector('#lsp-inspector-panel');
+          if (!section) {
+            section = document.createElement('section'); section.id = 'lsp-inspector-panel'; section.className = 'detail-section';
+            const label = document.createElement('div'); label.className = 'detail-label'; label.textContent = 'LSP diagnostics & source locations'; section.append(label);
+            const meta = document.createElement('div'); meta.className = 'trajectory-meta'; meta.id = 'lsp-inspector-meta'; section.append(meta);
+            const body = document.createElement('div'); body.id = 'lsp-inspector-body'; section.append(body); details.append(section);
+          }
+          const meta = section.querySelector('#lsp-inspector-meta'); const body = section.querySelector('#lsp-inspector-body'); body.innerHTML = '';
+          const views = (snapshot?.conversation?.nodes || []).filter((node) => node.kind === 'tool').map((node) => typedRuntime?.presentLspTool ? typedRuntime.presentLspTool(node.tool) : null).filter((view) => view?.visible);
+          meta.textContent = views.length ? `${views.length} LSP result${views.length === 1 ? '' : 's'}` : 'No LSP result in this session.';
+          if (!views.length) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = 'Diagnostics and source locations appear here when a configured LSP tool returns them.'; body.append(empty); return; }
+          for (const view of views.slice(-32)) {
+            const card = document.createElement('details'); card.className = `lsp-record ${view.status}`;
+            const summary = document.createElement('summary'); summary.textContent = `${view.summary} · ${view.path}`; card.append(summary);
+            for (const diagnostic of view.diagnostics) { const row = document.createElement('div'); row.className = 'detail-line'; const left = document.createElement('span'); left.textContent = `${diagnostic.severity} · ${diagnostic.message}`; const right = document.createElement('strong'); right.textContent = diagnostic.location?.preview || diagnostic.source || 'unknown location'; row.append(left, right); card.append(row); }
+            for (const location of view.locations) { const row = document.createElement('div'); row.className = 'detail-line'; const left = document.createElement('span'); left.textContent = 'Location'; const right = document.createElement('strong'); right.textContent = location.preview; row.append(left, right); card.append(row); }
+            if (view.error) { const error = document.createElement('div'); error.className = 'empty-detail'; error.textContent = view.error; card.append(error); }
+            body.append(card);
+          }
+        };
         const trajectoryDetailsObserver = new MutationObserver(() => {
           if (!details.querySelector('#trajectory-inspector-panel')) renderTrajectoryPanel(typedConnection?.store.getSnapshot()?.trajectory);
           if (!details.querySelector('#task-inspector-panel')) renderTaskPanel(typedConnection?.store.getSnapshot());
@@ -1395,6 +1416,7 @@
           if (!details.querySelector('#runtime-diagnostics-panel')) renderRuntimeDiagnosticsPanel(typedConnection?.store.getSnapshot());
           if (!details.querySelector('#worktree-inspector-panel')) renderWorktreePanel(typedConnection?.store.getSnapshot());
           if (!details.querySelector('#planning-panel')) renderPlanningPanel(typedConnection?.store.getSnapshot());
+          if (!details.querySelector('#lsp-inspector-panel')) renderLspPanel(typedConnection?.store.getSnapshot());
         });
         trajectoryDetailsObserver.observe(details, { childList: true });
         const render = () => {

@@ -5,6 +5,7 @@ export * from "./prompt-catalog.js";
 export * from "./prompt.js";
 export * from "./jobs.js";
 export * from "./lsp.js";
+export * from "./code-mode.js";
 export * from "./capabilities.js";
 export * from "./patch.js";
 export * from "./registry.js";
