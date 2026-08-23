@@ -4,6 +4,6 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "references": [{ "path": "../contracts" }, { "path": "../llm" }, { "path": "../storage" }, { "path": "../tools" }],
+  "references": [{ "path": "../contracts" }, { "path": "../compaction" }, { "path": "../llm" }, { "path": "../storage" }, { "path": "../tools" }],
   "include": ["src/**/*.ts"]
 }

@@ -45,6 +45,7 @@ import {
   type McpConfigBackend,
   type McpConfigRecord,
   type McpCredentialReference,
+  type ContextCompactionProjection,
 } from "@code-review-agent/contracts";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
@@ -472,6 +473,24 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
       });
       next = { ...next, todos };
     }
+  }
+
+  if (event.type === "context/compacted" || event.type === "context/compaction_failed") {
+    const payload = event.payload;
+    const summary = typeof payload["summary"] === "string" ? payload["summary"] : "";
+    const projection: ContextCompactionProjection = {
+      status: event.type === "context/compacted" ? "completed" : "failed",
+      sourceSequence: typeof payload["sourceSequence"] === "number" ? payload["sourceSequence"] : Math.max(0, event.sequence - 1),
+      summary,
+      originalMessageCount: typeof payload["originalMessageCount"] === "number" ? payload["originalMessageCount"] : 0,
+      compactedMessageCount: typeof payload["compactedMessageCount"] === "number" ? payload["compactedMessageCount"] : 0,
+      estimatedTokens: typeof payload["estimatedTokens"] === "number" ? payload["estimatedTokens"] : 0,
+      droppedMessages: typeof payload["droppedMessages"] === "number" ? payload["droppedMessages"] : 0,
+      updatedAt: event.createdAt,
+      lastSequence: event.sequence,
+      ...(typeof payload["error"] === "string" ? { error: payload["error"] } : {}),
+    };
+    next = { ...next, contextCompaction: projection };
   }
 
   if (event.type === "tool/call" || event.type === "tool/progress" || event.type === "tool/result") {

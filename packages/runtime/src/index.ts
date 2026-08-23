@@ -29,6 +29,7 @@ import {
   type TodoItem,
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
+import { compactMessages, type ContextBudget } from "@code-review-agent/compaction";
 import { randomUUID } from "node:crypto";
 import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type ExecuteToolOutput, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
 import type { SubagentRuntime } from "@code-review-agent/subagent";
@@ -47,6 +48,8 @@ export interface AgentHostOptions {
   readonly lspServers?: Readonly<Record<string, LspServerConfig>>;
   readonly capabilities?: CapabilityRegistry;
   readonly subagentRuntime?: SubagentRuntime;
+  readonly compactionEnabled?: boolean;
+  readonly contextBudget?: Partial<ContextBudget>;
 }
 
 interface PendingTurn {
@@ -100,9 +103,13 @@ export class AgentHost {
   private readonly terminalManager?: TerminalManager;
   private readonly jobManager?: JobManager;
   private readonly toolPromptRegistry: ToolPromptRegistry;
+  private readonly compactionEnabled: boolean;
+  private readonly contextBudget: Partial<ContextBudget> | undefined;
 
   constructor(private readonly options: AgentHostOptions) {
     this.model = options.model ?? new EchoChatModel();
+    this.compactionEnabled = options.compactionEnabled !== false;
+    this.contextBudget = options.contextBudget;
     this.customSystemPrompt = options.systemPrompt;
     this.maxSteps = options.maxSteps ?? 12;
     if (!Number.isInteger(this.maxSteps) || this.maxSteps < 1 || this.maxSteps > 100) throw new Error("maxSteps must be an integer between 1 and 100");
@@ -1075,6 +1082,7 @@ export class AgentHost {
     for (let step = 1; step <= this.maxSteps; step += 1) {
       if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
       this.appendSteers(messages, turnId);
+      await this.compactTurnContext(sessionId, turnId, messages);
       await this.options.store.append({ sessionId, turnId, type: "step/started", payload: { step } });
       const response = await this.collectModelResponse(sessionId, turnId, controller, messages);
       if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
@@ -1104,6 +1112,50 @@ export class AgentHost {
       await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "completed", toolCalls: response.toolCalls.length } });
     }
     throw new Error(`MAX_AGENT_STEPS_EXCEEDED: model did not produce a final response within ${this.maxSteps} steps`);
+  }
+
+  private async compactTurnContext(sessionId: SessionId, turnId: TurnId, messages: ChatMessage[]): Promise<void> {
+    if (!this.compactionEnabled) return;
+    const projection = await this.options.store.project(sessionId);
+    const protectedToolCallIds = new Set<string>([
+      ...(projection?.permissions.filter((permission) => permission.status === "pending").map((permission) => String(permission.toolCallId)) ?? []),
+      ...(projection?.interactions.filter((interaction) => interaction.status === "pending").map((interaction) => String(interaction.toolCallId)) ?? []),
+    ]);
+    try {
+      const result = compactMessages(messages, { ...(this.contextBudget === undefined ? {} : { budget: this.contextBudget }), protectedToolCallIds });
+      if (!result.didCompact) return;
+      messages.splice(0, messages.length, ...result.messages);
+      await this.options.store.append({
+        sessionId,
+        turnId,
+        type: "context/compacted",
+        payload: {
+          sourceSequence: projection?.lastSequence ?? 0,
+          summary: result.summary,
+          originalMessageCount: result.originalMessageCount,
+          compactedMessageCount: result.compactedMessageCount,
+          estimatedTokens: result.estimatedTokens,
+          droppedMessages: result.droppedMessages,
+          protectedMessageCount: result.protectedMessageCount,
+          truncatedToolResults: result.truncatedToolResults,
+        },
+      });
+    } catch (error) {
+      await this.options.store.append({
+        sessionId,
+        turnId,
+        type: "context/compaction_failed",
+        payload: {
+          sourceSequence: projection?.lastSequence ?? 0,
+          summary: "",
+          originalMessageCount: messages.length,
+          compactedMessageCount: messages.length,
+          estimatedTokens: 0,
+          droppedMessages: 0,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
   }
 
   private appendSteers(messages: ChatMessage[], turnId: TurnId): void {

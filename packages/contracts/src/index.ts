@@ -49,6 +49,8 @@ export type AgentEventType =
   | "goal/ended"
   | "plan/updated"
   | "todo/updated"
+  | "context/compacted"
+  | "context/compaction_failed"
   | "tool/call"
   | "tool/progress"
   | "tool/result"
@@ -313,6 +315,22 @@ export interface SessionProjection extends SessionSummary {
   readonly interactions: readonly InteractionProjection[];
   readonly toolCalls: readonly ToolCallProjection[];
   readonly permissions: readonly PermissionProjection[];
+  readonly contextCompaction?: ContextCompactionProjection;
+}
+
+export type ContextCompactionStatus = "completed" | "failed";
+
+export interface ContextCompactionProjection {
+  readonly status: ContextCompactionStatus;
+  readonly sourceSequence: number;
+  readonly summary: string;
+  readonly originalMessageCount: number;
+  readonly compactedMessageCount: number;
+  readonly estimatedTokens: number;
+  readonly droppedMessages: number;
+  readonly updatedAt: string;
+  readonly lastSequence: number;
+  readonly error?: string;
 }
 
 export type ToolRiskLevel = "read" | "write" | "execute" | "network";

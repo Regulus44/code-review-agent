@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@code-review-agent/contracts": "workspace:*"
+    "@code-review-agent/contracts": "workspace:*",
+    "@code-review-agent/compaction": "workspace:*"
   }
 }

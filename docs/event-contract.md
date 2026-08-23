@@ -93,6 +93,8 @@ mcp/prompt
 
 `goal/*` 记录 durable goal 的 title、successCriteria、status、budget/result/reason 和 last sequence。状态为 `active`、`paused`、`completed`、`blocked` 或 `cancelled`；`active`/`paused` 追加 `goal/updated`，终态追加 `goal/ended`。Host 的 Web command 以 goal `lastSequence` 执行 CAS，并使用 durable command idempotency；冲突不得追加事件。`get_goal` 只读取当前 session projection，`update_goal` 不允许凭空创建未知 goal。`job/*` 的完成状态和 bounded output 可以在 AgentHost 重启后由事件恢复；若原进程不再附着，恢复记录标记为 `orphaned`，不能继续 kill 或 send 一个虚构的进程。
 
+`context/compacted` 记录一次模型上下文压缩的 durable receipt：`sourceSequence`、bounded `summary`、原始/压缩后消息数、估算 token、丢弃数和受保护 tool 数。`context/compaction_failed` 记录失败原因并保留原上下文，不能因为压缩失败而丢弃 pending permission、pending interaction、running task 或 tool-call/tool-result 边界。Web 只展示 receipt，不把摘要当作新的用户事实。
+
 MCP 生命周期事件只携带 `serverName`、状态、动作和脱敏错误；env/header/token 等配置秘密不得进入 payload。MCP 工具调用本身仍使用公共 `tool/*` 和 `permission/*` 事件。`mcp/resource` / `mcp/prompt` 只记录 server、资源 URI 或 prompt name、动作、bounded bytes/truncated 和 trust marker，不记录远端原始内容。
 
 `turn/steered` 表示用户向当前运行中的 turn 追加一条指导。payload 至少包含 `{ content, receiptId, status: "accepted" }`，并通过 `correlationId` 关联幂等 command。该事件先落盘，再注入下一次模型请求；它不会覆盖原始 `user/message`，回放时作为同一 turn 下的独立 user message。非运行中的 turn 返回 `accepted: false`，不追加 steer 事件。

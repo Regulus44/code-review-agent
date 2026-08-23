@@ -47,6 +47,13 @@ Phase 7 的 DSH Web 调研与分步计划：
 - 当前状态仍为 `pending`，8.0.3 的 projection/presentation 与 Goal/Plan/Todo command 闭环已具备，但 Question batch 仍需 browser fixture，8.0.0–8.0.7 和 Phase 8 其余工作流尚未完成；
 - 定向 presenter、Runtime 20 项、API 25 项，Web 全量 93 项、`pnpm typecheck`、全量 `pnpm test`、`pnpm build:web`、`pnpm test:phase7:browser` 和 `git diff --check` 通过；browser gate 五场景、1,250 条 trajectory replay 继续通过。
 
+## Phase 8.1 Context Compaction（进行中）
+
+- 新增 `packages/compaction`：bounded token estimate、tool result microcompact、旧消息摘要、tool-call/tool-result 边界修复和 protected pending tool result；
+- `packages/runtime` 在每个模型 step 前按 context budget 压缩消息，成功追加 `context/compacted`，失败追加 `context/compaction_failed` 并继续使用原上下文；pending permission/interaction 对应 tool call 会进入 protected set；
+- `SessionProjection.contextCompaction` 和 Web `ContextMeter` 展示压缩状态、估算 token、丢弃消息数和失败原因；未配置 provider budget 时显示 `unknown`；
+- 当前状态仍为 `in_progress`，尚未完成长上下文 API/browser gate、reopen/recovery fixture、预算配置面板和 Phase 8.1 独立 checkpoint。
+
 ## Phase 7 Workspace lifecycle controls（当前 checkpoint）
 
 - `packages/contracts` / `docs/event-contract.md`：新增 `workspace/updated` 事件和 Workspace 生命周期元数据字段；

@@ -66,6 +66,28 @@ describe("AgentHost", () => {
     expect((await store.getCommand(session.id, "plan-command-2"))?.kind).toBe("update_plan");
   });
 
+  it("compacts long conversation context before the model request and records replay metadata", async () => {
+    const store = new InMemoryEventStore();
+    const requests: ModelRequest[] = [];
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        requests.push(request);
+        yield { type: "text_delta", text: "done" };
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store, model, contextBudget: { maxTokens: 120, recentMessageTokens: 40, maxSummaryChars: 300 } });
+    const session = await host.createSession("D:/compaction-fixture");
+    await store.append({ sessionId: session.id, type: "user/message", payload: { content: "old context " + "x".repeat(500) } });
+    await store.append({ sessionId: session.id, type: "assistant/message", payload: { content: "old answer " + "x".repeat(500) } });
+    const turn = await host.sendMessage(session.id, "current request");
+    await host.waitForTurn(turn);
+    const events = await host.events(session.id);
+    expect(events.some((event) => event.type === "context/compacted")).toBe(true);
+    expect((await host.getSession(session.id))?.contextCompaction).toMatchObject({ status: "completed", droppedMessages: expect.any(Number) });
+    expect(requests[0]?.messages.some((message) => message.content.includes("Compacted context"))).toBe(true);
+  });
+
   it("builds the prompt from the permission-filtered tool set and preserves custom instructions", async () => {
     const requests: ModelRequest[] = [];
     const store = new InMemoryEventStore();

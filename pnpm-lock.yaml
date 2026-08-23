@@ -53,9 +53,18 @@ importers:
 
   apps/web:
     dependencies:
+      '@code-review-agent/compaction':
+        specifier: workspace:*
+        version: link:../../packages/compaction
       '@code-review-agent/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+
+  packages/compaction:
+    dependencies:
+      '@code-review-agent/contracts':
+        specifier: workspace:*
+        version: link:../contracts
 
   packages/contracts: {}
 
@@ -82,6 +91,9 @@ importers:
 
   packages/runtime:
     dependencies:
+      '@code-review-agent/compaction':
+        specifier: workspace:*
+        version: link:../compaction
       '@code-review-agent/contracts':
         specifier: workspace:*
         version: link:../contracts

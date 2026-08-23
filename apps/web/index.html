@@ -529,7 +529,7 @@
               <button id="mode-trigger" class="toolbar-button model-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">◉ Mode · Loading…</button>
               <span class="toolbar-spacer"></span>
               <button id="model-trigger" class="toolbar-button model-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">Model · Loading…</button>
-              <span class="context-meter">Context · —</span>
+              <span id="context-meter" class="context-meter" title="Context budget and compaction status">Context · —</span>
               <button id="steer" class="toolbar-button steer-button" type="button" title="Send guidance to the running turn" hidden>↳ <span>Steer</span></button>
               <button id="send" class="send-button" type="submit" aria-label="Send message">↑</button>
             </div>
@@ -612,6 +612,7 @@
         const details = document.querySelector('#details-content');
         const goalBar = document.querySelector('#goal-bar');
         const planToggle = document.querySelector('#plan-toggle');
+        const contextMeter = document.querySelector('#context-meter');
          const renameTitle = document.querySelector('#rename-title');
          const renameDescription = document.querySelector('#rename-description');
          const renameLabel = document.querySelector('label[for="rename-input"]');
@@ -1067,6 +1068,13 @@
             goalBar.append(actions);
           }
         };
+        const renderContextMeter = (snapshot) => {
+          if (!contextMeter) return;
+          const intent = typedRuntime?.presentContextMeter ? typedRuntime.presentContextMeter(snapshot?.session || state.session, state.capabilities?.context?.maxTokens) : { label: 'Context · unknown', detail: 'Context presenter unavailable.', status: 'unknown' };
+          contextMeter.textContent = intent.label;
+          contextMeter.title = intent.detail;
+          contextMeter.dataset.status = intent.status;
+        };
         const renderSettings = () => {
           if (!settingsContent) return;
           settingsContent.innerHTML = '';
@@ -1345,6 +1353,7 @@
           steer.disabled = runningTurn === undefined || !input.value.trim();
           renderQueue(typedSnapshot || { session: state.session });
           renderGoalBar(typedSnapshot || { session: state.session });
+          renderContextMeter(typedSnapshot || { session: state.session });
           const typedProjection = typedSnapshot?.conversation;
           if (typedProjection && typedProjection.nodes.length > 0) {
             const typedBody = document.createElement('div');
