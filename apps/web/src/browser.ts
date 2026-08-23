@@ -16,6 +16,7 @@ import { presentConnection } from "./presentation/connection-presenter.js";
 import { buildNavigationModel, sessionLabel, sessionRelativeTime, workspaceKey, workspaceLabel } from "./presentation/navigation-presenter.js";
 import { createShellLayoutState, presentShellLayout, reduceShellLayout, shellViewport } from "./shell/layout.js";
 import { createShellBootState, normalizeBootError, presentShellBoot, reduceShellBoot } from "./shell/boot.js";
+import { createShellOverlayState, presentShellOverlay, reduceShellOverlay } from "./shell/overlay.js";
 
 export interface BrowserWebRuntime {
   readonly api: WebApiClient;
@@ -50,6 +51,9 @@ export interface BrowserWebRuntime {
   readonly reduceShellBoot: typeof reduceShellBoot;
   readonly presentShellBoot: typeof presentShellBoot;
   readonly normalizeBootError: typeof normalizeBootError;
+  readonly createShellOverlayState: typeof createShellOverlayState;
+  readonly reduceShellOverlay: typeof reduceShellOverlay;
+  readonly presentShellOverlay: typeof presentShellOverlay;
   readonly buildToolCallTree: typeof buildToolCallTree;
   readonly presentToolCall: typeof presentToolCall;
 }
@@ -90,6 +94,9 @@ const runtime: BrowserWebRuntime = {
   reduceShellBoot,
   presentShellBoot,
   normalizeBootError,
+  createShellOverlayState,
+  reduceShellOverlay,
+  presentShellOverlay,
   buildToolCallTree,
   presentToolCall,
 };

@@ -520,7 +520,7 @@
       (() => {
         const typedRuntime = window.CodeReviewAgentWeb;
         const typedConnection = typedRuntime?.connection || null;
-        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], models: null, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', details: 'open', mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
+        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], models: null, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', details: 'open', mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
         const app = document.querySelector('#app');
         const list = document.querySelector('#session-list');
         const mcpList = document.querySelector('#mcp-list');
@@ -557,8 +557,26 @@
          const connectionRetry = document.querySelector('#connection-retry');
          const workspaceDialog = workspaceModal.querySelector('.workspace-modal');
          const settingsDialog = settingsModal.querySelector('.workspace-modal');
-         const workspaceFocusTrap = typedRuntime?.createFocusTrap && workspaceDialog ? typedRuntime.createFocusTrap(workspaceDialog) : null;
-         const settingsFocusTrap = typedRuntime?.createFocusTrap && settingsDialog ? typedRuntime.createFocusTrap(settingsDialog) : null;
+        const workspaceFocusTrap = typedRuntime?.createFocusTrap && workspaceDialog ? typedRuntime.createFocusTrap(workspaceDialog) : null;
+        const settingsFocusTrap = typedRuntime?.createFocusTrap && settingsDialog ? typedRuntime.createFocusTrap(settingsDialog) : null;
+        const applyOverlay = () => {
+          const intent = typedRuntime?.presentShellOverlay ? typedRuntime.presentShellOverlay(state.overlay) : { workspaceOpen: state.overlay.open === 'workspace', settingsOpen: state.overlay.open === 'settings', sessionMenuOpen: state.overlay.open === 'session-menu', modelPopoverOpen: state.overlay.open === 'model-popover', modePopoverOpen: state.overlay.open === 'mode-popover' };
+          workspaceModal.hidden = !intent.workspaceOpen;
+          settingsModal.hidden = !intent.settingsOpen;
+          sessionMenu.hidden = !intent.sessionMenuOpen;
+          modelPopover.hidden = !intent.modelPopoverOpen;
+          modePopover.hidden = !intent.modePopoverOpen;
+          modelTrigger.setAttribute('aria-expanded', String(intent.modelPopoverOpen));
+          modeTrigger.setAttribute('aria-expanded', String(intent.modePopoverOpen));
+        };
+        const dispatchOverlay = (action) => {
+          if (typedRuntime?.reduceShellOverlay) state.overlay = typedRuntime.reduceShellOverlay(state.overlay, action);
+          else if (action.type === 'escape' || action.type === 'close' && action.overlay === undefined) state.overlay = { open: null };
+          else if (action.type === 'open') state.overlay = { open: action.overlay };
+          else if (action.type === 'toggle') state.overlay = { open: state.overlay.open === action.overlay ? null : action.overlay };
+          else if (action.type === 'close' && state.overlay.open === action.overlay) state.overlay = { open: null };
+          applyOverlay();
+        };
         const isNearConversationTail = () => conversation.scrollHeight === 0 || conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight <= 64;
         conversation.addEventListener('scroll', () => { state.trajectoryFollow = isNearConversationTail(); }, { passive: true });
         const api = async (url, options) => { const response = await fetch(url, options); if (!response.ok) throw new Error(await response.text()); return response.json(); };
@@ -1165,16 +1183,16 @@
           requestAnimationFrame(() => { if (shouldFollowTail) conversation.scrollTop = conversation.scrollHeight; });
         };
         const renderWorkspaceRecent = () => { workspaceRecent.innerHTML = ''; const roots = [...new Set(state.recentWorkspaces.filter(Boolean))].slice(0, 6); if (!roots.length) return; const label = document.createElement('div'); label.className = 'workspace-recent-label'; label.textContent = 'Recent workspaces'; workspaceRecent.append(label); roots.forEach((root) => { const button = document.createElement('button'); button.type = 'button'; button.className = 'workspace-recent-button'; button.textContent = root; button.onclick = () => { workspaceInput.value = root; workspaceError.textContent = ''; workspaceInput.focus(); }; workspaceRecent.append(button); }); };
-        const openWorkspacePicker = () => { workspaceError.textContent = ''; workspaceInput.value = state.session?.workspaceRoot || ''; permissionPreset.value = currentMode(); renderWorkspaceRecent(); workspaceModal.hidden = false; workspaceFocusTrap?.activate(); workspaceInput.focus(); workspaceInput.select(); };
-        const closeWorkspacePicker = () => { workspaceFocusTrap?.deactivate(); workspaceModal.hidden = true; workspaceError.textContent = ''; };
-        const openSettings = () => { renderSettings(); settingsModal.hidden = false; settingsFocusTrap?.activate(); settingsClose?.focus(); };
-        const closeSettings = () => { settingsFocusTrap?.deactivate(); settingsModal.hidden = true; };
+        const openWorkspacePicker = () => { workspaceError.textContent = ''; workspaceInput.value = state.session?.workspaceRoot || ''; permissionPreset.value = currentMode(); renderWorkspaceRecent(); dispatchOverlay({ type: 'open', overlay: 'workspace' }); workspaceFocusTrap?.activate(); workspaceInput.focus(); workspaceInput.select(); };
+        const closeWorkspacePicker = () => { workspaceFocusTrap?.deactivate(); dispatchOverlay({ type: 'close', overlay: 'workspace' }); workspaceError.textContent = ''; };
+        const openSettings = () => { renderSettings(); dispatchOverlay({ type: 'open', overlay: 'settings' }); settingsFocusTrap?.activate(); settingsClose?.focus(); };
+        const closeSettings = () => { settingsFocusTrap?.deactivate(); dispatchOverlay({ type: 'close', overlay: 'settings' }); };
         const showSessions = (payload) => { const sessions = Array.isArray(payload) ? payload : payload.sessions || []; const visible = sessions.filter((session) => Boolean(session.archived) === state.showArchived); state.sidebarSessions = visible; state.recentWorkspaces = sessions.map((session) => session.workspaceRoot); list.innerHTML = ''; if (!visible.length) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = state.showArchived ? 'No archived sessions.' : 'No active sessions.'; list.append(empty); return; } for (const session of visible) { const row = document.createElement('div'); row.className = 'session-row'; const button = document.createElement('button'); button.className = `session ${state.session?.id === session.id ? 'active' : ''}`; button.type = 'button'; const name = session.title || session.workspaceRoot?.split(/[\/]/).filter(Boolean).pop() || 'New session'; button.innerHTML = `<span class="session-dot"></span><span class="session-copy"><span class="session-name">${esc(name)}</span><span class="session-path">${esc(session.workspaceRoot || '.')}</span></span>`; button.onclick = () => openSession(session.id); const archive = document.createElement('button'); archive.className = 'session-archive'; archive.type = 'button'; archive.title = session.archived ? 'Restore session' : 'Archive session'; archive.setAttribute('aria-label', session.archived ? 'Restore session' : 'Archive session'); archive.textContent = session.archived ? '↩' : '▱'; archive.onclick = async (event) => { event.stopPropagation(); archive.disabled = true; try { await api(`/v1/sessions/${encodeURIComponent(session.id)}/archive`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ archived: !session.archived }) }); await refreshSessionList(); if (state.session?.id === session.id) { state.session.archived = !session.archived; render(); } } catch (error) { setStatus(error.message, false); archive.disabled = false; } }; row.append(button, archive); list.append(row); } };
         const workspaceLabel = (root) => { const value = String(root || '.').replace(/[\\/]+$/, ''); const segments = value.split(/[\\/]/).filter(Boolean); return segments[segments.length - 1] || value || 'Workspace'; };
         const workspaceKey = (root) => { const value = String(root || '.').replace(/\\/g, '/').replace(/\/+$/, '') || '.'; return /^[A-Za-z]:\//.test(value) ? value.toLowerCase() : value; };
         const sessionLabel = (session) => session.title || `Session · ${String(session.id || '').slice(-6)}`;
         const sessionTime = (timestamp) => { if (!timestamp) return ''; const diff = Math.max(0, Date.now() - Date.parse(timestamp)); if (diff < 60_000) return 'now'; if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`; if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`; return `${Math.floor(diff / 86_400_000)}d`; };
-        const closeSessionMenu = () => { sessionMenu.hidden = true; sessionMenu.innerHTML = ''; };
+        const closeSessionMenu = () => { dispatchOverlay({ type: 'close', overlay: 'session-menu' }); sessionMenu.innerHTML = ''; };
         const performSessionArchive = async (session) => {
           const endpoint = session.archived ? 'restore' : 'archive';
           const options = { method: 'POST', headers: { 'content-type': 'application/json' }, ...(endpoint === 'archive' ? { body: JSON.stringify({ archived: true }) } : {}) };
@@ -1199,7 +1217,7 @@
           const addAction = (label, icon, handler, danger = false) => { const button = document.createElement('button'); button.type = 'button'; button.className = danger ? 'danger' : ''; button.innerHTML = `<span>${icon}</span><span>${label}</span>`; button.onclick = async () => { button.disabled = true; try { await handler(); } catch (error) { setStatus(error.message, false); button.disabled = false; } }; sessionMenu.append(button); };
           addAction(session.archived ? 'Restore session' : 'Archive session', session.archived ? '↩' : '▱', () => performSessionArchive(session));
           addAction('Delete session', '⌫', () => deleteSession(session), true);
-          const rect = anchor.getBoundingClientRect(); sessionMenu.style.left = `${Math.max(8, Math.min(window.innerWidth - 176, rect.right - 164))}px`; sessionMenu.style.top = `${Math.min(window.innerHeight - 110, rect.bottom + 4)}px`; sessionMenu.hidden = false;
+          const rect = anchor.getBoundingClientRect(); sessionMenu.style.left = `${Math.max(8, Math.min(window.innerWidth - 176, rect.right - 164))}px`; sessionMenu.style.top = `${Math.min(window.innerHeight - 110, rect.bottom + 4)}px`; dispatchOverlay({ type: 'open', overlay: 'session-menu' });
         };
         const showSessionsTree = (payload) => {
           const sessions = Array.isArray(payload) ? payload : payload.sessions || [];
@@ -1359,7 +1377,7 @@
         settingsClose.onclick = () => closeSettings();
         settingsDismiss.onclick = () => closeSettings();
         settingsModal.addEventListener('click', (event) => { if (event.target === settingsModal) closeSettings(); });
-        document.addEventListener('keydown', (event) => { if (event.key !== 'Escape') return; if (!settingsModal.hidden) closeSettings(); else if (!workspaceModal.hidden) closeWorkspacePicker(); });
+        document.addEventListener('keydown', (event) => { if (event.key !== 'Escape') return; if (!settingsModal.hidden) closeSettings(); else if (!workspaceModal.hidden) closeWorkspacePicker(); else if (!sessionMenu.hidden) closeSessionMenu(); else if (!modelPopover.hidden) dispatchOverlay({ type: 'close', overlay: 'model-popover' }); else if (!modePopover.hidden) dispatchOverlay({ type: 'close', overlay: 'mode-popover' }); else dispatchOverlay({ type: 'escape' }); });
         archiveToggle.onclick = async () => { state.showArchived = !state.showArchived; try { await refreshSessionList(); } catch (error) { setStatus(error.message, false); } };
         sessionSearch.addEventListener('input', () => { state.sessionSearch = sessionSearch.value; showSessionsTree({ sessions: state.sidebarSessions }); });
         document.querySelector('#session-path').onclick = () => openWorkspacePicker();
@@ -1368,13 +1386,14 @@
         workspaceModal.addEventListener('click', (event) => { if (event.target === workspaceModal) closeWorkspacePicker(); });
         workspaceForm.addEventListener('submit', async (event) => { event.preventDefault(); const workspaceRoot = workspaceInput.value.trim(); if (!workspaceRoot) { workspaceError.textContent = 'Enter a local folder path.'; return; } workspaceCreate.disabled = true; workspaceError.textContent = ''; try { await createSession(workspaceRoot); closeWorkspacePicker(); } catch (error) { workspaceError.textContent = error.message; } finally { workspaceCreate.disabled = false; } });
         mobileMenu.onclick = () => { const viewport = typedRuntime?.shellViewport ? typedRuntime.shellViewport(window.innerWidth) : window.innerWidth <= 900 ? 'tablet' : 'desktop'; dispatchShellLayout({ type: viewport === 'desktop' ? 'toggle-sidebar' : state.layout.mobileSidebarOpen ? 'close-mobile-sidebar' : 'open-mobile-sidebar' }); };
-        modelTrigger.onclick = () => { modelPopover.hidden = !modelPopover.hidden; modelTrigger.setAttribute('aria-expanded', String(!modelPopover.hidden)); };
-        modeTrigger.onclick = () => { modePopover.hidden = !modePopover.hidden; modeTrigger.setAttribute('aria-expanded', String(!modePopover.hidden)); renderModes(); };
-        document.addEventListener('click', (event) => { if (!modelPopover.hidden && !modelPopover.contains(event.target) && event.target !== modelTrigger) { modelPopover.hidden = true; modelTrigger.setAttribute('aria-expanded', 'false'); } if (!modePopover.hidden && !modePopover.contains(event.target) && event.target !== modeTrigger) { modePopover.hidden = true; modeTrigger.setAttribute('aria-expanded', 'false'); } if (!sessionMenu.hidden && !sessionMenu.contains(event.target)) closeSessionMenu(); });
+        modelTrigger.onclick = () => { dispatchOverlay({ type: 'toggle', overlay: 'model-popover' }); };
+        modeTrigger.onclick = () => { dispatchOverlay({ type: 'toggle', overlay: 'mode-popover' }); renderModes(); };
+        document.addEventListener('click', (event) => { if (!modelPopover.hidden && !modelPopover.contains(event.target) && event.target !== modelTrigger) dispatchOverlay({ type: 'close', overlay: 'model-popover' }); if (!modePopover.hidden && !modePopover.contains(event.target) && event.target !== modeTrigger) dispatchOverlay({ type: 'close', overlay: 'mode-popover' }); if (!sessionMenu.hidden && !sessionMenu.contains(event.target)) closeSessionMenu(); });
         input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 220)}px`; });
         input.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); document.querySelector('#composer').requestSubmit(); } });
         document.querySelector('#composer').addEventListener('submit', async (event) => { event.preventDefault(); const content = input.value.trim(); if (!content || !state.session) return; send.disabled = true; input.value = ''; input.style.height = 'auto'; try { await api(`/v1/sessions/${encodeURIComponent(state.session.id)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content }) }); } catch (error) { setStatus(error.message, false); } finally { send.disabled = false; input.focus(); } });
         applyShellLayout();
+        applyOverlay();
         renderBootBoundary();
         void startBoot();
       })();

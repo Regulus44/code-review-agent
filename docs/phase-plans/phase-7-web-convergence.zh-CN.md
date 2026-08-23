@@ -1,6 +1,6 @@
 # Phase 7：DSH Web 前端收敛与可观测工作台
 
-状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection、7.1 shell layout state/reducer 和 mobile sidebar 行为已完成；物理 Shell 拆分、Workspace/Session 生命周期 API、7.6 queue/steer/attachment 深化、长任务 terminal/job 失败诊断和窄屏视觉基线继续推进）
+状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection、7.1 shell layout state/reducer、mobile sidebar 行为和 typed overlay state/reducer 已完成；物理 Shell 拆分、Workspace/Session 生命周期 API、7.6 queue/steer/attachment 深化、长任务 terminal/job 失败诊断和窄屏视觉基线继续推进）
 
 ## 当前执行 checkpoint：typed Web client 与 Session replay foundation
 
@@ -143,6 +143,17 @@
 - boot retry 重新走既有 `/v1/sessions`、tools、models、MCP 和 Session/SSE 入口，不写入 EventStore，也不创建第二套连接事实状态。
 
 验证：`pnpm typecheck`、Web 60 项测试、`pnpm --filter @code-review-agent/web run build:browser` 和 `git diff --check` 通过。该切片只改变 Web Shell state boundary，不改变 Event、Tool、Task、Permission 或 Workspace contract；可通过移除 boot bridge 恢复原有静态启动 fallback。
+
+## 当前执行 checkpoint：Typed overlay state（2026-08-23）
+
+本 checkpoint 把 Shell 的 modal/popover 生命周期从多个 inline `hidden` 布尔值收敛为单一 typed overlay state：
+
+- `apps/web/src/shell/overlay.ts` 定义 Workspace、Settings、Session menu、Model popover、Mode popover 的互斥状态、reducer 和 render intent；
+- `apps/web/src/shell/overlay.test.ts` 覆盖互斥打开、toggle、指定关闭和 Escape；
+- `apps/web/src/browser.ts` 暴露 overlay bridge；`apps/web/index.html` 的打开/关闭、outside click、Escape 和 aria-expanded 全部经过 reducer/presenter，DOM 只呈现结果；
+- focus trap 仍由 modal 自身管理，overlay state 只负责生命周期，不进入 EventStore。
+
+验证：`pnpm typecheck`、Web 62 项测试、`pnpm test:phase7:browser`（五场景通过，trajectory full replay 18.53ms）和 browser bundle 通过。该切片只增加 Web 内部 UI state boundary，可回滚为原有逐元素 `hidden` 操作。
 
 ## 1. 目标与边界
 

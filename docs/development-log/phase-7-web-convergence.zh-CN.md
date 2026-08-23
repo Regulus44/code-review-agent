@@ -761,6 +761,40 @@ git diff --check                                    ✓
 
 下一切片：继续物理拆分 Conversation、Details 和 Overlay，随后补 Workspace/Session rename/reorder 等真实生命周期 API、queue/steer/attachment、长任务 terminal/job 失败诊断和窄屏视觉基线。
 
+## 2026-08-23：Typed overlay state
+
+### 目标与 DSH 对照
+
+- 对照 DSH `ui-primitives`、Settings/Workspace modal 和 popover 的生命周期行为，把 Shell 的 overlay 打开/关闭路径收敛为单一 typed state；
+- modal、session menu、model/mode popover 互斥，outside click、Escape 和 `aria-expanded` 由同一 reducer 驱动。
+
+### 变更范围
+
+- `apps/web/src/shell/overlay.ts`：新增 `ShellOverlayState`、action reducer 和 `ShellOverlayRenderIntent`；
+- `apps/web/src/shell/overlay.test.ts`：覆盖 modal/popover 互斥、toggle、指定关闭和 Escape；
+- `apps/web/src/browser.ts`：暴露 overlay bridge；
+- `apps/web/index.html`：Workspace/Settings/Session menu/Model/Mode 的打开、关闭、outside click、Escape 和 aria-expanded 全部消费 typed overlay presenter；focus trap 继续只负责 dialog 内焦点。
+
+### 根治理七问
+
+1. **Phase**：Phase 7.1 Web Shell overlay boundary。
+2. **问题类型**：UI state boundary、modal/popover lifecycle 和可访问性交互。
+3. **契约影响**：只增加 Web 内部 state/render intent；不改变 Event、Tool、Task、Permission 或 Workspace contract。
+4. **参考入口**：DSH `ui-primitives`、`ui-settings*`、Workspace picker；实现继续使用本项目 typed bridge 和现有 focus trap。
+5. **上游来源**：只做行为参考，没有复制代码或资产。
+6. **验收场景**：Workspace/Settings/modal 互斥、popover outside click、Escape 关闭、aria-expanded 与 hidden 同步、browser/replay gate 无回归。
+7. **回滚**：移除 overlay bridge，恢复各 DOM 节点直接 `hidden` 切换；不影响 API、SessionStore、EventStore 或连接恢复。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/web test -- --run  ✓（62 tests）
+pnpm --filter @code-review-agent/web run build:browser ✓
+pnpm test:phase7:browser                            ✓（五场景；trajectory full replay 18.53ms）
+git diff --check                                    ✓
+```
+
 ## 2026-08-23：统一 Phase 7.10 browser/replay gate
 
 ### 目标
