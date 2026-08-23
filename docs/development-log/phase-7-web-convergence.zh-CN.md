@@ -582,3 +582,50 @@ git diff --check                                    ✓
 - 将三个 Coding fixture 与 Delegation、Inspection 汇总为单一可重复的 Phase 7.10 browser gate；
 - 补 Test/Recovery 的长任务 terminal/job output、失败诊断，以及 1,000+ Trajectory 多页性能测量；
 - 继续 Shell 拆分、Workspace/Session 导航和 Settings/Deliverables/accessibility 收敛。
+
+## 2026-08-23：Settings 与 capability surface
+
+### 目标与 DSH 对照
+
+- 对照 DSH `ui-settings*`、`ui-model-selection`、`ui-permission-presets` 和 MCP roster 的 host-backed details，把已有静态 `Workspace settings` 入口接入真实 projection；
+- 让用户可以在一个可访问对话框中检查 workspace、session 状态、permission mode、model、tool risk、MCP health 和 capability availability；
+- 保持 EventStore 为事实来源：Settings 只读 Session/Model/Tool/MCP projection，A2A 继续 `deferred`，不把 UI 状态或外部协议字段写入 Runtime。
+
+### 变更范围
+
+- `apps/web/src/presentation/settings-presenter.ts`：新增 bounded `SettingsRenderIntent`，汇总 workspace/status、permission 描述、model catalog、tool source/risk 计数、MCP connected/attention 计数和 Coding tools/MCP/Internal subagents/A2A capability 状态；
+- `apps/web/src/presentation/settings-presenter.test.ts`：覆盖完整 host catalog、MCP attention、风险统计和可选数据缺失时的安全默认值；
+- `apps/web/src/browser.ts`：暴露 `presentSettings` 给静态 Web bridge；
+- `apps/web/index.html`：新增 `Workspace settings` dialog，使用 textContent 渲染 General、Permission、Model、Tool catalog、MCP 和 Capabilities 分区，支持 Close、backdrop 和 Escape；
+- 没有新增 API、Event、Tool、Task、Permission 或 Workspace contract；没有复制 DSH/Claude Code 代码或资产。
+
+### 根治理七问
+
+1. **Phase**：Phase 7.9 Settings/capability surface。
+2. **问题类型**：Web UI、render intent、可访问交互和能力声明。
+3. **契约影响**：只消费已有 Session、Model、Tool、MCP projection；无生产事实 contract 变化。
+4. **参考入口**：DSH `ui-settings*`、`ui-model-selection`、`ui-permission-presets`、MCP roster；Claude Code 仅作 model/permission 行为参考。
+5. **上游来源**：行为参考，不复制代码；无需新增许可证登记。
+6. **验收场景**：Test/Recovery 页面打开 Settings，检查 interrupted/recovered 状态、Ask on execute、tool/MCP 统计、A2A deferred，并用 Close/Escape 关闭。
+7. **回滚**：移除 dialog 和 presenter，保留原 details panel；不影响 Runtime、EventStore、MCP、内部 Subagent 或 A2A deferred 状态。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/web test -- --run  ✓（41 tests）
+pnpm -F @code-review-agent/web run build:browser    ✓
+git diff --check                                    ✓
+```
+
+真实 browser smoke：
+
+- Settings dialog 显示 workspace、`interrupted` session、`Ask on execute`、model/configuration、34 个 host-approved tools、MCP 统计和内部 Subagent `available`；
+- A2A capability 显示 `deferred`，文案说明需要明确外部 Agent 互操作需求后再启用；
+- 对话框级 Escape 和 Close 按钮都能关闭设置层，Test/Recovery 的 `Recovered request`、pending approval 和 Trajectory 状态没有被 UI 操作改写。
+
+### 下一步
+
+- 补 Deliverables/Produced Files presenter 和 workspace-scoped path/open/download action；
+- 为 Settings 增加 loading/error/empty、窄屏和 keyboard focus restore smoke；
+- 将 Read-only、Edit、Test/Recovery、Delegation、Inspection 与 Settings/Deliverables 汇总为统一 Phase 7.10 browser gate。

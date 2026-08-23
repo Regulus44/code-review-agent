@@ -1,6 +1,6 @@
 # Phase 7：DSH Web 前端收敛与可观测工作台
 
-状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.10 Read-only/Edit/Test-Recovery Coding fixture 已完成；7.1 Shell 拆分、7.3 导航收敛、7.6 queue/steer/attachment 深化、7.9 capability surface、统一五场景 browser gate、性能基线继续推进）
+状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/model/permission/capability surface、7.10 Read-only/Edit/Test-Recovery Coding fixture 已完成；7.1 Shell 拆分、7.3 导航收敛、7.6 queue/steer/attachment 深化、Deliverables、统一五场景 browser gate、性能基线继续推进）
 
 ## 当前执行 checkpoint：typed Web client 与 Session replay foundation
 
@@ -71,6 +71,17 @@
 - fixture 的权限 preset、workspaceRoot、tool call、turn 和 approval 都走既有 contract；没有新增未经后端事件支持的 UI 状态，也没有把 A2A 作为内部 Multi-Agent transport。
 
 验证：`pnpm typecheck`、`pnpm test`、API 19 项测试、Web 39 项测试、Storage 10 项测试、browser bundle 和 `git diff --check` 通过。真实 browser smoke 已验证：Read-only assistant summary 与 completed trajectory；Edit 批准后的 unified diff 和 completed turn；Test/Recovery 重启后的 `Recovered request`、批准后 `run_tests` completed、trajectory 从 interrupted 收敛为 completed；browser console 无 warning/error。
+
+## 当前执行 checkpoint：Settings 与 capability surface（2026-08-23）
+
+本 checkpoint 对照 DSH `ui-settings*`、`ui-model-selection`、`ui-permission-presets` 和 MCP roster 的 host-backed details 行为，把 Settings 从静态入口收敛为可验证的 Web surface：
+
+- `apps/web/src/presentation/settings-presenter.ts` 将既有 Session、Model、Tool 和 MCP projection 转为 bounded Settings render intent，包含 workspace/status、permission mode、model catalog、tool risk mix、MCP attention 和 capability list；
+- `apps/web/src/presentation/settings-presenter.test.ts` 覆盖完整 catalog 与缺失 host 数据的安全默认值，Web 测试增至 41 项；
+- `apps/web/src/browser.ts` 暴露 typed `presentSettings`，`apps/web/index.html` 增加可访问 Settings dialog，支持 General/Permission/Model/Tool catalog/MCP/Capabilities 分区；
+- capability 状态由既有 catalog/Session 数据计算，内部 Subagent 标记为 available，A2A 明确标记为 `deferred`；secret 仍由 host 持有，UI 不写入 EventStore，也不伪造 A2A 能力。
+
+验证：`pnpm typecheck`、Web 41 项定向测试、browser bundle 和 `git diff --check` 通过。真实 browser smoke 已验证 Settings dialog 展示 workspace、interrupted session、Ask on execute、tool/MCP 统计和 A2A `deferred`；点击 Close 与对话框级 Escape 均可关闭，Test/Recovery 的 `Recovered request` 页面状态保持不变。
 
 ## 1. 目标与边界
 
