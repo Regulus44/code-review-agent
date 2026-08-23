@@ -1,6 +1,6 @@
 # Phase 7：DSH Web 前端收敛与可观测工作台
 
-状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线已完成；7.1 Shell 拆分、7.3 导航收敛、7.6 queue/steer/attachment 深化、长任务 terminal/job 失败诊断和窄屏视觉基线继续推进）
+状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection 已完成；物理 Shell 拆分、Workspace/Session 生命周期 API、7.6 queue/steer/attachment 深化、长任务 terminal/job 失败诊断和窄屏视觉基线继续推进）
 
 ## 当前执行 checkpoint：typed Web client 与 Session replay foundation
 
@@ -96,6 +96,8 @@
 验证：`pnpm typecheck`、`pnpm --filter @code-review-agent/api test -- --run src/server.test.ts`（18 tests）、`pnpm --filter @code-review-agent/web test -- --run`（43 tests）、`pnpm -F @code-review-agent/web run build:browser` 和 `git diff --check` 通过。真实 browser smoke 已验证 completed parent 的三类 artifact、external/unsafe action 禁用、child Session artifact 隔离和空 Session 空态；console 无 warning/error。
 
 已新增 `scripts/phase7-browser-gate.mjs` 与 `pnpm test:phase7:browser`：统一启动 coding/delegation/trajectory fixtures，校验五场景 API/replay、静态 Web bridge、权限批准、SQLite 重启恢复、重复批准不重复执行、parent/child scope、artifact inline/download/block、1,250 条 trajectory 与 older page。最近一次输出：五场景通过，总耗时 2.66s，trajectory latest/older/full replay 分别为 2.59/1.41/8.60ms；该 gate 作为 Phase 7.10 的可回滚验收入口。
+
+`apps/web/src/presentation/navigation-presenter.ts` 与 `navigation-presenter.test.ts` 已完成 7.1/7.3 的第一块可测试边界：Workspace→Session grouping、Windows path normalization、archived/deleted filter、search 保留匹配 child 的 ancestor、active workspace、recent roots、relative time 和 empty state。静态 Shell 在 typed bridge 可用时使用该 projection 渲染嵌套 parent/child tree，bridge 缺失时回退旧 renderer。
 
 ## 当前执行 checkpoint：Workspace-scoped artifact API（2026-08-23）
 

@@ -770,6 +770,53 @@ git diff --check                                  ✓
 - 推进 Shell 拆分、Workspace/Session 导航和窄屏视觉基线；
 - 保持 gate 作为每个后续 Phase 7 Web 切片的回归入口。
 
+## 2026-08-23：Typed Workspace→Session navigation projection
+
+### 目标
+
+对照 DSH `ui-workspace`、`ui-sidebar` 和 Session identity boundary，把现有静态导航中的分组、搜索、归档过滤和 parent/child lineage 从 inline DOM 逻辑抽出为可测试的 typed render intent。
+
+### 变更范围
+
+- `apps/web/src/presentation/navigation-presenter.ts`：新增 Workspace→Session projection，统一 Windows/Unix workspace key、workspace label、session label、relative time、archived/deleted filter、search、recent roots、active workspace 和 explicit empty state；
+- `apps/web/src/presentation/navigation-presenter.test.ts`：覆盖路径大小写/尾斜杠归一化、稳定排序、parent/child tree、child search ancestor 保留、archived/deleted 和 empty state；
+- `apps/web/src/browser.ts`：typed browser bridge 暴露 navigation presenter；
+- `apps/web/index.html`：typed bridge 可用时消费导航 projection，渲染嵌套 child Session、active workspace 展开和 600px 窄屏 sidebar fallback；旧 DOM renderer 继续保留为 bundle 缺失时的回滚路径。
+
+### 根治理七问
+
+1. **Phase**：Phase 7.1/7.3 Web Shell 与 Workspace/Session navigation。
+2. **问题类型**：UI projection、导航 identity、可测试 Shell 边界和窄屏呈现。
+3. **契约影响**：只消费现有 `SessionSummary`；不改变 Event、Tool、Task、Permission 或 Workspace contract。
+4. **参考入口**：DSH `ui-workspace`、`ui-sidebar`、Session identity boundary；实现继续使用本项目 API/SessionStore。
+5. **上游来源**：只做行为参考，没有复制上游代码或资产。
+6. **验收场景**：多 workspace 分组、搜索、归档过滤、父子 Session 展开、刷新/切换后 active identity、窄屏 sidebar 入口和 console 无错误。
+7. **回滚**：typed navigation bridge 缺失时自动使用旧 inline renderer；删除 presenter 不影响 AgentHost/EventStore。
+
+### 验证
+
+```text
+pnpm typecheck                                   ✓
+pnpm --filter @code-review-agent/web test -- --run ✓（54 tests）
+pnpm --filter @code-review-agent/web run build:browser ✓
+pnpm test:phase7:browser                         ✓（五场景，总耗时 2.18s）
+pnpm test                                        ✓
+git diff --check                                  ✓
+```
+
+真实浏览器 smoke：
+
+- 默认 viewport 显示 Workspace 分组、Session summary、MCP/Child agents 区域；
+- Search 输入 `coding-agent-test` 后只保留匹配 workspace；
+- 600×800 viewport 显示 `Open sidebar`，details/sidebar 按窄屏规则隐藏；
+- browser console warn/error 为空。
+
+### 下一步
+
+- 继续把物理 Shell 拆成 boot/layout/overlay 边界；
+- 补 Workspace/Session rename/reorder 等真实生命周期 API 与错误/空态；
+- 扩展 queue/steer/attachment、长任务 terminal/job 失败诊断和窄屏视觉基线。
+
 ## 2026-08-23：Modal keyboard/focus semantics
 
 ### 目标与 DSH 对照

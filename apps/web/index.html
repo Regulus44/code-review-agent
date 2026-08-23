@@ -101,6 +101,7 @@
       .workspace-menu-trigger:hover { color: var(--text); background: var(--surface-active); }
       .workspace-sessions { display: grid; gap: 2px; padding-left: 19px; }
       .workspace-group.collapsed .workspace-sessions { display: none; }
+      .workspace-children { display: grid; gap: 2px; padding-left: 14px; border-left: 1px solid var(--border); }
       .tree-session { position: relative; display: flex; align-items: center; gap: 4px; min-width: 0; }
       .tree-session::before { content: ""; position: absolute; left: -11px; top: -4px; bottom: -4px; width: 1px; background: var(--border); }
       .tree-session > .session { min-width: 0; flex: 1; min-height: 36px; padding-left: 8px; }
@@ -1151,6 +1152,50 @@
         };
         const showSessionsTree = (payload) => {
           const sessions = Array.isArray(payload) ? payload : payload.sessions || [];
+          const navigation = typedRuntime?.buildNavigationModel?.(sessions, { showArchived: state.showArchived, query: state.sessionSearch, activeSessionId: state.session?.id });
+          if (navigation) {
+            state.sidebarSessions = navigation.allSessions;
+            state.recentWorkspaces = [...navigation.recentWorkspaces];
+            list.innerHTML = '';
+            if (!navigation.groups.length) {
+              const empty = document.createElement('div'); empty.className = 'tree-empty';
+              empty.textContent = navigation.emptyState === 'search' ? 'No sessions match this search.' : navigation.emptyState === 'archived' ? 'No archived sessions.' : 'No active sessions. Create a session to start coding.';
+              list.append(empty); return;
+            }
+            const containsActive = (node) => node.id === state.session?.id || node.children.some(containsActive);
+            if (navigation.activeWorkspaceKey) state.expandedWorkspaces.add(navigation.activeWorkspaceKey);
+            const appendNavigationNode = (parent, node) => {
+              const row = document.createElement('div'); row.className = 'tree-session';
+              const button = document.createElement('button'); button.type = 'button'; button.className = `session ${state.session?.id === node.id ? 'active' : ''}`; button.title = node.workspaceRoot || '.';
+              const statusDot = document.createElement('span'); statusDot.className = `session-status-dot ${node.status || ''}`;
+              const copy = document.createElement('span'); copy.className = 'session-copy';
+              const name = document.createElement('span'); name.className = 'session-name'; name.textContent = typedRuntime.sessionLabel(node);
+              const meta = document.createElement('span'); meta.className = 'session-path'; meta.textContent = `${typedRuntime.sessionRelativeTime(node.updatedAt) || 'new'} · ${node.permissionPreset || 'ask-on-write'}${node.childMode ? ` · ${node.childMode}` : ''}`;
+              copy.append(name, meta); button.append(statusDot, copy); button.onclick = () => openSession(node.id);
+              const actions = document.createElement('span'); actions.className = 'tree-session-actions';
+              const menuButton = document.createElement('button'); menuButton.type = 'button'; menuButton.className = 'tree-action'; menuButton.textContent = '⋯'; menuButton.title = 'Session actions'; menuButton.onclick = (event) => { event.stopPropagation(); openSessionMenu(node, menuButton); };
+              actions.append(menuButton); row.append(button, actions); parent.append(row);
+              if (node.children.length) { const nested = document.createElement('div'); nested.className = 'workspace-children'; for (const child of node.children) appendNavigationNode(nested, child); parent.append(nested); }
+            };
+            for (const group of navigation.groups) {
+              if (group.sessions.some(containsActive)) state.expandedWorkspaces.add(group.key);
+              const section = document.createElement('section'); section.className = `workspace-group ${state.expandedWorkspaces.has(group.key) ? '' : 'collapsed'}`;
+              const header = document.createElement('div'); header.className = 'workspace-group-header'; header.setAttribute('role', 'button'); header.tabIndex = 0;
+              const caret = document.createElement('span'); caret.className = 'workspace-caret'; caret.textContent = '⌄';
+              const folder = document.createElement('span'); folder.className = 'workspace-folder'; folder.textContent = '⌂';
+              const copy = document.createElement('span'); copy.className = 'workspace-group-copy';
+              const groupName = document.createElement('span'); groupName.className = 'workspace-group-name'; groupName.textContent = typedRuntime.workspaceLabel(group.root);
+              const groupPath = document.createElement('span'); groupPath.className = 'workspace-group-path'; groupPath.textContent = group.root;
+              copy.append(groupName, groupPath);
+              const count = document.createElement('span'); count.className = 'workspace-count'; count.textContent = String(group.sessions.reduce((total, node) => total + 1 + node.children.length, 0));
+              const workspaceMenu = document.createElement('button'); workspaceMenu.type = 'button'; workspaceMenu.className = 'workspace-menu-trigger'; workspaceMenu.textContent = '⋯'; workspaceMenu.title = 'New session in this workspace'; workspaceMenu.onclick = (event) => { event.stopPropagation(); openWorkspacePicker(); workspaceInput.value = group.root; };
+              header.append(caret, folder, copy, count, workspaceMenu);
+              const toggleGroup = () => { if (state.expandedWorkspaces.has(group.key)) state.expandedWorkspaces.delete(group.key); else state.expandedWorkspaces.add(group.key); showSessionsTree({ sessions: state.sidebarSessions }); };
+              header.onclick = toggleGroup; header.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleGroup(); } };
+              section.append(header); const children = document.createElement('div'); children.className = 'workspace-sessions'; for (const node of group.sessions) appendNavigationNode(children, node); section.append(children); list.append(section);
+            }
+            return;
+          }
           const visible = sessions.filter((session) => session.deleted !== true && session.parentSessionId === undefined && Boolean(session.archived) === state.showArchived);
           state.sidebarSessions = visible;
           state.recentWorkspaces = sessions.map((session) => session.workspaceRoot).filter(Boolean);
