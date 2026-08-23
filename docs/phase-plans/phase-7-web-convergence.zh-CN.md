@@ -1,6 +1,6 @@
 # Phase 7：DSH Web 前端收敛与可观测工作台
 
-状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/model/permission/capability surface、7.10 Read-only/Edit/Test-Recovery Coding fixture 已完成；7.1 Shell 拆分、7.3 导航收敛、7.6 queue/steer/attachment 深化、Deliverables、统一五场景 browser gate、性能基线继续推进）
+状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/model/permission/capability surface、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface 已完成；7.1 Shell 拆分、7.3 导航收敛、7.6 queue/steer/attachment 深化、workspace-scoped artifact API、统一五场景 browser gate、性能基线继续推进）
 
 ## 当前执行 checkpoint：typed Web client 与 Session replay foundation
 
@@ -82,6 +82,20 @@
 - capability 状态由既有 catalog/Session 数据计算，内部 Subagent 标记为 available，A2A 明确标记为 `deferred`；secret 仍由 host 持有，UI 不写入 EventStore，也不伪造 A2A 能力。
 
 验证：`pnpm typecheck`、Web 41 项定向测试、browser bundle 和 `git diff --check` 通过。真实 browser smoke 已验证 Settings dialog 展示 workspace、interrupted session、Ask on execute、tool/MCP 统计和 A2A `deferred`；点击 Close 与对话框级 Escape 均可关闭，Test/Recovery 的 `Recovered request` 页面状态保持不变。
+
+## 当前执行 checkpoint：Deliverables/Produced Files render surface（2026-08-23）
+
+本 checkpoint 对照 DSH `ui-deliverables` 的产物清单与详情行为，把 Phase 5 TaskProjection.artifacts 接入 Web details panel，同时保持 EventStore 为事实来源和 workspace 安全边界：
+
+- `apps/web/src/presentation/deliverables-presenter.ts` 将 parent Session 的 task artifacts 去重并转换为 bounded render intent，分类 workspace、external、unsafe、unknown，保留 kind/path/mediaType/size/preview/source task；
+- `apps/web/src/browser.ts` 暴露 typed `presentDeliverables`，`apps/web/index.html` 增加 `Produced files & artifacts` 面板，空态、bounded 状态、路径、预览、scope 和 action reason 使用 DOM textContent 渲染；
+- artifact action 当前明确为 disabled/unavailable，不根据不可信路径执行打开或下载；external artifact 需要 host policy，workspace-scoped action 等待后续受控 API；
+- Delegation fixture 增加 workspace、external URL 和 workspace 外绝对路径三类 artifact，验证 Web 能显示 `workspace`、`external`、`blocked`，child Session 仍为 `0 artifacts`；
+- `apps/api/src/server.test.ts` 与 presenter tests 同步覆盖三类 artifact projection，未改变生产 Event、Tool、Task、Permission 或 Workspace contract。
+
+验证：`pnpm typecheck`、`pnpm --filter @code-review-agent/api test -- --run src/server.test.ts`（18 tests）、`pnpm --filter @code-review-agent/web test -- --run`（43 tests）、`pnpm -F @code-review-agent/web run build:browser` 和 `git diff --check` 通过。真实 browser smoke 已验证 completed parent 的三类 artifact、external/unsafe action 禁用、child Session artifact 隔离和空 Session 空态；console 无 warning/error。
+
+下一步：实现 workspace-scoped artifact API，在读取前通过 Session workspace 与 artifact id 重新解析路径并执行 path traversal/symlink 越界安全检查；随后把 Read-only、Edit、Test/Recovery、Delegation、Inspection、Settings、Deliverables 汇总为统一 Phase 7.10 browser gate。
 
 ## 1. 目标与边界
 

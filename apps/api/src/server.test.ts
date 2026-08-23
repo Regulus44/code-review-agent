@@ -101,7 +101,7 @@ describe("Phase 2 API", () => {
       const sibling = await (await fetch(`${url}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: siblingRoot, permissionPreset: "read-only" }) })).json() as { id: string };
       const seeded = await seedDelegationFixture({ store: fixtureStore, runtime: fixtureRuntime, parentSessionId: sessionId(parent.id), workspaceRoot: root, completedWorkspaceRoot: childCompletedRoot, cancellableWorkspaceRoot: childCancellableRoot, commandPrefix: "api-delegation-fixture" });
 
-      const catalog = await (await fetch(`${url}/v1/sessions/${parent.id}/subagents?scope=children`)).json() as { agents: { task: { id: string; status: string; childSessionId?: string; workspaceRoot?: string; permissionPreset?: string; report?: { summary: string; artifacts: { id: string }[] }; artifacts: { id: string }[] }; live: boolean; resumable: boolean }[] };
+      const catalog = await (await fetch(`${url}/v1/sessions/${parent.id}/subagents?scope=children`)).json() as { agents: { task: { id: string; status: string; childSessionId?: string; workspaceRoot?: string; permissionPreset?: string; report?: { summary: string; artifacts: { id: string; kind: string }[] }; artifacts: { id: string; kind: string }[] }; live: boolean; resumable: boolean }[] };
       const completed = catalog.agents.find((entry) => entry.task.id === seeded.completed.taskId);
       const cancellable = catalog.agents.find((entry) => entry.task.id === seeded.cancellable.taskId);
       expect(completed?.task.status).toBe("completed");
@@ -109,7 +109,8 @@ describe("Phase 2 API", () => {
       expect(completed?.task.workspaceRoot).toBe(childCompletedRoot);
       expect(completed?.task.permissionPreset).toBe("read-only");
       expect(completed?.task.report?.summary).toContain("Fixture completed");
-      expect(completed?.task.artifacts).toHaveLength(1);
+      expect(completed?.task.artifacts).toHaveLength(3);
+      expect(completed?.task.artifacts.map((artifact) => artifact.kind)).toEqual(["json", "url", "file"]);
       expect(completed?.live).toBe(false);
       expect(cancellable?.live).toBe(true);
       expect(cancellable?.task.childSessionId).toBe(seeded.cancellable.childSessionId);
@@ -119,9 +120,9 @@ describe("Phase 2 API", () => {
       expect(childProjection.messages.some((message) => message.role === "user" && message.content.includes("fixture:completed"))).toBe(true);
       expect(childProjection.messages.some((message) => message.role === "assistant" && message.content.includes("Fixture completed"))).toBe(true);
 
-      const output = await (await fetch(`${url}/v1/sessions/${parent.id}/tasks/${seeded.completed.taskId}/output`)).json() as { report?: { summary: string; artifacts: { id: string }[] }; events: { type: string; payload: Record<string, unknown> }[] };
+      const output = await (await fetch(`${url}/v1/sessions/${parent.id}/tasks/${seeded.completed.taskId}/output`)).json() as { report?: { summary: string; artifacts: { id: string; kind: string }[] }; events: { type: string; payload: Record<string, unknown> }[] };
       expect(output.report?.summary).toContain("Fixture completed");
-      expect(output.report?.artifacts).toHaveLength(1);
+      expect(output.report?.artifacts).toHaveLength(3);
       expect(output.events.length).toBeGreaterThan(4);
       expect(output.events.some((event) => event.type === "user/message")).toBe(true);
       expect(output.events.some((event) => event.type === "assistant/message")).toBe(true);

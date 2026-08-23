@@ -309,6 +309,22 @@
       .task-inspector { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--border); }
       .task-inspector-title { margin-bottom: 6px; color: var(--text); font-size: 12px; font-weight: 650; }
       .task-inspector pre { max-height: 180px; margin: 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary); font: 10px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+      .deliverables-ledger { display: grid; gap: 7px; }
+      .deliverable-record { min-width: 0; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-subtle); }
+      .deliverable-header { display: flex; align-items: flex-start; gap: 7px; min-width: 0; }
+      .deliverable-copy { min-width: 0; flex: 1; }
+      .deliverable-label { display: block; overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 650; }
+      .deliverable-meta { display: block; margin-top: 3px; overflow: hidden; color: var(--text-tertiary); text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
+      .deliverable-scope { flex: 0 0 auto; padding: 2px 5px; border-radius: 5px; color: var(--text-tertiary); background: var(--surface); font-size: 9px; }
+      .deliverable-scope.workspace { color: var(--green); background: #edf9f1; }
+      .deliverable-scope.external { color: #8f5c13; background: #fff3d9; }
+      .deliverable-scope.unsafe { color: var(--red); background: #fff0f0; }
+      .deliverable-path { margin-top: 6px; overflow-wrap: anywhere; color: var(--text-secondary); font: 10px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
+      .deliverable-preview { max-height: 130px; margin: 6px 0 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary); font: 10px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
+      .deliverable-footer { display: flex; align-items: flex-start; gap: 7px; margin-top: 7px; }
+      .deliverable-action { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-tertiary); background: var(--surface); font-size: 9px; }
+      .deliverable-action:disabled { cursor: not-allowed; opacity: .72; }
+      .deliverable-reason { min-width: 0; color: var(--text-tertiary); font-size: 9px; line-height: 1.4; }
       .mcp-ledger { display: grid; gap: 6px; }
       .mcp-record { display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; padding: 7px; border: 1px solid transparent; border-radius: 8px; color: var(--text-secondary); background: var(--surface-subtle); text-align: left; font-size: 10px; }
       .mcp-record:hover, .mcp-record.selected { border-color: rgba(65,118,230,.28); color: var(--text); background: var(--blue-soft); }
@@ -879,6 +895,48 @@
           if (selected.task.childSessionId) { const open = document.createElement('button'); open.type = 'button'; open.className = 'toolbar-button'; open.textContent = 'Open child session'; open.onclick = () => openSession(selected.task.childSessionId); inspector.append(open); }
           if (selectedIntent.cancellable) { const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'subagent-cancel'; cancel.textContent = 'Cancel task'; cancel.onclick = async () => { cancel.disabled = true; try { await typedRuntime.api.cancelTask(state.session.id, selected.task.id, commandKey()); await refreshSubagents(); renderTaskPanel(typedConnection?.store.getSnapshot()); } catch (error) { setStatus(error.message, false); cancel.disabled = false; } }; inspector.append(cancel); }
         };
+        const renderDeliverablesPanel = (snapshot) => {
+          let section = details.querySelector('#deliverables-inspector-panel');
+          if (!section) {
+            section = document.createElement('section');
+            section.id = 'deliverables-inspector-panel';
+            section.className = 'detail-section';
+            const label = document.createElement('div'); label.className = 'detail-label'; label.textContent = 'Produced files & artifacts'; section.append(label);
+            const meta = document.createElement('div'); meta.className = 'trajectory-meta'; meta.id = 'deliverables-ledger-meta'; section.append(meta);
+            const ledger = document.createElement('div'); ledger.className = 'deliverables-ledger'; ledger.id = 'deliverables-ledger'; section.append(ledger);
+            details.append(section);
+          }
+          const meta = section.querySelector('#deliverables-ledger-meta');
+          const ledger = section.querySelector('#deliverables-ledger');
+          ledger.innerHTML = '';
+          const tasks = snapshot?.session?.tasks || state.session?.tasks || [];
+          const workspaceRoot = snapshot?.session?.workspaceRoot || state.session?.workspaceRoot || '.';
+          const view = typedRuntime?.presentDeliverables ? typedRuntime.presentDeliverables(tasks, workspaceRoot, 64, 2_000) : null;
+          if (!view) {
+            meta.textContent = 'Artifact projection unavailable';
+            const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = 'Produced files are not available from the current typed session projection.'; ledger.append(empty); return;
+          }
+          meta.textContent = `${view.items.length} artifact${view.items.length === 1 ? '' : 's'}${view.truncated ? ' · list bounded' : ''}`;
+          if (!view.items.length) {
+            const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = 'No produced files or artifacts.'; ledger.append(empty); return;
+          }
+          for (const item of view.items) {
+            const record = document.createElement('article'); record.className = 'deliverable-record';
+            const header = document.createElement('div'); header.className = 'deliverable-header';
+            const copy = document.createElement('div'); copy.className = 'deliverable-copy';
+            const label = document.createElement('span'); label.className = 'deliverable-label'; label.textContent = item.label;
+            const metaText = document.createElement('span'); metaText.className = 'deliverable-meta'; metaText.textContent = `${item.kind} · task ${item.sourceTaskId}${item.mediaType ? ` · ${item.mediaType}` : ''}${item.sizeBytes === undefined ? '' : ` · ${item.sizeBytes} bytes`}`;
+            copy.append(label, metaText);
+            const scope = document.createElement('span'); scope.className = `deliverable-scope ${item.scope}`; scope.textContent = item.scopeLabel;
+            header.append(copy, scope); record.append(header);
+            if (item.path) { const path = document.createElement('div'); path.className = 'deliverable-path'; path.textContent = item.path; record.append(path); }
+            if (item.preview) { const preview = document.createElement('pre'); preview.className = 'deliverable-preview'; preview.textContent = item.preview; record.append(preview); }
+            const footer = document.createElement('div'); footer.className = 'deliverable-footer';
+            const action = document.createElement('button'); action.type = 'button'; action.className = 'deliverable-action'; action.disabled = true; action.textContent = 'Open unavailable'; action.title = item.actionReason;
+            const reason = document.createElement('span'); reason.className = 'deliverable-reason'; reason.textContent = item.actionReason;
+            footer.append(action, reason); record.append(footer); ledger.append(record);
+          }
+        };
         const renderMcpDetailsPanel = () => {
           let section = details.querySelector('#mcp-inspector-panel');
           if (!section) {
@@ -942,6 +1000,7 @@
         const trajectoryDetailsObserver = new MutationObserver(() => {
           if (!details.querySelector('#trajectory-inspector-panel')) renderTrajectoryPanel(typedConnection?.store.getSnapshot()?.trajectory);
           if (!details.querySelector('#task-inspector-panel')) renderTaskPanel(typedConnection?.store.getSnapshot());
+          if (!details.querySelector('#deliverables-inspector-panel')) renderDeliverablesPanel(typedConnection?.store.getSnapshot());
           if (!details.querySelector('#mcp-inspector-panel')) renderMcpDetailsPanel();
           if (!details.querySelector('#request-recovery-panel')) renderRequestRecoveryPanel(typedConnection?.store.getSnapshot());
         });
@@ -961,6 +1020,7 @@
               renderDetails();
               renderTrajectoryPanel(typedSnapshot?.trajectory);
               renderTaskPanel(typedSnapshot);
+              renderDeliverablesPanel(typedSnapshot);
               renderMcpDetailsPanel();
               renderRequestRecoveryPanel(typedSnapshot);
               requestAnimationFrame(() => { if (shouldFollowTail) conversation.scrollTop = conversation.scrollHeight; });
@@ -1010,6 +1070,7 @@
           renderDetails();
           renderTrajectoryPanel(typedSnapshot?.trajectory);
           renderTaskPanel(typedSnapshot);
+          renderDeliverablesPanel(typedSnapshot);
           renderMcpDetailsPanel();
           renderRequestRecoveryPanel(typedSnapshot);
           requestAnimationFrame(() => { if (shouldFollowTail) conversation.scrollTop = conversation.scrollHeight; });

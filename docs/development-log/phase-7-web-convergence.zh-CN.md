@@ -626,6 +626,56 @@ git diff --check                                    ✓
 
 ### 下一步
 
-- 补 Deliverables/Produced Files presenter 和 workspace-scoped path/open/download action；
+- 实现 workspace-scoped artifact API 和受控 path/open/download action；
 - 为 Settings 增加 loading/error/empty、窄屏和 keyboard focus restore smoke；
 - 将 Read-only、Edit、Test/Recovery、Delegation、Inspection 与 Settings/Deliverables 汇总为统一 Phase 7.10 browser gate。
+
+## 2026-08-23：Deliverables/Produced Files render surface
+
+### 目标与 DSH 对照
+
+- 对照 DSH `ui-deliverables` 的产物清单、详情和 bounded preview 行为，把 Phase 5 `TaskProjection.artifacts` 接入当前 Session details；
+- 让 Web 能区分 workspace artifact、external reference、workspace 外路径和无路径 artifact，同时把打开/下载动作保持在 host policy 与 workspace-scoped API 之后；
+- 保持 EventStore 为事实来源：Deliverables 只消费 Session task projection，不在浏览器保存 artifact 事实，也不把 A2A 引入内部 Multi-Agent transport。
+
+### 变更范围
+
+- `apps/web/src/presentation/deliverables-presenter.ts`：新增 bounded artifact dedupe/classification/preview render intent；使用 workspace 根目录进行路径边界判断，external URL、unsafe path 和 pathless artifact 提供明确原因；
+- `apps/web/src/presentation/deliverables-presenter.test.ts`：覆盖 workspace、relative/absolute unsafe、external、去重、empty 和 bounded manifest；
+- `apps/web/src/browser.ts`：暴露 typed `presentDeliverables`；
+- `apps/web/index.html`：新增 `Produced files & artifacts` details section，展示 label、kind、source task、path、scope、mediaType、size、preview 和 disabled action reason；所有不可信值使用 DOM textContent；
+- `apps/api/src/fixtures/delegation.ts`：completed child fixture 增加 workspace JSON、external URL、workspace 外文件三类 artifact；
+- `apps/api/src/server.test.ts`：同步验证三类 artifact 仍通过 parent catalog/report/output projection；
+
+### 根治理七问
+
+1. **Phase**：Phase 7.10 Deliverables/Produced Files render surface。
+2. **问题类型**：Web projection、产物可观测性、workspace 安全边界和浏览器验收 fixture。
+3. **契约影响**：复用现有 `TaskProjection.artifacts` 和 Session workspace；没有新增生产 Event、Tool、Task、Permission 或 Workspace contract，fixture 仅扩展测试数据。
+4. **参考入口**：DSH `ui-deliverables`；Claude Code 只作 Coding 结果呈现行为参考。
+5. **上游来源**：只做行为对照，没有复制 DSH 或 Claude Code 代码；无需新增许可证登记。
+6. **验收场景**：parent completed child 显示 workspace/external/blocked 三类 artifact；action 全部 disabled 并说明原因；child Session 不显示 parent artifact；空 Session 显示空态。
+7. **回滚**：移除 presenter、panel 和 fixture boundary artifacts；保留既有 Task projection、Web fallback、内部 Subagent 和 A2A deferred 状态。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/api test -- --run src/server.test.ts ✓（18 tests）
+pnpm --filter @code-review-agent/web test -- --run  ✓（43 tests）
+pnpm -F @code-review-agent/web run build:browser    ✓
+git diff --check                                    ✓
+```
+
+真实 browser smoke：
+
+- Delegation parent 的 completed child 显示 3 个 artifact：workspace JSON 显示 `workspace`，URL 显示 `external`，越界绝对路径显示 `blocked`；
+- 三个 `Open unavailable` 按钮均 disabled，workspace preview、external host policy、workspace boundary 原因分别可见；没有根据 event path 执行打开或下载；
+- 打开 completed child Session 后显示 `0 artifacts`，不会残留 parent artifact；新建空 Session 显示 `No produced files or artifacts.`；
+- 浏览器 console warn/error 为空。
+
+### 下一步
+
+- 实现 workspace-scoped artifact API：按 Session workspace 与 artifact id 查找，使用 `WorkspaceResolver.resolveExisting()`，拒绝路径穿越、绝对越界和 symlink 越界；
+- 为受控 inline/download 增加 API/security/replay 测试，再把 action 从 unavailable 提升为 host-backed capability；
+- 将 Read-only、Edit、Test/Recovery、Delegation、Inspection、Settings、Deliverables 汇总为统一 Phase 7.10 browser gate。

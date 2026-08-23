@@ -62,6 +62,28 @@ function reportArtifact(context: ProviderRunContext): ArtifactRef {
   };
 }
 
+function boundaryArtifacts(context: ProviderRunContext): ArtifactRef[] {
+  return [
+    reportArtifact(context),
+    {
+      id: `artifact_${context.taskId}_external`,
+      kind: "url",
+      label: `${context.descriptor.label ?? "child"} external reference`,
+      path: "https://example.test/phase7-artifact",
+      mediaType: "text/html",
+      preview: "External reference requires host policy.",
+    },
+    {
+      id: `artifact_${context.taskId}_unsafe`,
+      kind: "file",
+      label: `${context.descriptor.label ?? "child"} outside-workspace candidate`,
+      path: join(context.descriptor.workspaceRoot, "..", "..", "..", "outside-workspace.txt"),
+      mediaType: "text/plain",
+      preview: "This path must remain blocked by the workspace boundary.",
+    },
+  ];
+}
+
 function fixtureReport(context: ProviderRunContext, status: TaskReport["status"], stopReason: TaskReport["stopReason"], summary: string): TaskReport {
   return {
     taskId: context.taskId,
@@ -70,7 +92,7 @@ function fixtureReport(context: ProviderRunContext, status: TaskReport["status"]
     ...(stopReason === undefined ? {} : { stopReason }),
     summary,
     output: { fixture: true, taskId: context.taskId, childSessionId: context.childSessionId },
-    artifacts: status === "completed" ? [reportArtifact(context)] : [],
+    artifacts: status === "completed" ? boundaryArtifacts(context) : [],
   };
 }
 
