@@ -1,6 +1,6 @@
 # Phase 7：DSH Web 前端收敛与可观测工作台
 
-状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API 已完成；7.1 Shell 拆分、7.3 导航收敛、7.6 queue/steer/attachment 深化、统一五场景 browser gate、性能基线继续推进）
+状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface 与 modal keyboard/focus semantics、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API 已完成；7.1 Shell 拆分、7.3 导航收敛、7.6 queue/steer/attachment 深化、统一五场景 browser gate、性能基线继续推进）
 
 ## 当前执行 checkpoint：typed Web client 与 Session replay foundation
 
@@ -109,6 +109,16 @@
 - `scripts/phase7-delegation-fixture-server.mjs` 使用临时 workspace 并在退出时清理，避免 browser fixture 污染仓库。
 
 验证：`pnpm typecheck`、API 18 项定向测试、Web 43 项定向测试、browser bundle 和 `git diff --check` 通过。真实 browser smoke 已验证 workspace artifact 出现 Open/Download，external/blocked 仍为 disabled；Node fetch 复核 inline 返回 `application/json` + `inline`，download 返回 `attachment`；浏览器页面无 console warning/error。
+
+## 当前执行 checkpoint：Modal keyboard/focus semantics（2026-08-23）
+
+本 checkpoint 对照 DSH `ui-primitives`、`ui-settings*` 和 Workspace picker 的可访问交互边界，补齐两个高频 modal 的键盘行为：
+
+- `apps/web/src/presentation/focus-trap.ts` 提供可复用 FocusTrap、Focusable selector 和边界回环函数；Tab/Shift+Tab 始终留在当前 dialog，关闭时恢复打开 dialog 的元素；
+- `apps/web/src/presentation/focus-trap.test.ts` 覆盖正向/反向回环、modal 外焦点起点和空列表安全 sentinel；Web 测试增至 46 项；
+- `apps/web/src/browser.ts` 将 focus trap 作为 typed browser bridge 暴露；`apps/web/index.html` 为 Workspace picker 增加 `role=dialog`/`aria-labelledby`，Settings/Workspace 均支持 Escape 关闭、Tab 循环和 opener focus restore；连接状态增加 `role=status`/`aria-live=polite`；
+
+验证：`pnpm typecheck`、Web 46 项测试、browser bundle 和 `git diff --check` 通过。真实 browser smoke 验证 Workspace picker 打开后焦点落在输入框、反向/正向 Tab 在首尾回环、Escape 关闭后焦点回到 `new-session`；Settings dialog 同样回环并将焦点恢复到 `settings-button`；browser console warn/error 为空。
 
 ## 1. 目标与边界
 

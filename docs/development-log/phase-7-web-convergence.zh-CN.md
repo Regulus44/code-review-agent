@@ -725,3 +725,48 @@ git diff --check                                    ✓
 - 将 Read-only、Edit、Test/Recovery、Delegation、Inspection、Settings、Deliverables 和 artifact access 汇总为统一 Phase 7.10 browser gate；
 - 补齐 loading/error、键盘焦点恢复、窄屏布局、长任务 terminal/job 输出与失败诊断；
 - 推进 Shell 拆分、Workspace/Session 导航和 1,000+ trajectory 多页性能基线。
+
+## 2026-08-23：Modal keyboard/focus semantics
+
+### 目标与 DSH 对照
+
+- 对照 DSH `ui-primitives`、`ui-settings*` 和 Workspace picker 的 keyboard/focus 行为，完成 Phase 7.9 两个 modal 的可访问交互闭环；
+- 保持页面事实和 API/Session projection 不变，交互状态只存在于当前 Web session。
+
+### 变更范围
+
+- `apps/web/src/presentation/focus-trap.ts`：新增 bounded focusable selector、Tab/Shift+Tab 回环和 opener focus restore；
+- `apps/web/src/presentation/focus-trap.test.ts`：覆盖边界索引和空 dialog 安全行为；
+- `apps/web/src/browser.ts`：将 focus trap 暴露给静态 Shell；
+- `apps/web/index.html`：Workspace picker 增加 dialog 语义，Settings/Workspace 支持 Escape、Tab 回环和关闭后焦点恢复，连接状态声明 `role=status`/`aria-live`。
+
+### 根治理七问
+
+1. **Phase**：Phase 7.9 modal accessibility surface。
+2. **问题类型**：Web UI 交互、可访问性和窄屏/键盘验收。
+3. **契约影响**：无 Event、Tool、Task、Permission 或 Workspace contract 变化；新增状态不进入 EventStore。
+4. **参考入口**：DSH `ui-primitives`、`ui-settings*`、Workspace picker behavior；Claude Code 不作为实现依赖。
+5. **上游来源**：只做行为参考，没有复制上游代码或资产，无需许可证登记。
+6. **验收场景**：Workspace/Settings 打开后焦点进入 dialog，Tab/Shift+Tab 不逃逸，Escape 关闭并恢复 opener focus；浏览器无 console warning/error。
+7. **回滚**：移除 `focus-trap` bridge 和 modal 属性，保留原有 click/Escape fallback，不影响 Session/EventStore。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/web test -- --run  ✓（46 tests）
+pnpm -F @code-review-agent/web run build:browser    ✓
+git diff --check                                    ✓
+```
+
+真实 browser smoke：
+
+- Workspace picker 打开后 active element 为 `workspace-input`；从首个关闭按钮 Shift+Tab 到 `workspace-create`，从末尾正向 Tab 回到 `workspace-close`；
+- Workspace picker Escape 后 `hidden=true` 且焦点恢复到 `new-session`；Settings Escape 后焦点恢复到 `settings-button`；
+- browser console warn/error 为空。
+
+### 下一步
+
+- 将 Read-only、Edit、Test/Recovery、Delegation、Inspection、Settings、Deliverables 和 artifact access 汇总为统一 Phase 7.10 browser gate；
+- 补齐 loading/error/empty/reconnect 状态、窄屏布局、长任务 terminal/job 输出与失败诊断；
+- 推进 Shell 拆分、Workspace/Session 导航和 1,000+ trajectory 多页性能基线。

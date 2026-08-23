@@ -438,7 +438,7 @@
         <header class="workspace-header">
           <button id="mobile-menu" class="icon-button mobile-menu" type="button" aria-label="Open sidebar">☰</button>
           <div class="session-heading"><strong id="session-title">New coding session</strong><button id="session-path" class="session-path-button" type="button">Workspace · .</button></div>
-          <span id="status" class="connection-state disconnected">Connecting…</span>
+          <span id="status" class="connection-state disconnected" role="status" aria-live="polite">Connecting…</span>
           <button id="details-toggle" class="icon-button details-toggle" type="button" aria-label="Toggle details panel">☷</button>
         </header>
         <section id="conversation" class="conversation" aria-live="polite"></section>
@@ -465,8 +465,8 @@
         <div id="details-content" class="details-content"></div>
       </aside>
       <div id="workspace-modal" class="modal-backdrop" hidden>
-        <form id="workspace-form" class="workspace-modal">
-          <div class="workspace-modal-header"><div><h2>Choose a workspace</h2><p>New sessions run their file and terminal tools inside this local directory.</p></div><button id="workspace-close" class="icon-button" type="button" aria-label="Close workspace picker">×</button></div>
+        <form id="workspace-form" class="workspace-modal" role="dialog" aria-modal="true" aria-labelledby="workspace-title">
+          <div class="workspace-modal-header"><div><h2 id="workspace-title">Choose a workspace</h2><p>New sessions run their file and terminal tools inside this local directory.</p></div><button id="workspace-close" class="icon-button" type="button" aria-label="Close workspace picker">×</button></div>
           <label class="workspace-input-label" for="workspace-input">Local folder path</label>
           <input id="workspace-input" class="workspace-input" type="text" autocomplete="off" spellcheck="false" placeholder="D:\\Develop\\your-repository" />
           <label class="workspace-input-label" for="permission-preset">Work mode</label>
@@ -527,9 +527,13 @@
         const workspaceError = document.querySelector('#workspace-error');
         const workspaceRecent = document.querySelector('#workspace-recent');
         const workspaceCreate = document.querySelector('#workspace-create');
-        const permissionPreset = document.querySelector('#permission-preset');
-        const sessionSearch = document.querySelector('#session-search');
-        const sessionMenu = document.querySelector('#session-menu');
+         const permissionPreset = document.querySelector('#permission-preset');
+         const sessionSearch = document.querySelector('#session-search');
+         const sessionMenu = document.querySelector('#session-menu');
+         const workspaceDialog = workspaceModal.querySelector('.workspace-modal');
+         const settingsDialog = settingsModal.querySelector('.workspace-modal');
+         const workspaceFocusTrap = typedRuntime?.createFocusTrap && workspaceDialog ? typedRuntime.createFocusTrap(workspaceDialog) : null;
+         const settingsFocusTrap = typedRuntime?.createFocusTrap && settingsDialog ? typedRuntime.createFocusTrap(settingsDialog) : null;
         const isNearConversationTail = () => conversation.scrollHeight === 0 || conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight <= 64;
         conversation.addEventListener('scroll', () => { state.trajectoryFollow = isNearConversationTail(); }, { passive: true });
         const api = async (url, options) => { const response = await fetch(url, options); if (!response.ok) throw new Error(await response.text()); return response.json(); };
@@ -1083,10 +1087,10 @@
           requestAnimationFrame(() => { if (shouldFollowTail) conversation.scrollTop = conversation.scrollHeight; });
         };
         const renderWorkspaceRecent = () => { workspaceRecent.innerHTML = ''; const roots = [...new Set(state.recentWorkspaces.filter(Boolean))].slice(0, 6); if (!roots.length) return; const label = document.createElement('div'); label.className = 'workspace-recent-label'; label.textContent = 'Recent workspaces'; workspaceRecent.append(label); roots.forEach((root) => { const button = document.createElement('button'); button.type = 'button'; button.className = 'workspace-recent-button'; button.textContent = root; button.onclick = () => { workspaceInput.value = root; workspaceError.textContent = ''; workspaceInput.focus(); }; workspaceRecent.append(button); }); };
-        const openWorkspacePicker = () => { workspaceError.textContent = ''; workspaceInput.value = state.session?.workspaceRoot || ''; permissionPreset.value = currentMode(); renderWorkspaceRecent(); workspaceModal.hidden = false; workspaceInput.focus(); workspaceInput.select(); };
-        const closeWorkspacePicker = () => { workspaceModal.hidden = true; workspaceError.textContent = ''; };
-        const openSettings = () => { renderSettings(); settingsModal.hidden = false; settingsClose?.focus(); };
-        const closeSettings = () => { settingsModal.hidden = true; settingsButton?.focus(); };
+        const openWorkspacePicker = () => { workspaceError.textContent = ''; workspaceInput.value = state.session?.workspaceRoot || ''; permissionPreset.value = currentMode(); renderWorkspaceRecent(); workspaceModal.hidden = false; workspaceFocusTrap?.activate(); workspaceInput.focus(); workspaceInput.select(); };
+        const closeWorkspacePicker = () => { workspaceFocusTrap?.deactivate(); workspaceModal.hidden = true; workspaceError.textContent = ''; };
+        const openSettings = () => { renderSettings(); settingsModal.hidden = false; settingsFocusTrap?.activate(); settingsClose?.focus(); };
+        const closeSettings = () => { settingsFocusTrap?.deactivate(); settingsModal.hidden = true; };
         const showSessions = (payload) => { const sessions = Array.isArray(payload) ? payload : payload.sessions || []; const visible = sessions.filter((session) => Boolean(session.archived) === state.showArchived); state.sidebarSessions = visible; state.recentWorkspaces = sessions.map((session) => session.workspaceRoot); list.innerHTML = ''; if (!visible.length) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = state.showArchived ? 'No archived sessions.' : 'No active sessions.'; list.append(empty); return; } for (const session of visible) { const row = document.createElement('div'); row.className = 'session-row'; const button = document.createElement('button'); button.className = `session ${state.session?.id === session.id ? 'active' : ''}`; button.type = 'button'; const name = session.title || session.workspaceRoot?.split(/[\/]/).filter(Boolean).pop() || 'New session'; button.innerHTML = `<span class="session-dot"></span><span class="session-copy"><span class="session-name">${esc(name)}</span><span class="session-path">${esc(session.workspaceRoot || '.')}</span></span>`; button.onclick = () => openSession(session.id); const archive = document.createElement('button'); archive.className = 'session-archive'; archive.type = 'button'; archive.title = session.archived ? 'Restore session' : 'Archive session'; archive.setAttribute('aria-label', session.archived ? 'Restore session' : 'Archive session'); archive.textContent = session.archived ? '↩' : '▱'; archive.onclick = async (event) => { event.stopPropagation(); archive.disabled = true; try { await api(`/v1/sessions/${encodeURIComponent(session.id)}/archive`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ archived: !session.archived }) }); await refreshSessionList(); if (state.session?.id === session.id) { state.session.archived = !session.archived; render(); } } catch (error) { setStatus(error.message, false); archive.disabled = false; } }; row.append(button, archive); list.append(row); } };
         const workspaceLabel = (root) => { const value = String(root || '.').replace(/[\\/]+$/, ''); const segments = value.split(/[\\/]/).filter(Boolean); return segments[segments.length - 1] || value || 'Workspace'; };
         const workspaceKey = (root) => { const value = String(root || '.').replace(/\\/g, '/').replace(/\/+$/, '') || '.'; return /^[A-Za-z]:\//.test(value) ? value.toLowerCase() : value; };
@@ -1229,7 +1233,7 @@
         settingsClose.onclick = () => closeSettings();
         settingsDismiss.onclick = () => closeSettings();
         settingsModal.addEventListener('click', (event) => { if (event.target === settingsModal) closeSettings(); });
-        document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !settingsModal.hidden) closeSettings(); });
+        document.addEventListener('keydown', (event) => { if (event.key !== 'Escape') return; if (!settingsModal.hidden) closeSettings(); else if (!workspaceModal.hidden) closeWorkspacePicker(); });
         archiveToggle.onclick = async () => { state.showArchived = !state.showArchived; try { await refreshSessionList(); } catch (error) { setStatus(error.message, false); } };
         sessionSearch.addEventListener('input', () => { state.sessionSearch = sessionSearch.value; showSessionsTree({ sessions: state.sidebarSessions }); });
         document.querySelector('#session-path').onclick = () => openWorkspacePicker();
