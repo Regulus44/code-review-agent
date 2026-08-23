@@ -19,6 +19,8 @@ import {
   type UserInteractionAnswer,
   type UserInteractionRequest,
   type ChildSessionMetadata,
+  type EventListOptions,
+  type EventPage,
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { randomUUID } from "node:crypto";
@@ -166,6 +168,26 @@ export class AgentHost {
   async events(sessionId: SessionId, afterSequence = 0): Promise<readonly AgentEvent[]> {
     await this.ready;
     return this.options.store.list(sessionId, afterSequence);
+  }
+
+  async eventsPage(sessionId: SessionId, options: EventListOptions = {}): Promise<EventPage> {
+    await this.ready;
+    if (this.options.store.listPage !== undefined) return this.options.store.listPage(sessionId, options);
+    const after = options.afterSequence ?? 0;
+    const before = options.beforeSequence;
+    const all = (await this.options.store.list(sessionId, 0)).filter((event) => event.sequence > after && (before === undefined || event.sequence < before));
+    const limit = options.limit === undefined ? undefined : Math.min(1_000, Math.max(1, Math.floor(options.limit)));
+    const latest = before === undefined && limit !== undefined && after === 0;
+    const events = limit === undefined ? all : latest || before !== undefined ? all.slice(-limit) : all.slice(0, limit);
+    const first = events[0]?.sequence;
+    const last = events[events.length - 1]?.sequence;
+    return {
+      events,
+      hasMoreBefore: first === undefined ? false : all.some((event) => event.sequence < first),
+      hasMoreAfter: last === undefined ? false : all.some((event) => event.sequence > last),
+      ...(first === undefined ? {} : { oldestSequence: first }),
+      ...(last === undefined ? {} : { newestSequence: last }),
+    };
   }
 
   subscribe(sessionId: SessionId, listener: (event: AgentEvent) => void): () => void {

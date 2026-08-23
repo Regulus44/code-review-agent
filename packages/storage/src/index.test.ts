@@ -25,6 +25,19 @@ describe("InMemoryEventStore", () => {
     expect(await store.project(unknown)).toBeUndefined();
   });
 
+  it("serves bounded latest and older pages without changing the full replay contract", async () => {
+    const store = new InMemoryEventStore();
+    const sessionId = await store.createSession("D:/workspace");
+    for (let index = 0; index < 6; index += 1) await store.append({ sessionId, type: "session/updated", payload: { index } });
+    const latest = await store.listPage!(sessionId, { limit: 3 });
+    expect(latest.events.map((event) => event.sequence)).toEqual([5, 6, 7]);
+    expect(latest.hasMoreBefore).toBe(true);
+    const older = await store.listPage!(sessionId, { ...(latest.oldestSequence === undefined ? {} : { beforeSequence: latest.oldestSequence }), limit: 3 });
+    expect(older.events.map((event) => event.sequence)).toEqual([2, 3, 4]);
+    expect(older.hasMoreBefore).toBe(true);
+    expect((await store.list(sessionId)).map((event) => event.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  });
+
   it("replays tool and permission audit state", async () => {
     const store = new InMemoryEventStore(); const sessionId = await store.createSession("D:/workspace"); const expiresAt = new Date(Date.now() + 60_000).toISOString();
     await store.append({ sessionId, type: "tool/call", payload: { toolCallId: "tool_fixture", name: "write_file", input: { path: "a.txt" }, riskLevel: "write", approvalMode: "ask", caller: "agent", workspaceRoot: "D:/workspace" } });
@@ -67,6 +80,10 @@ describe("InMemoryEventStore", () => {
     expect(before?.turns[0]?.userMessage).toBe("hello");
     expect(before?.tasks[0]?.title).toBe("inspect");
     const fixture = await first.list(sessionId);
+    const latestPage = await first.listPage!(sessionId, { limit: 2 });
+    expect(latestPage.events.map((event) => event.sequence)).toEqual([3, 4]);
+    expect(latestPage.hasMoreBefore).toBe(true);
+    expect((await first.listPage!(sessionId, { ...(latestPage.oldestSequence === undefined ? {} : { beforeSequence: latestPage.oldestSequence }), limit: 2 })).events.map((event) => event.sequence)).toEqual([1, 2]);
     first.close();
     const corrupted = new DatabaseSync(databasePath);
     corrupted.prepare("UPDATE projections SET projection_json = ? WHERE session_id = ?").run(JSON.stringify({ broken: true }), sessionId);

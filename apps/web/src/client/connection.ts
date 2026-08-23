@@ -73,6 +73,8 @@ export interface SessionConnectionOptions {
   readonly maxReconnectAttempts?: number;
 }
 
+export const DEFAULT_HISTORY_PAGE_SIZE = 200;
+
 /**
  * Owns the DSH-style history-baseline + live-event handshake. A new
  * generation invalidates all callbacks from an old Session or EventSource,
@@ -114,11 +116,11 @@ export class SessionConnectionController {
     try {
       const [session, history] = await Promise.all([
         this.api.getSession(sessionId),
-        this.api.listEvents(sessionId, 0),
+        this.api.listEventsPage(sessionId, { limit: DEFAULT_HISTORY_PAGE_SIZE }),
       ]);
       if (!this.isCurrent(generation, sessionId)) return;
       if (session === undefined) throw new Error(`Session not found: ${sessionId}`);
-      this.store.open(session, history);
+      this.store.open(session, history.events, history);
       this.connect(generation, sessionId);
     } catch (error) {
       if (!this.isCurrent(generation, sessionId)) return;
@@ -137,6 +139,30 @@ export class SessionConnectionController {
   dispose(): void {
     this.close();
     this.store.clear();
+  }
+
+  /** Prepend one bounded page without affecting the live SSE cursor. */
+  async loadOlder(limit = DEFAULT_HISTORY_PAGE_SIZE): Promise<boolean> {
+    const sessionId = this.sessionId;
+    const snapshot = this.store.getSnapshot();
+    const generation = this.generation;
+    const beforeSequence = snapshot.history.oldestSequence;
+    if (this.closed || sessionId === undefined || snapshot.sessionId !== sessionId || !snapshot.history.hasOlder || beforeSequence === undefined || snapshot.history.loadingOlder) return false;
+    this.store.setHistoryLoading(true);
+    try {
+      const page = await this.api.listEventsPage(sessionId, { beforeSequence, limit });
+      if (!this.isCurrent(generation, sessionId)) return false;
+      this.store.prependHistory(page.events, page);
+      return page.events.length > 0;
+    } catch (error) {
+      if (this.isCurrent(generation, sessionId)) {
+        this.store.setHistoryLoading(false);
+        this.store.setConnection(this.store.getSnapshot().connection, error instanceof Error ? error.message : String(error));
+      }
+      throw error;
+    } finally {
+      if (this.isCurrent(generation, sessionId) && this.store.getSnapshot().history.loadingOlder) this.store.setHistoryLoading(false);
+    }
   }
 
   private connect(generation: number, sessionId: SessionId): void {

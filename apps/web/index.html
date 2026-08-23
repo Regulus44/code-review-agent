@@ -655,7 +655,20 @@
             const running = document.createElement('label'); running.className = 'trajectory-running'; const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.setAttribute('aria-label', 'Show running records only'); running.append(checkbox, document.createTextNode('Running'));
             const follow = document.createElement('button'); follow.type = 'button'; follow.className = 'trajectory-follow'; follow.setAttribute('aria-label', 'Toggle trajectory tail follow');
             follow.addEventListener('click', () => { state.trajectoryFollow = !state.trajectoryFollow; if (state.trajectoryFollow) requestAnimationFrame(() => { conversation.scrollTop = conversation.scrollHeight; }); refresh(); });
-            controls.append(search, running, follow); section.append(controls);
+            const loadOlder = document.createElement('button'); loadOlder.type = 'button'; loadOlder.className = 'toolbar-button trajectory-load-older'; loadOlder.textContent = 'Load older'; loadOlder.setAttribute('aria-label', 'Load older trajectory records');
+            loadOlder.addEventListener('click', async () => {
+              if (!typedRuntime?.loadOlder) return;
+              const snapshotBefore = typedConnection?.store.getSnapshot();
+              const heightBefore = conversation.scrollHeight;
+              const topBefore = conversation.scrollTop;
+              loadOlder.disabled = true;
+              try {
+                await typedRuntime.loadOlder(200);
+                requestAnimationFrame(() => { conversation.scrollTop = topBefore + (conversation.scrollHeight - heightBefore); });
+              } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); }
+              finally { loadOlder.disabled = snapshotBefore?.history.loadingOlder === true; refresh(); }
+            });
+            controls.append(search, running, follow, loadOlder); section.append(controls);
             const meta = document.createElement('div'); meta.className = 'trajectory-meta'; meta.id = 'trajectory-meta'; section.append(meta);
             const timeline = document.createElement('div'); timeline.className = 'trajectory-timeline'; timeline.id = 'trajectory-timeline'; section.append(timeline);
             const lanes = document.createElement('div'); lanes.className = 'trajectory-lanes'; lanes.id = 'trajectory-lanes'; section.append(lanes);
@@ -668,9 +681,16 @@
           const search = section.querySelector('.trajectory-search');
           const checkbox = section.querySelector('input[type="checkbox"]');
           const follow = section.querySelector('.trajectory-follow');
+          const loadOlder = section.querySelector('.trajectory-load-older');
           if (search && document.activeElement !== search) search.value = state.trajectoryQuery || '';
           if (checkbox && document.activeElement !== checkbox) checkbox.checked = state.trajectoryRunningOnly === true;
           if (follow) { follow.textContent = state.trajectoryFollow ? 'Following tail' : 'Paused'; follow.setAttribute('aria-pressed', String(state.trajectoryFollow)); follow.title = state.trajectoryFollow ? 'Pause following new records' : 'Resume following new records'; }
+          const currentSnapshot = typedConnection?.store.getSnapshot();
+          if (loadOlder) {
+            loadOlder.textContent = currentSnapshot?.history.loadingOlder ? 'Loading…' : 'Load older';
+            loadOlder.toggleAttribute('hidden', currentSnapshot?.history.hasOlder !== true);
+            loadOlder.toggleAttribute('disabled', currentSnapshot?.history.loadingOlder === true);
+          }
           const meta = section.querySelector('#trajectory-meta');
           const timeline = section.querySelector('#trajectory-timeline');
           const lanes = section.querySelector('#trajectory-lanes');
@@ -681,7 +701,7 @@
             return;
           }
           const view = typedRuntime.queryTrajectory(projection, { query: state.trajectoryQuery || '', runningOnly: state.trajectoryRunningOnly === true, limit: 200 });
-          meta.textContent = `${view.matchedRecords} matched · ${view.records.length} shown · sequence ${view.lastSequence}${view.truncated ? ' · more available' : ''}`;
+          meta.textContent = `${view.matchedRecords} matched · ${view.records.length} shown · sequence ${view.lastSequence}${view.truncated ? ' · more available' : ''}${currentSnapshot?.history.hasOlder ? ' · older history available' : ''}`;
           if (!view.records.length) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = state.trajectoryQuery || state.trajectoryRunningOnly ? 'No trajectory records match this filter.' : 'No trajectory records yet.'; lanes.append(empty); return; }
           const selected = view.records.find((record) => record.key === state.trajectorySelectedKey) || view.records[0];
           state.trajectorySelectedKey = selected.key;

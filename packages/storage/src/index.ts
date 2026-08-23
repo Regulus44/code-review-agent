@@ -7,6 +7,8 @@ import {
   type CommandClaim,
   type CommandRecord,
   type EventListener,
+  type EventListOptions,
+  type EventPage,
   type GoalProjection,
   type GoalStatus,
   type InteractionProjection,
@@ -61,6 +63,38 @@ function now(): string {
 
 function eventId(): string {
   return `evt_${randomUUID()}`;
+}
+
+function boundedPageLimit(value: number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isFinite(value)) return undefined;
+  return Math.min(1_000, Math.max(1, Math.floor(value)));
+}
+
+function finiteSequence(value: number | undefined, fallback: number): number {
+  return value !== undefined && Number.isFinite(value) && value >= 0 ? Math.floor(value) : fallback;
+}
+
+function pageEvents(events: readonly AgentEvent[], options: EventListOptions): EventPage {
+  const after = finiteSequence(options.afterSequence, 0);
+  const before = options.beforeSequence === undefined ? undefined : finiteSequence(options.beforeSequence, Number.MAX_SAFE_INTEGER);
+  const limit = boundedPageLimit(options.limit);
+  const candidates = events.filter((event) => event.sequence > after && (before === undefined || event.sequence < before));
+  const latest = before === undefined && limit !== undefined && after === 0;
+  const selected = limit === undefined
+    ? [...candidates]
+    : latest || before !== undefined
+      ? candidates.slice(-limit)
+      : candidates.slice(0, limit);
+  const first = selected[0]?.sequence;
+  const last = selected[selected.length - 1]?.sequence;
+  return {
+    events: selected,
+    hasMoreBefore: first === undefined ? false : candidates.some((event) => event.sequence < first),
+    hasMoreAfter: last === undefined ? false : candidates.some((event) => event.sequence > last),
+    ...(first === undefined ? {} : { oldestSequence: first }),
+    ...(last === undefined ? {} : { newestSequence: last }),
+  };
 }
 
 function newSessionId(): SessionId {
@@ -652,6 +686,11 @@ export class InMemoryEventStore implements SessionEventStore {
     return this.sessions.get(sessionId)?.events.filter((event) => event.sequence > afterSequence) ?? [];
   }
 
+  async listPage(sessionId: SessionId, options: EventListOptions = {}): Promise<EventPage> {
+    const events = this.sessions.get(sessionId)?.events ?? [];
+    return pageEvents(events, options);
+  }
+
   async listSessions(includeArchived = false): Promise<readonly SessionSummary[]> {
     return [...this.sessions.values()]
       .map((session) => toSummary(session.projection))
@@ -775,6 +814,34 @@ export class SqliteEventStore implements SessionEventStore, McpConfigBackend {
   async list(sessionId: SessionId, afterSequence = 0): Promise<readonly AgentEvent[]> {
     const rows = this.db.prepare("SELECT event_id, sequence, session_id, turn_id, correlation_id, type, created_at, payload_json, schema_version FROM events WHERE session_id = ? AND sequence > ? ORDER BY sequence ASC").all(sessionId, afterSequence) as SqliteRow[];
     return rows.map(readEvent);
+  }
+
+  async listPage(sessionId: SessionId, options: EventListOptions = {}): Promise<EventPage> {
+    const after = finiteSequence(options.afterSequence, 0);
+    const before = options.beforeSequence === undefined ? undefined : finiteSequence(options.beforeSequence, Number.MAX_SAFE_INTEGER);
+    const limit = boundedPageLimit(options.limit);
+    const latest = before === undefined && limit !== undefined && after === 0;
+    const order = latest || before !== undefined ? "DESC" : "ASC";
+    const upperClause = before === undefined ? "" : " AND sequence < ?";
+    const params: (string | number)[] = [sessionId, after];
+    if (before !== undefined) params.push(before);
+    const rows = this.db.prepare(`SELECT event_id, sequence, session_id, turn_id, correlation_id, type, created_at, payload_json, schema_version FROM events WHERE session_id = ? AND sequence > ?${upperClause} ORDER BY sequence ${order}${limit === undefined ? "" : " LIMIT ?"}`).all(...params, ...(limit === undefined ? [] : [limit + 1])) as SqliteRow[];
+    const overflow = limit !== undefined && rows.length > limit;
+    const selected = (overflow ? rows.slice(0, limit) : rows).map(readEvent);
+    if (order === "DESC") selected.reverse();
+    const first = selected[0]?.sequence;
+    const last = selected[selected.length - 1]?.sequence;
+    const hasMoreBefore = first === undefined ? false : (this.db.prepare(`SELECT 1 FROM events WHERE session_id = ? AND sequence > ?${before === undefined ? "" : " AND sequence < ?"} AND sequence < ? LIMIT 1`).get(...params.slice(0, before === undefined ? 2 : 3), first) as SqliteRow | undefined) !== undefined;
+    const hasMoreAfter = last === undefined ? false : order === "ASC" && overflow
+      ? true
+      : (this.db.prepare(`SELECT 1 FROM events WHERE session_id = ? AND sequence > ?${before === undefined ? "" : " AND sequence < ?"} AND sequence > ? LIMIT 1`).get(...params.slice(0, before === undefined ? 2 : 3), last) as SqliteRow | undefined) !== undefined;
+    return {
+      events: selected,
+      hasMoreBefore,
+      hasMoreAfter,
+      ...(first === undefined ? {} : { oldestSequence: first }),
+      ...(last === undefined ? {} : { newestSequence: last }),
+    };
   }
 
   async listSessions(includeArchived = false): Promise<readonly SessionSummary[]> {

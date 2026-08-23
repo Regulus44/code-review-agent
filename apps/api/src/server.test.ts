@@ -52,6 +52,22 @@ describe("Phase 2 API", () => {
     expect(await shell.text()).toContain("Code Review Agent");
   });
 
+  it("serves latest and older event pages while keeping unpaged JSON replay compatible", async () => {
+    const created = await fetch(`${baseUrl}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: "D:/workspace/paging" }) });
+    const session = await created.json() as { id: string };
+    for (let index = 0; index < 5; index += 1) await store.append({ sessionId: sessionId(session.id), type: "session/updated", payload: { index } });
+    const latestResponse = await fetch(`${baseUrl}/v1/sessions/${session.id}/events?format=json&limit=3`);
+    const latest = await latestResponse.json() as { events: { sequence: number }[]; hasMoreBefore: boolean; oldestSequence: number };
+    expect(latest.events.map((event) => event.sequence)).toEqual([4, 5, 6]);
+    expect(latest.hasMoreBefore).toBe(true);
+    const olderResponse = await fetch(`${baseUrl}/v1/sessions/${session.id}/events?format=json&before_sequence=${latest.oldestSequence}&limit=3`);
+    const older = await olderResponse.json() as { events: { sequence: number }[]; hasMoreBefore: boolean };
+    expect(older.events.map((event) => event.sequence)).toEqual([1, 2, 3]);
+    expect(older.hasMoreBefore).toBe(false);
+    const full = await (await fetch(`${baseUrl}/v1/sessions/${session.id}/events?format=json`)).json() as { sequence: number }[];
+    expect(full.map((event) => event.sequence)).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
   it("exposes durable subagent catalog, task output, cancel, and scoped replay", async () => {
     const created = await fetch(`${baseUrl}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: "D:/workspace", permissionPreset: "read-only" }) });
     const session = await created.json() as { id: string };

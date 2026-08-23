@@ -89,4 +89,20 @@ describe("trajectory presenter", () => {
     expect(view.rows.find((row) => row.key === "event:unknown")?.timing).toBe("unknown");
     expect(view.spanMs).toBe(4_000);
   });
+
+  it("keeps 1000+ records searchable while bounding the rendered ledger and timeline window", () => {
+    const records = Array.from({ length: 1_200 }, (_, index) => record({
+      key: `tool:${index}`,
+      label: `read_file_${index}`,
+      sourceSeq: index + 1,
+      lastSeq: index + 1,
+    }));
+    const bounded = queryTrajectory(projection(records), { limit: 200 });
+    expect(bounded.records).toHaveLength(200);
+    expect(bounded.truncated).toBe(true);
+    expect(queryTrajectory(projection(records), { query: "read_file_1199", limit: 200 }).records.map((item) => item.key)).toEqual(["tool:1199"]);
+    const timeline = buildTrajectoryTimeline(records, 1_000);
+    expect(timeline.rows).toHaveLength(1_000);
+    expect(timeline.truncated).toBe(true);
+  });
 });

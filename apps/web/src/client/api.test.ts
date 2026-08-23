@@ -38,4 +38,19 @@ describe("WebApiClient", () => {
     const client = new WebApiClient({ baseUrl: "http://localhost:4317" });
     expect(client.eventsUrl("ses/with space" as never, 12)).toBe("http://localhost:4317/v1/sessions/ses%2Fwith%20space/events?after_sequence=12");
   });
+
+  it("builds bounded history page queries and normalizes the page envelope", async () => {
+    const calls: string[] = [];
+    const client = new WebApiClient({
+      baseUrl: "http://localhost:4317",
+      fetcher: async (input) => {
+        calls.push(String(input));
+        return new Response(JSON.stringify({ events: [], hasMoreBefore: true, hasMoreAfter: false, oldestSequence: 8, newestSequence: 9 }), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+    const page = await client.listEventsPage("ses_page" as never, { beforeSequence: 10, limit: 2 });
+    expect(calls[0]).toContain("before_sequence=10");
+    expect(calls[0]).toContain("limit=2");
+    expect(page).toMatchObject({ hasMoreBefore: true, oldestSequence: 8, newestSequence: 9 });
+  });
 });

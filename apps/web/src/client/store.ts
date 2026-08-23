@@ -29,15 +29,32 @@ export interface SessionStoreSnapshot {
   readonly conversation?: ConversationProjection;
   readonly toolCallTree?: ToolCallTree;
   readonly trajectory?: TrajectoryProjection;
+  readonly history: SessionHistoryWindow;
   readonly lastSequence: number;
   readonly connection: WebConnectionState;
   readonly error?: string;
+}
+
+export interface SessionHistoryWindow {
+  readonly hasOlder: boolean;
+  readonly hasNewer: boolean;
+  readonly loadingOlder: boolean;
+  readonly oldestSequence?: number;
+  readonly newestSequence?: number;
+}
+
+export interface SessionHistoryPageMetadata {
+  readonly hasMoreBefore?: boolean;
+  readonly hasMoreAfter?: boolean;
+  readonly oldestSequence?: number;
+  readonly newestSequence?: number;
 }
 
 export type SessionStoreListener = (snapshot: SessionStoreSnapshot) => void;
 
 const EMPTY_SNAPSHOT: SessionStoreSnapshot = {
   events: [],
+  history: { hasOlder: false, hasNewer: false, loadingOlder: false },
   lastSequence: 0,
   connection: "idle",
 };
@@ -52,6 +69,7 @@ export class SessionStore {
   private readonly listeners = new Set<SessionStoreListener>();
   private conversationState: MutableConversationProjection | undefined;
   private trajectoryState: MutableTrajectoryProjection | undefined;
+  private sessionBaselineSequence = 0;
 
   getSnapshot(): SessionStoreSnapshot {
     return this.snapshot;
@@ -62,9 +80,10 @@ export class SessionStore {
     return () => this.listeners.delete(listener);
   }
 
-  open(session: SessionProjection, history: readonly AgentEvent[] = []): void {
+  open(session: SessionProjection, history: readonly AgentEvent[] = [], page: SessionHistoryPageMetadata = {}): void {
     const accepted = uniqueEvents(session.id, history);
-    const lastSequence = Math.max(session.lastSequence, ...accepted.map((event) => event.sequence), 0);
+    const lastSequence = page.newestSequence ?? Math.max(...accepted.map((event) => event.sequence), 0);
+    this.sessionBaselineSequence = session.lastSequence;
     this.conversationState = createConversationProjection(session.id);
     this.trajectoryState = {
       sessionId: session.id,
@@ -74,6 +93,8 @@ export class SessionStore {
     for (const event of accepted) applyConversationEvent(this.conversationState, event);
     for (const event of accepted) applyTrajectoryEvent(this.trajectoryState, event);
     const conversation = snapshotConversationProjection(this.conversationState);
+    const oldestSequence = page.oldestSequence ?? accepted[0]?.sequence;
+    const newestSequence = page.newestSequence ?? accepted.at(-1)?.sequence;
     this.commit({
       sessionId: session.id,
       session,
@@ -81,6 +102,13 @@ export class SessionStore {
       conversation,
       toolCallTree: buildToolCallTree(conversation.tools),
       trajectory: snapshotTrajectory(this.trajectoryState),
+      history: {
+        hasOlder: page.hasMoreBefore === true,
+        hasNewer: page.hasMoreAfter === true,
+        loadingOlder: false,
+        ...(oldestSequence === undefined ? {} : { oldestSequence }),
+        ...(newestSequence === undefined ? {} : { newestSequence }),
+      },
       lastSequence,
       connection: "connecting",
     });
@@ -88,21 +116,46 @@ export class SessionStore {
 
   replaceProjection(session: SessionProjection): void {
     if (this.snapshot.sessionId !== session.id) return;
-    this.commit({ ...this.snapshot, session, lastSequence: Math.max(this.snapshot.lastSequence, session.lastSequence) });
+    this.sessionBaselineSequence = Math.max(this.sessionBaselineSequence, session.lastSequence);
+    this.commit({ ...this.snapshot, session });
   }
 
   applyHistory(events: readonly AgentEvent[]): void {
-    for (const event of events) this.apply(event, false);
-    this.notify();
+    this.mergeHistory(events, {}, true);
+  }
+
+  prependHistory(events: readonly AgentEvent[], page: SessionHistoryPageMetadata = {}): void {
+    this.mergeHistory(events, page, true);
+  }
+
+  setHistoryLoading(loadingOlder: boolean): void {
+    this.commit({ ...this.snapshot, history: { ...this.snapshot.history, loadingOlder } });
   }
 
   apply(event: AgentEvent, notify = true): boolean {
     const currentId = this.snapshot.sessionId;
     if (currentId === undefined || event.sessionId !== currentId) return false;
-    if (event.sequence <= this.snapshot.lastSequence && this.snapshot.events.some((item) => item.sequence === event.sequence)) return false;
+    if (this.snapshot.events.some((item) => item.sequence === event.sequence)) return false;
+    const isOlder = event.sequence < this.snapshot.lastSequence;
     const events = [...this.snapshot.events, event].sort((left, right) => left.sequence - right.sequence);
     const isNewer = event.sequence > this.snapshot.lastSequence;
-    const session = isNewer && this.snapshot.session !== undefined ? foldProjection(this.snapshot.session, event) : this.snapshot.session;
+    if (isOlder) {
+      this.rebuildDerived(events);
+      const conversation = snapshotConversationProjection(this.conversationState as MutableConversationProjection);
+      const oldestSequence = events[0]?.sequence ?? this.snapshot.history.oldestSequence;
+      this.commit({
+        ...this.snapshot,
+        events,
+        conversation,
+        toolCallTree: buildToolCallTree(conversation.tools),
+        trajectory: snapshotTrajectory(this.trajectoryState as MutableTrajectoryProjection),
+        history: { ...this.snapshot.history, ...(oldestSequence === undefined ? {} : { oldestSequence }) },
+      }, notify);
+      return true;
+    }
+    const shouldFoldSession = isNewer && event.sequence > this.sessionBaselineSequence;
+    const session = shouldFoldSession && this.snapshot.session !== undefined ? foldProjection(this.snapshot.session, event) : this.snapshot.session;
+    if (shouldFoldSession) this.sessionBaselineSequence = event.sequence;
     if (isNewer && this.conversationState !== undefined) applyConversationEvent(this.conversationState, event);
     if (isNewer && this.trajectoryState !== undefined) applyTrajectoryEvent(this.trajectoryState, event);
     const conversation = isNewer && this.conversationState !== undefined
@@ -117,6 +170,11 @@ export class SessionStore {
         toolCallTree: buildToolCallTree(conversation.tools),
       }),
       ...(this.trajectoryState === undefined ? {} : { trajectory: snapshotTrajectory(this.trajectoryState) }),
+      history: {
+        ...this.snapshot.history,
+        ...(events[0] === undefined ? {} : { oldestSequence: events[0].sequence }),
+        ...(event.sequence > (this.snapshot.history.newestSequence ?? 0) ? { newestSequence: event.sequence } : {}),
+      },
       lastSequence: Math.max(this.snapshot.lastSequence, event.sequence),
     }, notify);
     return true;
@@ -133,6 +191,7 @@ export class SessionStore {
   clear(): void {
     this.conversationState = undefined;
     this.trajectoryState = undefined;
+    this.sessionBaselineSequence = 0;
     this.commit(EMPTY_SNAPSHOT);
   }
 
@@ -143,6 +202,40 @@ export class SessionStore {
 
   private notify(): void {
     for (const listener of this.listeners) listener(this.snapshot);
+  }
+
+  private mergeHistory(events: readonly AgentEvent[], page: SessionHistoryPageMetadata, notify: boolean): void {
+    const sessionId = this.snapshot.sessionId;
+    if (sessionId === undefined) return;
+    const merged = uniqueEvents(sessionId, [...this.snapshot.events, ...events]);
+    this.rebuildDerived(merged);
+    const first = merged[0]?.sequence;
+    const last = merged.at(-1)?.sequence;
+    this.commit({
+      ...this.snapshot,
+      events: merged,
+      ...(this.conversationState === undefined ? {} : { conversation: snapshotConversationProjection(this.conversationState), toolCallTree: buildToolCallTree(snapshotConversationProjection(this.conversationState).tools) }),
+      ...(this.trajectoryState === undefined ? {} : { trajectory: snapshotTrajectory(this.trajectoryState) }),
+      history: {
+        ...this.snapshot.history,
+        loadingOlder: false,
+        ...(page.hasMoreBefore === undefined ? {} : { hasOlder: page.hasMoreBefore }),
+        ...(page.hasMoreAfter === undefined ? {} : { hasNewer: page.hasMoreAfter }),
+        ...(first === undefined ? {} : { oldestSequence: first }),
+        ...(last === undefined ? {} : { newestSequence: last }),
+      },
+      lastSequence: Math.max(this.snapshot.lastSequence, last ?? 0),
+    }, notify);
+  }
+
+  private rebuildDerived(events: readonly AgentEvent[]): void {
+    if (this.snapshot.sessionId === undefined) return;
+    this.conversationState = createConversationProjection(this.snapshot.sessionId);
+    this.trajectoryState = { sessionId: this.snapshot.sessionId, records: new Map(), lastSequence: 0 };
+    for (const event of events) {
+      applyConversationEvent(this.conversationState, event);
+      applyTrajectoryEvent(this.trajectoryState, event);
+    }
   }
 }
 

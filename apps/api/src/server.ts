@@ -216,10 +216,16 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "GET" && eventsMatch?.[1] !== undefined) {
       const id = sessionId(decodeURIComponent(eventsMatch[1]));
       const after = parseSequence(url.searchParams.get("after_sequence") ?? request.headers["last-event-id"]);
+      const before = parseOptionalSequence(url.searchParams.get("before_sequence"));
+      const limit = parsePageLimit(url.searchParams.get("limit"));
       const session = await host.getSession(id);
       if (session === undefined) throw new HttpError(404, "session not found");
       if (url.searchParams.get("format") === "json") {
-        sendJson(response, 200, await host.events(id, after));
+        if (before !== undefined || limit !== undefined) {
+          sendJson(response, 200, await host.eventsPage(id, { afterSequence: after, ...(before === undefined ? {} : { beforeSequence: before }), ...(limit === undefined ? {} : { limit }) }));
+        } else {
+          sendJson(response, 200, await host.events(id, after));
+        }
         return;
       }
       await streamEvents(request, response, host, id, after);
@@ -578,6 +584,19 @@ function parseSequence(value: string | string[] | null | undefined): number {
   if (raw === null || raw === undefined || raw === "") return 0;
   const parsed = Number.parseInt(raw, 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+function parseOptionalSequence(value: string | string[] | null | undefined): number | undefined {
+  if (value === null || value === undefined || value === "") return undefined;
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (raw === undefined || raw === "") return undefined;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function parsePageLimit(value: string | string[] | null | undefined): number | undefined {
+  const parsed = parseOptionalSequence(value);
+  return parsed === undefined ? undefined : Math.min(1_000, Math.max(1, parsed));
 }
 
 function parsePermissionPreset(value: unknown): PermissionPreset {

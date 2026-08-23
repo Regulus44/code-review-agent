@@ -492,5 +492,46 @@ git diff --check                                    ✓
 
 ### 下一步
 
-- 实现 Trajectory load older、tail append 的暂停/恢复边界和 1000+ records 虚拟化；
 - 继续收敛 Read-only、Edit、Test/Recovery、Delegation、Inspection 的 Phase 7.10 browser fixtures 和性能基线。
+
+## 2026-08-23：Trajectory history paging、prepend replay 与 1000+ fixture
+
+### 目标与 DSH 对照
+
+- 对照 DSH `ui-conversation`/`ui-trajectory` 的 older page、cursor 和 bounded render window，把已有全量 `/events?format=json` 回放扩展为可恢复的历史分页；
+- 保持 EventStore 为唯一事实来源：分页只限制 Web 已加载/渲染的窗口，不能删除或重写事件；prepend 后重新从共享窗口折叠 Conversation、ToolCallTree 和 Trajectory；
+- 保持 newest SSE cursor 独立于 oldest history cursor，加载 older 不重新执行工具、不重复消费 live event。
+
+### 变更范围
+
+- `packages/contracts/src/index.ts`：新增可选 `EventStore.listPage()`、`EventListOptions`、`EventPage`，保留旧 `list(sessionId, afterSequence)` 兼容路径；
+- `packages/storage/src/index.ts`：InMemory/SQLite 支持 latest page、`before_sequence`、limit、hasMore 和 oldest/newest sequence；
+- `packages/runtime/src/index.ts`、`apps/api/src/server.ts`：增加 `AgentHost.eventsPage()` 和分页 JSON DTO；无分页参数时继续返回旧数组响应；
+- `apps/web/src/client/api.ts`、`connection.ts`、`store.ts`：初始读取 200-event tail page，`loadOlder()` 以 oldest sequence prepend，去重并 rebuild derived projection；
+- `apps/web/index.html`：Trajectory details 增加 `Load older`，加载 older 时保持 scroll anchor；paused tail-follow 仍消费新事件但不强制滚动；
+- `apps/api/src/fixtures/trajectory.ts`、`scripts/phase7-trajectory-fixture-server.mjs`：新增 1,250 条 completed read-only tool record fixture；
+- `apps/web/src/presentation/trajectory-presenter.test.ts`：新增 1,200 条记录的 searchable/bounded ledger/timeline 测试。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm test                                            ✓（全 workspace 通过）
+pnpm --filter @code-review-agent/web test            ✓（39 tests）
+pnpm --filter @code-review-agent/api test -- --run src/server.test.ts ✓（18 tests）
+pnpm --filter @code-review-agent/storage test -- --run src/index.test.ts ✓（10 tests）
+pnpm -F @code-review-agent/web run build:browser    ✓
+git diff --check                                    ✓
+```
+
+真实 browser smoke：
+
+- 1,250-record fixture 初始 bounded page 显示 100 条 tool records；点击 `Load older` 后显示 200 条，oldest cursor prepend 后 newest sequence 仍保持 2501；
+- 精确搜索 `trajectory_fixture_call_1250` 显示 `1 matched · 1 shown`；timeline/ledger render 保持有界；
+- `Following tail` 切换为 `Paused` 后追加 live turn，sequence 从 2501 前进而按钮仍为 `Paused`；恢复跟随后仍使用同一 SSE connection；
+- browser console warn/error 为空，临时 fixture API 和 tab 已关闭。
+
+### 下一步
+
+- 将 Read-only、Edit、Test/Recovery、Delegation、Inspection browser fixture 汇总为 Phase 7.10 门禁；
+- 补充 load-older 多页性能测量、真实 Read/Edit/Test trajectory fixture 和 shell 拆分/导航收敛。

@@ -531,8 +531,27 @@ export interface ChatModel {
 export interface EventStore {
   append(input: AppendEventInput): Promise<AgentEvent>;
   list(sessionId: SessionId, afterSequence?: number): Promise<readonly AgentEvent[]>;
+  /** Optional bounded history query. Legacy stores may only implement list(). */
+  listPage?(sessionId: SessionId, options?: EventListOptions): Promise<EventPage>;
   project(sessionId: SessionId): Promise<SessionProjection | undefined>;
   subscribe(sessionId: SessionId, listener: EventListener): () => void;
+}
+
+export interface EventListOptions {
+  /** Exclusive lower cursor. */
+  readonly afterSequence?: number;
+  /** Exclusive upper cursor, used when prepending older history. */
+  readonly beforeSequence?: number;
+  /** Maximum number of events returned. The page is always ordered ascending. */
+  readonly limit?: number;
+}
+
+export interface EventPage {
+  readonly events: readonly AgentEvent[];
+  readonly hasMoreBefore: boolean;
+  readonly hasMoreAfter: boolean;
+  readonly oldestSequence?: number;
+  readonly newestSequence?: number;
 }
 
 export interface SessionEventStore extends EventStore {

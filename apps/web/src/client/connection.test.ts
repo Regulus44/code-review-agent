@@ -105,4 +105,30 @@ describe("SessionConnectionController", () => {
     expect(controller.store.getSnapshot().connection).toBe("idle");
     expect(second?.closed).toBe(true);
   });
+
+  it("loads an older page through the same generation without changing the SSE cursor", async () => {
+    FakeEventSource.instances.length = 0;
+    const calls: string[] = [];
+    const initial = [event(4), event(5)];
+    const older = [event(1), event(2), event(3)];
+    const client = new WebApiClient({
+      baseUrl: "http://localhost:4317",
+      fetcher: async (input) => {
+        const url = String(input);
+        calls.push(url);
+        if (url.includes("before_sequence=4")) return new Response(JSON.stringify({ events: older, hasMoreBefore: false, hasMoreAfter: true, oldestSequence: 1, newestSequence: 3 }), { status: 200, headers: { "content-type": "application/json" } });
+        if (url.includes("/events?")) return new Response(JSON.stringify({ events: initial, hasMoreBefore: true, hasMoreAfter: false, oldestSequence: 4, newestSequence: 5 }), { status: 200, headers: { "content-type": "application/json" } });
+        return new Response(JSON.stringify(session(5)), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+    const controller = new SessionConnectionController({ api: client, eventSourceFactory: (url) => new FakeEventSource(url), reconnectDelayMs: 0 });
+    await controller.open(sessionId);
+    expect(controller.store.getSnapshot().history.hasOlder).toBe(true);
+    expect(await controller.loadOlder(3)).toBe(true);
+    expect(controller.store.getSnapshot().events.map((item) => item.sequence)).toEqual([1, 2, 3, 4, 5]);
+    expect(controller.store.getSnapshot().lastSequence).toBe(5);
+    expect(calls.some((url) => url.includes("before_sequence=4") && url.includes("limit=3"))).toBe(true);
+    expect(FakeEventSource.instances[0]?.url).toContain("after_sequence=5");
+    controller.close();
+  });
 });

@@ -60,6 +60,20 @@ export interface TaskOutputResponse {
   readonly events: readonly AgentEvent[];
 }
 
+export interface EventPageResponse {
+  readonly events: readonly AgentEvent[];
+  readonly hasMoreBefore: boolean;
+  readonly hasMoreAfter: boolean;
+  readonly oldestSequence?: number;
+  readonly newestSequence?: number;
+}
+
+export interface EventPageOptions {
+  readonly afterSequence?: number;
+  readonly beforeSequence?: number;
+  readonly limit?: number;
+}
+
 export interface CreateSessionResponse extends SessionProjection {}
 
 export interface WebApiClientOptions {
@@ -118,6 +132,14 @@ export class WebApiClient {
 
   listEvents(sessionId: SessionId, afterSequence = 0): Promise<readonly AgentEvent[]> {
     return this.request<readonly AgentEvent[]>(`/v1/sessions/${encodeURIComponent(sessionId)}/events?format=json&after_sequence=${afterSequence}`);
+  }
+
+  listEventsPage(sessionId: SessionId, options: EventPageOptions = {}): Promise<EventPageResponse> {
+    const params = new URLSearchParams({ format: "json" });
+    if (options.afterSequence !== undefined) params.set("after_sequence", String(Math.max(0, Math.floor(options.afterSequence))));
+    if (options.beforeSequence !== undefined) params.set("before_sequence", String(Math.max(0, Math.floor(options.beforeSequence))));
+    if (options.limit !== undefined) params.set("limit", String(Math.min(1_000, Math.max(1, Math.floor(options.limit)))));
+    return this.request<unknown>(`/v1/sessions/${encodeURIComponent(sessionId)}/events?${params.toString()}`).then(normalizeEventPage);
   }
 
   sendMessage(sessionId: SessionId, content: string, commandId?: string): Promise<{ readonly turnId: TurnId }> {
@@ -232,4 +254,27 @@ export class WebApiClient {
     if (!response.ok) throw new ApiError(response.status, body);
     return body as T;
   }
+}
+
+function normalizeEventPage(value: unknown): EventPageResponse {
+  if (Array.isArray(value)) {
+    const events = value as AgentEvent[];
+    const newestSequence = events.at(-1)?.sequence;
+    return {
+      events,
+      hasMoreBefore: false,
+      hasMoreAfter: false,
+      ...(events[0] === undefined ? {} : { oldestSequence: events[0].sequence }),
+      ...(newestSequence === undefined ? {} : { newestSequence }),
+    };
+  }
+  if (typeof value !== "object" || value === null || !Array.isArray((value as { events?: unknown }).events)) throw new Error("Invalid event page response");
+  const page = value as Partial<EventPageResponse> & { events: readonly AgentEvent[] };
+  return {
+    events: page.events,
+    hasMoreBefore: page.hasMoreBefore === true,
+    hasMoreAfter: page.hasMoreAfter === true,
+    ...(typeof page.oldestSequence === "number" ? { oldestSequence: page.oldestSequence } : {}),
+    ...(typeof page.newestSequence === "number" ? { newestSequence: page.newestSequence } : {}),
+  };
 }

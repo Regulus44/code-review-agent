@@ -14,6 +14,7 @@ export interface BrowserWebRuntime {
   readonly api: WebApiClient;
   readonly store: SessionStore;
   readonly connection: SessionConnectionController;
+  readonly loadOlder: SessionConnectionController["loadOlder"];
   readonly projectConversation: typeof projectConversation;
   readonly projectTrajectory: typeof projectTrajectory;
   readonly queryTrajectory: typeof queryTrajectory;
@@ -34,6 +35,7 @@ const runtime: BrowserWebRuntime = {
   api,
   store,
   connection,
+  loadOlder: (limit?: number) => connection.loadOlder(limit),
   projectConversation,
   projectTrajectory,
   queryTrajectory,

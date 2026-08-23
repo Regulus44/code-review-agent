@@ -105,4 +105,25 @@ describe("SessionStore", () => {
     expect(store.getSnapshot().conversation?.nodes.find((node) => node.kind === "turn")).toMatchObject({ status: "completed" });
     expect(store.getSnapshot().events.map((item) => item.sequence)).toEqual([4, 5]);
   });
+
+  it("prepends older history and rebuilds derived projections without moving the live cursor", () => {
+    const store = new SessionStore();
+    store.open({ ...session(), lastSequence: 5 }, [
+      event(4, "assistant/message", { content: "tail" }, false),
+      event(5, "turn/ended", { status: "completed" }),
+    ], { hasMoreBefore: true, oldestSequence: 4, newestSequence: 5 });
+    store.prependHistory([
+      event(1, "user/message", { content: "older prompt" }),
+      event(2, "turn/started", {}),
+      event(3, "assistant/message", { content: "older answer" }),
+    ], { hasMoreBefore: false, oldestSequence: 1, newestSequence: 3 });
+
+    const snapshot = store.getSnapshot();
+    expect(snapshot.events.map((item) => item.sequence)).toEqual([1, 2, 3, 4, 5]);
+    expect(snapshot.lastSequence).toBe(5);
+    expect(snapshot.history.hasOlder).toBe(false);
+    expect(snapshot.conversation?.nodes.filter((node) => node.kind === "user")).toHaveLength(1);
+    expect(snapshot.conversation?.nodes.filter((node) => node.kind === "assistant")).toHaveLength(2);
+    expect(snapshot.trajectory?.lastSequence).toBe(5);
+  });
 });
