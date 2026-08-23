@@ -97,6 +97,7 @@ async function runCodingScenarios() {
     const browserAsset = await request(fixture.baseUrl, "/web/browser.js");
     assert(typeof browserAsset.body === "string" && browserAsset.body.length > 10_000, "browser bundle is missing or unexpectedly small");
     assert(browserAsset.body.includes("reorderWorkspaces"), "browser bundle is missing the typed workspace reorder command");
+    assert(browserAsset.body.includes("renameWorkspace") && browserAsset.body.includes("archiveWorkspace") && browserAsset.body.includes("deleteWorkspace"), "browser bundle is missing workspace lifecycle commands");
 
     const workspaceCatalog = (await request(fixture.baseUrl, "/v1/workspaces")).body;
     assert(Array.isArray(workspaceCatalog.workspaces) && workspaceCatalog.workspaces.length >= 3, "Coding fixture workspace catalog is incomplete");
@@ -106,6 +107,22 @@ async function runCodingScenarios() {
     assert(workspaceMoved.body.workspaces.map((workspace) => workspace.key).join("|") === workspaceOrder.join("|"), "Workspace reorder response did not preserve the requested order");
     const workspaceRepeated = await request(fixture.baseUrl, "/v1/workspaces/reorder", { method: "POST", headers: workspaceHeaders, body: JSON.stringify({ order: workspaceOrder }) });
     assert(JSON.stringify(workspaceRepeated.body) === JSON.stringify(workspaceMoved.body), "Repeated workspace reorder did not return the durable catalog");
+    const lifecycleKey = workspaceOrder[0];
+    assert(typeof lifecycleKey === "string", "Workspace lifecycle fixture key is missing");
+    const renamedWorkspace = await request(fixture.baseUrl, `/v1/workspaces/${encodeURIComponent(lifecycleKey)}/label`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "phase7-gate-workspace-rename" }, body: JSON.stringify({ label: "Browser review workspace" }) });
+    assert(renamedWorkspace.body.workspaces.some((workspace) => workspace.key === lifecycleKey && workspace.label === "Browser review workspace"), "Workspace rename did not update the catalog label");
+    const archivedWorkspace = await request(fixture.baseUrl, `/v1/workspaces/${encodeURIComponent(lifecycleKey)}/archive`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "phase7-gate-workspace-archive" }, body: JSON.stringify({ archived: true }) });
+    assert(!archivedWorkspace.body.workspaces.some((workspace) => workspace.key === lifecycleKey), "Archived workspace remained in the active catalog");
+    const archivedCatalog = await request(fixture.baseUrl, "/v1/workspaces?include_archived=true");
+    assert(archivedCatalog.body.workspaces.some((workspace) => workspace.key === lifecycleKey && workspace.archived === true), "Archived workspace is missing from the archived catalog");
+    const restoredWorkspace = await request(fixture.baseUrl, `/v1/workspaces/${encodeURIComponent(lifecycleKey)}/archive`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "phase7-gate-workspace-restore" }, body: JSON.stringify({ archived: false }) });
+    assert(restoredWorkspace.body.workspaces.some((workspace) => workspace.key === lifecycleKey), "Workspace restore did not return the active catalog entry");
+    const deletedWorkspace = await request(fixture.baseUrl, `/v1/workspaces/${encodeURIComponent(lifecycleKey)}`, { method: "DELETE", headers: { "idempotency-key": "phase7-gate-workspace-delete" } });
+    assert(!deletedWorkspace.body.workspaces.some((workspace) => workspace.key === lifecycleKey), "Deleted workspace remained in the catalog");
+    const lifecycleSessions = (await request(fixture.baseUrl, "/v1/sessions?include_archived=true")).body.sessions.filter((session) => session.workspaceRoot && workspaceOrder.includes(session.workspaceRoot.replace(/\\/g, "/").replace(/\/+$/u, "").toLowerCase()));
+    assert(lifecycleSessions.length > 0, "Workspace delete removed session history instead of retaining it");
+    const lifecycleEvents = (await request(fixture.baseUrl, `/v1/sessions/${lifecycleSessions[0].id}/events?format=json`)).body;
+    assert(lifecycleEvents.filter((event) => event.type === "workspace/updated").length >= 4, "Workspace lifecycle events are not replayable");
     assert(browserAsset.body.includes("presentRuntimeDiagnostics"), "browser bundle is missing typed terminal/job diagnostics presenter");
 
     const readId = fixture.scenarios.readOnly.sessionId;

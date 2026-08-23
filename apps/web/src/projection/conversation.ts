@@ -161,6 +161,7 @@ export function applyConversationEvent(projection: MutableConversationProjection
     case "session/created":
     case "session/updated":
     case "session/deleted":
+    case "workspace/updated":
     case "workspace/reordered":
       return false;
     case "user/message": {

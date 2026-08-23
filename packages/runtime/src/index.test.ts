@@ -403,6 +403,32 @@ describe("AgentHost", () => {
     expect(durableEvents.some((event) => event.type === "workspace/reordered")).toBe(true);
   });
 
+  it("renames, archives, restores and soft-deletes a workspace with replayable metadata", async () => {
+    const store = new InMemoryEventStore();
+    const host = new AgentHost({ store });
+    const first = await host.createSession("D:/workspace-lifecycle");
+    const second = await host.createSession("D:/workspace-lifecycle");
+    await host.createSession("D:/workspace-other");
+    const key = "d:/workspace-lifecycle";
+
+    const renamed = await host.renameWorkspace(key, "Review workspace", "workspace-rename-1");
+    expect(renamed.workspaces.find((workspace) => workspace.key === key)).toMatchObject({ label: "Review workspace" });
+    expect(await host.renameWorkspace(key, "Review workspace", "workspace-rename-1")).toEqual(renamed);
+
+    const archived = await host.archiveWorkspace(key, true, "workspace-archive-1");
+    expect(archived.workspaces.some((workspace) => workspace.key === key)).toBe(false);
+    expect((await host.listWorkspaces(true)).workspaces.find((workspace) => workspace.key === key)).toMatchObject({ label: "Review workspace", archived: true });
+
+    const restored = await host.archiveWorkspace(key, false, "workspace-restore-1");
+    expect(restored.workspaces.find((workspace) => workspace.key === key)).toMatchObject({ label: "Review workspace" });
+
+    const deleted = await host.deleteWorkspace(key, "workspace-delete-1");
+    expect(deleted.workspaces.some((workspace) => workspace.key === key)).toBe(false);
+    expect((await host.listSessions(true)).filter((session) => session.workspaceRoot === "D:/workspace-lifecycle")).toHaveLength(2);
+    const events = [...await host.events(first.id), ...await host.events(second.id)].filter((event) => event.type === "workspace/updated");
+    expect(events.map((event) => event.payload["action"])).toEqual(expect.arrayContaining(["renamed", "archived", "restored", "deleted"]));
+  });
+
   it("supports resume and fork commands", async () => {
     const store = new InMemoryEventStore();
     const host = new AgentHost({ store });

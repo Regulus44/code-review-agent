@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { brand, type SessionSummary } from "@code-review-agent/contracts";
+import { brand, type SessionSummary, type WorkspaceSummary } from "@code-review-agent/contracts";
 import { buildNavigationModel, sessionRelativeTime, workspaceKey } from "./navigation-presenter.js";
 
 function session(id: string, overrides: Partial<SessionSummary> = {}): SessionSummary {
@@ -64,5 +64,26 @@ describe("buildNavigationModel", () => {
     const second = session("ses_second", { workspaceRoot: "D:/second", updatedAt: "2026-08-23T13:00:00.000Z" });
     const model = buildNavigationModel([first, second], { workspaceOrder: ["D:/first", "D:/second"] });
     expect(model.groups.map((group) => group.root)).toEqual(["D:/first", "D:/second"]);
+  });
+
+  it("uses workspace lifecycle metadata for labels and archive filtering", () => {
+    const active = session("ses_active", { workspaceRoot: "D:/lifecycle" });
+    const archived = session("ses_archived_workspace", { workspaceRoot: "D:/archived-workspace" });
+    const catalog: WorkspaceSummary[] = [
+      { key: workspaceKey("D:/lifecycle"), root: "D:/lifecycle", position: 0, sessionCount: 1, label: "Review workspace" },
+      { key: workspaceKey("D:/archived-workspace"), root: "D:/archived-workspace", position: 1, sessionCount: 1, archived: true },
+    ];
+    const activeModel = buildNavigationModel([active, archived], { workspaceCatalog: catalog });
+    expect(activeModel.groups.map((group) => group.label || group.root)).toEqual(["Review workspace"]);
+    const archivedModel = buildNavigationModel([active, archived], { showArchived: true, workspaceCatalog: catalog });
+    expect(archivedModel.groups.map((group) => group.root)).toEqual(["D:/archived-workspace"]);
+  });
+
+  it("hides sessions whose workspace was soft-deleted while retaining their history", () => {
+    const deletedWorkspaceSession = session("ses_deleted_workspace", { workspaceRoot: "D:/deleted-workspace" });
+    const catalog: WorkspaceSummary[] = [{ key: workspaceKey("D:/repo"), root: "D:/repo", position: 0, sessionCount: 1 }];
+    const model = buildNavigationModel([session("ses_active"), deletedWorkspaceSession], { workspaceCatalog: catalog });
+    expect(model.groups.map((group) => group.root)).toEqual(["D:/repo"]);
+    expect(model.allSessions.map((item) => item.id)).toEqual(["ses_active", "ses_deleted_workspace"]);
   });
 });

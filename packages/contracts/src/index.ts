@@ -19,6 +19,7 @@ export type AgentEventType =
   | "session/created"
   | "session/updated"
   | "session/deleted"
+  | "workspace/updated"
   | "workspace/reordered"
   | "user/message"
   | "turn/steered"
@@ -197,6 +198,11 @@ export interface WorkspaceSummary {
   readonly position: number;
   readonly sessionCount: number;
   readonly latestUpdatedAt?: string;
+  /** Optional host-backed display label; absent means derive it from root. */
+  readonly label?: string;
+  /** Workspace lifecycle metadata. Missing values mean active/not deleted for backward compatibility. */
+  readonly archived?: boolean;
+  readonly deleted?: boolean;
 }
 
 export interface WorkspaceCatalog {

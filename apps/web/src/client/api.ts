@@ -145,8 +145,8 @@ export class WebApiClient {
     return this.request(`/v1/sessions?include_archived=${String(includeArchived)}`);
   }
 
-  listWorkspaces(): Promise<WorkspaceCatalog> {
-    return this.request<WorkspaceCatalog>("/v1/workspaces");
+  listWorkspaces(includeArchived = false): Promise<WorkspaceCatalog> {
+    return this.request<WorkspaceCatalog>(`/v1/workspaces${includeArchived ? "?include_archived=true" : ""}`);
   }
 
   reorderWorkspaces(order: readonly string[], commandId?: string): Promise<WorkspaceCatalog> {
@@ -154,6 +154,29 @@ export class WebApiClient {
       method: "POST",
       commandId,
       body: { order },
+    });
+  }
+
+  renameWorkspace(key: string, label: string, commandId?: string): Promise<WorkspaceCatalog> {
+    return this.request<WorkspaceCatalog>(`/v1/workspaces/${encodeURIComponent(key)}/label`, {
+      method: "POST",
+      commandId,
+      body: { label },
+    });
+  }
+
+  archiveWorkspace(key: string, archived = true, commandId?: string): Promise<WorkspaceCatalog> {
+    return this.request<WorkspaceCatalog>(`/v1/workspaces/${encodeURIComponent(key)}/archive`, {
+      method: "POST",
+      commandId,
+      body: { archived },
+    });
+  }
+
+  deleteWorkspace(key: string, commandId?: string): Promise<WorkspaceCatalog> {
+    return this.request<WorkspaceCatalog>(`/v1/workspaces/${encodeURIComponent(key)}`, {
+      method: "DELETE",
+      commandId,
     });
   }
 

@@ -1,5 +1,43 @@
 # Phase 7：DSH Web 前端收敛
 
+## 2026-08-23：Workspace lifecycle controls
+
+### 变更范围
+
+- `WorkspaceSummary` 增加 `label`、`archived`、`deleted` 可选元数据；新增 `workspace/updated` durable event，保留 Session/EventStore 历史并让 Conversation projection 忽略导航元数据事件。
+- `AgentHost` 增加 Workspace catalog、rename、archive/restore、soft delete；所有命令使用 command claim 保持幂等，delete 不删除文件、Session 或事件。
+- API 增加 Workspace catalog、label、archive/restore 和 delete endpoint；Web Workspace actions 菜单接入 New session、Rename、Archive/Restore、Delete。
+- Navigation presenter 以 Workspace catalog 为权威：已删除 Workspace 的 Session 不再显示在导航，Session 历史仍可由 API/事件回放读取；Rename dialog 描述会区分 Session 与 Workspace。
+
+### 根治理七问
+
+1. **Phase**：Phase 7.1/7.3/7.10 Web navigation 与生命周期收敛。
+2. **问题类型**：Runtime/API/Web Workspace lifecycle、事件回放和导航投影。
+3. **契约影响**：新增 `workspace/updated` event 与 Workspace lifecycle metadata；同步 `packages/contracts`、`docs/event-contract.md`、Runtime/API/Web tests。
+4. **参考入口**：DSH Workspace Browser 的分组/操作行为；本项目继续使用自己的 EventStore、AgentHost 和 Web contract。
+5. **上游来源**：仅行为参考，无第三方代码复制或新增许可证义务。
+6. **验收场景**：Rename、Archive/Restore、Delete confirmation、active/archived navigation、soft-deleted history replay、重复 command 和 browser gate。
+7. **回滚**：回滚本 checkpoint 可隐藏 Workspace actions/API；Session、文件和历史事件不受破坏。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+Runtime Workspace lifecycle tests                  ✓（19 tests）
+API Workspace lifecycle tests                      ✓（24 tests）
+Web API/navigation lifecycle tests                 ✓（17 tests）
+pnpm test                                          ✓（串行 workspace 调度；10 个项目）
+pnpm test:phase7:browser                            ✓（2.14s；trajectory full replay 19.03ms）
+git diff --check                                    ✓
+```
+
+真实 browser fixture 已验证：Rename 成功更新导航 label；Archive/Restore 正确切换 active/archived 视图；Delete confirmation 确认后 Workspace 从导航消失，Session 历史仍可通过 API 获取。
+
+### 下一步
+
+- 按 Phase 7.final 退出条件执行全 workspace 回归、browser/replay gate、文档契约同步和独立 Git checkpoint；
+- 完成后进入 Phase 8 高级能力与产品化。
+
 ## 2026-08-23：Responsive viewport baseline
 
 ### 变更范围

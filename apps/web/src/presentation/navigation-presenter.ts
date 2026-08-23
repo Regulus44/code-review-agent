@@ -1,4 +1,4 @@
-import type { SessionId, SessionSummary } from "@code-review-agent/contracts";
+import type { SessionId, SessionSummary, WorkspaceSummary } from "@code-review-agent/contracts";
 
 export interface NavigationSession extends SessionSummary {
   readonly children: readonly NavigationSession[];
@@ -7,6 +7,7 @@ export interface NavigationSession extends SessionSummary {
 export interface WorkspaceNavigationGroup {
   readonly key: string;
   readonly root: string;
+  readonly label?: string;
   readonly sessions: readonly NavigationSession[];
   readonly latestUpdatedAt?: string;
 }
@@ -27,6 +28,7 @@ export interface NavigationOptions {
   readonly activeSessionId?: SessionId;
   readonly maxDepth?: number;
   readonly workspaceOrder?: readonly string[];
+  readonly workspaceCatalog?: readonly WorkspaceSummary[];
 }
 
 /**
@@ -43,7 +45,17 @@ export function buildNavigationModel(
   const query = normalizeQuery(options.query);
   const maxDepth = boundedDepth(options.maxDepth);
   const allSessions = input.filter((session) => session.deleted !== true);
-  const candidates = allSessions.filter((session) => Boolean(session.archived) === showArchived);
+  const workspaceByKey = new Map((options.workspaceCatalog ?? []).map((workspace) => [workspaceKey(workspace.key), workspace] as const));
+  const candidates = allSessions.filter((session) => {
+    const workspace = workspaceByKey.get(workspaceKey(session.workspaceRoot));
+    // A catalog-backed projection is authoritative: a workspace omitted from
+    // the active catalog has been soft-deleted and must not remain navigable
+    // merely because its Session history is intentionally retained.
+    if (options.workspaceCatalog !== undefined && workspace === undefined) return false;
+    if (workspace?.deleted === true) return false;
+    const workspaceArchived = workspace?.archived === true;
+    return showArchived ? Boolean(session.archived) || workspaceArchived : !session.archived && !workspaceArchived;
+  });
   const byId = new Map(candidates.map((session) => [session.id, session]));
   const childrenByParent = new Map<SessionId, SessionSummary[]>();
   for (const session of candidates) {
@@ -77,9 +89,11 @@ export function buildNavigationModel(
     .map(([key, group]) => {
       const sessions = group.sessions.filter((session) => matchesTree(session, query));
       const latestUpdatedAt = latestTimestamp(sessions);
+      const workspace = workspaceByKey.get(key);
       return {
         key,
         root: group.root,
+        ...(workspace?.label === undefined ? {} : { label: workspace.label }),
         sessions,
         ...(latestUpdatedAt === undefined ? {} : { latestUpdatedAt }),
       } satisfies WorkspaceNavigationGroup;

@@ -250,6 +250,25 @@ describe("Phase 2 API", () => {
     expect(allEvents.flat().some((event) => event.type === "workspace/reordered")).toBe(true);
   });
 
+  it("serves workspace rename/archive/delete lifecycle with durable replay", async () => {
+    const first = await (await fetch(`${baseUrl}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: "D:/workspace-lifecycle-api" }) })).json() as { id: string };
+    await fetch(`${baseUrl}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: "D:/workspace-lifecycle-api" }) });
+    const key = "d:/workspace-lifecycle-api";
+    const renamedResponse = await fetch(`${baseUrl}/v1/workspaces/${encodeURIComponent(key)}/label`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "api-workspace-rename-1" }, body: JSON.stringify({ label: "API review" }) });
+    expect(renamedResponse.status).toBe(200);
+    expect((await renamedResponse.json()).workspaces.find((workspace: { key: string }) => workspace.key === key)).toMatchObject({ label: "API review" });
+    const archivedResponse = await fetch(`${baseUrl}/v1/workspaces/${encodeURIComponent(key)}/archive`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "api-workspace-archive-1" }, body: JSON.stringify({ archived: true }) });
+    expect((await archivedResponse.json()).workspaces.some((workspace: { key: string }) => workspace.key === key)).toBe(false);
+    const archivedCatalog = await (await fetch(`${baseUrl}/v1/workspaces?include_archived=true`)).json() as { workspaces: { key: string; label?: string; archived?: boolean }[] };
+    expect(archivedCatalog.workspaces.find((workspace) => workspace.key === key)).toMatchObject({ label: "API review", archived: true });
+    const restored = await fetch(`${baseUrl}/v1/workspaces/${encodeURIComponent(key)}/archive`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "api-workspace-restore-1" }, body: JSON.stringify({ archived: false }) });
+    expect((await restored.json()).workspaces.some((workspace: { key: string }) => workspace.key === key)).toBe(true);
+    const deleted = await fetch(`${baseUrl}/v1/workspaces/${encodeURIComponent(key)}`, { method: "DELETE", headers: { "idempotency-key": "api-workspace-delete-1" } });
+    expect((await deleted.json()).workspaces.some((workspace: { key: string }) => workspace.key === key)).toBe(false);
+    const events = await (await fetch(`${baseUrl}/v1/sessions/${first.id}/events?format=json`)).json() as { type: string }[];
+    expect(events.filter((event) => event.type === "workspace/updated")).toHaveLength(4);
+  });
+
   it("persists scoped MCP settings and exposes catalog diagnostics without secrets", async () => {
     const directory = mkdtempSync(join(tmpdir(), "code-review-agent-api-mcp-"));
     const databasePath = join(directory, "agent.sqlite");

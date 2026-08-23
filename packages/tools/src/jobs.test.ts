@@ -4,6 +4,19 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { JobManager } from "./jobs.js";
 
+async function removeTempTree(root: string): Promise<void> {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      await rm(root, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code) : "";
+      if (!["EBUSY", "EPERM", "ENOTEMPTY"].includes(code) || attempt === 7) throw error;
+      await new Promise<void>((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+    }
+  }
+}
+
 describe("JobManager", () => {
   it("starts a scoped job, records output events, and reads bounded output", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "cra-job-"));
@@ -12,14 +25,16 @@ describe("JobManager", () => {
       const jobs = new JobManager();
       const started = await jobs.start({ sessionId: "ses_job", workspaceRoot: root, cwd: root, executable: process.execPath, args: ["-e", "process.stdout.write('job-output')"], command: "node fixture", appendEvent: async (type) => { events.push(type); } });
       const jobId = (started.output as { jobId: string }).jobId;
-      await new Promise<void>((resolve) => setTimeout(resolve, 100));
+      for (let attempt = 0; attempt < 40 && (!events.includes("job/output") || jobs.list("ses_job", root)[0]?.status === "running"); attempt += 1) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 25));
+      }
       const output = await jobs.read("ses_job", jobId, 100);
       expect((output.output as { output: string }).output).toContain("job-output");
       expect(events).toContain("job/started");
       expect(events).toContain("job/output");
       expect(jobs.list("ses_job", root)[0]).toMatchObject({ jobId, command: "node fixture" });
       for (let attempt = 0; attempt < 20 && jobs.list("ses_job", root)[0]?.status === "running"; attempt += 1) await new Promise<void>((resolve) => setTimeout(resolve, 25));
-    } finally { await rm(root, { recursive: true, force: true }); }
+    } finally { await removeTempTree(root); }
   });
 
   it("kills only a job owned by the current session", async () => {
@@ -32,7 +47,7 @@ describe("JobManager", () => {
       await jobs.kill("ses_job_kill", jobId);
       await new Promise<void>((resolve) => setTimeout(resolve, 100));
       expect(jobs.list("ses_job_kill", root)[0]?.status).toBe("cancelled");
-    } finally { await rm(root, { recursive: true, force: true }); }
+    } finally { await removeTempTree(root); }
   });
 
   it("recovers completed metadata and buffered output from durable job events", async () => {
@@ -50,7 +65,7 @@ describe("JobManager", () => {
       expect(await jobs.listForSession(sessionId, root)).toMatchObject([{ jobId: "job_recovered", status: "completed" }]);
       const output = await jobs.read(sessionId, "job_recovered", 100);
       expect(output.output).toMatchObject({ output: "durable-output", status: "completed", exitCode: 0 });
-    } finally { await rm(root, { recursive: true, force: true }); }
+    } finally { await removeTempTree(root); }
   });
 
   it("preserves the event store receiver while recovering job metadata", async () => {
@@ -67,7 +82,7 @@ describe("JobManager", () => {
       };
       const jobs = new JobManager({ eventStore: store });
       expect(await jobs.listForSession(sessionId, root)).toMatchObject([{ jobId: "job_receiver", status: "orphaned" }]);
-    } finally { await rm(root, { recursive: true, force: true }); }
+    } finally { await removeTempTree(root); }
   });
 
   it("captures output from the Windows PowerShell background adapter", async () => {
@@ -80,7 +95,7 @@ describe("JobManager", () => {
       for (let attempt = 0; attempt < 40 && jobs.list("ses_job_pwsh", root)[0]?.status === "running"; attempt += 1) await new Promise<void>((resolve) => setTimeout(resolve, 25));
       const output = await jobs.read("ses_job_pwsh", jobId, 100);
       expect((output.output as { output: string }).output).toContain("job-pwsh-output");
-    } finally { await rm(root, { recursive: true, force: true }); }
+    } finally { await removeTempTree(root); }
   });
 
   it("spills complete output to a workspace artifact while bounding output events", async () => {
@@ -98,6 +113,6 @@ describe("JobManager", () => {
       const spillPath = (jobs.list("ses_job_spill", root)[0] as { spillPath?: string }).spillPath;
       expect(spillPath).toContain(".agent-artifacts/jobs/");
       expect((await readFile(path.join(root, spillPath!), "utf8"))).toHaveLength(20_000);
-    } finally { await rm(root, { recursive: true, force: true }); }
+    } finally { await removeTempTree(root); }
   });
 });

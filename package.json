@@ -13,7 +13,7 @@
     "build:web:browser": "pnpm --filter @code-review-agent/web build:browser",
     "test:phase7:browser": "pnpm typecheck && pnpm build:web && node scripts/phase7-browser-gate.mjs",
     "typecheck": "tsc -b",
-    "test": "pnpm -r --if-present test",
+    "test": "pnpm -r --workspace-concurrency=1 --if-present test",
     "test:contracts": "pnpm --filter @code-review-agent/contracts test",
     "test:storage": "pnpm --filter @code-review-agent/storage test",
     "dev:api": "pnpm --filter @code-review-agent/api dev",

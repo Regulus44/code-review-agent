@@ -1,6 +1,18 @@
 # Phase 7：DSH Web 前端收敛与可观测工作台
 
-状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、terminal/job diagnostics、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection、7.1 shell layout state/reducer、mobile sidebar 行为、typed overlay state/reducer、物理 Shell frame mount/apply、queue dock/cancel/reorder surface、Session rename 生命周期、host-backed steer receipt、attachment capability gate/upload receipt、Workspace reorder lifecycle、窄屏视觉基线已完成；Workspace rename/archive/delete 生命周期继续推进）
+状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、terminal/job diagnostics、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection、7.1 shell layout state/reducer、mobile sidebar 行为、typed overlay state/reducer、物理 Shell frame mount/apply、queue dock/cancel/reorder surface、Session rename 生命周期、host-backed steer receipt、attachment capability gate/upload receipt、Workspace reorder lifecycle、窄屏视觉基线、Workspace rename/archive/delete 生命周期已完成；当前进行 Phase 7 最终退出审计）
+
+## 当前执行 checkpoint：Workspace lifecycle controls（2026-08-23）
+
+本 checkpoint 完成 Workspace 元数据的 host-backed 生命周期，并保持 Session 与 EventStore 历史可恢复：
+
+- `WorkspaceSummary` 增加可选 `label`、`archived`、`deleted` 元数据；新增 durable `workspace/updated` 事件，事件追加到同一 Workspace 下未删除 Session，Conversation projection 忽略导航元数据事件；
+- `AgentHost` 增加 `listWorkspaces(includeArchived?)`、`renameWorkspace()`、`archiveWorkspace()`、`deleteWorkspace()`；命令通过 durable command claim 保持幂等；delete 是软删除，不删除文件、Session 或事件；
+- API 增加 `GET /v1/workspaces?include_archived=true`、`POST /v1/workspaces/:key/label`、`POST /v1/workspaces/:key/archive` 和 `DELETE /v1/workspaces/:key`；Web API client 与 Workspace actions 菜单已接入 Rename、Archive/Restore、Delete；
+- Workspace→Session navigation 以 Workspace catalog 为权威投影：active/archived/deleted Workspace 正确筛选，catalog 中已软删除 Workspace 的 Session 历史不会继续显示在导航，但仍可通过 API 和事件回放读取；Rename dialog 文案会随 Session/Workspace 上下文切换；
+- Runtime、API、Web presenter、Conversation ignore、幂等重放和 Phase 7 browser gate 覆盖生命周期状态及 Session 历史保留。
+
+验证：`pnpm typecheck`、Workspace Runtime/API/Web 定向测试、`pnpm test`、`pnpm test:phase7:browser`（五场景 + Workspace lifecycle，2.14s；trajectory full replay 19.03ms）和 `git diff --check` 通过；真实 browser fixture 已验证删除确认后 Workspace 从导航消失，Session 历史仍保留。
 
 ## 当前执行 checkpoint：Responsive viewport baseline（2026-08-23）
 

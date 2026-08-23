@@ -67,6 +67,28 @@ describe("WebApiClient", () => {
     expect(calls[1]?.init?.body).toBe(JSON.stringify({ order: ["d:/first", "d:/second"] }));
   });
 
+  it("builds workspace lifecycle commands with encoded keys and idempotency", async () => {
+    const calls: { url: string; init?: RequestInit | undefined }[] = [];
+    const client = new WebApiClient({
+      baseUrl: "http://localhost:4317",
+      fetcher: async (input, init) => {
+        calls.push({ url: String(input), init });
+        return new Response(JSON.stringify({ workspaces: [] }), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+    await client.renameWorkspace("D:/repo with space" as never, "Review", "workspace_rename_1");
+    await client.archiveWorkspace("D:/repo with space" as never, true, "workspace_archive_1");
+    await client.deleteWorkspace("D:/repo with space" as never, "workspace_delete_1");
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://localhost:4317/v1/workspaces/D%3A%2Frepo%20with%20space/label",
+      "http://localhost:4317/v1/workspaces/D%3A%2Frepo%20with%20space/archive",
+      "http://localhost:4317/v1/workspaces/D%3A%2Frepo%20with%20space",
+    ]);
+    expect(calls[0]?.init?.body).toBe(JSON.stringify({ label: "Review" }));
+    expect(calls[1]?.init?.body).toBe(JSON.stringify({ archived: true }));
+    expect(new Headers(calls[2]?.init?.headers).get("idempotency-key")).toBe("workspace_delete_1");
+  });
+
   it("builds the host-backed steer command", async () => {
     const calls: { url: string; init?: RequestInit | undefined }[] = [];
     const client = new WebApiClient({

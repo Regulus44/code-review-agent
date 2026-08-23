@@ -558,7 +558,7 @@
       </div>
       <div id="rename-modal" class="modal-backdrop" hidden>
         <form id="rename-form" class="workspace-modal" role="dialog" aria-modal="true" aria-labelledby="rename-title">
-          <div class="workspace-modal-header"><div><h2 id="rename-title">Rename session</h2><p>Choose a concise label for this Coding Agent session.</p></div><button id="rename-close" class="icon-button" type="button" aria-label="Close rename dialog">×</button></div>
+          <div class="workspace-modal-header"><div><h2 id="rename-title">Rename session</h2><p id="rename-description">Choose a concise label for this Coding Agent session.</p></div><button id="rename-close" class="icon-button" type="button" aria-label="Close rename dialog">×</button></div>
           <label class="workspace-input-label" for="rename-input">Session title</label>
           <input id="rename-input" class="workspace-input" type="text" maxlength="120" autocomplete="off" spellcheck="false" />
           <div id="rename-error" class="workspace-error" role="alert"></div>
@@ -596,6 +596,9 @@
         const sidebarToggle = document.querySelector('#sidebar-toggle');
         const detailsToggle = document.querySelector('#details-toggle');
         const details = document.querySelector('#details-content');
+         const renameTitle = document.querySelector('#rename-title');
+         const renameDescription = document.querySelector('#rename-description');
+         const renameLabel = document.querySelector('label[for="rename-input"]');
         const workspaceModal = document.querySelector('#workspace-modal');
         const settingsButton = document.querySelector('#settings-button');
         const settingsModal = document.querySelector('#settings-modal');
@@ -707,7 +710,7 @@
         const currentModel = () => state.models?.current || state.models?.defaultModel || 'deepseek-v4-flash';
         const modeLabels = { 'read-only': 'Read only', 'workspace-write': 'Workspace write', 'ask-on-write': 'Ask on write', 'ask-on-execute': 'Ask on execute', 'danger-full-access': 'Full access' };
         const currentMode = () => state.session?.permissionPreset || 'ask-on-write';
-        const refreshWorkspaces = async () => { try { state.workspaces = typedRuntime?.api?.listWorkspaces ? await typedRuntime.api.listWorkspaces() : await api('/v1/workspaces'); } catch { state.workspaces = null; } };
+        const refreshWorkspaces = async () => { try { state.workspaces = typedRuntime?.api?.listWorkspaces ? await typedRuntime.api.listWorkspaces(state.showArchived) : await api(`/v1/workspaces${state.showArchived ? '?include_archived=true' : ''}`); } catch { state.workspaces = null; } };
         const refreshSessionList = async () => { const payload = await api(`/v1/sessions?include_archived=${state.showArchived}`); await refreshWorkspaces(); showSessionsTree(payload); archiveToggle.classList.toggle('active', state.showArchived); archiveToggle.setAttribute('aria-pressed', String(state.showArchived)); };
         const refreshSubagents = async () => { if (!state.session) { state.subagents = []; renderSubagents(); if (typedConnection) renderTaskPanel(typedConnection.store.getSnapshot()); return; } try { state.subagents = (await api(`/v1/sessions/${encodeURIComponent(state.session.id)}/subagents?scope=children`)).agents || []; } catch { state.subagents = []; } renderSubagents(); if (typedConnection) renderTaskPanel(typedConnection.store.getSnapshot()); };
          const setStatus = (text, connected = true) => { status.textContent = text; status.classList.toggle('disconnected', !connected); };
@@ -1344,8 +1347,9 @@
         const closeWorkspacePicker = () => { workspaceFocusTrap?.deactivate(); dispatchOverlay({ type: 'close', overlay: 'workspace' }); workspaceError.textContent = ''; };
         const openSettings = () => { renderSettings(); dispatchOverlay({ type: 'open', overlay: 'settings' }); settingsFocusTrap?.activate(); settingsClose?.focus(); };
         const closeSettings = () => { settingsFocusTrap?.deactivate(); dispatchOverlay({ type: 'close', overlay: 'settings' }); };
-        const openRenameSession = (session) => { state.renameTarget = session; renameError.textContent = ''; renameInput.value = session.title || ''; dispatchOverlay({ type: 'open', overlay: 'rename-session' }); renameFocusTrap?.activate(); renameInput.focus(); renameInput.select(); };
-        const closeRenameSession = () => { renameFocusTrap?.deactivate(); state.renameTarget = null; dispatchOverlay({ type: 'close', overlay: 'rename-session' }); renameError.textContent = ''; };
+        const openRenameSession = (session) => { state.renameTarget = { kind: 'session', ...session }; renameTitle.textContent = 'Rename session'; renameDescription.textContent = 'Choose a concise label for this Coding Agent session.'; renameLabel.textContent = 'Session title'; renameError.textContent = ''; renameInput.value = session.title || ''; dispatchOverlay({ type: 'open', overlay: 'rename-session' }); renameFocusTrap?.activate(); renameInput.focus(); renameInput.select(); };
+        const openRenameWorkspace = (workspace) => { state.renameTarget = { kind: 'workspace', key: workspace.key, label: workspace.label || typedRuntime.workspaceLabel(workspace.root) }; renameTitle.textContent = 'Rename workspace'; renameDescription.textContent = 'Choose a concise label for this workspace.'; renameLabel.textContent = 'Workspace label'; renameError.textContent = ''; renameInput.value = workspace.label || typedRuntime.workspaceLabel(workspace.root); dispatchOverlay({ type: 'open', overlay: 'rename-session' }); renameFocusTrap?.activate(); renameInput.focus(); renameInput.select(); };
+        const closeRenameSession = () => { renameFocusTrap?.deactivate(); state.renameTarget = null; renameTitle.textContent = 'Rename session'; renameDescription.textContent = 'Choose a concise label for this Coding Agent session.'; renameLabel.textContent = 'Session title'; dispatchOverlay({ type: 'close', overlay: 'rename-session' }); renameError.textContent = ''; };
         const showSessions = (payload) => { const sessions = Array.isArray(payload) ? payload : payload.sessions || []; const visible = sessions.filter((session) => Boolean(session.archived) === state.showArchived); state.sidebarSessions = visible; state.recentWorkspaces = sessions.map((session) => session.workspaceRoot); list.innerHTML = ''; if (!visible.length) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = state.showArchived ? 'No archived sessions.' : 'No active sessions.'; list.append(empty); return; } for (const session of visible) { const row = document.createElement('div'); row.className = 'session-row'; const button = document.createElement('button'); button.className = `session ${state.session?.id === session.id ? 'active' : ''}`; button.type = 'button'; const name = session.title || session.workspaceRoot?.split(/[\/]/).filter(Boolean).pop() || 'New session'; button.innerHTML = `<span class="session-dot"></span><span class="session-copy"><span class="session-name">${esc(name)}</span><span class="session-path">${esc(session.workspaceRoot || '.')}</span></span>`; button.onclick = () => openSession(session.id); const archive = document.createElement('button'); archive.className = 'session-archive'; archive.type = 'button'; archive.title = session.archived ? 'Restore session' : 'Archive session'; archive.setAttribute('aria-label', session.archived ? 'Restore session' : 'Archive session'); archive.textContent = session.archived ? '↩' : '▱'; archive.onclick = async (event) => { event.stopPropagation(); archive.disabled = true; try { await api(`/v1/sessions/${encodeURIComponent(session.id)}/archive`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ archived: !session.archived }) }); await refreshSessionList(); if (state.session?.id === session.id) { state.session.archived = !session.archived; render(); } } catch (error) { setStatus(error.message, false); archive.disabled = false; } }; row.append(button, archive); list.append(row); } };
         const workspaceLabel = (root) => { const value = String(root || '.').replace(/[\\/]+$/, ''); const segments = value.split(/[\\/]/).filter(Boolean); return segments[segments.length - 1] || value || 'Workspace'; };
         const workspaceKey = (root) => { const value = String(root || '.').replace(/\\/g, '/').replace(/\/+$/, '') || '.'; return /^[A-Za-z]:\//.test(value) ? value.toLowerCase() : value; };
@@ -1379,6 +1383,34 @@
           addAction('Delete session', '⌫', () => deleteSession(session), true);
           const rect = anchor.getBoundingClientRect(); sessionMenu.style.left = `${Math.max(8, Math.min(window.innerWidth - 176, rect.right - 164))}px`; sessionMenu.style.top = `${Math.min(window.innerHeight - 110, rect.bottom + 4)}px`; dispatchOverlay({ type: 'open', overlay: 'session-menu' });
         };
+        const workspaceForRoot = (root) => (state.workspaces?.workspaces || []).find((workspace) => (typedRuntime?.workspaceKey ? typedRuntime.workspaceKey(workspace.key || workspace.root) : workspaceKey(workspace.key || workspace.root)) === (typedRuntime?.workspaceKey ? typedRuntime.workspaceKey(root) : workspaceKey(root)));
+        const performWorkspaceArchive = async (workspace) => {
+          if (!typedRuntime?.api?.archiveWorkspace) return;
+          const nextArchived = workspace.archived !== true;
+          state.workspaces = await typedRuntime.api.archiveWorkspace(workspace.key, nextArchived, commandKey());
+          closeSessionMenu();
+          await refreshSessionList();
+          setStatus(nextArchived ? `Workspace archived · ${workspace.label || typedRuntime.workspaceLabel(workspace.root)}` : `Workspace restored · ${workspace.label || typedRuntime.workspaceLabel(workspace.root)}`, true);
+        };
+        const deleteWorkspace = async (workspace) => {
+          if (!typedRuntime?.api?.deleteWorkspace) return;
+          const label = workspace.label || typedRuntime.workspaceLabel(workspace.root);
+          if (!window.confirm(`Delete workspace “${label}”? Sessions and event history remain available for audit, but the workspace will disappear from navigation.`)) return;
+          state.workspaces = await typedRuntime.api.deleteWorkspace(workspace.key, commandKey());
+          closeSessionMenu();
+          await refreshSessionList();
+          setStatus(`Workspace deleted · ${label}`, true);
+        };
+        const openWorkspaceMenu = (workspace, anchor) => {
+          sessionMenu.innerHTML = '';
+          const addAction = (label, icon, handler, danger = false) => { const button = document.createElement('button'); button.type = 'button'; button.className = danger ? 'danger' : ''; button.innerHTML = `<span>${icon}</span><span>${label}</span>`; button.onclick = async () => { button.disabled = true; try { await handler(); } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); button.disabled = false; } }; sessionMenu.append(button); };
+          const label = workspace.label || typedRuntime.workspaceLabel(workspace.root);
+          addAction('New session', '＋', () => { closeSessionMenu(); openWorkspacePicker(); workspaceInput.value = workspace.root; });
+          addAction('Rename workspace', '✎', () => { closeSessionMenu(); openRenameWorkspace(workspace); });
+          addAction(workspace.archived ? 'Restore workspace' : 'Archive workspace', workspace.archived ? '↩' : '▱', () => performWorkspaceArchive(workspace));
+          addAction('Delete workspace', '⌫', () => deleteWorkspace(workspace), true);
+          const rect = anchor.getBoundingClientRect(); sessionMenu.style.left = `${Math.max(8, Math.min(window.innerWidth - 176, rect.right - 164))}px`; sessionMenu.style.top = `${Math.min(window.innerHeight - 150, rect.bottom + 4)}px`; dispatchOverlay({ type: 'open', overlay: 'session-menu' });
+        };
         const appendWorkspaceOrderControls = (header, root) => {
           const order = (state.workspaces?.workspaces || []).map((workspace) => workspace.key || workspace.root);
           const key = typedRuntime?.workspaceKey ? typedRuntime.workspaceKey(root) : String(root || '.').replace(/\\/g, '/').replace(/\/+$/u, '').toLowerCase() || '.';
@@ -1390,7 +1422,7 @@
         };
         const showSessionsTree = (payload) => {
           const sessions = Array.isArray(payload) ? payload : payload.sessions || [];
-          const navigation = typedRuntime?.buildNavigationModel?.(sessions, { showArchived: state.showArchived, query: state.sessionSearch, activeSessionId: state.session?.id, workspaceOrder: state.workspaces?.workspaces?.map((workspace) => workspace.key || workspace.root) });
+          const navigation = typedRuntime?.buildNavigationModel?.(sessions, { showArchived: state.showArchived, query: state.sessionSearch, activeSessionId: state.session?.id, workspaceOrder: state.workspaces?.workspaces?.map((workspace) => workspace.key || workspace.root), workspaceCatalog: state.workspaces?.workspaces });
           if (navigation) {
             state.sidebarSessions = navigation.allSessions;
             state.recentWorkspaces = [...navigation.recentWorkspaces];
@@ -1422,11 +1454,11 @@
               const caret = document.createElement('span'); caret.className = 'workspace-caret'; caret.textContent = '⌄';
               const folder = document.createElement('span'); folder.className = 'workspace-folder'; folder.textContent = '⌂';
               const copy = document.createElement('span'); copy.className = 'workspace-group-copy';
-              const groupName = document.createElement('span'); groupName.className = 'workspace-group-name'; groupName.textContent = typedRuntime.workspaceLabel(group.root);
+              const groupName = document.createElement('span'); groupName.className = 'workspace-group-name'; groupName.textContent = group.label || typedRuntime.workspaceLabel(group.root);
               const groupPath = document.createElement('span'); groupPath.className = 'workspace-group-path'; groupPath.textContent = group.root;
               copy.append(groupName, groupPath);
               const count = document.createElement('span'); count.className = 'workspace-count'; count.textContent = String(group.sessions.reduce((total, node) => total + 1 + node.children.length, 0));
-              const workspaceMenu = document.createElement('button'); workspaceMenu.type = 'button'; workspaceMenu.className = 'workspace-menu-trigger'; workspaceMenu.textContent = '⋯'; workspaceMenu.title = 'New session in this workspace'; workspaceMenu.onclick = (event) => { event.stopPropagation(); openWorkspacePicker(); workspaceInput.value = group.root; };
+              const workspaceMenu = document.createElement('button'); workspaceMenu.type = 'button'; workspaceMenu.className = 'workspace-menu-trigger'; workspaceMenu.textContent = '⋯'; workspaceMenu.title = 'Workspace actions'; workspaceMenu.setAttribute('aria-label', `Workspace actions · ${group.label || typedRuntime.workspaceLabel(group.root)}`); workspaceMenu.onclick = (event) => { event.stopPropagation(); const workspace = workspaceForRoot(group.root) || { key: group.key, root: group.root }; openWorkspaceMenu(workspace, workspaceMenu); };
               header.append(caret, folder, copy, count, workspaceMenu); appendWorkspaceOrderControls(header, group.root);
               const toggleGroup = () => { if (state.expandedWorkspaces.has(group.key)) state.expandedWorkspaces.delete(group.key); else state.expandedWorkspaces.add(group.key); showSessionsTree({ sessions: state.sidebarSessions }); };
               header.onclick = toggleGroup; header.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleGroup(); } };
@@ -1526,8 +1558,8 @@
           for (const event of history) addEvent(event, false);
           render();
           state.source = new EventSource(`/v1/sessions/${encodeURIComponent(id)}/events?after_sequence=${state.session.lastSequence || 0}`);
-          const types = ['session/created','session/updated','session/deleted','user/message','turn/steered','attachment/received','attachment/rejected','workspace/reordered','turn/queued','queue/changed','turn/started','step/started','step/ended','turn/ended','assistant/chunk','assistant/message','task/created','task/updated','task/input-required','task/report','task/artifact','task/ended','subagent/descriptor','subagent/start','subagent/end','subagent/inbox','subagent/settlement','goal/created','goal/updated','goal/ended','plan/updated','todo/updated','tool/call','tool/progress','tool/result','diff/preview','patch/preview','patch/applied','patch/rejected','patch/rolled_back','lsp/server','lsp/request','permission/requested','permission/resolved','interaction/requested','interaction/resolved','terminal/session','job/started','job/output','job/ended','mcp/server','mcp/tool','mcp/resource','mcp/prompt','agent/status','agent/error'];
-          types.forEach((type) => state.source.addEventListener(type, (message) => { const event = JSON.parse(message.data); addEvent(event); if (event.type === 'workspace/reordered') void refreshSessionList(); void refreshSubagents(); }));
+          const types = ['session/created','session/updated','session/deleted','workspace/updated','user/message','turn/steered','attachment/received','attachment/rejected','workspace/reordered','turn/queued','queue/changed','turn/started','step/started','step/ended','turn/ended','assistant/chunk','assistant/message','task/created','task/updated','task/input-required','task/report','task/artifact','task/ended','subagent/descriptor','subagent/start','subagent/end','subagent/inbox','subagent/settlement','goal/created','goal/updated','goal/ended','plan/updated','todo/updated','tool/call','tool/progress','tool/result','diff/preview','patch/preview','patch/applied','patch/rejected','patch/rolled_back','lsp/server','lsp/request','permission/requested','permission/resolved','interaction/requested','interaction/resolved','terminal/session','job/started','job/output','job/ended','mcp/server','mcp/tool','mcp/resource','mcp/prompt','agent/status','agent/error'];
+          types.forEach((type) => state.source.addEventListener(type, (message) => { const event = JSON.parse(message.data); addEvent(event); if (event.type === 'workspace/reordered' || event.type === 'workspace/updated') void refreshSessionList(); void refreshSubagents(); }));
           state.source.onerror = () => setStatus('Reconnecting…', false);
           state.source.onopen = () => setStatus('Connected', true);
           state.scopedSource = new EventSource(`/v1/sessions/${encodeURIComponent(id)}/subagents/events`);
@@ -1552,7 +1584,7 @@
         renameClose.onclick = () => closeRenameSession();
         renameCancel.onclick = () => closeRenameSession();
         renameModal.addEventListener('click', (event) => { if (event.target === renameModal) closeRenameSession(); });
-        renameForm.addEventListener('submit', async (event) => { event.preventDefault(); const target = state.renameTarget; const nextTitle = renameInput.value.trim(); if (!target) return; if (!nextTitle) { renameError.textContent = 'Enter a session title.'; renameInput.focus(); return; } renameSave.disabled = true; renameError.textContent = ''; try { const updated = typedRuntime?.api?.renameSession ? await typedRuntime.api.renameSession(target.id, nextTitle, commandKey()) : await api(`/v1/sessions/${encodeURIComponent(target.id)}/title`, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': commandKey() }, body: JSON.stringify({ title: nextTitle }) }); if (state.session?.id === target.id) { state.session = updated; title.textContent = updated.title || 'Coding session'; render(); } closeRenameSession(); await refreshSessionList(); } catch (error) { renameError.textContent = error instanceof Error ? error.message : String(error); } finally { renameSave.disabled = false; } });
+        renameForm.addEventListener('submit', async (event) => { event.preventDefault(); const target = state.renameTarget; const nextTitle = renameInput.value.trim(); if (!target) return; if (!nextTitle) { renameError.textContent = target.kind === 'workspace' ? 'Enter a workspace label.' : 'Enter a session title.'; renameInput.focus(); return; } renameSave.disabled = true; renameError.textContent = ''; try { if (target.kind === 'workspace') { state.workspaces = await typedRuntime.api.renameWorkspace(target.key, nextTitle, commandKey()); closeRenameSession(); await refreshSessionList(); setStatus(`Workspace renamed · ${nextTitle}`, true); } else { const updated = typedRuntime?.api?.renameSession ? await typedRuntime.api.renameSession(target.id, nextTitle, commandKey()) : await api(`/v1/sessions/${encodeURIComponent(target.id)}/title`, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': commandKey() }, body: JSON.stringify({ title: nextTitle }) }); if (state.session?.id === target.id) { state.session = updated; title.textContent = updated.title || 'Coding session'; render(); } closeRenameSession(); await refreshSessionList(); } } catch (error) { renameError.textContent = error instanceof Error ? error.message : String(error); } finally { renameSave.disabled = false; } });
         document.addEventListener('keydown', (event) => { if (event.key !== 'Escape') return; if (!settingsModal.hidden) closeSettings(); else if (!workspaceModal.hidden) closeWorkspacePicker(); else if (!renameModal.hidden) closeRenameSession(); else if (!sessionMenu.hidden) closeSessionMenu(); else if (!modelPopover.hidden) dispatchOverlay({ type: 'close', overlay: 'model-popover' }); else if (!modePopover.hidden) dispatchOverlay({ type: 'close', overlay: 'mode-popover' }); else dispatchOverlay({ type: 'escape' }); });
         archiveToggle.onclick = async () => { state.showArchived = !state.showArchived; try { await refreshSessionList(); } catch (error) { setStatus(error.message, false); } };
         sessionSearch.addEventListener('input', () => { state.sessionSearch = sessionSearch.value; showSessionsTree({ sessions: state.sidebarSessions }); });

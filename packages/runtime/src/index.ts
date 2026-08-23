@@ -53,6 +53,13 @@ interface PendingTurn {
   readonly previousMessages: readonly ChatMessage[];
 }
 
+interface WorkspaceMetadata {
+  readonly updatedAt: string;
+  readonly label?: string;
+  readonly archived?: boolean;
+  readonly deleted?: boolean;
+}
+
 interface PendingPermissionWaiter {
   readonly resolve: (output: ExecuteToolOutput) => void;
   readonly reject: (error: unknown) => void;
@@ -132,15 +139,15 @@ export class AgentHost {
     return this.options.store.listSessions(includeArchived);
   }
 
-  async listWorkspaces(): Promise<WorkspaceCatalog> {
+  async listWorkspaces(includeArchived = false): Promise<WorkspaceCatalog> {
     await this.ready;
-    return this.workspaceCatalog(await this.options.store.listSessions(true));
+    return this.workspaceCatalog(await this.options.store.listSessions(true), undefined, includeArchived);
   }
 
   async reorderWorkspaces(order: readonly string[], commandId?: string): Promise<WorkspaceCatalog> {
     await this.ready;
     const sessions = await this.options.store.listSessions(true);
-    const current = await this.workspaceCatalog(sessions);
+    const current = await this.workspaceCatalog(sessions, undefined, false);
     const requested = order.map(normalizeWorkspaceKey);
     const expected = current.workspaces.map((workspace) => workspace.key);
     if (requested.length !== expected.length || new Set(requested).size !== requested.length || expected.some((key) => !requested.includes(key))) {
@@ -151,7 +158,7 @@ export class AgentHost {
       .sort((left, right) => left.id.localeCompare(right.id))[0];
     if (anchor === undefined) return current;
     const idempotencyKey = commandId ?? `cmd_${randomUUID()}`;
-    const reorderedCatalog = await this.workspaceCatalog(sessions, requested);
+    const reorderedCatalog = await this.workspaceCatalog(sessions, requested, false);
     const result = { order: requested, catalog: reorderedCatalog };
     const claim = await this.options.store.claimCommand({
       sessionId: anchor.id,
@@ -164,7 +171,7 @@ export class AgentHost {
       const saved = claim.record.result as { catalog?: unknown; order?: unknown };
       if (isWorkspaceCatalog(saved.catalog)) return saved.catalog;
       const savedOrder = Array.isArray(saved.order) ? saved.order.filter((value): value is string => typeof value === "string") : requested;
-      return this.workspaceCatalog(sessions, savedOrder);
+      return this.workspaceCatalog(sessions, savedOrder, false);
     }
     await this.options.store.append({
       sessionId: anchor.id,
@@ -175,12 +182,69 @@ export class AgentHost {
     return reorderedCatalog;
   }
 
-  private async workspaceCatalog(sessions: readonly SessionSummary[], explicitOrder?: readonly string[]): Promise<WorkspaceCatalog> {
+  async renameWorkspace(key: string, label: string, commandId?: string): Promise<WorkspaceCatalog> {
+    const normalized = label.trim();
+    if (normalized.length === 0) throw new Error("Workspace label cannot be empty");
+    if (normalized.length > 120) throw new Error("Workspace label must be 120 characters or fewer");
+    return this.updateWorkspace(key, { action: "renamed", label: normalized }, commandId);
+  }
+
+  async archiveWorkspace(key: string, archived = true, commandId?: string): Promise<WorkspaceCatalog> {
+    return this.updateWorkspace(key, { action: archived ? "archived" : "restored", archived }, commandId);
+  }
+
+  async deleteWorkspace(key: string, commandId?: string): Promise<WorkspaceCatalog> {
+    return this.updateWorkspace(key, { action: "deleted", deleted: true }, commandId);
+  }
+
+  private async updateWorkspace(
+    key: string,
+    change: { readonly action: "renamed" | "archived" | "restored" | "deleted"; readonly label?: string; readonly archived?: boolean; readonly deleted?: boolean },
+    commandId?: string,
+  ): Promise<WorkspaceCatalog> {
+    await this.ready;
+    const sessions = await this.options.store.listSessions(true);
+    const normalizedKey = normalizeWorkspaceKey(key);
+    const current = await this.workspaceCatalog(sessions, undefined, true);
+    const workspace = current.workspaces.find((item) => item.key === normalizedKey);
+    if (workspace === undefined || workspace.deleted === true) throw new Error(`Unknown workspace: ${key}`);
+    const members = sessions
+      .filter((session) => session.deleted !== true && normalizeWorkspaceKey(session.workspaceRoot) === normalizedKey)
+      .sort((left, right) => left.id.localeCompare(right.id));
+    const anchor = members[0];
+    if (anchor === undefined) throw new Error(`Unknown workspace: ${key}`);
+    const idempotencyKey = commandId ?? `cmd_${randomUUID()}`;
+    const request = { key: normalizedKey, ...change };
+    const claim = await this.options.store.claimCommand({
+      sessionId: anchor.id,
+      commandId: idempotencyKey,
+      kind: `workspace_${change.action}`,
+      request,
+      result: request,
+    });
+    if (!claim.created) return this.workspaceCatalog(await this.options.store.listSessions(true), undefined, false);
+
+    const updatedAt = new Date().toISOString();
+    for (const member of members) {
+      await this.options.store.append({
+        sessionId: member.id,
+        correlationId: idempotencyKey,
+        type: "workspace/updated",
+        payload: { key: normalizedKey, action: change.action, updatedAt, ...(change.label === undefined ? {} : { label: change.label }), ...(change.archived === undefined ? {} : { archived: change.archived }), ...(change.deleted === undefined ? {} : { deleted: change.deleted }) },
+      });
+    }
+    return this.workspaceCatalog(await this.options.store.listSessions(true), undefined, false);
+  }
+
+  private async workspaceCatalog(sessions: readonly SessionSummary[], explicitOrder?: readonly string[], includeArchived = false): Promise<WorkspaceCatalog> {
+    const metadata = await this.workspaceMetadata(sessions);
     const groups = new Map<string, { readonly key: string; readonly root: string; readonly sessionCount: number; readonly latestUpdatedAt?: string }>();
     for (const session of sessions) {
       if (session.deleted === true) continue;
       const root = session.workspaceRoot || ".";
       const key = normalizeWorkspaceKey(root);
+      const state = metadata.get(key);
+      if (state?.deleted === true || (!includeArchived && state?.archived === true)) continue;
       const previous = groups.get(key);
       const latestUpdatedAt = latestTimestamp(previous?.latestUpdatedAt, session.updatedAt ?? session.createdAt);
       groups.set(key, { key, root: previous?.root ?? root, sessionCount: (previous?.sessionCount ?? 0) + 1, ...(latestUpdatedAt === undefined ? {} : { latestUpdatedAt }) });
@@ -210,7 +274,40 @@ export class AgentHost {
       if (leftRank !== undefined || rightRank !== undefined) return (leftRank ?? Number.MAX_SAFE_INTEGER) - (rightRank ?? Number.MAX_SAFE_INTEGER);
       return (Date.parse(right.latestUpdatedAt ?? "") || 0) - (Date.parse(left.latestUpdatedAt ?? "") || 0);
     });
-    return { workspaces: sorted.map((workspace, position) => ({ ...workspace, position })) };
+    return {
+      workspaces: sorted.map((workspace, position) => {
+        const state = metadata.get(workspace.key);
+        return {
+          ...workspace,
+          position,
+          ...(state?.label === undefined ? {} : { label: state.label }),
+          ...(state?.archived === true ? { archived: true } : {}),
+          ...(state?.deleted === true ? { deleted: true } : {}),
+        };
+      }),
+    };
+  }
+
+  private async workspaceMetadata(sessions: readonly SessionSummary[]): Promise<ReadonlyMap<string, WorkspaceMetadata>> {
+    const metadata = new Map<string, WorkspaceMetadata>();
+    for (const session of sessions) {
+      for (const event of await this.options.store.list(session.id, 0)) {
+        if (event.type !== "workspace/updated") continue;
+        const rawKey = event.payload["key"];
+        if (typeof rawKey !== "string") continue;
+        const key = normalizeWorkspaceKey(rawKey);
+        const updatedAt = typeof event.payload["updatedAt"] === "string" ? event.payload["updatedAt"] : event.createdAt;
+        const previous = metadata.get(key);
+        if (previous !== undefined && (Date.parse(previous.updatedAt) || 0) > (Date.parse(updatedAt) || 0)) continue;
+        metadata.set(key, {
+          updatedAt,
+          ...(typeof event.payload["label"] === "string" ? { label: event.payload["label"] } : previous?.label === undefined ? {} : { label: previous.label }),
+          ...(typeof event.payload["archived"] === "boolean" ? { archived: event.payload["archived"] } : previous?.archived === undefined ? {} : { archived: previous.archived }),
+          ...(typeof event.payload["deleted"] === "boolean" ? { deleted: event.payload["deleted"] } : previous?.deleted === undefined ? {} : { deleted: previous.deleted }),
+        });
+      }
+    }
+    return metadata;
   }
 
   async archiveSession(sessionId: SessionId, archived = true): Promise<SessionProjection> {

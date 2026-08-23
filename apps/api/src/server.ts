@@ -144,13 +144,33 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/workspaces") {
-      sendJson(response, 200, await host.listWorkspaces());
+      sendJson(response, 200, await host.listWorkspaces(url.searchParams.get("include_archived") === "true"));
       return;
     }
     if (request.method === "POST" && url.pathname === "/v1/workspaces/reorder") {
       const body = await readJson(request);
       if (!Array.isArray(body.order) || body.order.some((value: unknown) => typeof value !== "string")) throw new HttpError(400, "order must be an array of workspace keys");
       sendJson(response, 200, await host.reorderWorkspaces(body.order as string[], commandId(request, body)));
+      return;
+    }
+    const workspaceRenameMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/label$/u);
+    if (request.method === "POST" && workspaceRenameMatch?.[1] !== undefined) {
+      const body = await readJson(request);
+      if (typeof body.label !== "string") throw new HttpError(400, "label is required");
+      sendJson(response, 200, await host.renameWorkspace(decodeURIComponent(workspaceRenameMatch[1]), body.label, commandId(request, body)));
+      return;
+    }
+    const workspaceArchiveMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/archive$/u);
+    if (request.method === "POST" && workspaceArchiveMatch?.[1] !== undefined) {
+      const body = await readJson(request);
+      const archived = body.archived === undefined ? true : body.archived;
+      if (typeof archived !== "boolean") throw new HttpError(400, "archived must be a boolean");
+      sendJson(response, 200, await host.archiveWorkspace(decodeURIComponent(workspaceArchiveMatch[1]), archived, commandId(request, body)));
+      return;
+    }
+    const workspaceDeleteMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)$/u);
+    if (request.method === "DELETE" && workspaceDeleteMatch?.[1] !== undefined) {
+      sendJson(response, 200, await host.deleteWorkspace(decodeURIComponent(workspaceDeleteMatch[1]), commandId(request)));
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/mcp/servers") {
@@ -600,7 +620,7 @@ async function streamScopedEvents(request: IncomingMessage, response: ServerResp
   }
 }
 
-function commandId(request: IncomingMessage, body: Record<string, unknown>): string | undefined {
+function commandId(request: IncomingMessage, body: Record<string, unknown> = {}): string | undefined {
   const header = request.headers["idempotency-key"];
   if (typeof header === "string" && header.length > 0) return header;
   return typeof body.commandId === "string" && body.commandId.length > 0 ? body.commandId : undefined;

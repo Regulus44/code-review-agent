@@ -15,7 +15,7 @@
 | Phase 4B：MCP 加固 | completed（2026-08-23） | 本 checkpoint；4B.0–4B.6、focused tests、API restart persistence 和 MCP browser smoke 通过；普通 baseline 未重复执行 |
 | Phase 5：内部 Subagent / 多 Agent | completed（2026-08-23） | 5.0–5.4：Task/Descriptor durable projection、one-shot/continuable child、FIFO/authority/cold resume、report/MCP scope、API/SSE/Web catalog；定向 typecheck、storage/subagent/runtime/API 测试和 API/Web smoke 通过 |
 | Phase 6：A2A | deferred（暂不作为 Phase 7 前置） | [ADR：Phase 7 Web 收敛不等待 A2A](adr/phase-7-web-with-a2a-deferred.zh-CN.md)；等待明确的外部 Agent 互操作需求 |
-| Phase 7：DSH Web 前端收敛 | in_progress | typed Web API/SessionStore/Conversation projection/SSE replay、Tool presenter/lineage guard、permission/interaction surface、过期与重启恢复 render intent、Trajectory query/lane/inspector/timeline/fold/tail-follow、typed terminal/job diagnostics、Task/Subagent/MCP details、非空 Delegation browser fixture、Trajectory history paging/prepend replay、1,250-record bounded fixture、Read-only/Edit/Test-Recovery Coding browser fixture、Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、typed overlay state/reducer、physical Shell frame mount/apply、durable Workspace reorder lifecycle、queue dock/cancel/reorder surface、Session rename 生命周期、host-backed steer receipt、attachment capability gate/upload receipt（含模型切换 capability 刷新与 accepted/rejected replay gate）、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate、typed Workspace→Session navigation projection 和 typed Shell layout state 已接入主 Session 流；本次完成 600/900/1024px 真实 viewport 窄屏基线、rail/drawer/details overflow 修正、ARIA 状态和 drawer focus restore；`pnpm test:phase7:browser` 通过五场景、workspace reorder/幂等、attachment receipt、artifact scope、重启恢复、幂等批准、1,250-record/2,501-event 分页回放，最近一次总耗时 1.92s、trajectory full replay 18.74ms；Workspace rename/archive/delete 生命周期继续推进 |
+| Phase 7：DSH Web 前端收敛 | in_progress | typed Web API/SessionStore/Conversation projection/SSE replay、Tool presenter/lineage guard、permission/interaction surface、过期与重启恢复 render intent、Trajectory query/lane/inspector/timeline/fold/tail-follow、typed terminal/job diagnostics、Task/Subagent/MCP details、非空 Delegation browser fixture、Trajectory history paging/prepend replay、1,250-record bounded fixture、Read-only/Edit/Test-Recovery Coding browser fixture、Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、typed overlay state/reducer、physical Shell frame mount/apply、durable Workspace reorder lifecycle、queue dock/cancel/reorder surface、Session rename 生命周期、host-backed steer receipt、attachment capability gate/upload receipt（含模型切换 capability 刷新与 accepted/rejected replay gate）、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate、typed Workspace→Session navigation projection 和 typed Shell layout state 已接入主 Session 流；600/900/1024px 真实 viewport 窄屏基线、rail/drawer/details overflow 修正、ARIA 状态和 drawer focus restore 已完成；Workspace rename/archive/delete 生命周期已完成并纳入 browser/replay gate，最近一次 `pnpm test` 与 `pnpm test:phase7:browser` 均通过，browser gate 总耗时 2.14s、trajectory full replay 19.03ms；当前进行 Phase 7 最终退出审计 |
 | Phase 8：高级能力与产品化 | pending | 等前置阶段完成 |
 
 ## Phase 6 A2A 暂缓决策
@@ -29,7 +29,16 @@ Phase 7 的 DSH Web 调研与分步计划：
 - [DSH Web 前端与 Agent 能力调研](phase-7-dsh-web-research.zh-CN.md)
 - [Phase 7：DSH Web 前端收敛与可观测工作台](phase-plans/phase-7-web-convergence.zh-CN.md)
 
-## Phase 7 typed Web client、Tool surface、Trajectory foundation 与 inspector（当前 checkpoint）
+## Phase 7 Workspace lifecycle controls（当前 checkpoint）
+
+- `packages/contracts` / `docs/event-contract.md`：新增 `workspace/updated` 事件和 Workspace 生命周期元数据字段；
+- `packages/runtime/src/index.ts`：Workspace catalog、rename、archive/restore、soft delete 和幂等 replay；delete 不删除 Session、文件或事件历史；
+- `apps/api/src/server.ts` / `apps/web/src/client/api.ts`：Workspace catalog 与生命周期命令 API；
+- `apps/web/index.html` / `apps/web/src/presentation/navigation-presenter.ts`：Workspace actions 菜单、动态 Rename 文案、active/archived/deleted 导航筛选；catalog 缺失的已删除 Workspace 不再继续显示，但 Session 历史仍保留；
+- `scripts/phase7-browser-gate.mjs`：覆盖 rename、archive/restore、delete、幂等和事件回放；
+- 验证：`pnpm typecheck`、Runtime 19 项、API 24 项、Web 17 项生命周期定向测试、`pnpm test:phase7:browser` 通过；真实 browser fixture 验证删除确认、导航隐藏和历史保留。
+
+## Phase 7 typed Web client、Tool surface、Trajectory foundation 与 inspector（历史 checkpoint）
 
 - `apps/web/src/client/api.ts` 已统一 Web API 的 URL、JSON response、HTTP error 和 idempotency header；
 - `apps/web/src/client/store.ts` 已提供 Session baseline、事件去重、higher-sequence-wins、Session projection 和可订阅 immutable snapshot；
@@ -47,7 +56,7 @@ Phase 7 的 DSH Web 调研与分步计划：
 - `apps/web/src/presentation/focus-trap.ts`、`apps/web/src/browser.ts` 和 `apps/web/index.html` 已为 Workspace picker/Settings dialog 提供 Tab 循环、Escape 关闭、dialog/aria 语义和 opener focus restore；typed bridge 缺失时仍保留静态 fallback；
 - `apps/web/src/presentation/connection-presenter.ts`、`apps/web/src/client/store.ts` 和 `apps/web/index.html` 已提供 loading/reconnecting/failed 的 bounded connection banner、Retry 入口和 aria-live 状态；SessionStore 在恢复到 connected/idle 时清理 stale transport error，正常连接不显示多余 banner；
 - `apps/web/src/presentation/navigation-presenter.ts` 已把 Workspace→Session tree、archived/deleted filter、search、跨平台 workspace key、relative time、parent/child lineage 和 explicit empty state 转为纯 typed render intent；`apps/web/src/browser.ts` 暴露该 presenter，`apps/web/index.html` 在 typed bridge 存在时消费它并保留旧 DOM fallback；
-- 导航树现在渲染 child Session 的嵌套 lineage，Session 切换仍通过 `SessionConnectionController` identity boundary 清理旧订阅和可丢弃 selection；Workspace/Session 的 rename/reorder 等生命周期 API 尚未宣称完成；
+- 导航树现在渲染 child Session 的嵌套 lineage，Session 切换仍通过 `SessionConnectionController` identity boundary 清理旧订阅和可丢弃 selection；Workspace reorder、rename、archive/restore、soft delete 生命周期 API 已接入并通过 replay gate。
 - `apps/web/src/shell/layout.ts` 已提供 Shell layout state、reducer、responsive viewport 和 class render intent；sidebar/details/mobile-sidebar actions 通过 typed bridge 驱动，600px 窄屏可实际打开/收起侧栏，旧 class toggle 仍作为 fallback；
 - `apps/web/src/presentation/request-presenter.ts` 已把 Permission/Interaction node 转为 time-aware、bounded、redacted render intent；pending request 在 deadline 到达但 resolved event 尚未抵达时会先禁用操作并显示 expired，interrupted/reconnecting session 会标记可恢复请求；details panel 增加 pending/recovered/expired 计数；
 - `apps/web/src/presentation/job-presenter.ts` 已把 durable job/terminal 事件折叠为 bounded、redacted、可恢复的 diagnostics render intent；未收到 terminal event 且 Session interrupted 的 job 显示 orphaned，失败 job 保留 exit code/signal/diagnostics，details panel 展示输出和 spill metadata；
@@ -64,7 +73,7 @@ Phase 7 的 DSH Web 调研与分步计划：
 - 现有 Shell 通过 `/web/browser.js` bridge 使用 typed 主 Session 连接，并优先从统一 `SessionStoreSnapshot` 渲染 Conversation/Tool/Turn/Permission/Interaction 节点；旧 inline EventSource 和 event renderer 保留为 bundle 缺失时的 fallback，未改变 API/Runtime/EventStore 事实来源；
 - 定向与全量验证：`pnpm typecheck`、`pnpm test`（全 workspace 通过）、`pnpm --filter @code-review-agent/web test`（50 tests）、`pnpm --filter @code-review-agent/tools test -- --run src/index.test.ts`（30 tests）、`pnpm --filter @code-review-agent/runtime test -- --run src/index.test.ts`（13 tests）、`pnpm --filter @code-review-agent/api test -- --run src/server.test.ts`（18 tests）、`pnpm --filter @code-review-agent/storage test -- --run src/index.test.ts`（10 tests）、`pnpm -F @code-review-agent/web run build:browser`、`git diff --check`；API/AgentHost recovery fixture、Delegation browser replay/cancel、child Session identity/artifact isolation、Trajectory timeline/fold/tail-follow、load older/prepend、1,250-record search/bounded render、paused tail append、Settings/Workspace dialog Tab/Escape/focus restore、connection banner connected/empty/error presenter 和 Deliverables workspace/external/blocked/empty smoke 均通过，browser console 无 warning/error。
 
-当前已补齐 host-backed steer 与 attachment capability/upload receipt：两者均有 durable event、API/Web command、replay 和幂等测试；普通 Send 继续走既有 queue。下一切片聚焦物理 Shell 拆分、Workspace reorder 生命周期和窄屏视觉基线，统一五场景 gate 继续作为验收基线。
+当前已补齐 Workspace lifecycle controls：rename、archive/restore、soft delete 均有 durable event、API/Web command、replay、幂等和导航投影测试；普通 Session/EventStore 历史保持可回放。下一步是按 Phase 7.final 退出条件执行最终审计并创建 checkpoint。
 
 ## Phase 5 Subagent / Multi-Agent 验收证据（2026-08-23）
 
