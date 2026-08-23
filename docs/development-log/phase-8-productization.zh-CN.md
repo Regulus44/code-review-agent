@@ -1,5 +1,41 @@
 # Phase 8 开发日志
 
+## 2026-08-24：8.3 Code Mode 网络边界元数据与 fail-closed
+
+本次 checkpoint 继续 Phase 8.3 的安全退出审计，明确 Code Mode 当前可证明的网络边界。A2A 保持 deferred。
+
+### 已完成
+
+- `CodeModePolicySnapshot` 和 `/v1/capabilities` 暴露 `networkEnforcement`、`network` 和 `osNetworkIsolation` 元数据；默认策略是进程级 deny-by-default，当前 host 明确报告没有 OS 级网络隔离；
+- `os-required` 策略在执行前返回 `CODE_MODE_OS_ISOLATION_UNAVAILABLE`，在没有 OS 隔离适配器时 fail closed；
+- Settings、LSP/Code Mode gate 和 Web replay gate 均检查该边界，避免把进程内入口拦截描述成 OS 级隔离；
+- Settings fixture 补齐 network metadata，保持旧 host 数据缺失时显示 `Network enforcement metadata is unavailable`。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/tools test -- --run src/code-mode.test.ts ✓ (5 tests)
+pnpm --filter @code-review-agent/web test -- --run src/presentation/settings-presenter.test.ts ✓ (3 tests)
+pnpm test:phase8:lsp                                ✓
+pnpm test:phase8:lsp:web                            ✓
+pnpm test:phase8:parity                             ✓
+pnpm build:web                                      ✓
+git diff --check                                     ✓
+```
+
+### 尚未关闭
+
+当前 host 仍未提供 OS-level network isolation；8.3 还需要完成退出审计和必要的更强隔离评估。8.0 visual baseline、8.4 跨场景 browser recovery matrix 与 8.5 产品化仍未完成。
+
+## 2026-08-24：8.4 Job Center 真实 fixture 与重启恢复
+
+8.4 的真实 Job Center action slice 和 API restart/recovery slice 已分别通过 `pnpm test:phase8:jobs` 与 `pnpm test:phase8:job-recovery`。前者覆盖 running/failed job、Cancel/Retry、spill metadata、lifecycle replay、diagnostics、session export 和重复 action 幂等；后者覆盖 seed 后关闭 API/SQLite、fresh AgentHost/API reopen、orphaned/completed job、interrupted session、terminal recovery、SSE replay、`after_sequence` tail cursor、diagnostics 和 export。
+
+### 尚未关闭
+
+更广泛的跨场景长任务 browser recovery matrix 仍需继续扩展，不能由这两个 slice 代替完整 8.4 退出条件。
+
 ## 2026-08-24：8.0 Aggregate Web parity contract gate
 
 本次 checkpoint 收口 Phase 8.0 的静态 Web parity 合同门禁，继续从现有实现和事件投影验证 DSH 对齐能力；A2A 保持 `deferred`，不进入本次实现。
@@ -20,7 +56,7 @@ git diff --check         ✓
 
 ### 尚未关闭
 
-该门禁不替代视觉截图基线和真实交互证据。8.0 仍需 600/900/1024 视觉矩阵、完整 Settings section（含 Plugins 的明确状态）和真实 Job 浏览器取消/重试/恢复；8.3 完整审计、8.4 browser recovery matrix 与 8.5 产品化也未完成。
+该门禁不替代视觉截图基线和真实交互证据。8.0 仍需 600/900/1024 视觉矩阵和完整 Settings section（含 Plugins 的明确状态）；真实 Job action/replay fixture 与 provider failure/retry fixture 已由后续 checkpoint 关闭。8.3 完整审计、8.4 browser recovery matrix 与 8.5 产品化也未完成。
 
 ## 2026-08-24：8.0 Workspace Browser 导航 parity 收口
 
@@ -96,7 +132,7 @@ git diff --check                             ✓
 - `AgentHost` 增加 job list/retry/kill、session export/replay、structured diagnostics 和 shutdown；
 - API 增加 `/v1/sessions/:id/jobs`、`/retry`、`/cancel`、`/export` 与 `/v1/diagnostics`；Web API client 与 Job center 增加 Cancel/Retry 操作；
 - 新增 `scripts/phase8-reliability-gate.mjs`，覆盖 retry、deadline、shutdown、session export 和 diagnostics 的真实运行路径。
-- Reliability gate 增加 Web Job Center recovery surface 检查，确认 Cancel/Retry/diagnostics 文案和 typed browser action symbols 随构建产物存在；真实带 Job 的浏览器交互 fixture 仍未宣称完成。
+- Reliability gate 增加 Web Job Center recovery surface 检查，确认 Cancel/Retry/diagnostics 文案和 typed browser action symbols 随构建产物存在；真实 Job action/replay fixture 已由后续 `pnpm test:phase8:jobs` checkpoint 关闭。
 - 修复 API restart recovery race：shutdown 只取消普通 active turn，保留等待 durable user interaction 的 turn，让下一次 AgentHost 从 pending interaction 恢复；同时避免 SQLite close 后异步 `finishTurnAfterError` 写入失败。
 
 ### 验证
@@ -144,7 +180,7 @@ git diff --check                                     ✓
 
 ### 尚未关闭
 
-8.3 仍需继续补充真实 Web/browser fixture、网络策略的更强 OS 级隔离评估和完整 Phase 8.3 退出审计；当前新增 gate 只证明 typed Web surface 存在，不宣称浏览器交互矩阵已完成。
+8.3 仍需完成完整退出审计和更强 OS 级隔离评估；当前 host 只有 process-policy，`os-required` 会 fail closed。真实 LSP/Code Mode Web replay 已由 `pnpm test:phase8:lsp:web` 覆盖，但这不替代完整 browser/安全审计矩阵。
 
 ## 2026-08-24：8.2 Worktree 收口
 

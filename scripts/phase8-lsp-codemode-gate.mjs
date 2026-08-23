@@ -15,10 +15,13 @@ assert(browserBundle.includes("presentLspTool") && browserBundle.includes("lsp")
 try {
   await writeFile(join(root, "fixture.ts"), "const value = 1;\n", "utf8");
   const codeMode = new CodeModeSandbox({ enabled: true, maxRuntimeMs: 5_000, maxOutputBytes: 4_096 });
+  assert(codeMode.snapshot().networkEnforcement === "process-policy" && codeMode.snapshot().osNetworkIsolation === false, "Code Mode did not expose the process-policy/OS-isolation boundary");
   const code = await codeMode.run({ code: "console.log(require('node:fs').readFileSync('fixture.ts', 'utf8'))" }, { workspaceRoot: root, signal: new AbortController().signal });
   assert(code.ok === true && code.output?.stdout.includes("const value"), "Code Mode success path did not read the workspace fixture");
   const network = await codeMode.run({ code: "fetch('https://example.com')" }, { workspaceRoot: root, signal: new AbortController().signal });
   assert(network.error?.code === "CODE_MODE_NETWORK_DENIED", "Code Mode network policy was bypassed");
+  const osRequired = await new CodeModeSandbox({ enabled: true, networkEnforcement: "os-required" }).run({ code: "console.log('must not run')" }, { workspaceRoot: root, signal: new AbortController().signal });
+  assert(osRequired.error?.code === "CODE_MODE_OS_ISOLATION_UNAVAILABLE", "Code Mode did not fail closed for an unavailable OS isolation requirement");
   const output = await new CodeModeSandbox({ enabled: true, maxOutputBytes: 256 }).run({ code: "console.log('x'.repeat(10_000))" }, { workspaceRoot: root, signal: new AbortController().signal });
   assert(output.error?.code === "CODE_MODE_OUTPUT_LIMIT", "Code Mode output budget did not terminate the child");
 

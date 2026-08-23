@@ -8,7 +8,7 @@ describe("CodeModeSandbox", () => {
   it("requires an explicit host enablement and exposes bounded policy metadata", async () => {
     const sandbox = new CodeModeSandbox({ maxRuntimeMs: 1_000, maxOutputBytes: 2_000 });
     await expect(sandbox.run({ code: "console.log('no')" }, { workspaceRoot: ".", signal: new AbortController().signal })).resolves.toMatchObject({ ok: false, error: { code: "CODE_MODE_DISABLED" } });
-    expect(sandbox.snapshot()).toMatchObject({ enabled: false, maxRuntimeMs: 1_000, maxOutputBytes: 2_000, network: "disabled" });
+    expect(sandbox.snapshot()).toMatchObject({ enabled: false, maxRuntimeMs: 1_000, maxOutputBytes: 2_000, network: "disabled", networkEnforcement: "process-policy", osNetworkIsolation: false });
   });
 
   it("runs JavaScript with workspace-bounded filesystem permissions and no inherited secrets", async () => {
@@ -34,6 +34,15 @@ describe("CodeModeSandbox", () => {
       await expect(sandbox.run({ code: "process.getBuiltinModule('node:http')" }, { workspaceRoot: root, signal })).resolves.toMatchObject({ ok: false, error: { code: "CODE_MODE_NETWORK_DENIED" } });
       await expect(sandbox.run({ language: "python" as "javascript", code: "print(1)" }, { workspaceRoot: root, signal })).resolves.toMatchObject({ ok: false, error: { code: "CODE_MODE_LANGUAGE_UNSUPPORTED" } });
       await expect(new CodeModeSandbox({ enabled: true, allowedCommands: ["python"] }).run({ code: "console.log(1)" }, { workspaceRoot: root, signal })).resolves.toMatchObject({ ok: false, error: { code: "CODE_MODE_COMMAND_NOT_ALLOWED" } });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("fails closed when a caller requires unavailable OS-level network isolation", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-code-mode-os-isolation-"));
+    try {
+      const sandbox = new CodeModeSandbox({ enabled: true, networkEnforcement: "os-required" });
+      expect(sandbox.snapshot()).toMatchObject({ networkEnforcement: "os-required", osNetworkIsolation: false });
+      await expect(sandbox.run({ code: "console.log('must not run')" }, { workspaceRoot: root, signal: new AbortController().signal })).resolves.toMatchObject({ ok: false, error: { code: "CODE_MODE_OS_ISOLATION_UNAVAILABLE" } });
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 

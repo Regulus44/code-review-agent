@@ -60,7 +60,15 @@ export interface ContextCapability {
 export interface CodeModeCapability {
   readonly configured: boolean;
   readonly enabled: boolean;
-  readonly limits?: Readonly<Record<string, unknown>>;
+  readonly limits?: {
+    readonly maxCodeBytes?: number;
+    readonly maxRuntimeMs?: number;
+    readonly maxOutputBytes?: number;
+    readonly network?: "disabled";
+    readonly networkEnforcement?: "process-policy" | "os-required";
+    readonly osNetworkIsolation?: boolean;
+    readonly [key: string]: unknown;
+  };
 }
 
 export interface LspCapability {

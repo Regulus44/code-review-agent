@@ -69,16 +69,17 @@ Phase 7 的 DSH Web 调研与分步计划：
 - `presentLspTool` 与 Web LSP details surface 已接入，diagnostics、definition、references、source location、restart/crash 和失败状态均保持 host-backed；
 - `CodeModeSandbox` 已接入可选 `code_mode` builtin，默认 disabled；支持 workspace-bound child process、`node` allowlist、网络禁用、runtime/output/code budget 和取消；API `/v1/capabilities` 与 Settings 暴露 Code Mode/LSP metadata；
 - Code Mode 的网络策略继续保持 deny-by-default，并额外拦截 `globalThis.fetch`、`globalThis.WebSocket` 与 `process.getBuiltinModule` 入口；该策略仍是进程内策略检查，不等同于 OS 级网络隔离。
+- Code Mode capability metadata 现在显式暴露 `networkEnforcement`：默认 `process-policy`，并报告 `osNetworkIsolation: false`；若配置 `os-required`，host 会以 `CODE_MODE_OS_ISOLATION_UNAVAILABLE` fail closed，不会把进程内检查冒充为 OS 级隔离。
 - `scripts/phase8-lsp-codemode-gate.mjs` 现在同时检查 Web LSP details 文案和 typed browser bundle；`pnpm test:phase8:lsp` 与 Code Mode 定向测试通过。
 - `pnpm test:phase8:web` 已通过（planning/question replay gate）；`pnpm test:phase8:lsp` 已通过（LSP/Code Mode safety/recovery gate）；Web 100 tests、Tools 56 tests、API 27 tests、Runtime 25 tests 和 `pnpm typecheck` 通过；
-- `6ac8e7e`：8.3 第一阶段 checkpoint 已建立；随后新增 `scripts/phase8-lsp-fixture-server.mjs` 与 `scripts/phase8-lsp-web-gate.mjs`，真实 SQLite/API/AgentHost/Web replay 已覆盖 diagnostics、definition、references、Code Mode 成功结果和网络拒绝结果；`pnpm test:phase8:lsp:web` 已通过。OS 级网络隔离评估和完整退出审计仍待补齐。
+- `6ac8e7e`：8.3 第一阶段 checkpoint 已建立；随后新增 `scripts/phase8-lsp-fixture-server.mjs` 与 `scripts/phase8-lsp-web-gate.mjs`，真实 SQLite/API/AgentHost/Web replay 已覆盖 diagnostics、definition、references、Code Mode 成功结果和网络拒绝结果；`pnpm test:phase8:lsp:web` 已通过。网络 boundary assessment 已记录，当前 host 仍没有 OS 级网络隔离；完整退出审计仍待补齐。
 - 当前已进入 `Phase 8.4 Reliability`：`JobManager` 已持久化可重试 executable/args 元数据，支持 bounded retry、deadline 结构化失败、取消原因和 graceful shutdown；`AgentHost` 提供 job action、session export/replay 和 structured diagnostics；API 暴露 `/v1/sessions/:id/jobs`、`/retry`、`/cancel`、`/export` 与 `/v1/diagnostics`；Web Job center 已提供 Cancel/Retry actions。
 - `AgentHost` 已支持显式 `fallbackModels`：主模型在产生部分输出前失败时切换到下一个模型，并追加 `MODEL_FALLBACK` 审计事件；`metrics()` 与 API `/v1/metrics` 提供 turns、fallback、tool failure counters；每个 turn 的 `traceId` 会在 started/ended/error 边界中保持一致。
 - 新增 `scripts/phase8-job-fixture-server.mjs` 与 `scripts/phase8-job-browser-gate.mjs`，使用真实 SQLite、AgentHost、ToolRuntime、API 和 Web bundle 验证 running/failed job、Cancel、Retry、spill metadata、job lifecycle replay、diagnostics、session export 以及重复 action 的幂等行为；`pnpm test:phase8:jobs` 已通过。
 - `AgentHost.retryJob` / `killJob` 与 API Job action route 现在消费 `Idempotency-Key`，通过 durable command claim 防止重复 Retry/Cancel 产生重复副作用；Runtime 定向测试与 API server tests 已通过。
-- 8.4 的真实 Job Center action slice 已闭合；更完整的 API restart、断线、orphaned/interrupted 和跨场景 browser recovery matrix 仍待补齐。
+- 8.4 的真实 Job Center action slice 已闭合；`pnpm test:phase8:jobs` 已覆盖真实页面的 Cancel/Retry、lifecycle replay、diagnostics、export 和重复 action 幂等。
 - 新增 `scripts/phase8-job-recovery-fixture-server.mjs` 与 `scripts/phase8-job-recovery-gate.mjs`，通过 seed → API/SQLite shutdown → fresh AgentHost/API reopen 验证 orphaned/completed job、interrupted session、terminal recovery、SSE replay、`after_sequence` tail cursor、diagnostics 和 export；`pnpm test:phase8:job-recovery` 已通过。
-- 8.4 的 API restart、断线 SSE replay、orphaned/interrupted recovery slice 已闭合；跨场景真实长任务恢复矩阵仍需继续扩展。
+- 8.4 的 API restart、断线 SSE replay、orphaned/interrupted recovery slice 已闭合；`pnpm test:phase8:job-recovery` 已覆盖 fresh AgentHost/API reopen、terminal recovery、tail cursor、diagnostics 和 export；跨场景真实长任务恢复矩阵仍需继续扩展。
 - 新增 `scripts/phase8-reliability-gate.mjs`，覆盖 retry、deadline、shutdown、session export、diagnostics 和 metrics；`pnpm test:phase8:reliability` 已通过。当前 8.4 仍未整体完成，更完整的 browser recovery matrix 仍是后续工作。
 - Reliability gate 现在额外检查 Web Job Center 的 `Cancel job`、`Retry job` 和 `Terminal & long-running jobs` surface；真实 Job fixture 已由 `pnpm test:phase8:jobs` 覆盖，后续继续扩展 API restart、断线和 orphaned/interrupted browser recovery matrix。
 - 修复 API restart recovery：graceful shutdown 不再取消处于 pending user interaction 的 turn，避免在数据库关闭前追加 `interaction/resolved(cancelled)`；`apps/api` 27 项 server tests 已通过。

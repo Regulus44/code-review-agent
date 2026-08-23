@@ -44,6 +44,7 @@ try {
   const capabilities = await request("/v1/capabilities");
   assert(capabilities.lsp?.configured === true && capabilities.lsp.servers.includes("default"), "LSP capability metadata did not reach the API");
   assert(capabilities.codeMode?.enabled === true, "Code Mode capability metadata did not reach the API");
+  assert(capabilities.codeMode?.limits?.networkEnforcement === "process-policy" && capabilities.codeMode?.limits?.osNetworkIsolation === false, "API capability metadata overstated Code Mode network isolation");
   const tools = await request("/v1/tools");
   assert(tools.tools.some((tool) => tool.name === "lsp_diagnostics") && tools.tools.some((tool) => tool.name === "code_mode"), "LSP/Code Mode tools are missing from the host catalog");
   const shell = await request("/");

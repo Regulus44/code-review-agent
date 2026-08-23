@@ -10,6 +10,25 @@ export interface CodeModePolicy {
   readonly maxOutputBytes?: number;
   /** Code Mode intentionally starts with a deny-by-default network policy. */
   readonly network?: "disabled";
+  /**
+   * `process-policy` is the current supported boundary. `os-required` fails
+   * closed until the host supplies an OS-level network isolation adapter.
+   */
+  readonly networkEnforcement?: "process-policy" | "os-required";
+}
+
+export type CodeModeNetworkEnforcement = "process-policy" | "os-required";
+
+export interface CodeModePolicySnapshot {
+  readonly enabled: boolean;
+  readonly allowedCommands: readonly string[];
+  readonly maxCodeBytes: number;
+  readonly maxRuntimeMs: number;
+  readonly maxOutputBytes: number;
+  readonly network: "disabled";
+  readonly networkEnforcement: CodeModeNetworkEnforcement;
+  /** False means the current host has no OS-level network isolation adapter. */
+  readonly osNetworkIsolation: false;
 }
 
 export interface CodeModeInput {
@@ -38,7 +57,7 @@ const NETWORK_IMPORT_PATTERN = /(?:\bfetch\s*\(|\bWebSocket\s*\(|\bXMLHttpReques
  * application secrets, and has network access disabled by policy.
  */
 export class CodeModeSandbox {
-  private readonly policy: Required<Pick<CodeModePolicy, "enabled" | "maxCodeBytes" | "maxRuntimeMs" | "maxOutputBytes" | "network">> & Pick<CodeModePolicy, "allowedCommands">;
+  private readonly policy: Required<Pick<CodeModePolicy, "enabled" | "maxCodeBytes" | "maxRuntimeMs" | "maxOutputBytes" | "network" | "networkEnforcement">> & Pick<CodeModePolicy, "allowedCommands">;
 
   constructor(policy: CodeModePolicy = {}) {
     this.policy = {
@@ -48,10 +67,11 @@ export class CodeModeSandbox {
       maxRuntimeMs: bounded(policy.maxRuntimeMs ?? DEFAULT_MAX_RUNTIME_MS, 1, MAX_RUNTIME_MS),
       maxOutputBytes: bounded(policy.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES, 256, MAX_OUTPUT_BYTES),
       network: policy.network ?? "disabled",
+      networkEnforcement: policy.networkEnforcement ?? "process-policy",
     };
   }
 
-  snapshot(): Readonly<Record<string, unknown>> {
+  snapshot(): CodeModePolicySnapshot {
     return {
       enabled: this.policy.enabled,
       allowedCommands: [...(this.policy.allowedCommands ?? [])],
@@ -59,11 +79,14 @@ export class CodeModeSandbox {
       maxRuntimeMs: this.policy.maxRuntimeMs,
       maxOutputBytes: this.policy.maxOutputBytes,
       network: this.policy.network,
+      networkEnforcement: this.policy.networkEnforcement,
+      osNetworkIsolation: false,
     };
   }
 
   async run(input: CodeModeInput, options: CodeModeRunOptions): Promise<ToolResult> {
     if (!this.policy.enabled) return fail("CODE_MODE_DISABLED", "Code Mode is disabled by the host policy.");
+    if (this.policy.networkEnforcement === "os-required") return fail("CODE_MODE_OS_ISOLATION_UNAVAILABLE", "Code Mode requires OS-level network isolation, but this host only provides process-level policy enforcement.");
     if (input.language !== undefined && input.language !== "javascript") return fail("CODE_MODE_LANGUAGE_UNSUPPORTED", "Only JavaScript Code Mode is enabled.");
     if (typeof input.code !== "string" || input.code.trim().length === 0) return fail("CODE_MODE_EMPTY", "Code Mode requires non-empty JavaScript code.");
     if (Buffer.byteLength(input.code, "utf8") > this.policy.maxCodeBytes) return fail("CODE_MODE_INPUT_TOO_LARGE", `Code exceeds the ${this.policy.maxCodeBytes}-byte Code Mode limit.`);

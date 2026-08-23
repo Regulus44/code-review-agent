@@ -32,7 +32,7 @@ import {
 import { EchoChatModel } from "@code-review-agent/llm";
 import { compactMessages, type ContextBudget } from "@code-review-agent/compaction";
 import { randomUUID } from "node:crypto";
-import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModeSandbox, type ExecuteToolOutput, type JobSummary, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
+import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModePolicySnapshot, type CodeModeSandbox, type ExecuteToolOutput, type JobSummary, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
 import type { SubagentRuntime } from "@code-review-agent/subagent";
 import { GitWorktreeManager } from "@code-review-agent/workspace";
 import { buildAgentSystemPrompt } from "./system-prompt.js";
@@ -65,7 +65,7 @@ export interface ContextSettings {
 export interface CodeModeSettings {
   readonly configured: boolean;
   readonly enabled: boolean;
-  readonly limits?: Readonly<Record<string, unknown>>;
+  readonly limits?: CodeModePolicySnapshot;
 }
 
 export interface LspSettings {
