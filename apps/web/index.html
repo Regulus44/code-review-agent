@@ -406,6 +406,15 @@
         .mobile-menu { display: grid; }
         .workspace-header { padding-inline: 12px; }
         .details-toggle { display: none; }
+        .app-shell.mobile-sidebar-open { grid-template-columns: minmax(240px, 78vw) minmax(0, 1fr) 0; }
+        .app-shell.mobile-sidebar-open .sidebar { display: flex; position: relative; z-index: 5; }
+        .app-shell.mobile-sidebar-open .sidebar .brand { display: flex; }
+        .app-shell.mobile-sidebar-open .sidebar .brand span:last-child,
+        .app-shell.mobile-sidebar-open .sidebar .session-copy,
+        .app-shell.mobile-sidebar-open .sidebar .mcp-copy,
+        .app-shell.mobile-sidebar-open .sidebar .sidebar-footer-copy,
+        .app-shell.mobile-sidebar-open .sidebar .collapse-symbol { display: flex; }
+        .app-shell.mobile-sidebar-open .sidebar-header { justify-content: space-between; padding-inline: 13px; }
       }
       @media (max-width: 600px) {
         .app-shell, .app-shell.sidebar-collapsed { grid-template-columns: 1fr 0 0; }
@@ -418,6 +427,9 @@
         .context-meter { display: none; }
         .model-trigger { max-width: 150px; }
         .model-popover { right: 43px; bottom: 74px; }
+        .app-shell.mobile-sidebar-open { grid-template-columns: minmax(250px, 86vw) minmax(0, 1fr) 0; }
+        .app-shell.mobile-sidebar-open .sidebar { display: flex; }
+        .app-shell.mobile-sidebar-open .workspace { visibility: hidden; }
       }
     </style>
   </head>
@@ -508,7 +520,7 @@
       (() => {
         const typedRuntime = window.CodeReviewAgentWeb;
         const typedConnection = typedRuntime?.connection || null;
-        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], models: null, sidebarCollapsed: false, detailsOpen: true, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
+        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], models: null, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', details: 'open', mobileSidebarOpen: false }, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
         const app = document.querySelector('#app');
         const list = document.querySelector('#session-list');
         const mcpList = document.querySelector('#mcp-list');
@@ -524,6 +536,7 @@
         const modelPopover = document.querySelector('#model-popover');
         const modeTrigger = document.querySelector('#mode-trigger');
         const modePopover = document.querySelector('#mode-popover');
+        const mobileMenu = document.querySelector('#mobile-menu');
         const details = document.querySelector('#details-content');
         const workspaceModal = document.querySelector('#workspace-modal');
         const settingsButton = document.querySelector('#settings-button');
@@ -551,6 +564,25 @@
         const api = async (url, options) => { const response = await fetch(url, options); if (!response.ok) throw new Error(await response.text()); return response.json(); };
         const commandKey = () => globalThis.crypto?.randomUUID?.() || `web_${Date.now()}_${Math.random().toString(36).slice(2)}`;
         const commandApi = (url, body) => { const idempotencyKey = commandKey(); return api(url, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKey }, body: JSON.stringify({ ...body, commandId: idempotencyKey }) }); };
+        const applyShellLayout = () => {
+          const viewport = typedRuntime?.shellViewport ? typedRuntime.shellViewport(window.innerWidth) : window.innerWidth <= 600 ? 'mobile' : window.innerWidth <= 900 ? 'tablet' : 'desktop';
+          if (typedRuntime?.reduceShellLayout) state.layout = typedRuntime.reduceShellLayout(state.layout, { type: 'set-viewport', viewport });
+          if (typedRuntime?.presentShellLayout) {
+            const intent = typedRuntime.presentShellLayout(state.layout, viewport);
+            app.className = intent.appClassName;
+            mobileMenu.hidden = !intent.mobileMenuVisible;
+            mobileMenu.setAttribute('aria-expanded', String(intent.mobileSidebarOpen));
+            mobileMenu.setAttribute('aria-label', intent.mobileSidebarOpen ? 'Close sidebar' : 'Open sidebar');
+            return;
+          }
+          app.classList.toggle('sidebar-collapsed', state.layout.sidebar === 'collapsed');
+          app.classList.toggle('details-collapsed', state.layout.details === 'closed');
+        };
+        const dispatchShellLayout = (action) => {
+          state.layout = typedRuntime?.reduceShellLayout ? typedRuntime.reduceShellLayout(state.layout, action) : state.layout;
+          applyShellLayout();
+        };
+        window.addEventListener('resize', applyShellLayout, { passive: true });
         const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
         const currentModel = () => state.models?.current || state.models?.defaultModel || 'deepseek-v4-flash';
         const modeLabels = { 'read-only': 'Read only', 'workspace-write': 'Workspace write', 'ask-on-write': 'Ask on write', 'ask-on-execute': 'Ask on execute', 'danger-full-access': 'Full access' };
@@ -1251,6 +1283,7 @@
         const renderModes = () => { modeTrigger.textContent = `◉ Mode · ${modeLabels[currentMode()] || currentMode()}`; modePopover.innerHTML = '<div class="popover-label">Choose a work mode for this session</div>'; for (const [value, label] of Object.entries(modeLabels)) { const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${value === currentMode() ? 'selected' : ''}`; option.innerHTML = `<span class="model-check">${value === currentMode() ? '✓' : ''}</span><span>${label}<span class="model-meta">${value === 'read-only' ? 'Inspect without changing files' : value === 'danger-full-access' ? 'Run tools without approval' : 'Permission-controlled coding workflow'}</span></span>`; option.onclick = async () => { modePopover.hidden = true; modeTrigger.setAttribute('aria-expanded', 'false'); if (value === currentMode() || !state.session) return; modeTrigger.disabled = true; try { state.session = await api(`/v1/sessions/${encodeURIComponent(state.session.id)}/mode`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ permissionPreset: value }) }); renderModes(); renderDetails(); setStatus(`Mode · ${label}`); } catch (error) { setStatus(error.message, false); } finally { modeTrigger.disabled = false; } }; modePopover.append(option); } };
         const renderDetails = () => { const connected = state.mcp.filter((server) => !['disabled', 'failed', 'needs_auth'].includes(server.status)).length; const typedSnapshot = typedConnection?.store.getSnapshot(); const trajectory = typedSnapshot?.trajectory; const treeWarnings = typedSnapshot?.toolCallTree?.warnings || []; const pendingPermissions = typedSnapshot?.conversation?.nodes?.filter((node) => node.kind === 'permission' && node.status === 'pending').length || 0; const pendingInteractions = typedSnapshot?.conversation?.nodes?.filter((node) => node.kind === 'interaction' && node.status === 'pending').length || 0; const diagnostics = state.mcp.map((server) => { const name = server.config?.name || server.name; const catalog = Array.isArray(server.catalog) ? server.catalog : []; const disabled = catalog.filter((item) => item.enabled === false).length; const active = server.status === 'connected' ? catalog.length - disabled : 0; return `<div class="detail-line"><span>${esc(name)}</span><strong>${esc(server.status)} · g${server.generation || 0} · ${active}/${catalog.length} active</strong></div><div class="detail-line"><span>Auth</span><strong>${server.status === 'needs_auth' ? 'Needs authorization' : server.config?.credentialRef ? 'Credential reference configured' : 'No credential reference'}</strong></div>${server.retry?.nextAttemptAt ? `<div class="detail-line"><span>Next retry</span><strong>${esc(server.retry.nextAttemptAt)}</strong></div>` : ''}`; }).join(''); details.innerHTML = `<div class="detail-section"><div class="detail-label">Model</div><div class="detail-value">${esc(currentModel())}</div><div class="detail-line"><span>Provider</span><strong>${esc(state.models?.provider || 'DeepSeek-compatible')}</strong></div><div class="detail-line"><span>Default</span><strong>${esc(state.models?.defaultModel || 'deepseek-v4-flash')}</strong></div></div><div class="detail-section"><div class="detail-label">Session</div><div class="detail-line"><span>Status</span><span class="status-pill">Connected</span></div><div class="detail-line"><span>Events</span><strong>${state.events.size}</strong></div><div class="detail-line"><span>Workspace</span><strong title="${esc(state.session?.workspaceRoot || '.')}">${esc(state.session?.workspaceRoot || '.')}</strong></div></div><div class="detail-section"><div class="detail-label">Trajectory</div><div class="detail-line"><span>Records</span><strong>${trajectory?.records.length || 0} · seq ${trajectory?.lastSequence || 0}</strong></div><div class="detail-line"><span>Running</span><strong>${trajectory?.records.filter((record) => record.running).length || 0}</strong></div><div class="detail-line"><span>Lineage warnings</span><strong>${treeWarnings.length}</strong></div></div><div class="detail-section"><div class="detail-label">MCP diagnostics</div><div class="detail-line"><span>Servers</span><strong>${connected}/${state.mcp.length} connected</strong></div><div class="detail-line"><span>Tools</span><strong>${state.tools.size}</strong></div>${diagnostics || '<div class="empty-detail">No MCP servers configured.</div>'}</div><div class="detail-section"><div class="detail-label">Tools</div><div id="detail-tools" class="tool-list"></div></div><div class="detail-section"><div class="detail-label">Permissions</div><div class="detail-line"><span>Pending approvals</span><strong>${pendingPermissions}</strong></div><div class="detail-line"><span>Pending questions</span><strong>${pendingInteractions}</strong></div></div>`; const toolList = details.querySelector('#detail-tools'); const names = [...state.tools.keys()].slice(0, 8); if (!names.length) toolList.innerHTML = '<div class="empty-detail">No tools discovered.</div>'; else names.forEach((name) => { const row = document.createElement('div'); row.className = 'tool-list-item'; row.textContent = name; toolList.append(row); }); };
         const openSession = async (id) => {
+           dispatchShellLayout({ type: 'close-mobile-sidebar' });
            state.trajectoryQuery = ''; state.trajectoryRunningOnly = false; state.trajectorySelectedKey = null; state.trajectoryFollow = true; state.trajectoryCollapsedLanes.clear(); state.trajectoryCollapsedRecords.clear(); state.taskSelectedId = null;
           if (state.storeUnsubscribe) { state.storeUnsubscribe(); state.storeUnsubscribe = null; }
           if (state.source) state.source.close();
@@ -1297,9 +1330,9 @@
         const newSession = () => openWorkspacePicker();
         modeTrigger.textContent = '◉ Mode · Ask on write';
         const boot = async () => { const result = await api('/v1/sessions'); const tools = await api('/v1/tools'); state.tools = new Map((tools.tools || []).map((tool) => [tool.name, tool])); renderModels(await api('/v1/models')); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); if (result.sessions?.length) await openSession(result.sessions[0].id); else await createSession('.'); };
-        document.querySelector('#sidebar-toggle').onclick = () => { state.sidebarCollapsed = !state.sidebarCollapsed; app.classList.toggle('sidebar-collapsed', state.sidebarCollapsed); };
-        document.querySelector('#details-toggle').onclick = () => { state.detailsOpen = !state.detailsOpen; app.classList.toggle('details-collapsed', !state.detailsOpen); };
-        document.querySelector('#details-close').onclick = () => { state.detailsOpen = false; app.classList.add('details-collapsed'); };
+        document.querySelector('#sidebar-toggle').onclick = () => { dispatchShellLayout({ type: 'toggle-sidebar' }); };
+        document.querySelector('#details-toggle').onclick = () => { dispatchShellLayout({ type: 'toggle-details' }); };
+        document.querySelector('#details-close').onclick = () => { dispatchShellLayout({ type: 'close-details' }); };
          document.querySelector('#new-session').onclick = () => newSession();
          connectionRetry.onclick = () => { void retryConnection(); };
         settingsButton.onclick = () => openSettings();
@@ -1314,13 +1347,14 @@
         document.querySelector('#workspace-cancel').onclick = () => closeWorkspacePicker();
         workspaceModal.addEventListener('click', (event) => { if (event.target === workspaceModal) closeWorkspacePicker(); });
         workspaceForm.addEventListener('submit', async (event) => { event.preventDefault(); const workspaceRoot = workspaceInput.value.trim(); if (!workspaceRoot) { workspaceError.textContent = 'Enter a local folder path.'; return; } workspaceCreate.disabled = true; workspaceError.textContent = ''; try { await createSession(workspaceRoot); closeWorkspacePicker(); } catch (error) { workspaceError.textContent = error.message; } finally { workspaceCreate.disabled = false; } });
-        document.querySelector('#mobile-menu').onclick = () => { state.sidebarCollapsed = false; app.classList.remove('sidebar-collapsed'); };
+        mobileMenu.onclick = () => { const viewport = typedRuntime?.shellViewport ? typedRuntime.shellViewport(window.innerWidth) : window.innerWidth <= 900 ? 'tablet' : 'desktop'; dispatchShellLayout({ type: viewport === 'desktop' ? 'toggle-sidebar' : state.layout.mobileSidebarOpen ? 'close-mobile-sidebar' : 'open-mobile-sidebar' }); };
         modelTrigger.onclick = () => { modelPopover.hidden = !modelPopover.hidden; modelTrigger.setAttribute('aria-expanded', String(!modelPopover.hidden)); };
         modeTrigger.onclick = () => { modePopover.hidden = !modePopover.hidden; modeTrigger.setAttribute('aria-expanded', String(!modePopover.hidden)); renderModes(); };
         document.addEventListener('click', (event) => { if (!modelPopover.hidden && !modelPopover.contains(event.target) && event.target !== modelTrigger) { modelPopover.hidden = true; modelTrigger.setAttribute('aria-expanded', 'false'); } if (!modePopover.hidden && !modePopover.contains(event.target) && event.target !== modeTrigger) { modePopover.hidden = true; modeTrigger.setAttribute('aria-expanded', 'false'); } if (!sessionMenu.hidden && !sessionMenu.contains(event.target)) closeSessionMenu(); });
         input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 220)}px`; });
         input.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); document.querySelector('#composer').requestSubmit(); } });
         document.querySelector('#composer').addEventListener('submit', async (event) => { event.preventDefault(); const content = input.value.trim(); if (!content || !state.session) return; send.disabled = true; input.value = ''; input.style.height = 'auto'; try { await api(`/v1/sessions/${encodeURIComponent(state.session.id)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content }) }); } catch (error) { setStatus(error.message, false); } finally { send.disabled = false; input.focus(); } });
+        applyShellLayout();
         boot().catch((error) => { setStatus(error.message, false); conversation.innerHTML = `<div class="hero"><div class="hero-inner"><div class="hero-mark">!</div><h1>Unable to connect</h1><p>${esc(error.message)}</p></div></div>`; });
       })();
     </script>

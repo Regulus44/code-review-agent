@@ -799,7 +799,7 @@ git diff --check                                  ✓
 pnpm typecheck                                   ✓
 pnpm --filter @code-review-agent/web test -- --run ✓（54 tests）
 pnpm --filter @code-review-agent/web run build:browser ✓
-pnpm test:phase7:browser                         ✓（五场景，总耗时 2.18s）
+pnpm test:phase7:browser                         ✓（五场景，总耗时 2.40s）
 pnpm test                                        ✓
 git diff --check                                  ✓
 ```
@@ -816,6 +816,52 @@ git diff --check                                  ✓
 - 继续把物理 Shell 拆成 boot/layout/overlay 边界；
 - 补 Workspace/Session rename/reorder 等真实生命周期 API 与错误/空态；
 - 扩展 queue/steer/attachment、长任务 terminal/job 失败诊断和窄屏视觉基线。
+
+## 2026-08-23：Typed Shell layout state 与 mobile sidebar
+
+### 目标
+
+对照 DSH `ui-layout/AppFrame` 与 responsive sidebar 行为，把三栏 Shell 的布局事实从 inline boolean 切到可测试的 typed state/reducer，并让窄屏侧栏真正可打开和收起。
+
+### 变更范围
+
+- `apps/web/src/shell/layout.ts`：新增 `ShellLayoutState`、`ShellLayoutAction`、viewport breakpoint、reducer 和 `ShellLayoutRenderIntent`；sidebar、details、mobile sidebar 是 UI session state，不进入 EventStore；
+- `apps/web/src/shell/layout.test.ts`：覆盖 desktop sidebar/details 独立切换、mobile overlay 打开/关闭和 600/900 breakpoint；
+- `apps/web/src/browser.ts`：暴露 `createShellLayoutState`、`reduceShellLayout`、`presentShellLayout` 和 `shellViewport`；
+- `apps/web/index.html`：typed bridge 驱动 class/aria/expanded 状态，resize 时同步 viewport；`mobile-sidebar-open` 在 600/900 breakpoint 展开真实 sidebar，点击 Session 后自动收起；旧 class toggle 保留为 fallback。
+
+### 根治理七问
+
+1. **Phase**：Phase 7.1 Web Shell/layout。
+2. **问题类型**：UI state boundary、responsive layout、keyboard/aria 交互。
+3. **契约影响**：只增加 Web 内部 state/render intent；不改变 Event、Tool、Task、Permission 或 Workspace contract。
+4. **参考入口**：DSH `ui-layout/AppFrame`、`ui-sidebar` responsive behavior；实现继续使用本项目静态 shell 和 typed bridge。
+5. **上游来源**：只做行为参考，没有复制上游代码或资产。
+6. **验收场景**：desktop sidebar/details toggle、600px Open/Close sidebar、Session 切换关闭 mobile sidebar、resize 状态稳定、控制台无错误。
+7. **回滚**：移除 layout bridge 后恢复现有 class toggle；不影响 API、SessionStore、AgentHost 或 EventStore。
+
+### 验证
+
+```text
+pnpm typecheck                                   ✓
+pnpm --filter @code-review-agent/web test -- --run ✓（57 tests）
+pnpm --filter @code-review-agent/web run build:browser ✓
+pnpm test:phase7:browser                         ✓
+pnpm test                                        ✓
+git diff --check                                  ✓
+```
+
+真实浏览器 smoke：
+
+- 600×800 viewport 初始显示 `Open sidebar`；点击后显示完整 Workspace/Session sidebar；再次点击 `Collapse sidebar` 后恢复主内容；
+- 默认 viewport 的 Workspace search、Session tree 保持正常；
+- browser console warn/error 为空。
+
+### 下一步
+
+- 抽出 booting/ready/failed boot state 和错误边界；
+- 继续把 Conversation、Details、Overlay 从单文件 inline script 拆为可测试 Shell 区域；
+- 补 Workspace/Session 生命周期 API、长任务 terminal/job 失败诊断和窄屏视觉基线。
 
 ## 2026-08-23：Modal keyboard/focus semantics
 

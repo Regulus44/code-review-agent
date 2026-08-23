@@ -14,6 +14,7 @@ import { presentDeliverables } from "./presentation/deliverables-presenter.js";
 import { createFocusTrap, FOCUSABLE_SELECTOR, nextFocusableIndex } from "./presentation/focus-trap.js";
 import { presentConnection } from "./presentation/connection-presenter.js";
 import { buildNavigationModel, sessionLabel, sessionRelativeTime, workspaceKey, workspaceLabel } from "./presentation/navigation-presenter.js";
+import { createShellLayoutState, presentShellLayout, reduceShellLayout, shellViewport } from "./shell/layout.js";
 
 export interface BrowserWebRuntime {
   readonly api: WebApiClient;
@@ -40,6 +41,10 @@ export interface BrowserWebRuntime {
   readonly sessionRelativeTime: typeof sessionRelativeTime;
   readonly workspaceKey: typeof workspaceKey;
   readonly workspaceLabel: typeof workspaceLabel;
+  readonly createShellLayoutState: typeof createShellLayoutState;
+  readonly reduceShellLayout: typeof reduceShellLayout;
+  readonly presentShellLayout: typeof presentShellLayout;
+  readonly shellViewport: typeof shellViewport;
   readonly buildToolCallTree: typeof buildToolCallTree;
   readonly presentToolCall: typeof presentToolCall;
 }
@@ -72,6 +77,10 @@ const runtime: BrowserWebRuntime = {
   sessionRelativeTime,
   workspaceKey,
   workspaceLabel,
+  createShellLayoutState,
+  reduceShellLayout,
+  presentShellLayout,
+  shellViewport,
   buildToolCallTree,
   presentToolCall,
 };
