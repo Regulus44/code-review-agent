@@ -69,6 +69,10 @@ describe("trajectory presenter", () => {
     expect(timing?.entries.find((entry) => entry.label === "Duration")?.value).toBe("running");
     expect(detail?.entries[0]?.value).toContain("[redacted]");
     expect(detail?.entries[0]?.untrusted).toBe(true);
+    expect(inspected.sections.map((section) => section.id)).toEqual([
+      "overview", "options", "usage", "timing", "diff", "request", "catalog", "rendered", "raw", "source", "input", "output", "schema", "detail",
+    ]);
+    expect(inspected.sections.find((section) => section.id === "usage")?.entries.find((item) => item.label === "TTFT")?.value).toBe("unknown");
   });
 
   it("builds a bounded timeline with stable order, nested depth, and explicit timing state", () => {

@@ -14,6 +14,7 @@
     "test:phase7:browser": "pnpm typecheck && pnpm build:web && node scripts/phase7-browser-gate.mjs",
     "test:phase8:worktree": "pnpm typecheck && pnpm build:web && node scripts/phase8-worktree-gate.mjs",
     "test:phase8:compaction": "pnpm typecheck && pnpm build:web && node scripts/phase8-compaction-gate.mjs",
+    "test:phase8:web": "pnpm typecheck && pnpm build:web && node scripts/phase8-web-gate.mjs",
     "typecheck": "tsc -b",
     "test": "pnpm -r --workspace-concurrency=1 --if-present test",
     "test:contracts": "pnpm --filter @code-review-agent/contracts test",

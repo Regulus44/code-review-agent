@@ -60,7 +60,7 @@ export interface TrajectoryInspectorEntry {
 }
 
 export interface TrajectoryInspectorSection {
-  readonly id: "overview" | "timing" | "source" | "detail";
+  readonly id: "overview" | "options" | "usage" | "timing" | "diff" | "request" | "catalog" | "rendered" | "raw" | "source" | "input" | "output" | "schema" | "detail";
   readonly title: string;
   readonly entries: readonly TrajectoryInspectorEntry[];
 }
@@ -176,6 +176,19 @@ export function buildTrajectoryTimeline(records: readonly TrajectoryRecord[], ma
 /** Build bounded inspector sections for a selected record. */
 export function inspectTrajectory(record: TrajectoryRecord, maxDetailChars = 8_000): TrajectoryInspectorView {
   const detail = presentBoundedValue(record.detail, maxDetailChars);
+  const raw = asRecord(record.detail);
+  const value = (keys: readonly string[]): unknown => readPath(raw, keys);
+  const boundedEntry = (label: string, candidate: unknown): TrajectoryInspectorEntry => {
+    if (candidate === undefined) return entry(label, "unknown");
+    const display = presentBoundedValue(candidate, Math.min(maxDetailChars, 2_000));
+    return { label, value: display.text, untrusted: display.untrusted, truncated: display.truncated };
+  };
+  const detailEntry: TrajectoryInspectorEntry = {
+    label: "Untrusted event data",
+    value: detail.text,
+    untrusted: detail.untrusted,
+    truncated: detail.truncated,
+  };
   return {
     key: record.key,
     title: record.label,
@@ -194,6 +207,28 @@ export function inspectTrajectory(record: TrajectoryRecord, maxDetailChars = 8_0
         ]),
       },
       {
+        id: "options",
+        title: "Options",
+        entries: [
+          boundedEntry("Options", value(["options"])),
+          boundedEntry("Model", value(["model"])),
+          boundedEntry("Reasoning", value(["reasoning", "reasoningEffort"])),
+          boundedEntry("Temperature", value(["temperature"])),
+          boundedEntry("Max tokens", value(["maxTokens", "max_tokens"])),
+        ],
+      },
+      {
+        id: "usage",
+        title: "Usage",
+        entries: [
+          boundedEntry("Usage", value(["usage"])),
+          boundedEntry("Input tokens", value(["inputTokens", "input_tokens", "usage", "input"])),
+          boundedEntry("Output tokens", value(["outputTokens", "output_tokens", "usage", "output"])),
+          boundedEntry("TTFT", value(["ttftMs", "ttft_ms"])),
+          boundedEntry("Provider", value(["provider"])),
+        ],
+      },
+      {
         id: "timing",
         title: "Timing",
         entries: compactEntries([
@@ -201,6 +236,46 @@ export function inspectTrajectory(record: TrajectoryRecord, maxDetailChars = 8_0
           entry("Ended", record.endedAt ?? (record.running ? "running" : "unknown")),
           entry("Duration", formatDuration(record.durationMs, record.running)),
         ]),
+      },
+      {
+        id: "diff",
+        title: "Diff",
+        entries: [
+          boundedEntry("Diff", value(["diff"])),
+          boundedEntry("Patch", value(["patch"])),
+          boundedEntry("Before", value(["before"])),
+          boundedEntry("After", value(["after"])),
+        ],
+      },
+      {
+        id: "request",
+        title: "Request",
+        entries: [
+          boundedEntry("Request", value(["request"])),
+          boundedEntry("Permission", value(["permissionId", "permission"])),
+          boundedEntry("Interaction", value(["interactionId", "interaction"])),
+          boundedEntry("Question", value(["question"])),
+        ],
+      },
+      {
+        id: "catalog",
+        title: "Tool catalog",
+        entries: [
+          boundedEntry("Tool", value(["toolName", "name"])),
+          boundedEntry("Risk", value(["riskLevel", "risk"])),
+          boundedEntry("Source", value(["source"])),
+          boundedEntry("Schema", value(["inputSchema", "schema"])),
+        ],
+      },
+      {
+        id: "rendered",
+        title: "Rendered",
+        entries: [detailEntry],
+      },
+      {
+        id: "raw",
+        title: "Raw",
+        entries: [detailEntry],
       },
       {
         id: "source",
@@ -217,16 +292,24 @@ export function inspectTrajectory(record: TrajectoryRecord, maxDetailChars = 8_0
         ]),
       },
       {
+        id: "input",
+        title: "Input",
+        entries: [boundedEntry("Input", value(["input", "arguments"]))],
+      },
+      {
+        id: "output",
+        title: "Output",
+        entries: [boundedEntry("Output", value(["output", "result"]))],
+      },
+      {
+        id: "schema",
+        title: "Schema",
+        entries: [boundedEntry("Schema", value(["schema", "inputSchema"]))],
+      },
+      {
         id: "detail",
         title: "Rendered detail",
-        entries: [
-          {
-            label: "Untrusted event data",
-            value: detail.text,
-            untrusted: detail.untrusted,
-            truncated: detail.truncated,
-          },
-        ],
+        entries: [detailEntry],
       },
     ],
   };
@@ -246,6 +329,18 @@ function compactEntries(entries: readonly (TrajectoryInspectorEntry | undefined)
 
 function entry(label: string, value: string): TrajectoryInspectorEntry {
   return { label, value };
+}
+
+function asRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : undefined;
+}
+
+function readPath(record: Readonly<Record<string, unknown>> | undefined, keys: readonly string[]): unknown {
+  if (record === undefined) return undefined;
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) return record[key];
+  }
+  return undefined;
 }
 
 function formatDuration(durationMs: number | undefined, running: boolean): string {
