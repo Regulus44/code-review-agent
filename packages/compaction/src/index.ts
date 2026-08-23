@@ -67,7 +67,10 @@ export function compactMessages(messages: readonly ChatMessage[], options: Compa
     recentTokens += cost;
   }
   const protectedIds = options.protectedToolCallIds ?? new Set<string>();
-  const protectedMessages = nonSystem.filter((message) => message.role === "tool" && protectedIds.has(message.toolCallId));
+  const protectedMessages = nonSystem.filter((message) =>
+    (message.role === "tool" && protectedIds.has(message.toolCallId)) ||
+    (message.role === "assistant" && message.toolCalls?.some((call) => protectedIds.has(call.id)) === true),
+  );
   const preserved = mergeStable(recent, protectedMessages);
   const dropped = nonSystem.filter((message) => !preserved.includes(message));
   const summary = buildSummary(dropped, dropped.length, budget.maxSummaryChars);

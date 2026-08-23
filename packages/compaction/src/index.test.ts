@@ -37,6 +37,7 @@ describe("context compaction", () => {
       { role: "tool", toolCallId: "call_old", content: "protected" },
       { role: "user", content: "new" },
     ], { budget: { maxTokens: 20, recentMessageTokens: 8 }, protectedToolCallIds: new Set(["call_old"]) });
+    expect(result.messages.some((message) => message.role === "assistant" && message.toolCalls?.some((call) => call.id === "call_old"))).toBe(true);
     expect(result.messages.some((message) => message.role === "tool" && message.toolCallId === "call_old")).toBe(true);
     expect(estimateMessagesTokens(result.messages)).toBeGreaterThan(0);
   });

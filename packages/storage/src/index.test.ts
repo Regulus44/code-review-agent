@@ -64,6 +64,15 @@ describe("InMemoryEventStore", () => {
     expect((await store.project(sessionId))?.goals[0]).toMatchObject({ id: "goal_1", title: "Ship phase", status: "completed", successCriteria: ["Tests pass"], result: { tests: "pass" } });
   });
 
+  it("replays context compaction receipts and failures", async () => {
+    const store = new InMemoryEventStore();
+    const sessionId = await store.createSession("D:/context-replay");
+    await store.append({ sessionId, type: "context/compacted", payload: { sourceSequence: 2, summary: "bounded summary", originalMessageCount: 8, compactedMessageCount: 4, estimatedTokens: 120, droppedMessages: 4 } });
+    expect((await store.project(sessionId))?.contextCompaction).toMatchObject({ status: "completed", sourceSequence: 2, droppedMessages: 4 });
+    await store.append({ sessionId, type: "context/compaction_failed", payload: { sourceSequence: 3, summary: "", originalMessageCount: 8, compactedMessageCount: 8, estimatedTokens: 0, droppedMessages: 0, error: "fixture failure" } });
+    expect((await store.project(sessionId))?.contextCompaction).toMatchObject({ status: "failed", error: "fixture failure" });
+  });
+
   it("persists events, projections, commands, and schema across reopen", async () => {
     const directory = mkdtempSync(join(tmpdir(), "code-review-agent-"));
     const databasePath = join(directory, "agent.sqlite");
