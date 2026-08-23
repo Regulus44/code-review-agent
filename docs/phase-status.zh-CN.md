@@ -77,6 +77,8 @@ Phase 7 的 DSH Web 调研与分步计划：
 - 新增 `scripts/phase8-job-fixture-server.mjs` 与 `scripts/phase8-job-browser-gate.mjs`，使用真实 SQLite、AgentHost、ToolRuntime、API 和 Web bundle 验证 running/failed job、Cancel、Retry、spill metadata、job lifecycle replay、diagnostics、session export 以及重复 action 的幂等行为；`pnpm test:phase8:jobs` 已通过。
 - `AgentHost.retryJob` / `killJob` 与 API Job action route 现在消费 `Idempotency-Key`，通过 durable command claim 防止重复 Retry/Cancel 产生重复副作用；Runtime 定向测试与 API server tests 已通过。
 - 8.4 的真实 Job Center action slice 已闭合；更完整的 API restart、断线、orphaned/interrupted 和跨场景 browser recovery matrix 仍待补齐。
+- 新增 `scripts/phase8-job-recovery-fixture-server.mjs` 与 `scripts/phase8-job-recovery-gate.mjs`，通过 seed → API/SQLite shutdown → fresh AgentHost/API reopen 验证 orphaned/completed job、interrupted session、terminal recovery、SSE replay、`after_sequence` tail cursor、diagnostics 和 export；`pnpm test:phase8:job-recovery` 已通过。
+- 8.4 的 API restart、断线 SSE replay、orphaned/interrupted recovery slice 已闭合；跨场景真实长任务恢复矩阵仍需继续扩展。
 - 新增 `scripts/phase8-reliability-gate.mjs`，覆盖 retry、deadline、shutdown、session export、diagnostics 和 metrics；`pnpm test:phase8:reliability` 已通过。当前 8.4 仍未整体完成，更完整的 browser recovery matrix 仍是后续工作。
 - Reliability gate 现在额外检查 Web Job Center 的 `Cancel job`、`Retry job` 和 `Terminal & long-running jobs` surface；真实 Job fixture 已由 `pnpm test:phase8:jobs` 覆盖，后续继续扩展 API restart、断线和 orphaned/interrupted browser recovery matrix。
 - 修复 API restart recovery：graceful shutdown 不再取消处于 pending user interaction 的 turn，避免在数据库关闭前追加 `interaction/resolved(cancelled)`；`apps/api` 27 项 server tests 已通过。
