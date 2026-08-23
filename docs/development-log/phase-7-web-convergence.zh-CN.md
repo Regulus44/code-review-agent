@@ -413,3 +413,47 @@ git diff --check                                    ✓
 - 建立隔离、可回放的非空 Delegation fixture，验证 parent/child tree、child history、report/artifact 和 cancel；
 - 补 browser replay fixture，把恢复请求的显示、回答和终态纳入真实 Web smoke；
 - 继续 Trajectory timeline、折叠、tail-follow/pause-follow、load older 和大数据量虚拟化。
+
+## 2026-08-23：非空 Delegation fixture 与 browser replay 收口
+
+### 目标与 DSH 对照
+
+- 对照 DSH `ui-subagent`、`packages/host/apiproxy/src/api/subagents.ts` 和 child Session history，将 Phase 5 的内部 parent/child Task projection 变成可重复的真实 Web fixture；
+- 验证 Web 只消费 parent Session projection、Subagent catalog 和 child scoped replay，不读取 live Agent 对象，也不把 A2A 引入内部 Multi-Agent transport；
+- 把本轮验证发现的短 TTL expiry timer 竞争修复在 ToolRuntime 中，保持 `expired`、`cancelled` 和重启恢复语义稳定。
+
+### 变更范围
+
+- 新增 `apps/api/src/fixtures/delegation.ts`：`phase-7-fixture` provider，completed child、cancellable child、非空 child transcript、bounded report/artifact，以及显式 workspace、permission、tool/MCP allowlist；
+- 新增 `scripts/phase7-delegation-fixture-server.mjs`：启动隔离 in-memory API，seed fixture 并输出可供浏览器 smoke 使用的 parent/child ids；
+- `packages/storage/src/index.ts`：`task/report` 的 artifacts 合并到顶层 `TaskProjection.artifacts`，按 artifact id 去重；
+- `packages/subagent/src/runtime.ts`：`taskOutput()` 增加 parent/ancestor authority 检查，兄弟 Session 不能读取其他 child transcript；
+- `apps/api/src/server.test.ts`：覆盖 catalog、completed/cancellable child、history、report/artifact、workspace/permission/tool/MCP scope、parent/scoped replay、sibling rejection、cancel 和 live-state cleanup；
+- `apps/web/index.html`：刷新 Subagent catalog 后重新渲染 typed Task panel，修复打开 child Session 后残留 parent task 的 identity 泄漏；
+- `packages/tools/src/runtime.ts`：expiry timer 触发时重新检查绝对截止时间，避免定时器提前唤醒将过期 permission 错记为取消。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm test                                            ✓（全 workspace 通过）
+pnpm --filter @code-review-agent/web test            ✓（34 tests）
+pnpm --filter @code-review-agent/tools test -- --run src/index.test.ts   ✓（30 tests）
+pnpm --filter @code-review-agent/runtime test -- --run src/index.test.ts ✓（13 tests）
+pnpm --filter @code-review-agent/api test -- --run src/server.test.ts    ✓（17 tests）
+pnpm -F @code-review-agent/web run build:browser    ✓
+git diff --check                                    ✓
+```
+
+真实 browser smoke：
+
+- parent 初始显示 completed child 和 cancellable child，details 为 `2 tasks · 1 live`；completed child 的 report/artifact 和 bounded detail 可见；
+- 点击 cancel 后 parent 显示 `2 tasks · 0 live`，cancellable child 变为 `cancelled`，child transcript 追加 `subagent/settlement`、`subagent/end` 和 interrupted turn；
+- 刷新 parent 后 Task/Trajectory/replay 仍显示 `cancelled`，没有重复记录；
+- 打开 child Session 后 Conversation 显示 fixture prompt、assistant summary 与 `subagent/*` events，details 显示 `0 tasks · 0 live`，没有残留 parent task；
+- console warn/error 为空，临时 API 进程已关闭。
+
+### 下一步
+
+- 继续 Trajectory timeline 的 record 折叠/展开、tail-follow/pause-follow、load older 和 1000+ records 虚拟化；
+- 将 Read-only、Edit、Test/Recovery、Delegation、Inspection browser fixture 汇总为 Phase 7.10 可重复门禁，并补性能基线。

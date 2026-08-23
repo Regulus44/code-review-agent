@@ -7,6 +7,8 @@ import { createApiServer } from "./server.js";
 import { InMemoryEventStore } from "@code-review-agent/storage";
 import { sessionId } from "@code-review-agent/runtime";
 import { DEEPSEEK_MODELS, OpenAICompatibleChatModel } from "@code-review-agent/llm";
+import { SubagentRuntime } from "@code-review-agent/subagent";
+import { createDelegationFixtureProvider, seedDelegationFixture } from "./fixtures/delegation.js";
 
 describe("Phase 2 API", () => {
   let server: Server;
@@ -63,6 +65,83 @@ describe("Phase 2 API", () => {
     expect(output.report?.summary).toContain("Echo: child fixture");
     const scoped = await (await fetch(`${baseUrl}/v1/sessions/${session.id}/subagents/events?format=json`)).json() as { sessionId: string; event: { type: string } }[];
     expect(scoped.some((entry) => entry.sessionId === receipt.childSessionId && entry.event.type === "subagent/descriptor")).toBe(true);
+  });
+
+  it("replays a non-empty isolated delegation fixture and prevents sibling task history access", async () => {
+    const root = mkdtempSync(join(tmpdir(), "code-review-agent-delegation-fixture-"));
+    const childCompletedRoot = join(root, "completed-child");
+    const childCancellableRoot = join(root, "cancellable-child");
+    const siblingRoot = join(root, "sibling");
+    const fixtureStore = new InMemoryEventStore();
+    const fixtureRuntime = new SubagentRuntime({ store: fixtureStore });
+    fixtureRuntime.registerProvider(createDelegationFixtureProvider({ store: fixtureStore }));
+    const fixtureServer = createApiServer({ store: fixtureStore, subagentRuntime: fixtureRuntime });
+    await new Promise<void>((resolve) => fixtureServer.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = fixtureServer.address();
+      if (address === null || typeof address === "string") throw new Error("Delegation fixture API did not bind");
+      const url = `http://127.0.0.1:${address.port}`;
+      const parent = await (await fetch(`${url}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: root, permissionPreset: "read-only" }) })).json() as { id: string };
+      const sibling = await (await fetch(`${url}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: siblingRoot, permissionPreset: "read-only" }) })).json() as { id: string };
+      const seeded = await seedDelegationFixture({ store: fixtureStore, runtime: fixtureRuntime, parentSessionId: sessionId(parent.id), workspaceRoot: root, completedWorkspaceRoot: childCompletedRoot, cancellableWorkspaceRoot: childCancellableRoot, commandPrefix: "api-delegation-fixture" });
+
+      const catalog = await (await fetch(`${url}/v1/sessions/${parent.id}/subagents?scope=children`)).json() as { agents: { task: { id: string; status: string; childSessionId?: string; workspaceRoot?: string; permissionPreset?: string; report?: { summary: string; artifacts: { id: string }[] }; artifacts: { id: string }[] }; live: boolean; resumable: boolean }[] };
+      const completed = catalog.agents.find((entry) => entry.task.id === seeded.completed.taskId);
+      const cancellable = catalog.agents.find((entry) => entry.task.id === seeded.cancellable.taskId);
+      expect(completed?.task.status).toBe("completed");
+      expect(completed?.task.childSessionId).toBe(seeded.completed.childSessionId);
+      expect(completed?.task.workspaceRoot).toBe(childCompletedRoot);
+      expect(completed?.task.permissionPreset).toBe("read-only");
+      expect(completed?.task.report?.summary).toContain("Fixture completed");
+      expect(completed?.task.artifacts).toHaveLength(1);
+      expect(completed?.live).toBe(false);
+      expect(cancellable?.live).toBe(true);
+      expect(cancellable?.task.childSessionId).toBe(seeded.cancellable.childSessionId);
+
+      const childProjection = await (await fetch(`${url}/v1/sessions/${seeded.completed.childSessionId}`)).json() as { parentSessionId?: string; workspaceRoot: string; permissionPreset: string; messages: { role: string; content: string }[] };
+      expect(childProjection).toMatchObject({ parentSessionId: parent.id, workspaceRoot: childCompletedRoot, permissionPreset: "read-only" });
+      expect(childProjection.messages.some((message) => message.role === "user" && message.content.includes("fixture:completed"))).toBe(true);
+      expect(childProjection.messages.some((message) => message.role === "assistant" && message.content.includes("Fixture completed"))).toBe(true);
+
+      const output = await (await fetch(`${url}/v1/sessions/${parent.id}/tasks/${seeded.completed.taskId}/output`)).json() as { report?: { summary: string; artifacts: { id: string }[] }; events: { type: string; payload: Record<string, unknown> }[] };
+      expect(output.report?.summary).toContain("Fixture completed");
+      expect(output.report?.artifacts).toHaveLength(1);
+      expect(output.events.length).toBeGreaterThan(4);
+      expect(output.events.some((event) => event.type === "user/message")).toBe(true);
+      expect(output.events.some((event) => event.type === "assistant/message")).toBe(true);
+
+      const descriptor = output.events.find((event) => event.type === "subagent/descriptor")?.payload["descriptor"] as { workspaceRoot?: string; permissionPreset?: string; toolAllowlist?: string[]; mcpAllowlist?: string[] } | undefined;
+      expect(descriptor).toMatchObject({ workspaceRoot: childCompletedRoot, permissionPreset: "read-only", toolAllowlist: ["read_file"], mcpAllowlist: [] });
+
+      const parentEvents = await (await fetch(`${url}/v1/sessions/${parent.id}/events?format=json`)).json() as { sequence: number; type: string }[];
+      const reportEvent = parentEvents.find((event) => event.type === "task/report");
+      expect(reportEvent).toBeDefined();
+      const replayed = await (await fetch(`${url}/v1/sessions/${parent.id}/events?format=json&after_sequence=${Math.max(0, (reportEvent?.sequence ?? 1) - 1)}`)).json() as { sequence: number; type: string }[];
+      expect(replayed.some((event) => event.type === "task/report")).toBe(true);
+      const scoped = await (await fetch(`${url}/v1/sessions/${parent.id}/subagents/events?format=json`)).json() as { sessionId: string; event: { type: string } }[];
+      expect(scoped.some((entry) => entry.sessionId === seeded.completed.childSessionId && entry.event.type === "assistant/message")).toBe(true);
+      expect(scoped.some((entry) => entry.sessionId === seeded.cancellable.childSessionId && entry.event.type === "subagent/descriptor")).toBe(true);
+
+      const forbidden = await fetch(`${url}/v1/sessions/${sibling.id}/tasks/${seeded.completed.taskId}/output`);
+      expect(forbidden.status, await forbidden.text()).toBe(404);
+
+      const cancelled = await fetch(`${url}/v1/sessions/${parent.id}/tasks/${seeded.cancellable.taskId}/cancel`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "api-delegation-fixture-cancel" }, body: "{}" });
+      expect(cancelled.status).toBe(200);
+      let cancelledTask: { status: string } | undefined;
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        const current = await (await fetch(`${url}/v1/sessions/${parent.id}/tasks/${seeded.cancellable.taskId}`)).json() as { status: string };
+        cancelledTask = current;
+        if (current.status === "cancelled") break;
+        await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      }
+      expect(cancelledTask?.status).toBe("cancelled");
+      const afterCancel = await (await fetch(`${url}/v1/sessions/${parent.id}/subagents?scope=children`)).json() as { agents: { task: { id: string; status: string }; live: boolean }[] };
+      const cancelledEntry = afterCancel.agents.find((entry) => entry.task.id === seeded.cancellable.taskId);
+      expect(cancelledEntry).toMatchObject({ task: { status: "cancelled" }, live: false });
+    } finally {
+      await new Promise<void>((resolve, reject) => fixtureServer.close((error) => error ? reject(error) : resolve()));
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("validates a local workspace directory before creating a session", async () => {

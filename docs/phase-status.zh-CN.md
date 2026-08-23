@@ -15,7 +15,7 @@
 | Phase 4B：MCP 加固 | completed（2026-08-23） | 本 checkpoint；4B.0–4B.6、focused tests、API restart persistence 和 MCP browser smoke 通过；普通 baseline 未重复执行 |
 | Phase 5：内部 Subagent / 多 Agent | completed（2026-08-23） | 5.0–5.4：Task/Descriptor durable projection、one-shot/continuable child、FIFO/authority/cold resume、report/MCP scope、API/SSE/Web catalog；定向 typecheck、storage/subagent/runtime/API 测试和 API/Web smoke 通过 |
 | Phase 6：A2A | deferred（暂不作为 Phase 7 前置） | [ADR：Phase 7 Web 收敛不等待 A2A](adr/phase-7-web-with-a2a-deferred.zh-CN.md)；等待明确的外部 Agent 互操作需求 |
-| Phase 7：DSH Web 前端收敛 | in_progress | typed Web API/SessionStore/Conversation projection/SSE replay、Tool presenter/lineage guard、permission/interaction surface、过期与重启恢复 render intent、Trajectory query/lane/inspector、Task/Subagent/MCP details 已接入主 Session 流；34 项 Web 测试、tools/runtime/API recovery 定向测试、类型检查和 browser bundle 通过；Shell 拆分、完整 capability surface、Trajectory timeline/虚拟化和非空 Delegation e2e 仍在推进 |
+| Phase 7：DSH Web 前端收敛 | in_progress | typed Web API/SessionStore/Conversation projection/SSE replay、Tool presenter/lineage guard、permission/interaction surface、过期与重启恢复 render intent、Trajectory query/lane/inspector、Task/Subagent/MCP details 和非空 Delegation browser fixture 已接入主 Session 流；`pnpm typecheck`、`pnpm test`、34 项 Web 测试、API 17 项测试、browser bundle 和真实 browser replay/cancel smoke 通过；Shell 拆分、完整 capability surface、Trajectory timeline/虚拟化、Read/Edit/Test/Recovery 完整 browser fixtures 和 Phase 7.9–7.10 仍在推进 |
 | Phase 8：高级能力与产品化 | pending | 等前置阶段完成 |
 
 ## Phase 6 A2A 暂缓决策
@@ -43,11 +43,14 @@ Phase 7 的 DSH Web 调研与分步计划：
 - `apps/web/src/presentation/mcp-presenter.ts` 已把 MCP server/config/catalog/retry view 转为 bounded render intent，details panel 展示 scope、transport、revision/generation、auth、catalog policy、retry/error 和安全 raw detail；MCP config/env/credential 仍由 host/API 提供脱敏值；
 - `apps/web/src/presentation/request-presenter.ts` 已把 Permission/Interaction node 转为 time-aware、bounded、redacted render intent；pending request 在 deadline 到达但 resolved event 尚未抵达时会先禁用操作并显示 expired，interrupted/reconnecting session 会标记可恢复请求；details panel 增加 pending/recovered/expired 计数；
 - `packages/tools/src/runtime.ts` 与 `packages/runtime/src/index.ts` 已恢复 durable Interaction：API/AgentHost 重启后可以重新挂载 pending question，回答会追加 synthetic `tool/result` 并恢复原 turn；过期恢复请求会追加 `interaction/resolved(expired)` 和 bounded tool result；
+- `packages/tools/src/runtime.ts` 的 permission/interaction expiry timer 会在定时器提前唤醒时重新检查绝对截止时间，避免短 TTL 下把 `expired` 错记为 `cancelled`；
 - `conversation.ts` 和 Shell permission/interaction surface 已保留 caller、workspaceRoot、expiresAt、allowFreeform、cancelled/expired/resolved 状态；按钮命令使用 idempotency key；
+- `apps/api/src/fixtures/delegation.ts` 与 `scripts/phase7-delegation-fixture-server.mjs` 提供隔离、非空、可回放的 completed child 和 cancellable child；fixture 显式携带 workspace、permission、tool/MCP allowlist、report、artifact 和 child transcript；
+- API/replay/security 已覆盖 parent/child catalog、report/artifact projection、scoped event replay、sibling authority rejection、cancel 和 live-state cleanup；浏览器 smoke 已验证取消后 parent `2 tasks · 0 live`、刷新回放保持 `cancelled`、child Session 不残留 parent tasks；
 - 现有 Shell 通过 `/web/browser.js` bridge 使用 typed 主 Session 连接，并优先从统一 `SessionStoreSnapshot` 渲染 Conversation/Tool/Turn/Permission/Interaction 节点；旧 inline EventSource 和 event renderer 保留为 bundle 缺失时的 fallback，未改变 API/Runtime/EventStore 事实来源；
-- 定向验证：`pnpm typecheck`、`pnpm --filter @code-review-agent/web test`（34 tests）、`pnpm --filter @code-review-agent/tools test -- --run src/index.test.ts`、`pnpm --filter @code-review-agent/runtime test -- --run src/index.test.ts`、`pnpm --filter @code-review-agent/api test -- --run src/server.test.ts`、`pnpm -F @code-review-agent/web run build:browser`、`git diff --check`；API/AgentHost recovery fixture 验证 pending Interaction 的重启、回答、tool result 和原 turn continuation。
+- 定向与全量验证：`pnpm typecheck`、`pnpm test`（全 workspace 通过）、`pnpm --filter @code-review-agent/web test`（34 tests）、`pnpm --filter @code-review-agent/tools test -- --run src/index.test.ts`（30 tests）、`pnpm --filter @code-review-agent/runtime test -- --run src/index.test.ts`（13 tests）、`pnpm --filter @code-review-agent/api test -- --run src/server.test.ts`（17 tests）、`pnpm -F @code-review-agent/web run build:browser`、`git diff --check`；API/AgentHost recovery fixture、Delegation browser replay/cancel 和 child Session identity smoke 均通过，browser console 无 warning/error。
 
-下一切片：补真实非空 Delegation fixture，继续实现 Trajectory timeline/折叠/虚拟化，并补 browser replay fixtures。
+下一切片：继续实现 Trajectory timeline/折叠、tail-follow/pause-follow、load older 和 1000+ records 虚拟化，并把 Read-only、Edit、Test/Recovery、Delegation、Inspection browser fixtures 收敛为可重复的 Phase 7.10 门禁。
 
 ## Phase 5 Subagent / Multi-Agent 验收证据（2026-08-23）
 

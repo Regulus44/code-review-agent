@@ -1,6 +1,6 @@
 # Phase 7：DSH Web 前端收敛与可观测工作台
 
-状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 切片，以及 7.8 Trajectory ledger 的 query/lane/inspector 切片已完成；7.1 Shell 拆分、7.3 导航收敛、7.6 queue/steer/attachment 深化、7.8 timeline/virtualization、7.9–7.10 继续推进）
+状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector 切片已完成；7.1 Shell 拆分、7.3 导航收敛、7.6 queue/steer/attachment 深化、7.8 timeline/virtualization、7.9–7.10 继续推进）
 
 ## 当前执行 checkpoint：typed Web client 与 Session replay foundation
 
@@ -21,7 +21,20 @@
 - `apps/web/src/browser.ts` 与 API `/web/*` 静态资源：typed runtime 作为现有静态 Shell 的可回滚 bridge，主 Session 流已切换到 `SessionConnectionController`；旧 inline EventSource 仅作为 bundle 缺失时的 fallback；
 - Web 包已进入 TypeScript project reference，并有 API、Store、Connection、Conversation 定向测试。
 
-验证证据：`pnpm typecheck`、`pnpm --filter @code-review-agent/web test`（31 tests）、`pnpm -F @code-review-agent/web run build:browser` 和 `git diff --check` 通过；真实 API/browser smoke 已验证 Trajectory 搜索、lane、record inspector、敏感字段脱敏、running-only 空态、Task/Subagent 空态、MCP disabled/non-empty server inspector、fixture cleanup、刷新回放和 console 无 warning/error。当前 renderer 已优先消费统一 `SessionStoreSnapshot`，无 bundle 时仍回退旧 event renderer。
+验证证据：`pnpm typecheck`、`pnpm test`、`pnpm --filter @code-review-agent/web test`（34 tests）、`pnpm -F @code-review-agent/web run build:browser` 和 `git diff --check` 通过；真实 API/browser smoke 已验证 Trajectory 搜索、lane、record inspector、敏感字段脱敏、running-only 空态、Task/Subagent 空态、MCP disabled/non-empty server inspector、非空 Delegation parent/child tree、report/artifact、cancel、刷新回放、child Session identity boundary 和 console 无 warning/error。当前 renderer 已优先消费统一 `SessionStoreSnapshot`，无 bundle 时仍回退旧 event renderer。
+
+## 当前执行 checkpoint：非空 Delegation fixture 与 browser replay（2026-08-23）
+
+本 checkpoint 对照 DSH `ui-subagent`、Host `subagents` API、child Session history 和 Task projection，补齐可重复的非空 Delegation 入口，并验证 parent/child 的事实边界：
+
+- `apps/api/src/fixtures/delegation.ts` 提供一个 completed child 和一个可取消 child；两者都有非空 transcript，completed child 产生 bounded report/artifact，descriptor 显式冻结 workspace、permission preset、tool allowlist 和 MCP allowlist；
+- `scripts/phase7-delegation-fixture-server.mjs` 启动隔离 in-memory API，seed fixture 后输出 parent/child ids，供 browser replay 使用；
+- `packages/storage/src/index.ts` 将 `task/report` 中的 artifact 合并到顶层 `TaskProjection.artifacts` 并按 artifact id 去重，保证 API 和 Web presenter 读取同一 projection；
+- `packages/subagent/src/runtime.ts` 的 `taskOutput()` 增加 parent/ancestor authority 检查，兄弟 Session 不能读取其他 child transcript；
+- `apps/web/index.html` 在刷新 Subagent catalog 后重新渲染 typed Task panel，切换到 child Session 时不残留 parent 的 task 列表；
+- `apps/api/src/server.test.ts` 覆盖 catalog、completed/cancellable child、history、report/artifact、workspace/permission/tool/MCP scope、parent/scoped replay、sibling rejection、cancel 和 live-state cleanup。
+
+验证：`pnpm typecheck`、`pnpm test`（全 workspace 通过）、Web 34 项、API 17 项、storage 9 项、subagent 5 项定向测试、browser bundle 和 `git diff --check` 通过。真实浏览器 smoke 记录了 parent 初始 `2 tasks · 1 live`，取消后 `2 tasks · 0 live`，刷新后仍为 `cancelled`；打开 child Session 后显示 `0 tasks · 0 live`，child transcript/`subagent/*` events 和 interrupted state 可回放，console 无 warning/error。
 
 ## 1. 目标与边界
 

@@ -144,6 +144,12 @@ function artifactRefs(value: unknown): readonly ArtifactRef[] {
   });
 }
 
+function mergeArtifactRefs(existing: readonly ArtifactRef[], incoming: readonly ArtifactRef[]): readonly ArtifactRef[] {
+  const byId = new Map<string, ArtifactRef>();
+  for (const artifact of [...existing, ...incoming]) byId.set(artifact.id, artifact);
+  return [...byId.values()];
+}
+
 function normalizeReport(value: unknown): TaskReport | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const report = value as Record<string, unknown>;
@@ -348,10 +354,10 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
         ...(isPermissionPreset(event.payload["permissionPreset"]) ? { permissionPreset: event.payload["permissionPreset"] } : {}),
         ...(typeof event.payload["delegationDepth"] === "number" ? { delegationDepth: event.payload["delegationDepth"] } : {}),
         ...(typeof event.payload["budget"] === "object" && event.payload["budget"] !== null ? { budget: event.payload["budget"] as TaskBudget } : {}),
-        ...(report === undefined ? {} : { report, result: report.output }),
+        ...(report === undefined ? {} : { report, result: report.output, artifacts: mergeArtifactRefs(current?.artifacts ?? [], report.artifacts) }),
         ...(typeof event.payload["terminalReason"] === "string" ? { terminalReason: event.payload["terminalReason"] } : {}),
         ...(Array.isArray(event.payload["diagnostics"]) ? { diagnostics: event.payload["diagnostics"] as readonly ToolError[] } : {}),
-        ...(event.type === "task/artifact" ? { artifacts: [...(current?.artifacts ?? []), ...artifactRefs([event.payload["artifact"] ?? event.payload])] } : {}),
+        ...(event.type === "task/artifact" ? { artifacts: mergeArtifactRefs(current?.artifacts ?? [], artifactRefs([event.payload["artifact"] ?? event.payload])) } : {}),
       };
       next = {
         ...next,

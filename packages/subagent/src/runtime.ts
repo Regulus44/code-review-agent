@@ -230,7 +230,8 @@ export class SubagentRuntime {
 
   async taskOutput(parentSessionId: SessionId, taskId: TaskId): Promise<TaskOutput | undefined> {
     const task = (await this.options.store.listTasks()).find((candidate) => candidate.id === taskId);
-    if (task === undefined || task.childSessionId === undefined) return task === undefined ? undefined : { task, events: [] };
+    if (task === undefined || !(await this.isAuthority(parentSessionId, task))) return undefined;
+    if (task.childSessionId === undefined) return { task, events: [] };
     return { task, ...(task.report === undefined ? {} : { report: task.report }), events: await this.options.store.list(task.childSessionId) };
   }
 

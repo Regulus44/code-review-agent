@@ -502,17 +502,33 @@ export class ToolRuntime {
   }
 
   private scheduleExpiry(permissionId: PermissionId, expiresAt: string): void {
-    const delay = Math.max(0, Date.parse(expiresAt) - Date.now());
-    const timer = setTimeout(() => { void this.resolvePermission(permissionId, "cancelled").catch(() => undefined); }, delay);
-    timer.unref();
-    this.expiryTimers.set(permissionId, timer);
+    const schedule = (): void => {
+      const remaining = Date.parse(expiresAt) - Date.now();
+      if (remaining > 0) {
+        const timer = setTimeout(schedule, Math.max(1, remaining));
+        timer.unref();
+        this.expiryTimers.set(permissionId, timer);
+        return;
+      }
+      this.expiryTimers.delete(permissionId);
+      void this.resolvePermission(permissionId, "cancelled").catch(() => undefined);
+    };
+    schedule();
   }
 
   private scheduleInteractionExpiry(interactionId: InteractionId, expiresAt: string): void {
-    const delay = Math.max(0, Date.parse(expiresAt) - Date.now());
-    const timer = setTimeout(() => { void this.resolveInteraction(interactionId, "expired").catch(() => undefined); }, delay);
-    timer.unref();
-    this.interactionExpiryTimers.set(interactionId, timer);
+    const schedule = (): void => {
+      const remaining = Date.parse(expiresAt) - Date.now();
+      if (remaining > 0) {
+        const timer = setTimeout(schedule, Math.max(1, remaining));
+        timer.unref();
+        this.interactionExpiryTimers.set(interactionId, timer);
+        return;
+      }
+      this.interactionExpiryTimers.delete(interactionId);
+      void this.resolveInteraction(interactionId, "expired").catch(() => undefined);
+    };
+    schedule();
   }
 
   private async resolveRestoredInteraction(interaction: UserInteractionRequest, status: "expired" | "cancelled"): Promise<void> {
