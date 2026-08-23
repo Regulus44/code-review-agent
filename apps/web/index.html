@@ -481,10 +481,52 @@
         const appendTool = (parent, name, text, statusText = 'Completed') => { const row = document.createElement('div'); row.className = 'tool-row'; const summary = document.createElement('button'); summary.className = 'tool-summary'; summary.type = 'button'; const icon = document.createElement('span'); icon.className = 'tool-icon'; icon.textContent = '⌘'; const heading = document.createElement('span'); heading.className = 'tool-title'; const source = state.tools.get(name)?.source; heading.textContent = source?.kind === 'mcp' ? `MCP · ${source.serverName} · ${source.rawName}` : `Tool · ${name}`; const toolStatus = document.createElement('span'); toolStatus.className = 'tool-status'; toolStatus.textContent = statusText; const chevron = document.createElement('span'); chevron.className = 'tool-chevron'; chevron.textContent = '⌄'; const details = document.createElement('div'); details.className = 'tool-details'; const pre = document.createElement('pre'); pre.textContent = text; details.append(pre); summary.append(icon, heading, toolStatus, chevron); summary.onclick = () => row.classList.toggle('open'); row.append(summary, details); parent.append(row); return { row, heading, toolStatus, pre }; };
         const appendPermission = (parent, payload) => { const row = document.createElement('div'); row.className = 'permission-card'; const heading = document.createElement('strong'); heading.textContent = `Approval required · ${payload.toolName || 'tool'}`; const body = document.createElement('pre'); body.textContent = `${payload.reason || 'This tool needs permission'}\ncaller: ${payload.caller || 'agent'}\nworkspace: ${payload.workspaceRoot || state.session?.workspaceRoot || '.'}\nexpires: ${payload.expiresAt || 'unknown'}\n${JSON.stringify(payload.input || {}, null, 2)}`; const actions = document.createElement('div'); actions.className = 'permission-actions'; for (const [label, value, className] of [['Approve','approved',''],['Deny','denied','deny'],['Cancel','cancelled','cancel']]) { const button = document.createElement('button'); button.type = 'button'; button.textContent = label; if (className) button.className = className; button.onclick = async () => { button.disabled = true; try { await api(`/v1/sessions/${encodeURIComponent(state.session.id)}/permissions/${encodeURIComponent(payload.permissionId)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: value }) }); } catch (error) { setStatus(error.message, false); button.disabled = false; } }; actions.append(button); } row.append(heading, body, actions); parent.append(row); };
         const appendInteraction = (parent, payload) => { const row = document.createElement('div'); row.className = 'interaction-card'; const heading = document.createElement('strong'); heading.textContent = 'Agent needs your input'; const body = document.createElement('pre'); body.textContent = `${payload.question || 'Question'}\nexpires: ${payload.expiresAt || 'unknown'}`; const actions = document.createElement('div'); actions.className = 'permission-actions'; const options = Array.isArray(payload.options) ? payload.options : []; for (const option of options) { const button = document.createElement('button'); button.type = 'button'; button.textContent = option.label || option.value; button.onclick = async () => { button.disabled = true; try { await api(`/v1/sessions/${encodeURIComponent(state.session.id)}/interactions/${encodeURIComponent(payload.interactionId)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'answered', answer: option.value }) }); } catch (error) { setStatus(error.message, false); button.disabled = false; } }; actions.append(button); } if (payload.allowFreeform !== false) { const input = document.createElement('input'); input.className = 'workspace-input'; input.placeholder = 'Type an answer'; const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Send'; button.onclick = async () => { if (!input.value.trim()) return; button.disabled = true; try { await api(`/v1/sessions/${encodeURIComponent(state.session.id)}/interactions/${encodeURIComponent(payload.interactionId)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'answered', answer: input.value }) }); } catch (error) { setStatus(error.message, false); button.disabled = false; } }; actions.append(input, button); } row.append(heading, body, actions); parent.append(row); };
+        const renderTypedConversation = (projection, body) => {
+          if (!projection || !Array.isArray(projection.nodes) || projection.nodes.length === 0) return false;
+          const assistant = new Map();
+          const toolRows = new Map();
+          const upsertTool = (tool) => {
+            const key = tool.id || `tool-${toolRows.size}`;
+            const payload = { input: tool.input, result: tool.result, progress: tool.progress };
+            let card = toolRows.get(key);
+            const text = JSON.stringify(payload, null, 2);
+            if (!card) { card = appendTool(body, tool.name || 'tool', text, tool.status || 'unknown'); toolRows.set(key, card); }
+            else { card.toolStatus.textContent = tool.status || 'unknown'; card.pre.textContent = text; }
+          };
+          for (const node of projection.nodes) {
+            if (node.kind === 'user') appendMessage(body, 'user', node.content || '');
+            else if (node.kind === 'assistant' || node.kind === 'reasoning') {
+              const key = node.key;
+              const current = assistant.get(key);
+              if (!current) assistant.set(key, appendMessage(body, 'assistant', node.content || ''));
+              else setMessageContent(current, node.content || '');
+            } else if (node.kind === 'turn') {
+              const label = node.status === 'running' ? 'Agent is working…' : node.status === 'completed' ? 'Turn completed' : `Turn ${node.status}`;
+              addTurnStateRow(body, label, node.status === 'completed' ? 'completed' : node.status === 'running' ? 'running' : 'failed');
+            } else if (node.kind === 'tool') upsertTool(node.tool);
+            else if (node.kind === 'permission' && node.status === 'pending') appendPermission(body, { permissionId: node.permissionId, toolCallId: node.toolCallId, toolName: node.toolName, status: node.status, reason: node.reason, input: node.input });
+            else if (node.kind === 'interaction' && node.status === 'pending') appendInteraction(body, { interactionId: node.interactionId, toolCallId: node.toolCallId, question: node.question, options: node.options, status: node.status, allowFreeform: true });
+            else if (node.kind === 'task') addEventRow(body, `Task · ${node.title || node.taskId} · ${node.status}${node.summary ? ` · ${node.summary}` : ''}`);
+            else if (node.kind === 'event' && node.eventType !== 'session/created') addEventRow(body, `${node.eventType} · ${node.key}`);
+          }
+          return body.childNodes.length > 0;
+        };
         const render = () => {
           if (state.session) renderModes();
           const wasNearBottom = conversation.scrollHeight === 0 || conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight <= 64;
           conversation.innerHTML = '';
+          const typedProjection = typedConnection?.store.getSnapshot().conversation;
+          if (typedProjection && typedProjection.nodes.length > 0) {
+            const typedBody = document.createElement('div');
+            typedBody.className = 'conversation-body';
+            conversation.append(typedBody);
+            if (renderTypedConversation(typedProjection, typedBody)) {
+              renderDetails();
+              requestAnimationFrame(() => { if (wasNearBottom) conversation.scrollTop = conversation.scrollHeight; });
+              return;
+            }
+            typedBody.remove();
+          }
           const ordered = orderedEvents();
           const hasMessage = ordered.some((event) => event.type === 'user/message' || event.type === 'assistant/chunk' || event.type === 'assistant/message');
           const hasActivity = ordered.some((event) => event.type !== 'session/created');

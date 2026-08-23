@@ -13,7 +13,7 @@
 - `apps/web/src/browser.ts` 与 API `/web/*` 静态资源：typed runtime 作为现有静态 Shell 的可回滚 bridge，主 Session 流已切换到 `SessionConnectionController`；旧 inline EventSource 仅作为 bundle 缺失时的 fallback；
 - Web 包已进入 TypeScript project reference，并有 API、Store、Connection、Conversation 定向测试。
 
-验证证据：`pnpm typecheck`、`pnpm --filter @code-review-agent/web test`、`pnpm -F @code-review-agent/web run build:browser` 通过；浏览器 smoke 已验证 typed bundle 加载、Session 切换、历史回放，以及 API 停止/重启后的 `Reconnecting… → Connected` 恢复。当前 inline renderer 仍按旧 event window 绘制，下一切片将改为直接消费 `SessionStoreSnapshot.conversation`。
+验证证据：`pnpm typecheck`、`pnpm --filter @code-review-agent/web test`、`pnpm -F @code-review-agent/web run build:browser` 通过；浏览器 smoke 已验证 typed bundle 加载、Session 切换、历史回放、Conversation/Tool 节点渲染，以及 API 停止/重启后的 `Reconnecting… → Connected` 恢复。当前 renderer 已优先消费 `SessionStoreSnapshot.conversation`，无 bundle 时仍回退旧 event renderer。
 
 ## 1. 目标与边界
 

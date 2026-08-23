@@ -35,10 +35,10 @@ Phase 7 的 DSH Web 调研与分步计划：
 - `apps/web/src/client/store.ts` 已提供 Session baseline、事件去重、higher-sequence-wins、Session projection 和可订阅 immutable snapshot；
 - `apps/web/src/client/connection.ts` 已提供 generation 隔离、history replay、SSE live stream、指数 backoff、断线重连和旧 Session callback 丢弃；
 - `apps/web/src/projection/conversation.ts` 已提供 keyed Conversation/Tool/Permission/Interaction/Task projection，assistant chunk 合并和未知事件 generic fallback；
-- 现有 Shell 通过 `/web/browser.js` bridge 使用 typed 主 Session 连接；旧 inline EventSource 保留为 bundle 缺失时的 fallback，未改变 API/Runtime/EventStore 事实来源；
+- 现有 Shell 通过 `/web/browser.js` bridge 使用 typed 主 Session 连接，并优先从 `SessionStoreSnapshot.conversation` 渲染 Conversation/Tool/Turn 节点；旧 inline EventSource 和 event renderer 保留为 bundle 缺失时的 fallback，未改变 API/Runtime/EventStore 事实来源；
 - 定向验证：`pnpm typecheck`、`pnpm --filter @code-review-agent/web test`、`pnpm -F @code-review-agent/web run build:browser`；浏览器验证 typed bundle、Session 切换、历史回放和 API 停止/重启后的 `Reconnecting… → Connected`。
 
-下一切片：将 inline Conversation renderer 改为直接消费 `SessionStoreSnapshot.conversation`，再补 ToolRow presenter、permission/interaction projection surface 和 Trajectory ledger。
+下一切片：补 ToolRow presenter、permission/interaction projection surface、递归调用 lineage guard 和 Trajectory ledger。
 
 ## Phase 5 Subagent / Multi-Agent 验收证据（2026-08-23）
 

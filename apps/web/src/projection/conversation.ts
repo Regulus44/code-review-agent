@@ -150,6 +150,10 @@ export function applyConversationEvent(projection: MutableConversationProjection
   });
 
   switch (event.type) {
+    case "session/created":
+    case "session/updated":
+    case "session/deleted":
+      return false;
     case "user/message": {
       const content = stringValue(event.payload["content"]);
       if (content === undefined) return markUnkeyedEvent(projection, event);
