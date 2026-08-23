@@ -253,8 +253,8 @@ Reference documents:
 | 2 | Event persistence and recovery: SQLite event store, projections, SSE replay, idempotent commands | completed |
 | 3 | Tool runtime and permissions: registry, policy, hardening | completed |
 | 4 | MCP client: stdio/SSE/Streamable HTTP, discovery, registry bridge | completed |
-| 5 | Internal subagents / multi-agent delegation | pending |
-| 6 | A2A interoperability adapter | pending |
+| 5 | Internal subagents / multi-agent delegation | completed |
+| 6 | A2A interoperability adapter | deferred; does not block Phase 7 |
 | 7 | DSH-style web frontend convergence | in progress |
 | 8 | Productization: worktree, LSP, code mode, background jobs, scheduled tasks, model fallback, session fork/replay/export, multi-user auth, desktop wrapper | pending |
 
@@ -263,8 +263,9 @@ MCP detail views into reusable components, add narrow-screen and SSE
 reconnect browser regressions, and evaluate moving the static shell into a
 TypeScript UI package while keeping the API contract stable.
 
-Phase 5 will add a `SubagentRegistry` with parent/child lifecycle, task and
-report contracts, and concurrency/depth/budget limits, built on the existing
-event, tool, and task contracts. Phase 6 will then add A2A as an adapter
-layer (agent card discovery, task create/get/cancel, streaming updates)
-mapped onto internal sessions.
+Phase 5 has completed the `SubagentRuntime`, parent/child lifecycle, task and
+report contracts, concurrency/depth/budget limits, and the API/Web catalog on
+top of the existing event, tool, and task contracts. Phase 6 A2A is deferred
+until a concrete external-agent interoperability requirement exists; Phase 7
+now focuses on the internal Agent web workbench, tool presentation, and
+visible trajectories.

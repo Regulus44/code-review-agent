@@ -26,6 +26,8 @@ Phase 7  DSH Web 前端收敛
 Phase 8  高级能力与产品化
 ```
 
+当前决策：Phase 6 A2A 暂缓，不作为 Phase 7 Web 收敛的前置门禁；未来恢复时仍按独立阶段和独立 checkpoint 执行，详见 [A2A 暂缓 ADR](../adr/phase-7-web-with-a2a-deferred.zh-CN.md)。
+
 ## 文档入口
 
 - [Phase 0：TypeScript 基线和防漂移机制](../phase-0-checklist.zh-CN.md)

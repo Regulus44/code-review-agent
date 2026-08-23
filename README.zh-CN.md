@@ -242,8 +242,8 @@ pnpm test        # 全 package vitest 测试
 | 2 | 事件持久化与恢复：SQLite event store、projection、SSE replay、幂等命令 | 已完成 |
 | 3 | 工具运行时与权限：registry、policy、安全硬化 | 已完成 |
 | 4 | MCP Client：stdio/SSE/Streamable HTTP、discovery、registry 桥接 | 已完成 |
-| 5 | 内部 Subagent / 多 Agent 任务委派 | 待开始 |
-| 6 | A2A 互操作适配层 | 待开始 |
+| 5 | 内部 Subagent / 多 Agent 任务委派 | 已完成 |
+| 6 | A2A 互操作适配层 | 暂缓，不阻塞 Phase 7 |
 | 7 | DSH 风格 Web 前端收敛 | 进行中 |
 | 8 | 产品化：worktree、LSP、code mode、后台任务、定时任务、模型回退、session fork/replay/export、多用户认证、桌面端 | 待开始 |
 
@@ -251,7 +251,8 @@ Phase 7 近期工作：把 Diff、Terminal、Permission、Subagent 和 MCP 详�
 抽成可复用组件，补充窄屏和 SSE 断线重连的浏览器回归，并评估把静态 shell
 迁移到 TypeScript UI package，同时保持 API contract 稳定。
 
-Phase 5 将在现有事件、工具和任务契约之上增加 `SubagentRegistry`、
-parent/child 生命周期、task/report contract 和并发/深度/预算限制。
-Phase 6 随后把 A2A 作为适配层接入，提供 agent card 发现、task
-create/get/cancel 和流式更新，并映射到内部 Session。
+Phase 5 已在现有事件、工具和任务契约之上完成 `SubagentRuntime`、
+parent/child 生命周期、task/report contract、并发/深度/预算限制和
+API/Web catalog。Phase 6 A2A 暂缓，只有出现明确的外部 Agent
+互操作需求后才重新开启；当前 Phase 7 直接完善内部 Agent 的 Web
+工作台、工具展示和可见运行轨迹。

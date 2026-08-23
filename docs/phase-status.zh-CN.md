@@ -14,23 +14,20 @@
 | Phase 4：MCP Client | completed | `5477f16`；官方 SDK stdio/SSE/Streamable HTTP、discovery、ToolRegistry bridge、权限/取消/重连、API/Web MCP 状态和 fixture 验证通过 |
 | Phase 4B：MCP 加固 | completed（2026-08-23） | 本 checkpoint；4B.0–4B.6、focused tests、API restart persistence 和 MCP browser smoke 通过；普通 baseline 未重复执行 |
 | Phase 5：内部 Subagent / 多 Agent | completed（2026-08-23） | 5.0–5.4：Task/Descriptor durable projection、one-shot/continuable child、FIFO/authority/cold resume、report/MCP scope、API/SSE/Web catalog；定向 typecheck、storage/subagent/runtime/API 测试和 API/Web smoke 通过 |
-| Phase 6：A2A | pending | 等 Phase 5 parent/child lifecycle 稳定 |
+| Phase 6：A2A | deferred（暂不作为 Phase 7 前置） | [ADR：Phase 7 Web 收敛不等待 A2A](adr/phase-7-web-with-a2a-deferred.zh-CN.md)；等待明确的外部 Agent 互操作需求 |
 | Phase 7：DSH Web 前端收敛 | in_progress | DSH 三栏 Web 垂直切片 + Workspace Picker + Workspace→Session 树 + Session mode/archive/delete；类型检查、API 测试、浏览器交互和真实 DeepSeek 只读工具 smoke 通过 |
 | Phase 8：高级能力与产品化 | pending | 等前置阶段完成 |
 
-## 后续执行计划：Phase 6 A2A 边界
+## Phase 6 A2A 暂缓决策
 
-Phase 3B 已完成，Phase 4B 和 Phase 5 已完成；后续路线继续采用 [MCP 与 A2A 演进执行计划](phase-plans/mcp-a2a-execution-plan.zh-CN.md)：
+Phase 5 已经稳定了内部 parent/child Task、Session、权限、workspace、MCP scope、report、cancel 和恢复语义。当前产品目标是 Web Coding Agent，暂无跨产品或跨组织 Agent 互操作的验收场景，因此 Phase 6 A2A 暂缓，不阻塞 Phase 7 Web 收敛。
 
-```text
-Phase 4B MCP 加固
-  → Phase 5 内部 Task/Subagent
-  → Phase 6 A2A inbound adapter
-```
+具体决策见 [ADR：Phase 7 Web 收敛不等待 A2A](adr/phase-7-web-with-a2a-deferred.zh-CN.md)。未来只有在出现外部 Agent 调用、跨进程/主机协作、跨组织标准化 task/artifact/streaming 或私有集成维护成本明确上升时，才重新开启 Phase 6。
 
-计划明确了 DSH R0/R1/R2 参考等级。MCP contract audit、持久化 scope/credential 设计、连接 generation fixture 和 ADR 已在 Phase 4B 完成；Phase 5 已将 parent/child contract 稳定下来，下一步才进入 A2A inbound adapter 研究。
+Phase 7 的 DSH Web 调研与分步计划：
 
-Phase 5 的详细 DSH 对照计划：[Phase 5：内部 Task/Subagent 多 Agent（DSH 对照执行计划）](phase-plans/phase-5-subagents.zh-CN.md) 已完成 5.0–5.4。A2A HTTP endpoint、Agent Card 和远程 provider 仍保持 Phase 6 边界。
+- [DSH Web 前端与 Agent 能力调研](phase-7-dsh-web-research.zh-CN.md)
+- [Phase 7：DSH Web 前端收敛与可观测工作台](phase-plans/phase-7-web-convergence.zh-CN.md)
 
 ## Phase 5 Subagent / Multi-Agent 验收证据（2026-08-23）
 

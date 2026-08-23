@@ -110,6 +110,14 @@ MCP server 配置由 SQLite 的 `mcp_server_configs` 表持久化，记录 scope
 
 外部 tool/resource/prompt description 和结果都是不可信数据。ToolRuntime 仍是 MCP tool 的唯一执行入口；resource/prompt 只能产生有界 model view 和低优先级追加上下文，不能覆盖本地 system prompt、workspace、permission、security 或 verification 规则。
 
+## ADR-012：Phase 7 Web 收敛不等待 A2A
+
+状态：accepted（2026-08-23）
+
+Phase 5 已完成内部 Task/Subagent、父子 Session、权限、workspace、MCP scope、report、cancel 和恢复语义。当前产品目标是 Web Coding Agent，暂无跨产品或跨组织 Agent 互操作的验收场景，因此 Phase 6 A2A 暂缓，不作为 Phase 7 Web 收敛的前置门禁。
+
+Phase 7 只消费本项目内部 EventStore、Session、Task、Permission 和 Workspace projection；不把 A2A 作为内部 Subagent transport，也不在 Web contract 中预留未经验证的外部 envelope。未来恢复 Phase 6 时，A2A 仍必须作为 inbound adapter 映射到已有内部 Task/Session，并独立完成 Agent Card、认证、租户、Artifact、流式恢复和安全验收。完整记录见 [`docs/adr/phase-7-web-with-a2a-deferred.zh-CN.md`](adr/phase-7-web-with-a2a-deferred.zh-CN.md)。
+
 ## 参考代码入口
 
 - DSH Agent Loop：`D:/Develop/deepseek-harness-fork/packages/core/agent-loop/src/agent.ts`
