@@ -4,6 +4,7 @@ import type {
   SessionProjection,
   SessionStatus,
   TurnId,
+  TurnProjection,
 } from "@code-review-agent/contracts";
 import {
   applyConversationEvent,
@@ -273,6 +274,7 @@ function foldProjection(session: SessionProjection, event: AgentEvent): SessionP
       return {
         ...session,
         messages: appendMessage(session.messages, { role: "user", content, ...(event.turnId === undefined ? {} : { turnId: event.turnId }) }),
+        turns: upsertTurn(session.turns, event.turnId, event.createdAt, event.sequence, { userMessage: content }),
         updatedAt: event.createdAt,
         lastSequence: event.sequence,
       };
@@ -285,12 +287,30 @@ function foldProjection(session: SessionProjection, event: AgentEvent): SessionP
       const message = { role: "assistant" as const, content, ...(event.turnId === undefined ? {} : { turnId: event.turnId }) };
       if (index < 0) messages.push(message);
       else messages[index] = message;
-      return { ...session, messages, updatedAt: event.createdAt, lastSequence: event.sequence };
+      return {
+        ...session,
+        messages,
+        turns: upsertTurn(session.turns, event.turnId, event.createdAt, event.sequence, { assistantMessage: content }),
+        updatedAt: event.createdAt,
+        lastSequence: event.sequence,
+      };
     }
     case "turn/queued":
     case "turn/started":
-    case "turn/ended":
-      return { ...session, status: sessionStatus(event), updatedAt: event.createdAt, lastSequence: event.sequence };
+    case "turn/ended": {
+      const turnPatch: Partial<TurnProjection> = {
+        status: turnStatusForEvent(event),
+        ...(event.type === "turn/started" ? { startedAt: event.createdAt } : {}),
+        ...(event.type === "turn/ended" ? { endedAt: event.createdAt } : {}),
+      };
+      return {
+        ...session,
+        turns: upsertTurn(session.turns, event.turnId, event.createdAt, event.sequence, turnPatch),
+        status: sessionStatus(event),
+        updatedAt: event.createdAt,
+        lastSequence: event.sequence,
+      };
+    }
     default:
       return { ...session, updatedAt: event.createdAt, lastSequence: Math.max(session.lastSequence, event.sequence) };
   }
@@ -309,6 +329,38 @@ function sessionStatus(event: AgentEvent): SessionStatus {
   const status = stringValue(event.payload["status"]);
   if (status === "queued" || status === "running" || status === "stopped" || status === "failed" || status === "interrupted") return status;
   return "idle";
+}
+
+function turnStatusForEvent(event: AgentEvent): TurnProjection["status"] {
+  if (event.type === "turn/queued") return "queued";
+  if (event.type === "turn/started") return "running";
+  const status = stringValue(event.payload["status"]);
+  return status === "queued" || status === "running" || status === "completed" || status === "stopped" || status === "failed" || status === "interrupted" ? status : "completed";
+}
+
+function upsertTurn(
+  turns: readonly TurnProjection[],
+  rawTurnId: TurnId | undefined,
+  createdAt: string,
+  sequence: number,
+  patch: Partial<TurnProjection>,
+): readonly TurnProjection[] {
+  if (rawTurnId === undefined) return turns;
+  const index = turns.findIndex((turn) => turn.id === rawTurnId);
+  if (index < 0) {
+    return [...turns, {
+      id: rawTurnId,
+      status: "queued",
+      createdAt,
+      updatedAt: createdAt,
+      lastSequence: sequence,
+      ...patch,
+    }];
+  }
+  const next = [...turns];
+  const previous = next[index] as TurnProjection;
+  next[index] = { ...previous, ...patch, updatedAt: createdAt, lastSequence: sequence };
+  return next;
 }
 
 function stringValue(value: unknown): string | undefined {

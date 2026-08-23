@@ -1,6 +1,6 @@
 # Phase 7：DSH Web 前端收敛与可观测工作台
 
-状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection、7.1 shell layout state/reducer、mobile sidebar 行为和 typed overlay state/reducer 已完成；物理 Shell 拆分、Workspace/Session 生命周期 API、7.6 queue/steer/attachment 深化、长任务 terminal/job 失败诊断和窄屏视觉基线继续推进）
+状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection、7.1 shell layout state/reducer、mobile sidebar 行为、typed overlay state/reducer 和 queue dock/cancel surface 已完成；物理 Shell 拆分、Workspace/Session 生命周期 API、7.6 queue reorder/steer/attachment 深化、长任务 terminal/job 失败诊断和窄屏视觉基线继续推进）
 
 ## 当前执行 checkpoint：typed Web client 与 Session replay foundation
 
@@ -154,6 +154,17 @@
 - focus trap 仍由 modal 自身管理，overlay state 只负责生命周期，不进入 EventStore。
 
 验证：`pnpm typecheck`、Web 62 项测试、`pnpm test:phase7:browser`（五场景通过，trajectory full replay 18.53ms）和 browser bundle 通过。该切片只增加 Web 内部 UI state boundary，可回滚为原有逐元素 `hidden` 操作。
+
+## 当前执行 checkpoint：Queue dock 与 durable turn projection（2026-08-23）
+
+本 checkpoint 对照 DSH `InputBar`/queued-turn surface，补齐 Web 对 AgentHost 队列的第一块可操作呈现：
+
+- `apps/web/src/presentation/queue-presenter.ts` 从 `SessionProjection.turns` 生成 bounded running/queued queue render intent，按 durable `lastSequence` 排序并明确显示当前 host 尚未支持 reorder；
+- `apps/web/src/client/store.ts` 在增量 `user/message`、`turn/queued`、`turn/started`、`assistant/message`、`turn/ended` 事件到达时同步 upsert `SessionProjection.turns`，避免 queue dock 必须 refetch 才能看到新消息；
+- `apps/web/index.html` 增加 Queue dock：显示 pending count、running/queued row、消息摘要和 host-backed Cancel；取消使用既有 `cancelTurn` 与 command idempotency；
+- 没有新增前端队列事实、没有模拟 reorder，也没有把 attachment/steer 能力伪造为已实现。
+
+验证：`pnpm typecheck`、Web 65 项测试、`pnpm --filter @code-review-agent/web run build:browser`、`pnpm test:phase7:browser`（五场景通过，trajectory full replay 18.91ms）和 `git diff --check` 通过。该切片可通过移除 queue dock 恢复原有 composer，不影响 Runtime/EventStore。
 
 ## 1. 目标与边界
 

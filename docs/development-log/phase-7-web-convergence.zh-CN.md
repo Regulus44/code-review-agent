@@ -795,6 +795,43 @@ pnpm test:phase7:browser                            ✓（五场景；trajectory
 git diff --check                                    ✓
 ```
 
+## 2026-08-23：Queue dock 与 durable turn projection
+
+### 目标与 DSH 对照
+
+- 对照 DSH `InputBar`/queued-turn surface，把 AgentHost 已有的 queued turn 事实呈现在 Web composer 附近；
+- 只暴露后端已经支持的 cancel，明确标记 reorder 尚未进入 host contract。
+
+### 变更范围
+
+- `apps/web/src/presentation/queue-presenter.ts`：新增 bounded queue render intent，按 durable `TurnProjection.lastSequence` 稳定排序，区分 running/queued 和 pending count；
+- `apps/web/src/presentation/queue-presenter.test.ts`：覆盖排序、running/queued、bounded message 和 empty state；
+- `apps/web/src/client/store.ts`：增量 fold `user/message`、`turn/queued`、`turn/started`、`assistant/message`、`turn/ended` 时同步 upsert turns，保证 queue dock 不依赖 refetch；
+- `apps/web/src/client/store.test.ts`：增加新 queued turn 在本地事件窗口中立即可见的回归测试；
+- `apps/web/src/browser.ts`、`apps/web/index.html`：暴露 typed presenter，增加 Queue dock、host-backed Cancel、pending count 和 reorder limitation hint。
+
+### 根治理七问
+
+1. **Phase**：Phase 7.6 Permission/AskUser/queue surface。
+2. **问题类型**：Web queue projection、可恢复交互和取消入口。
+3. **契约影响**：复用既有 `turn/queued`、`turn/started`、`turn/ended` 和 `cancelTurn` command；只增强 Web SessionProjection fold，不改变事件 schema。
+4. **参考入口**：DSH `InputBar`、queued turn indicator；实现继续使用本项目 `SessionStore` 和 AgentHost queue。
+5. **上游来源**：只做行为参考，没有复制代码或资产。
+6. **验收场景**：连续发送后 running/queued row、刷新/重连后 queue replay、Cancel 后状态收敛、长消息 bounded、host 不支持 reorder 时显示明确提示。
+7. **回滚**：移除 Queue dock 和 presenter，保留 `SessionStore` turn upsert 兼容逻辑；不影响 Runtime、EventStore 或权限恢复。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/web test -- --run  ✓（65 tests）
+pnpm --filter @code-review-agent/web run build:browser ✓
+pnpm test:phase7:browser                            ✓（五场景；trajectory full replay 18.91ms）
+git diff --check                                    ✓
+```
+
+下一切片：继续物理拆分 Conversation/Details，或在 host contract 允许后补 queue reorder/steer；附件能力先补 capability gate、大小/type rejection 和 receipt contract，再接入 UI。
+
 ## 2026-08-23：统一 Phase 7.10 browser/replay gate
 
 ### 目标

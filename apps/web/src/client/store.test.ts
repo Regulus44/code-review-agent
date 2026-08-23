@@ -74,6 +74,16 @@ describe("SessionStore", () => {
       { role: "assistant", content: "hi", turnId },
     ]);
     expect(store.getSnapshot().session?.status).toBe("idle");
+    expect(store.getSnapshot().session?.turns).toMatchObject([{ id: turnId, status: "completed", userMessage: "hello", assistantMessage: "hi" }]);
+  });
+
+  it("keeps a newly queued turn visible to the queue presenter without a refetch", () => {
+    const store = new SessionStore();
+    store.open(session());
+    store.apply(event(1, "user/message", { content: "queued prompt" }));
+    store.apply(event(2, "turn/queued", {}));
+
+    expect(store.getSnapshot().session?.turns).toMatchObject([{ id: turnId, status: "queued", userMessage: "queued prompt" }]);
   });
 
   it("publishes conversation, tool lineage and trajectory from one event window", () => {

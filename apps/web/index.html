@@ -149,6 +149,20 @@
       .connection-banner-message { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .connection-retry { flex: 0 0 auto; height: 26px; padding: 0 9px; border: 1px solid currentColor; border-radius: 7px; color: inherit; background: transparent; font-size: 10px; font-weight: 650; }
       .connection-retry:hover { background: rgba(255,255,255,.72); }
+      .queue-dock { display: grid; gap: 7px; padding: 8px 22px; border-bottom: 1px solid var(--border); color: var(--text-secondary); background: rgba(255,255,255,.74); font-size: 11px; }
+      .queue-dock[hidden] { display: none; }
+      .queue-heading { display: flex; align-items: center; gap: 8px; }
+      .queue-heading strong { color: var(--text); font-size: 11px; }
+      .queue-heading span { color: var(--text-tertiary); }
+      .queue-list { display: grid; gap: 5px; max-height: 150px; overflow: auto; }
+      .queue-item { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-subtle); }
+      .queue-item.running { border-color: rgba(65,118,230,.25); background: var(--blue-soft); }
+      .queue-item-position { flex: 0 0 auto; width: 20px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+      .queue-item-copy { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .queue-item-status { flex: 0 0 auto; color: var(--text-tertiary); font-size: 10px; }
+      .queue-item-cancel { flex: 0 0 auto; padding: 3px 6px; border-radius: 6px; color: var(--red); background: transparent; font-size: 10px; }
+      .queue-item-cancel:hover { background: #fff0f0; }
+      .queue-hint { color: var(--text-tertiary); font-size: 10px; }
       .conversation { position: relative; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scroll-behavior: smooth; }
       .conversation::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 50% 20%, rgba(65,118,230,.07), transparent 38%); opacity: .75; }
       .conversation-body { position: relative; width: min(748px, calc(100% - 40px)); min-height: 100%; margin: 0 auto; padding: 34px 0 28px; }
@@ -462,6 +476,7 @@
           <button id="details-toggle" class="icon-button details-toggle" type="button" aria-label="Toggle details panel">☷</button>
         </header>
         <div id="connection-banner" class="connection-banner" role="status" aria-live="polite" hidden><span id="connection-banner-message" class="connection-banner-message"></span><button id="connection-retry" class="connection-retry" type="button" hidden>Retry</button></div>
+        <section id="queue-dock" class="queue-dock" aria-label="Queued messages" hidden></section>
         <section id="conversation" class="conversation" aria-live="polite"></section>
         <footer class="composer-shell">
           <form id="composer" class="composer-card">
@@ -555,6 +570,7 @@
          const connectionBanner = document.querySelector('#connection-banner');
          const connectionBannerMessage = document.querySelector('#connection-banner-message');
          const connectionRetry = document.querySelector('#connection-retry');
+         const queueDock = document.querySelector('#queue-dock');
          const workspaceDialog = workspaceModal.querySelector('.workspace-modal');
          const settingsDialog = settingsModal.querySelector('.workspace-modal');
         const workspaceFocusTrap = typedRuntime?.createFocusTrap && workspaceDialog ? typedRuntime.createFocusTrap(workspaceDialog) : null;
@@ -635,6 +651,34 @@
            connectionBannerMessage.textContent = intent.message;
            connectionRetry.hidden = !intent.retryable;
            connectionRetry.disabled = false;
+         };
+         const renderQueue = (snapshot) => {
+           if (!queueDock) return;
+           const intent = typedRuntime?.presentQueue ? typedRuntime.presentQueue(snapshot?.session) : { visible: false, pendingCount: 0, items: [], reorderSupported: false, reorderReason: '' };
+           queueDock.hidden = !intent.visible;
+           queueDock.innerHTML = '';
+           if (!intent.visible) return;
+           const heading = document.createElement('div'); heading.className = 'queue-heading';
+           const headingTitle = document.createElement('strong'); headingTitle.textContent = `Queue · ${intent.pendingCount} pending`;
+           heading.append(headingTitle);
+           if (intent.activeTurnId) { const active = document.createElement('span'); active.textContent = 'Agent is working'; heading.append(active); }
+           queueDock.append(heading);
+           const list = document.createElement('div'); list.className = 'queue-list';
+           for (const item of intent.items) {
+             const row = document.createElement('div'); row.className = `queue-item ${item.status}`;
+             const position = document.createElement('span'); position.className = 'queue-item-position'; position.textContent = `#${item.position}`;
+             const copy = document.createElement('span'); copy.className = 'queue-item-copy'; copy.textContent = item.message;
+             const itemStatus = document.createElement('span'); itemStatus.className = 'queue-item-status'; itemStatus.textContent = item.status === 'running' ? 'running' : 'queued';
+             row.append(position, copy, itemStatus);
+             if (item.cancellable && snapshot?.session?.id) {
+               const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'queue-item-cancel'; cancel.textContent = 'Cancel'; cancel.title = 'Cancel this turn';
+               cancel.onclick = async () => { cancel.disabled = true; try { await typedRuntime.api.cancelTurn(snapshot.session.id, item.turnId, commandKey()); } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); cancel.disabled = false; } };
+               row.append(cancel);
+             }
+             list.append(row);
+           }
+           queueDock.append(list);
+           if (!intent.reorderSupported) { const hint = document.createElement('div'); hint.className = 'queue-hint'; hint.textContent = intent.reorderReason; queueDock.append(hint); }
          };
          const retryConnection = async () => {
            if (!typedConnection || !state.session || connectionRetry.hidden) return;
@@ -1118,6 +1162,7 @@
           const shouldFollowTail = state.trajectoryFollow === true && isNearConversationTail();
           conversation.innerHTML = '';
           const typedSnapshot = typedConnection?.store.getSnapshot();
+          renderQueue(typedSnapshot || { session: state.session });
           const typedProjection = typedSnapshot?.conversation;
           if (typedProjection && typedProjection.nodes.length > 0) {
             const typedBody = document.createElement('div');
