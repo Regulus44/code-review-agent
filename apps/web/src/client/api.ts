@@ -13,6 +13,7 @@ import type {
   ToolRiskLevel,
   ToolSource,
   TurnId,
+  WorkspaceCatalog,
 } from "@code-review-agent/contracts";
 
 export interface ToolCatalogEntry {
@@ -142,6 +143,18 @@ export class WebApiClient {
 
   listSessions(includeArchived = false): Promise<{ readonly sessions: readonly SessionSummary[] }> {
     return this.request(`/v1/sessions?include_archived=${String(includeArchived)}`);
+  }
+
+  listWorkspaces(): Promise<WorkspaceCatalog> {
+    return this.request<WorkspaceCatalog>("/v1/workspaces");
+  }
+
+  reorderWorkspaces(order: readonly string[], commandId?: string): Promise<WorkspaceCatalog> {
+    return this.request<WorkspaceCatalog>("/v1/workspaces/reorder", {
+      method: "POST",
+      commandId,
+      body: { order },
+    });
   }
 
   createSession(workspaceRoot: string, permissionPreset?: PermissionPreset): Promise<CreateSessionResponse> {

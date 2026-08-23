@@ -58,4 +58,11 @@ describe("buildNavigationModel", () => {
     expect(sessionRelativeTime("2026-08-23T09:59:30.000Z", Date.parse("2026-08-23T10:00:00.000Z"))).toBe("now");
     expect(sessionRelativeTime("invalid", Date.now())).toBe("");
   });
+
+  it("honors the durable workspace order before recency fallback", () => {
+    const first = session("ses_first", { workspaceRoot: "D:/first", updatedAt: "2026-08-23T12:00:00.000Z" });
+    const second = session("ses_second", { workspaceRoot: "D:/second", updatedAt: "2026-08-23T13:00:00.000Z" });
+    const model = buildNavigationModel([first, second], { workspaceOrder: ["D:/first", "D:/second"] });
+    expect(model.groups.map((group) => group.root)).toEqual(["D:/first", "D:/second"]);
+  });
 });

@@ -21,6 +21,28 @@ git diff --check ✓
 - Workspace reorder 生命周期的 durable host/API/Web 切片；
 - 窄屏视觉基线与 browser smoke。
 
+## 2026-08-23：Workspace reorder lifecycle
+
+### 变更范围
+
+- `workspace/reordered` 与 `WorkspaceSummary` / `WorkspaceCatalog` 加入公共 contract；事件落在 host 选择的 anchor Session 上，回放时不进入 Conversation。
+- `AgentHost.listWorkspaces()` 从 Session 与 durable event replay 生成 catalog；`reorderWorkspaces()` 要求完整 workspace key 集合，使用 command claim 保证重复请求返回同一 catalog。
+- API 增加 `GET /v1/workspaces`、`POST /v1/workspaces/reorder`；Web API client、SSE typed event list、navigation presenter 和 Sidebar 上移/下移控件已接入。
+- Phase 7 browser gate 增加 workspace catalog、reverse reorder、重复命令和 bundle command surface 检查。
+
+### 验证
+
+```text
+pnpm typecheck ✓
+Workspace/API/Runtime/Web 定向测试 ✓（59 tests）
+git diff --check ✓
+```
+
+### 下一步
+
+- 窄屏视觉基线与真实 browser viewport smoke；
+- Workspace rename/archive/delete 生命周期仍未实现，继续保持在后续 Phase 7 切片。
+
 ## 2026-08-23：Attachment capability gate 与 upload receipt
 
 ### 变更范围

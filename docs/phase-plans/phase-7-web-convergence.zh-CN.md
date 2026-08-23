@@ -13,6 +13,18 @@
 
 验证：`pnpm typecheck`、Shell 定向测试和 `git diff --check` 通过；完整 workspace 与 Phase 7 browser gate 在提交前执行。
 
+## 当前执行 checkpoint：Workspace reorder lifecycle（2026-08-23）
+
+本 checkpoint 将 Workspace → Session 导航顺序从 recency-only 渲染推进为 host-backed durable lifecycle：
+
+- `workspace/reordered` 事件与 `WorkspaceSummary` / `WorkspaceCatalog` contract 纳入公共类型；导航事件不进入 Conversation 可见节点；
+- `AgentHost.listWorkspaces()` 从 Session projection 和事件回放生成 workspace catalog；`reorderWorkspaces()` 校验完整集合、追加 durable snapshot，并通过 command claim 保证幂等；
+- API 增加 `GET /v1/workspaces` 与 `POST /v1/workspaces/reorder`；Web API client、SSE typed event list、Session refresh 和 navigation presenter 消费同一顺序；
+- Sidebar workspace group 增加 host-backed 上移/下移控件，失败时显示 status，不维护本地事实副本；
+- runtime、API、Web API client、navigation projection、Conversation ignore 和 browser gate 均覆盖顺序、重放与幂等行为。
+
+验证：定向 typecheck/API/Runtime/Web 测试通过；完整 workspace 与统一 Phase 7 browser gate 在提交前执行。
+
 ## 当前执行 checkpoint：Host-backed steer receipt（2026-08-23）
 
 本 checkpoint 完成了运行中 turn 的 Web steer 纵向切片：

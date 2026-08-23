@@ -10,6 +10,8 @@ import {
   type SessionId,
   type SessionProjection,
   type SessionSummary,
+  type WorkspaceCatalog,
+  type WorkspaceSummary,
   type TurnId,
   type InteractionId,
   type PermissionId,
@@ -128,6 +130,87 @@ export class AgentHost {
   async listSessions(includeArchived = false): Promise<readonly SessionSummary[]> {
     await this.ready;
     return this.options.store.listSessions(includeArchived);
+  }
+
+  async listWorkspaces(): Promise<WorkspaceCatalog> {
+    await this.ready;
+    return this.workspaceCatalog(await this.options.store.listSessions(true));
+  }
+
+  async reorderWorkspaces(order: readonly string[], commandId?: string): Promise<WorkspaceCatalog> {
+    await this.ready;
+    const sessions = await this.options.store.listSessions(true);
+    const current = await this.workspaceCatalog(sessions);
+    const requested = order.map(normalizeWorkspaceKey);
+    const expected = current.workspaces.map((workspace) => workspace.key);
+    if (requested.length !== expected.length || new Set(requested).size !== requested.length || expected.some((key) => !requested.includes(key))) {
+      throw new Error("WORKSPACE_ORDER_INVALID: order must contain each visible workspace exactly once");
+    }
+    const anchor = sessions
+      .filter((session) => session.deleted !== true)
+      .sort((left, right) => left.id.localeCompare(right.id))[0];
+    if (anchor === undefined) return current;
+    const idempotencyKey = commandId ?? `cmd_${randomUUID()}`;
+    const reorderedCatalog = await this.workspaceCatalog(sessions, requested);
+    const result = { order: requested, catalog: reorderedCatalog };
+    const claim = await this.options.store.claimCommand({
+      sessionId: anchor.id,
+      commandId: idempotencyKey,
+      kind: "reorder_workspaces",
+      request: { order: requested },
+      result,
+    });
+    if (!claim.created) {
+      const saved = claim.record.result as { catalog?: unknown; order?: unknown };
+      if (isWorkspaceCatalog(saved.catalog)) return saved.catalog;
+      const savedOrder = Array.isArray(saved.order) ? saved.order.filter((value): value is string => typeof value === "string") : requested;
+      return this.workspaceCatalog(sessions, savedOrder);
+    }
+    await this.options.store.append({
+      sessionId: anchor.id,
+      correlationId: idempotencyKey,
+      type: "workspace/reordered",
+      payload: { order: requested },
+    });
+    return reorderedCatalog;
+  }
+
+  private async workspaceCatalog(sessions: readonly SessionSummary[], explicitOrder?: readonly string[]): Promise<WorkspaceCatalog> {
+    const groups = new Map<string, { readonly key: string; readonly root: string; readonly sessionCount: number; readonly latestUpdatedAt?: string }>();
+    for (const session of sessions) {
+      if (session.deleted === true) continue;
+      const root = session.workspaceRoot || ".";
+      const key = normalizeWorkspaceKey(root);
+      const previous = groups.get(key);
+      const latestUpdatedAt = latestTimestamp(previous?.latestUpdatedAt, session.updatedAt ?? session.createdAt);
+      groups.set(key, { key, root: previous?.root ?? root, sessionCount: (previous?.sessionCount ?? 0) + 1, ...(latestUpdatedAt === undefined ? {} : { latestUpdatedAt }) });
+    }
+    let order = explicitOrder;
+    if (order === undefined) {
+      let latestEventAt = 0;
+      let replayed: readonly string[] | undefined;
+      for (const session of sessions) {
+        for (const event of await this.options.store.list(session.id, 0)) {
+          if (event.type !== "workspace/reordered") continue;
+          const at = Date.parse(event.createdAt) || 0;
+          const payloadOrder = event.payload["order"];
+          if (at >= latestEventAt && Array.isArray(payloadOrder)) {
+            const values = payloadOrder.filter((value): value is string => typeof value === "string").map(normalizeWorkspaceKey);
+            replayed = values;
+            latestEventAt = at;
+          }
+        }
+      }
+      order = replayed;
+    }
+    const rank = new Map((order ?? []).map((key, index) => [normalizeWorkspaceKey(key), index]));
+    const sorted = [...groups.values()].sort((left, right) => {
+      const leftRank = rank.get(left.key);
+      const rightRank = rank.get(right.key);
+      if (leftRank !== undefined || rightRank !== undefined) return (leftRank ?? Number.MAX_SAFE_INTEGER) - (rightRank ?? Number.MAX_SAFE_INTEGER);
+      return (Date.parse(right.latestUpdatedAt ?? "") || 0) - (Date.parse(left.latestUpdatedAt ?? "") || 0);
+    });
+    return { workspaces: sorted.map((workspace, position) => ({ ...workspace, position })) };
   }
 
   async archiveSession(sessionId: SessionId, archived = true): Promise<SessionProjection> {
@@ -975,6 +1058,27 @@ export function sessionId(value: string): SessionId {
 
 export function turnId(value: string): TurnId {
   return brand<string, "TurnId">(value);
+}
+
+function normalizeWorkspaceKey(value: string): string {
+  const normalized = String(value || ".").replace(/\\/g, "/").replace(/\/+$/u, "") || ".";
+  return /^[A-Za-z]:\//u.test(normalized) ? normalized.toLowerCase() : normalized;
+}
+
+function latestTimestamp(left: string | undefined, right: string | undefined): string | undefined {
+  if (left === undefined) return right;
+  if (right === undefined) return left;
+  return (Date.parse(right) || 0) >= (Date.parse(left) || 0) ? right : left;
+}
+
+function isWorkspaceCatalog(value: unknown): value is WorkspaceCatalog {
+  if (typeof value !== "object" || value === null) return false;
+  const workspaces = (value as { workspaces?: unknown }).workspaces;
+  return Array.isArray(workspaces) && workspaces.every((workspace) => {
+    if (typeof workspace !== "object" || workspace === null) return false;
+    const item = workspace as { key?: unknown; root?: unknown; position?: unknown; sessionCount?: unknown };
+    return typeof item.key === "string" && typeof item.root === "string" && typeof item.position === "number" && typeof item.sessionCount === "number";
+  });
 }
 
 function modelToolResult(output: ExecuteToolOutput): string {

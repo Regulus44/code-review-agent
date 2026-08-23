@@ -143,6 +143,16 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       sendJson(response, 200, { attachments: currentAttachmentCapability(attachmentPolicy, modelRuntime) });
       return;
     }
+    if (request.method === "GET" && url.pathname === "/v1/workspaces") {
+      sendJson(response, 200, await host.listWorkspaces());
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/v1/workspaces/reorder") {
+      const body = await readJson(request);
+      if (!Array.isArray(body.order) || body.order.some((value: unknown) => typeof value !== "string")) throw new HttpError(400, "order must be an array of workspace keys");
+      sendJson(response, 200, await host.reorderWorkspaces(body.order as string[], commandId(request, body)));
+      return;
+    }
     if (request.method === "GET" && url.pathname === "/v1/mcp/servers") {
       sendJson(response, 200, { servers: mcp.list() });
       return;

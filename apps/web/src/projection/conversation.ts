@@ -161,6 +161,7 @@ export function applyConversationEvent(projection: MutableConversationProjection
     case "session/created":
     case "session/updated":
     case "session/deleted":
+    case "workspace/reordered":
       return false;
     case "user/message": {
       const content = stringValue(event.payload["content"]);

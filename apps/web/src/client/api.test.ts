@@ -50,6 +50,23 @@ describe("WebApiClient", () => {
     expect(calls[0]?.init?.body).toBe(JSON.stringify({ turnId: "turn_3", position: 0 }));
   });
 
+  it("builds typed workspace catalog and reorder commands", async () => {
+    const calls: { url: string; init?: RequestInit | undefined }[] = [];
+    const client = new WebApiClient({
+      baseUrl: "http://localhost:4317",
+      fetcher: async (input, init) => {
+        calls.push({ url: String(input), init });
+        return new Response(JSON.stringify({ workspaces: [] }), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+    await client.listWorkspaces();
+    await client.reorderWorkspaces(["d:/first", "d:/second"], "workspace_1");
+    expect(calls[0]?.url).toBe("http://localhost:4317/v1/workspaces");
+    expect(calls[1]?.url).toBe("http://localhost:4317/v1/workspaces/reorder");
+    expect(new Headers(calls[1]?.init?.headers).get("idempotency-key")).toBe("workspace_1");
+    expect(calls[1]?.init?.body).toBe(JSON.stringify({ order: ["d:/first", "d:/second"] }));
+  });
+
   it("builds the host-backed steer command", async () => {
     const calls: { url: string; init?: RequestInit | undefined }[] = [];
     const client = new WebApiClient({

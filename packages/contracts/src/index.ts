@@ -19,6 +19,7 @@ export type AgentEventType =
   | "session/created"
   | "session/updated"
   | "session/deleted"
+  | "workspace/reordered"
   | "user/message"
   | "turn/steered"
   | "attachment/received"
@@ -188,6 +189,18 @@ export interface SessionSummary {
   readonly childMode?: SubagentMode;
   readonly childProvider?: string;
   readonly delegationDepth?: number;
+}
+
+export interface WorkspaceSummary {
+  readonly key: string;
+  readonly root: string;
+  readonly position: number;
+  readonly sessionCount: number;
+  readonly latestUpdatedAt?: string;
+}
+
+export interface WorkspaceCatalog {
+  readonly workspaces: readonly WorkspaceSummary[];
 }
 
 export interface TurnProjection {

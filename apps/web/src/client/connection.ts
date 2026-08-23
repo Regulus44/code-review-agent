@@ -10,6 +10,7 @@ export const AGENT_EVENT_TYPES: readonly AgentEventType[] = [
   "turn/steered",
   "attachment/received",
   "attachment/rejected",
+  "workspace/reordered",
   "turn/queued",
   "turn/started",
   "step/started",

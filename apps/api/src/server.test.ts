@@ -232,6 +232,24 @@ describe("Phase 2 API", () => {
     }
   });
 
+  it("serves a durable workspace catalog and idempotent reorder command", async () => {
+    await fetch(`${baseUrl}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: "D:/workspace-order-first" }) });
+    await fetch(`${baseUrl}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: "D:/workspace-order-second" }) });
+    const before = await (await fetch(`${baseUrl}/v1/workspaces`)).json() as { workspaces: { key: string; root: string }[] };
+    expect(before.workspaces.map((workspace) => workspace.root)).toEqual(expect.arrayContaining(["D:/workspace-order-first", "D:/workspace-order-second"]));
+    const order = before.workspaces.map((workspace) => workspace.key).reverse();
+    const headers = { "content-type": "application/json", "idempotency-key": "api-workspace-order-1" };
+    const moved = await fetch(`${baseUrl}/v1/workspaces/reorder`, { method: "POST", headers, body: JSON.stringify({ order }) });
+    expect(moved.status).toBe(200);
+    const movedBody = await moved.json();
+    expect(movedBody.workspaces.map((workspace: { key: string }) => workspace.key)).toEqual(order);
+    const repeated = await fetch(`${baseUrl}/v1/workspaces/reorder`, { method: "POST", headers, body: JSON.stringify({ order }) });
+    expect(await repeated.json()).toEqual(movedBody);
+    const allSessions = await (await fetch(`${baseUrl}/v1/sessions?include_archived=true`)).json() as { sessions: { id: string }[] };
+    const allEvents = await Promise.all(allSessions.sessions.map(async (session) => await (await fetch(`${baseUrl}/v1/sessions/${session.id}/events?format=json`)).json() as { type: string }[]));
+    expect(allEvents.flat().some((event) => event.type === "workspace/reordered")).toBe(true);
+  });
+
   it("persists scoped MCP settings and exposes catalog diagnostics without secrets", async () => {
     const directory = mkdtempSync(join(tmpdir(), "code-review-agent-api-mcp-"));
     const databasePath = join(directory, "agent.sqlite");

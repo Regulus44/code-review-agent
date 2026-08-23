@@ -96,6 +96,16 @@ async function runCodingScenarios() {
     assert(typeof shell.body === "string" && shell.body.includes("/web/browser.js"), "Web shell does not reference the typed browser bridge");
     const browserAsset = await request(fixture.baseUrl, "/web/browser.js");
     assert(typeof browserAsset.body === "string" && browserAsset.body.length > 10_000, "browser bundle is missing or unexpectedly small");
+    assert(browserAsset.body.includes("reorderWorkspaces"), "browser bundle is missing the typed workspace reorder command");
+
+    const workspaceCatalog = (await request(fixture.baseUrl, "/v1/workspaces")).body;
+    assert(Array.isArray(workspaceCatalog.workspaces) && workspaceCatalog.workspaces.length >= 3, "Coding fixture workspace catalog is incomplete");
+    const workspaceOrder = workspaceCatalog.workspaces.map((workspace) => workspace.key).reverse();
+    const workspaceHeaders = { "content-type": "application/json", "idempotency-key": "phase7-gate-workspace-order" };
+    const workspaceMoved = await request(fixture.baseUrl, "/v1/workspaces/reorder", { method: "POST", headers: workspaceHeaders, body: JSON.stringify({ order: workspaceOrder }) });
+    assert(workspaceMoved.body.workspaces.map((workspace) => workspace.key).join("|") === workspaceOrder.join("|"), "Workspace reorder response did not preserve the requested order");
+    const workspaceRepeated = await request(fixture.baseUrl, "/v1/workspaces/reorder", { method: "POST", headers: workspaceHeaders, body: JSON.stringify({ order: workspaceOrder }) });
+    assert(JSON.stringify(workspaceRepeated.body) === JSON.stringify(workspaceMoved.body), "Repeated workspace reorder did not return the durable catalog");
     assert(browserAsset.body.includes("presentRuntimeDiagnostics"), "browser bundle is missing typed terminal/job diagnostics presenter");
 
     const readId = fixture.scenarios.readOnly.sessionId;

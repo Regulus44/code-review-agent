@@ -26,6 +26,7 @@ export interface NavigationOptions {
   readonly query?: string;
   readonly activeSessionId?: SessionId;
   readonly maxDepth?: number;
+  readonly workspaceOrder?: readonly string[];
 }
 
 /**
@@ -84,7 +85,13 @@ export function buildNavigationModel(
       } satisfies WorkspaceNavigationGroup;
     })
     .filter((group) => group.sessions.length > 0)
-    .sort((left, right) => compareTimestamp(right.latestUpdatedAt) - compareTimestamp(left.latestUpdatedAt));
+    .sort((left, right) => {
+      const order = options.workspaceOrder ?? [];
+      const leftPosition = order.findIndex((root) => workspaceKey(root) === left.key);
+      const rightPosition = order.findIndex((root) => workspaceKey(root) === right.key);
+      if (leftPosition >= 0 || rightPosition >= 0) return (leftPosition < 0 ? Number.MAX_SAFE_INTEGER : leftPosition) - (rightPosition < 0 ? Number.MAX_SAFE_INTEGER : rightPosition);
+      return compareTimestamp(right.latestUpdatedAt) - compareTimestamp(left.latestUpdatedAt);
+    });
   const activeWorkspaceKey = options.activeSessionId === undefined
     ? undefined
     : groups.find((group) => group.sessions.some((session) => containsSession(session, options.activeSessionId as SessionId)))?.key;

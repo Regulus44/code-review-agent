@@ -386,6 +386,23 @@ describe("AgentHost", () => {
     expect(queueEvents.some((event) => JSON.stringify(event.payload["queuedTurnIds"]) === JSON.stringify([third, second]))).toBe(true);
   });
 
+  it("lists and reorders workspaces from a durable event with idempotent replay", async () => {
+    const store = new InMemoryEventStore();
+    const host = new AgentHost({ store });
+    const first = await host.createSession("D:/first");
+    const second = await host.createSession("D:/second");
+    const before = await host.listWorkspaces();
+    expect(new Set(before.workspaces.map((workspace) => workspace.root))).toEqual(new Set(["D:/first", "D:/second"]));
+    const requested = ["D:/first", "D:/second"];
+    const moved = await host.reorderWorkspaces(requested, "workspace-order-1");
+    expect(moved.workspaces.map((workspace) => workspace.root)).toEqual(requested);
+    expect(await host.reorderWorkspaces(requested, "workspace-order-1")).toEqual(moved);
+    const reopened = new AgentHost({ store });
+    expect((await reopened.listWorkspaces()).workspaces.map((workspace) => workspace.root)).toEqual(requested);
+    const durableEvents = [...await reopened.events(first.id), ...await reopened.events(second.id)];
+    expect(durableEvents.some((event) => event.type === "workspace/reordered")).toBe(true);
+  });
+
   it("supports resume and fork commands", async () => {
     const store = new InMemoryEventStore();
     const host = new AgentHost({ store });
