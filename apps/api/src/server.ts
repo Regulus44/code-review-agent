@@ -497,9 +497,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const jobId = decodeURIComponent(jobActionMatch[2]);
         if (jobActionMatch[3] === "retry") {
           const backoffMs = body.backoffMs === undefined ? undefined : requireFiniteNumber(body.backoffMs, "backoffMs");
-          sendJson(response, 200, await host.retryJob(id, jobId, backoffMs));
+          sendJson(response, 200, await host.retryJob(id, jobId, backoffMs, commandId(request, body)));
         } else {
-          sendJson(response, 200, await host.killJob(id, jobId));
+          sendJson(response, 200, await host.killJob(id, jobId, commandId(request, body)));
         }
         return;
       }

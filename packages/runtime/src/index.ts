@@ -213,19 +213,37 @@ export class AgentHost {
     return this.jobManager?.listForSession(sessionId, effectiveWorkspaceRoot(projection)) ?? [];
   }
 
-  async retryJob(sessionId: SessionId, jobId: string, backoffMs?: number): Promise<ToolResult> {
+  async retryJob(sessionId: SessionId, jobId: string, backoffMs?: number, commandId?: string): Promise<ToolResult> {
     await this.ready;
     const projection = await this.options.store.project(sessionId);
     if (projection === undefined) throw new Error(`Unknown session: ${sessionId}`);
     if (this.jobManager === undefined) throw new Error("JOB_MANAGER_UNAVAILABLE: background jobs are disabled for this host");
+    const idempotencyKey = commandId ?? `cmd_${randomUUID()}`;
+    const claim = await this.options.store.claimCommand({
+      sessionId,
+      commandId: idempotencyKey,
+      kind: "retry_job",
+      request: { jobId, backoffMs },
+      result: { status: "pending", jobId },
+    });
+    if (!claim.created) return replayJobCommand(jobId, claim.record.result);
     return this.jobManager.retry(sessionId, jobId, backoffMs === undefined ? {} : { backoffMs });
   }
 
-  async killJob(sessionId: SessionId, jobId: string): Promise<ToolResult> {
+  async killJob(sessionId: SessionId, jobId: string, commandId?: string): Promise<ToolResult> {
     await this.ready;
     const projection = await this.options.store.project(sessionId);
     if (projection === undefined) throw new Error(`Unknown session: ${sessionId}`);
     if (this.jobManager === undefined) throw new Error("JOB_MANAGER_UNAVAILABLE: background jobs are disabled for this host");
+    const idempotencyKey = commandId ?? `cmd_${randomUUID()}`;
+    const claim = await this.options.store.claimCommand({
+      sessionId,
+      commandId: idempotencyKey,
+      kind: "cancel_job",
+      request: { jobId },
+      result: { status: "pending", jobId },
+    });
+    if (!claim.created) return replayJobCommand(jobId, claim.record.result);
     return this.jobManager.kill(sessionId, jobId);
   }
 
@@ -1700,4 +1718,15 @@ function stableWorktreeId(commandId: string): string {
 
 function effectiveWorkspaceRoot(projection: SessionProjection): string {
   return projection.activeWorkspaceRoot ?? projection.workspaceRoot;
+}
+
+function replayJobCommand(jobId: string, result: unknown): ToolResult {
+  if (typeof result === "object" && result !== null && typeof (result as { readonly ok?: unknown }).ok === "boolean") {
+    return result as ToolResult;
+  }
+  return {
+    ok: true,
+    output: { jobId, status: "idempotent_replay" },
+    presentation: { kind: "terminal", title: `Job command already applied for ${jobId}`, data: { jobId, status: "idempotent_replay" } },
+  };
 }

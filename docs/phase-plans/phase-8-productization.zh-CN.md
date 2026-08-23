@@ -1,6 +1,6 @@
 # Phase 8：高级能力、DSH Web 对齐与产品化
 
-状态：`pending`。进入条件是 Phase 7 已完成并保留独立 checkpoint；当前 Phase 7 checkpoint 为 `82326d6`。
+状态：`in_progress`。Phase 7 已完成并保留独立 checkpoint；当前 Phase 8 正在按 8.0–8.5 工作流推进。
 
 ## 1. 阶段目标
 

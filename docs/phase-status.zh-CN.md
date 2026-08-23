@@ -74,8 +74,11 @@ Phase 7 的 DSH Web 调研与分步计划：
 - `6ac8e7e`：8.3 第一阶段 checkpoint 已建立；`8.3` 的真实 Web fixture、OS 级网络隔离评估和完整退出审计仍待补齐。
 - 当前已进入 `Phase 8.4 Reliability`：`JobManager` 已持久化可重试 executable/args 元数据，支持 bounded retry、deadline 结构化失败、取消原因和 graceful shutdown；`AgentHost` 提供 job action、session export/replay 和 structured diagnostics；API 暴露 `/v1/sessions/:id/jobs`、`/retry`、`/cancel`、`/export` 与 `/v1/diagnostics`；Web Job center 已提供 Cancel/Retry actions。
 - `AgentHost` 已支持显式 `fallbackModels`：主模型在产生部分输出前失败时切换到下一个模型，并追加 `MODEL_FALLBACK` 审计事件；`metrics()` 与 API `/v1/metrics` 提供 turns、fallback、tool failure counters；每个 turn 的 `traceId` 会在 started/ended/error 边界中保持一致。
+- 新增 `scripts/phase8-job-fixture-server.mjs` 与 `scripts/phase8-job-browser-gate.mjs`，使用真实 SQLite、AgentHost、ToolRuntime、API 和 Web bundle 验证 running/failed job、Cancel、Retry、spill metadata、job lifecycle replay、diagnostics、session export 以及重复 action 的幂等行为；`pnpm test:phase8:jobs` 已通过。
+- `AgentHost.retryJob` / `killJob` 与 API Job action route 现在消费 `Idempotency-Key`，通过 durable command claim 防止重复 Retry/Cancel 产生重复副作用；Runtime 定向测试与 API server tests 已通过。
+- 8.4 的真实 Job Center action slice 已闭合；更完整的 API restart、断线、orphaned/interrupted 和跨场景 browser recovery matrix 仍待补齐。
 - 新增 `scripts/phase8-reliability-gate.mjs`，覆盖 retry、deadline、shutdown、session export、diagnostics 和 metrics；`pnpm test:phase8:reliability` 已通过。当前 8.4 仍未整体完成，更完整的 browser recovery matrix 仍是后续工作。
-- Reliability gate 现在额外检查 Web Job Center 的 `Cancel job`、`Retry job` 和 `Terminal & long-running jobs` surface；这补齐静态 Web recovery contract 检查，但真实带 Job 的浏览器交互 fixture 仍待补充。
+- Reliability gate 现在额外检查 Web Job Center 的 `Cancel job`、`Retry job` 和 `Terminal & long-running jobs` surface；真实 Job fixture 已由 `pnpm test:phase8:jobs` 覆盖，后续继续扩展 API restart、断线和 orphaned/interrupted browser recovery matrix。
 - 修复 API restart recovery：graceful shutdown 不再取消处于 pending user interaction 的 turn，避免在数据库关闭前追加 `interaction/resolved(cancelled)`；`apps/api` 27 项 server tests 已通过。
 - 当前 Web parity 收口新增 Workspace Browser 的 Tree/Flat 视图与 Recent/Name/Path 确定性排序；搜索、Archived 筛选、父子 Session 展示和 active Session 保持现有回放状态；真实页面切换回归已通过。
 - 本次导航改动验证：`pnpm typecheck`、Web 101 tests、`pnpm build:web`、`pnpm test:phase8:web`、`pnpm test:phase8:reliability` 和 `git diff --check` 均通过；独立 checkpoint 为本次提交。

@@ -55,6 +55,34 @@ describe("AgentHost", () => {
     expect(host.metrics()).toMatchObject({ turnsStarted: 1, turnsCompleted: 1, modelFallbacks: 1 });
   });
 
+  it("claims background job cancellation commands so repeated actions do not repeat the side effect", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-runtime-job-command-"));
+    const store = new InMemoryEventStore();
+    const host = new AgentHost({ store });
+    try {
+      const session = await host.createSession(root, "danger-full-access");
+      const started = await host.executeTool(session.id, "pwsh", {
+        command: "Start-Sleep -Seconds 10",
+        description: "runtime job command fixture",
+        run_in_background: true,
+      }, undefined, "runtime-job-start", undefined, "system");
+      const output = started.result?.output;
+      const jobId = typeof output === "object" && output !== null && typeof (output as { readonly jobId?: unknown }).jobId === "string"
+        ? (output as { readonly jobId: string }).jobId
+        : undefined;
+      if (jobId === undefined) return;
+
+      const cancelled = await host.killJob(session.id, jobId, "runtime-job-cancel");
+      const repeated = await host.killJob(session.id, jobId, "runtime-job-cancel");
+      expect(cancelled.ok).toBe(true);
+      expect(repeated.output).toMatchObject({ jobId, status: "idempotent_replay" });
+      expect((await store.getCommand(session.id, "runtime-job-cancel"))?.kind).toBe("cancel_job");
+    } finally {
+      await host.shutdown();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("renames a session through an idempotent session/updated event", async () => {
     const store = new InMemoryEventStore();
     const host = new AgentHost({ store });
