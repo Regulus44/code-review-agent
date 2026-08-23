@@ -1,5 +1,23 @@
 # Phase 7：DSH Web 前端收敛
 
+## 2026-08-23：Terminal/Job diagnostics render intent
+
+### 变更范围
+
+- 新增 `apps/web/src/presentation/job-presenter.ts`，从 `job/started`、`job/output`、`job/ended` 和 `terminal/session` durable events 生成 bounded job/terminal view。
+- 长任务输出保留 `totalBytes`、`truncated`、`spillPath`、exit code、signal 和结构化错误；命令、错误和输出展示前执行敏感字段脱敏。
+- Session 在重启后处于 interrupted 且 job 没有 terminal event 时显示 `orphaned`，不将未闭合任务渲染为 completed；terminal interrupted 状态保留为可解释的恢复状态。
+- `apps/web/index.html` details 面板新增 Terminal & long-running jobs 区域；`apps/web/src/browser.ts` 暴露 typed presenter；browser gate 检查 bundle 已包含该 bridge。
+
+### 验证
+
+```text
+pnpm typecheck                         ✓
+pnpm test                              ✓（Web 72 项，workspace 全量通过）
+pnpm test:phase7:browser               ✓（五场景，trajectory full replay 20.09ms）
+git diff --check                       ✓
+```
+
 ## 2026-08-23：Queue reorder contract 与 host-backed controls
 
 ### 变更范围

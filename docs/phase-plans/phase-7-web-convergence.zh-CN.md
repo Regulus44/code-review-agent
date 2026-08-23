@@ -1,6 +1,6 @@
 # Phase 7：DSH Web 前端收敛与可观测工作台
 
-状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection、7.1 shell layout state/reducer、mobile sidebar 行为、typed overlay state/reducer、queue dock/cancel/reorder surface 和 Session rename 生命周期已完成；物理 Shell 拆分、Workspace reorder 生命周期、steer/attachment 深化、长任务 terminal/job 失败诊断和窄屏视觉基线继续推进）
+状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、terminal/job diagnostics、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection、7.1 shell layout state/reducer、mobile sidebar 行为、typed overlay state/reducer、queue dock/cancel/reorder surface 和 Session rename 生命周期已完成；物理 Shell 拆分、Workspace reorder 生命周期、steer/attachment 深化和窄屏视觉基线继续推进）
 
 ## 当前执行 checkpoint：typed Web client 与 Session replay foundation
 
@@ -177,6 +177,18 @@
 - 没有实现 steer、attachment 或跨 Session 队列操作。
 
 验证：`pnpm typecheck`；Runtime、API、Web presenter/store/client 定向测试 50 项通过。完整 workspace 测试、browser bundle 和 Phase 7 browser gate 在提交前执行。
+
+## 当前执行 checkpoint：Terminal/Job diagnostics render intent（2026-08-23）
+
+本 checkpoint 对照 DSH `ui-tool`、`ui-jobs` 和 trajectory details，补齐长任务事实到 Web 的展示闭环：
+
+- `apps/web/src/presentation/job-presenter.ts` 从 durable `job/started`、`job/output`、`job/ended` 和 `terminal/session` 事件生成 bounded job/terminal render intent；
+- job 输出按字符预算截断并保留 `totalBytes`/`truncated`/`spillPath`，命令、错误和输出展示前执行敏感字段脱敏；
+- 进程重启后只有 `job/started`、没有 terminal event 且 Session 已 interrupted 的任务显示为 `orphaned`，不会伪造 completed；失败 job 展示 exit code、signal 和结构化诊断；
+- `apps/web/index.html` details 增加 Terminal & long-running jobs 面板，使用 `<details>` 展示命令、cwd、workspace、输出、spill 和失败/恢复状态；
+- browser bridge 暴露 typed presenter，统一 browser gate 检查 bundle 已包含该 presenter。
+
+验证：`pnpm typecheck`、`pnpm test`（Web 72 项、Runtime 15 项、API 21 项等全 workspace 通过）、`pnpm test:phase7:browser`（五场景通过，trajectory full replay 20.09ms）和 `git diff --check` 通过。
 
 ## 当前执行 checkpoint：Session rename 生命周期（2026-08-23）
 

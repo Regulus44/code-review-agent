@@ -96,6 +96,7 @@ async function runCodingScenarios() {
     assert(typeof shell.body === "string" && shell.body.includes("/web/browser.js"), "Web shell does not reference the typed browser bridge");
     const browserAsset = await request(fixture.baseUrl, "/web/browser.js");
     assert(typeof browserAsset.body === "string" && browserAsset.body.length > 10_000, "browser bundle is missing or unexpectedly small");
+    assert(browserAsset.body.includes("presentRuntimeDiagnostics"), "browser bundle is missing typed terminal/job diagnostics presenter");
 
     const readId = fixture.scenarios.readOnly.sessionId;
     const read = (async () => (await request(fixture.baseUrl, `/v1/sessions/${readId}`)).body) ;
