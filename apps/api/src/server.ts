@@ -166,7 +166,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/capabilities") {
-      sendJson(response, 200, { attachments: currentAttachmentCapability(attachmentPolicy, modelRuntime), context: host.contextSettings(), codeMode: host.codeModeSettings(), lsp: host.lspSettings() });
+      sendJson(response, 200, { attachments: currentAttachmentCapability(attachmentPolicy, modelRuntime), context: host.contextSettings(), codeMode: host.codeModeSettings(), lsp: host.lspSettings(), plugins: host.pluginsSettings() });
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/workspaces") {

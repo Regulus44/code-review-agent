@@ -1,5 +1,5 @@
 import type { PermissionPreset, SessionProjection } from "@code-review-agent/contracts";
-import type { AttachmentCapability, CodeModeCapability, ContextCapability, LspCapability, ModelCatalogResponse, McpServerView, ToolCatalogEntry } from "../client/api.js";
+import type { AttachmentCapability, CodeModeCapability, ContextCapability, LspCapability, ModelCatalogResponse, McpServerView, PluginsCapability, ToolCatalogEntry } from "../client/api.js";
 
 export interface SettingsCapability {
   readonly key: string;
@@ -44,6 +44,7 @@ export interface SettingsPresenterOptions {
   readonly contextCapability?: ContextCapability;
   readonly codeModeCapability?: CodeModeCapability;
   readonly lspCapability?: LspCapability;
+  readonly pluginsCapability?: PluginsCapability;
   readonly modelState?: {
     readonly status: "loading" | "ready" | "error";
     readonly error?: string;
@@ -87,6 +88,7 @@ export function presentSettings(
   const context = options.contextCapability;
   const codeMode = options.codeModeCapability;
   const lsp = options.lspCapability;
+  const plugins = options.pluginsCapability;
   const modelState = options.modelState ?? { status: models === undefined ? "loading" : "ready" };
   const codeModeNetworkDetail = codeMode?.limits?.networkEnforcement === "process-policy"
     ? `Network deny-by-default is enforced by the child process policy; OS isolation: ${codeMode.limits.osNetworkIsolation === true ? "enabled" : "unavailable"}.`
@@ -101,6 +103,7 @@ export function presentSettings(
     { key: "context-compaction", label: "Context compaction", status: context === undefined ? "unavailable" : context.enabled ? (context.configured ? "configured" : "available") : "unavailable", detail: context === undefined ? "The host did not expose context budget metadata." : !context.enabled ? "Context compaction is disabled by the host." : context.budget?.maxTokens === undefined ? "Compaction is enabled; provider context budget is unknown." : `Compaction budget: ${context.budget.maxTokens} tokens.` },
     { key: "code-mode", label: "Code Mode", status: codeMode === undefined ? "unavailable" : codeMode.enabled ? "configured" : codeMode.configured ? "unavailable" : "unavailable", detail: codeMode === undefined ? "The host did not expose Code Mode policy metadata." : codeMode.enabled ? `Sandbox enabled; output/runtime limits are host-controlled. ${codeModeNetworkDetail}` : codeMode.configured ? "Code Mode is configured but disabled by policy." : "Code Mode is not configured." },
     { key: "lsp", label: "Language server", status: lsp === undefined ? "unavailable" : lsp.configured ? "configured" : "available", detail: lsp === undefined ? "The host did not expose LSP server metadata." : lsp.configured ? `${lsp.servers.length} configured server${lsp.servers.length === 1 ? "" : "s"}: ${lsp.servers.join(", ")}.` : "No language server is configured." },
+    { key: "plugins", label: "Plugins", status: plugins?.status ?? "unavailable", detail: plugins === undefined ? "The host did not expose plugin runtime metadata." : plugins.reason },
     { key: "a2a", label: "A2A interoperability", status: a2aStatus, detail: a2aStatus === "deferred" ? "Deferred until an external Agent interoperability scenario is accepted." : a2aStatus === "available" ? "External Agent adapter is enabled." : "External Agent adapter is unavailable." },
   ];
   return {

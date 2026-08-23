@@ -22,7 +22,7 @@
 
 - [Phase 8：高级能力、DSH Web 对齐与产品化](phase-plans/phase-8-productization.zh-CN.md) 已扩展为 8.0 Web 对齐、8.1 Context Compaction、8.2 Worktree、8.3 LSP/Code Mode、8.4 后台任务与可靠性、8.5 产品化；
 - [ADR：Phase 8 Web 与 DSH 前端行为对齐](adr/phase-8-web-dsh-alignment.zh-CN.md) 已接受，记录行为参考、REST/SSE 边界、typed Web 拆分、契约变更和回滚规则；
-- Phase 8 已进入 `in_progress`。8.0 的 aggregate Web parity contract gate 已建立并通过；视觉基线、真实 Job 浏览器矩阵、8.3 完整退出审计和 8.5 产品化仍未完成。
+- Phase 8 已进入 `in_progress`。8.0 的 aggregate Web parity contract gate 与真实 600/900/1024 Shell/Settings 视觉基线 gate 已通过；完整响应式/可访问性 browser 矩阵、真实 Job 跨场景恢复矩阵、8.3 完整退出审计和 8.5 产品化仍未完成。
 
 ## Phase 6 A2A 暂缓决策
 
@@ -86,10 +86,12 @@ Phase 7 的 DSH Web 调研与分步计划：
 - 当前 Web parity 收口新增 Workspace Browser 的 Tree/Flat 视图与 Recent/Name/Path 确定性排序；搜索、Archived 筛选、父子 Session 展示和 active Session 保持现有回放状态；真实页面切换回归已通过。
 - 本次导航改动验证：`pnpm typecheck`、Web 101 tests、`pnpm build:web`、`pnpm test:phase8:web`、`pnpm test:phase8:reliability` 和 `git diff --check` 均通过；独立 checkpoint 为本次提交。
 - Settings 的 Model section 现在保留 host-backed loading/ready/error 状态、provider failure 文案、Retry model catalog 操作和模型选择 receipt；模型目录失败不会把整个 Web boot 误判为连接失败。
+- Settings 新增 host-backed Plugins capability section；`/v1/capabilities` 的 `plugins` 字段当前明确为 `deferred`，并说明插件运行时等待 Phase 8.5 产品化需求，不把未实现能力显示为可用。
 - `scripts/phase8-web-gate.mjs` 已增加 Workspace view/sort 与 Settings model retry surface 检查；Web presenter 102 tests、`pnpm typecheck`、`pnpm build:web` 和 `pnpm test:phase8:web` 通过。
 - 新增 `scripts/phase8-settings-gate.mjs` 与 `PHASE8_MODEL_FAILURES` fixture：首个 `/v1/models` 请求返回 503，页面保持 Connected 并显示 Settings error/Retry，点击 Retry 后恢复 fixture-model；真实页面回归已通过。
 - 新增 `scripts/phase8-parity-gate.mjs` 与 `pnpm test:phase8:parity`，聚合 Goal/Plan/Question、Workspace、Job、LSP、Settings、Deliverables、Task/Subagent、typed presenters、响应式和可访问性 contract；gate 已通过。
-- 8.0 当前剩余 visual baseline 和更完整的 Settings section/响应式矩阵；真实 Job 浏览器 action/replay fixture、provider failure/retry fixture 与 aggregate parity contract 已关闭。
+- 新增 `docs/phase8-visual-baselines/manifest.json`、六个真实 JPEG 基线和 `scripts/phase8-visual-gate.mjs`；`pnpm test:phase8:visual` 已通过，校验 Shell/Settings 的 600/900/1024 尺寸、格式和 Plugins deferred 说明。
+- 8.0 当前剩余完整响应式/可访问性 browser 矩阵和更多真实交互场景；真实 Job 浏览器 action/replay fixture、provider failure/retry fixture、Plugins 状态和 aggregate parity contract 已关闭。
 
 ## Phase 7 Workspace lifecycle controls（当前 checkpoint）
 

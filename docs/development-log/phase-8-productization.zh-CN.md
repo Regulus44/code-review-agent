@@ -1,5 +1,32 @@
 # Phase 8 开发日志
 
+## 2026-08-24：8.0 响应式视觉基线与 Plugins 状态收口
+
+本次 checkpoint 属于 Phase 8.0 Web 对齐，完成真实 Web fixture 的响应式视觉基线门禁，并补齐 Settings 的 Plugins 分区状态。A2A 保持 `deferred`，不进入本次实现。
+
+### 已完成
+
+- 使用真实 SQLite/API/AgentHost Web fixture 生成 Shell 与 Settings 的 600×800、900×800、1024×800 截图；文件统一为可校验的 JPEG，manifest 记录页面 surface、尺寸和 fixture 来源；
+- 新增 `scripts/phase8-visual-gate.mjs` 与 `pnpm test:phase8:visual`，检查六个基线文件存在、PNG/JPEG 格式、真实像素尺寸、Shell/Settings 分离，以及 Settings 中 Plugins 的 `deferred` 说明；
+- Runtime/API 新增 host-backed `pluginsSettings()` / `/v1/capabilities` 的 `plugins` 字段，当前明确返回 `deferred`，说明插件运行时等待 Phase 8.5 产品化需求；
+- Settings presenter、Web Settings modal、API server test、presenter test 和 aggregate parity gate 均覆盖 Plugins，不把未实现插件能力显示为可用。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/web test -- --run src/presentation/settings-presenter.test.ts ✓ (3 tests)
+pnpm --filter @code-review-agent/api test -- --run src/server.test.ts ✓ (28 tests)
+pnpm build:web                                      ✓
+pnpm test:phase8:visual                             ✓
+pnpm test:phase8:parity                             ✓
+git diff --check                                     ✓
+```
+
+### 尚未关闭
+
+8.0 的完整响应式/可访问性 browser 矩阵和更多真实交互场景仍需继续扩展；8.3 完整退出审计、8.4 跨场景 browser recovery matrix 与 8.5 产品化也未完成。
+
 ## 2026-08-24：8.3 Code Mode 网络边界元数据与 fail-closed
 
 本次 checkpoint 继续 Phase 8.3 的安全退出审计，明确 Code Mode 当前可证明的网络边界。A2A 保持 deferred。

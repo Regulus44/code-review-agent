@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "source": "phase8-web-fixture",
+  "capturedAt": "2026-08-24",
+  "settingsCapabilityState": {
+    "plugins": "deferred",
+    "pluginsReason": "Plugin runtime is deferred until a Phase 8.5 productization requirement is accepted."
+  },
+  "baselines": [
+    { "file": "web-shell-600x800.jpg", "surface": "shell", "width": 600, "height": 800 },
+    { "file": "web-settings-600x800.jpg", "surface": "settings", "width": 600, "height": 800 },
+    { "file": "web-shell-900x800.jpg", "surface": "shell", "width": 900, "height": 800 },
+    { "file": "web-settings-900x800.jpg", "surface": "settings", "width": 900, "height": 800 },
+    { "file": "web-shell-1024x800.jpg", "surface": "shell", "width": 1024, "height": 800 },
+    { "file": "web-settings-1024x800.jpg", "surface": "settings", "width": 1024, "height": 800 }
+  ]
+}

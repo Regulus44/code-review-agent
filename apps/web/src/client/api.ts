@@ -76,11 +76,19 @@ export interface LspCapability {
   readonly servers: readonly string[];
 }
 
+export interface PluginsCapability {
+  readonly configured: boolean;
+  readonly enabled: boolean;
+  readonly status: "available" | "deferred" | "unavailable";
+  readonly reason: string;
+}
+
 export interface CapabilityResponse {
   readonly attachments: AttachmentCapability;
   readonly context: ContextCapability;
   readonly codeMode: CodeModeCapability;
   readonly lsp: LspCapability;
+  readonly plugins: PluginsCapability;
 }
 
 export interface HealthResponse {

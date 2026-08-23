@@ -73,6 +73,13 @@ export interface LspSettings {
   readonly servers: readonly string[];
 }
 
+export interface PluginsSettings {
+  readonly configured: boolean;
+  readonly enabled: boolean;
+  readonly status: "available" | "deferred" | "unavailable";
+  readonly reason: string;
+}
+
 export interface RuntimeMetricsSnapshot {
   readonly turnsStarted: number;
   readonly turnsCompleted: number;
@@ -189,6 +196,15 @@ export class AgentHost {
 
   lspSettings(): LspSettings {
     return { configured: Object.keys(this.options.lspServers ?? {}).length > 0, servers: Object.keys(this.options.lspServers ?? {}).sort() };
+  }
+
+  pluginsSettings(): PluginsSettings {
+    return {
+      configured: false,
+      enabled: false,
+      status: "deferred",
+      reason: "Plugin runtime is deferred until a Phase 8.5 productization requirement is accepted.",
+    };
   }
 
   async createSession(workspaceRoot: string, permissionPreset?: PermissionPreset, metadata?: ChildSessionMetadata): Promise<SessionProjection> {

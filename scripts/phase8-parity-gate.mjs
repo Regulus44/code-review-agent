@@ -19,6 +19,7 @@ const browserSymbols = [
   "presentRuntimeDiagnostics", "presentSettings", "buildNavigationModel", "queryTrajectory", "inspectTrajectory",
 ];
 for (const symbol of browserSymbols) assert(browser.includes(symbol), `browser bundle is missing ${symbol}`);
+assert(browser.includes("Plugins"), "browser bundle is missing the host-backed Plugins Settings section");
 
 for (const marker of ["@media (max-width: 900px)", "@media (max-width: 600px)", "aria-live"]) {
   assert(shell.includes(marker), `responsive/accessibility baseline is missing ${marker}`);
