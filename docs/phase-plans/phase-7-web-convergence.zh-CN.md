@@ -1,6 +1,17 @@
 # Phase 7：DSH Web 前端收敛与可观测工作台
 
-状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、terminal/job diagnostics、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection、7.1 shell layout state/reducer、mobile sidebar 行为、typed overlay state/reducer、queue dock/cancel/reorder surface、Session rename 生命周期、host-backed steer receipt、attachment capability gate/upload receipt 已完成；物理 Shell 拆分、Workspace reorder 生命周期和窄屏视觉基线继续推进）
+状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、terminal/job diagnostics、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection、7.1 shell layout state/reducer、mobile sidebar 行为、typed overlay state/reducer、物理 Shell frame mount/apply、queue dock/cancel/reorder surface、Session rename 生命周期、host-backed steer receipt、attachment capability gate/upload receipt 已完成；Workspace reorder 生命周期和窄屏视觉基线继续推进）
+
+## 当前执行 checkpoint：Physical Shell frame mount/apply（2026-08-23）
+
+本 checkpoint 将 Phase 7.1 的三栏 Shell frame 边界从静态入口中的 layout DOM 操作抽出为可测试 TypeScript 模块：
+
+- `apps/web/src/shell/app-frame.ts` 定义并挂载 `#app`、`#mobile-menu` 以及 Shell frame contract，统一应用 typed `ShellLayoutRenderIntent` 的 class、hidden 和 aria 状态；
+- `apps/web/src/browser.ts` 暴露 `mountShellFrame()` / `applyShellFrame()`，`apps/web/index.html` 在 typed bridge 可用时通过该边界更新布局，bundle 缺失时保留原有静态 fallback；
+- Conversation、Details、SessionStore 和 EventStore 事实来源未被 Shell frame 组件接管，仍由现有主 Session 流负责；
+- 新增 Shell frame unit tests，覆盖 mobile menu aria 语义与静态 fallback 缺少 frame contract 的降级行为。
+
+验证：`pnpm typecheck`、Shell 定向测试和 `git diff --check` 通过；完整 workspace 与 Phase 7 browser gate 在提交前执行。
 
 ## 当前执行 checkpoint：Host-backed steer receipt（2026-08-23）
 

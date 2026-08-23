@@ -555,6 +555,7 @@
         const typedConnection = typedRuntime?.connection || null;
         const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], models: null, capabilities: null, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', details: 'open', mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
         const app = document.querySelector('#app');
+        const shellFrame = typedRuntime?.mountShellFrame ? typedRuntime.mountShellFrame(document) : null;
         const list = document.querySelector('#session-list');
         const mcpList = document.querySelector('#mcp-list');
         const subagentList = document.querySelector('#subagent-list');
@@ -634,10 +635,13 @@
           if (typedRuntime?.reduceShellLayout) state.layout = typedRuntime.reduceShellLayout(state.layout, { type: 'set-viewport', viewport });
           if (typedRuntime?.presentShellLayout) {
             const intent = typedRuntime.presentShellLayout(state.layout, viewport);
-            app.className = intent.appClassName;
-            mobileMenu.hidden = !intent.mobileMenuVisible;
-            mobileMenu.setAttribute('aria-expanded', String(intent.mobileSidebarOpen));
-            mobileMenu.setAttribute('aria-label', intent.mobileSidebarOpen ? 'Close sidebar' : 'Open sidebar');
+            if (shellFrame && typedRuntime.applyShellFrame) typedRuntime.applyShellFrame(shellFrame, intent);
+            else {
+              app.className = intent.appClassName;
+              mobileMenu.hidden = !intent.mobileMenuVisible;
+              mobileMenu.setAttribute('aria-expanded', String(intent.mobileSidebarOpen));
+              mobileMenu.setAttribute('aria-label', intent.mobileSidebarOpen ? 'Close sidebar' : 'Open sidebar');
+            }
             return;
           }
           app.classList.toggle('sidebar-collapsed', state.layout.sidebar === 'collapsed');

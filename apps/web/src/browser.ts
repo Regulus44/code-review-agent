@@ -19,6 +19,7 @@ import { presentRuntimeDiagnostics } from "./presentation/job-presenter.js";
 import { createShellLayoutState, presentShellLayout, reduceShellLayout, shellViewport } from "./shell/layout.js";
 import { createShellBootState, normalizeBootError, presentShellBoot, reduceShellBoot } from "./shell/boot.js";
 import { createShellOverlayState, presentShellOverlay, reduceShellOverlay } from "./shell/overlay.js";
+import { applyShellFrame, mountShellFrame } from "./shell/app-frame.js";
 
 export interface BrowserWebRuntime {
   readonly api: WebApiClient;
@@ -58,6 +59,8 @@ export interface BrowserWebRuntime {
   readonly createShellOverlayState: typeof createShellOverlayState;
   readonly reduceShellOverlay: typeof reduceShellOverlay;
   readonly presentShellOverlay: typeof presentShellOverlay;
+  readonly mountShellFrame: typeof mountShellFrame;
+  readonly applyShellFrame: typeof applyShellFrame;
   readonly buildToolCallTree: typeof buildToolCallTree;
   readonly presentToolCall: typeof presentToolCall;
 }
@@ -103,6 +106,8 @@ const runtime: BrowserWebRuntime = {
   createShellOverlayState,
   reduceShellOverlay,
   presentShellOverlay,
+  mountShellFrame,
+  applyShellFrame,
   buildToolCallTree,
   presentToolCall,
 };

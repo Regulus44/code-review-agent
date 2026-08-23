@@ -1,5 +1,26 @@
 # Phase 7：DSH Web 前端收敛
 
+## 2026-08-23：Physical Shell frame mount/apply
+
+### 变更范围
+
+- 新增 `apps/web/src/shell/app-frame.ts`，把三栏 Shell 的 frame-owned DOM（`#app`、`#mobile-menu`）挂载和 layout intent 应用抽成 typed 边界。
+- `apps/web/src/browser.ts` 暴露 `mountShellFrame()` / `applyShellFrame()`；`apps/web/index.html` 优先走该 bridge，bundle 缺失时继续使用原有静态 layout fallback。
+- 新增 Shell frame 测试，验证 class、mobile menu `hidden`、`aria-expanded`、`aria-label` 以及缺少静态 frame 时的降级。
+
+### 验证
+
+```text
+pnpm typecheck ✓
+Shell 定向测试 ✓（5 tests）
+git diff --check ✓
+```
+
+### 下一步
+
+- Workspace reorder 生命周期的 durable host/API/Web 切片；
+- 窄屏视觉基线与 browser smoke。
+
 ## 2026-08-23：Attachment capability gate 与 upload receipt
 
 ### 变更范围
