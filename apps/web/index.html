@@ -434,6 +434,23 @@
       .settings-capability-status.deferred { color: #8f5c13; background: #fff4dc; }
       .settings-capability-status.unavailable { color: #a13c3c; background: #fff0f0; }
       .settings-muted { color: var(--text-tertiary); font-size: 10px; line-height: 1.5; }
+      .worktree-ledger { display: grid; gap: 7px; }
+      .worktree-record { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); }
+      .worktree-record.active { border-color: rgba(65,118,230,.35); background: var(--blue-soft); }
+      .worktree-record.dirty, .worktree-record.conflicted { border-color: rgba(192,67,67,.28); background: #fff8f8; }
+      .worktree-record-header { display: flex; align-items: center; gap: 7px; min-width: 0; }
+      .worktree-record-copy { min-width: 0; flex: 1; }
+      .worktree-record-label { display: block; overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 650; }
+      .worktree-record-meta { display: block; margin-top: 2px; overflow: hidden; color: var(--text-tertiary); text-overflow: ellipsis; white-space: nowrap; font: 9px ui-monospace, SFMono-Regular, Consolas, monospace; }
+      .worktree-status { flex: 0 0 auto; padding: 2px 5px; border-radius: 5px; color: var(--text-tertiary); background: var(--surface); font-size: 9px; }
+      .worktree-status.clean, .worktree-status.attached { color: var(--green); background: #edf9f1; }
+      .worktree-status.dirty, .worktree-status.conflicted, .worktree-status.failed { color: var(--red); background: #fff0f0; }
+      .worktree-record-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+      .worktree-action { display: inline-flex; align-items: center; padding: 4px 7px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-secondary); background: var(--surface); font-size: 9px; }
+      .worktree-action:hover:not(:disabled) { border-color: rgba(65,118,230,.28); color: var(--blue); background: var(--blue-soft); }
+      .worktree-action:disabled { cursor: not-allowed; opacity: .55; }
+      .worktree-create-row { display: flex; gap: 5px; margin-bottom: 7px; }
+      .worktree-create-row input { min-width: 0; flex: 1; height: 28px; padding: 0 7px; border: 1px solid var(--border); border-radius: 7px; color: var(--text); background: var(--surface); font-size: 10px; }
       @media (max-width: 1120px) { :root { --details-width: 260px; } }
       @media (max-width: 900px) {
         .app-shell,
@@ -586,7 +603,7 @@
       (() => {
         const typedRuntime = window.CodeReviewAgentWeb;
         const typedConnection = typedRuntime?.connection || null;
-        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], models: null, capabilities: null, workspaces: null, lastWorkspaceOrderSequence: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', details: 'open', mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
+        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, capabilities: null, workspaces: null, lastWorkspaceOrderSequence: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', details: 'open', mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
         const app = document.querySelector('#app');
         const shellFrame = typedRuntime?.mountShellFrame ? typedRuntime.mountShellFrame(document) : null;
         const list = document.querySelector('#session-list');
@@ -730,6 +747,7 @@
         const refreshWorkspaces = async () => { try { state.workspaces = typedRuntime?.api?.listWorkspaces ? await typedRuntime.api.listWorkspaces(state.showArchived) : await api(`/v1/workspaces${state.showArchived ? '?include_archived=true' : ''}`); } catch { state.workspaces = null; } };
         const refreshSessionList = async () => { const payload = await api(`/v1/sessions?include_archived=${state.showArchived}`); await refreshWorkspaces(); showSessionsTree(payload); archiveToggle.classList.toggle('active', state.showArchived); archiveToggle.setAttribute('aria-pressed', String(state.showArchived)); };
         const refreshSubagents = async () => { if (!state.session) { state.subagents = []; renderSubagents(); if (typedConnection) renderTaskPanel(typedConnection.store.getSnapshot()); return; } try { state.subagents = (await api(`/v1/sessions/${encodeURIComponent(state.session.id)}/subagents?scope=children`)).agents || []; } catch { state.subagents = []; } renderSubagents(); if (typedConnection) renderTaskPanel(typedConnection.store.getSnapshot()); };
+        const refreshWorktrees = async () => { if (!state.session || !typedRuntime?.api?.listWorktrees) { state.worktrees = []; return; } try { state.worktrees = (await typedRuntime.api.listWorktrees(state.session.id)).worktrees || []; } catch { state.worktrees = []; } };
          const setStatus = (text, connected = true) => { status.textContent = text; status.classList.toggle('disconnected', !connected); };
          const applyAttachmentCapability = () => { const capability = state.capabilities?.attachments; attach.disabled = capability?.enabled !== true; attach.title = capability?.enabled === true ? `Attach files (max ${Math.floor(capability.maxBytes / 1024)} KiB)` : capability?.reason || 'Attachments are unavailable'; attachmentInput.accept = capability?.enabled === true ? capability.allowedMediaTypes.filter((type) => capability.imagesEnabled || !type.startsWith('image/')).join(',') : ''; };
          const refreshCapabilities = async () => { state.capabilities = typedRuntime?.api?.listCapabilities ? await typedRuntime.api.listCapabilities() : await api('/v1/capabilities'); applyAttachmentCapability(); renderDetails(); };
@@ -1332,6 +1350,42 @@
           }
           if (!intent.visible) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = 'No terminal sessions or long-running jobs.'; body.append(empty); }
         };
+        const renderWorktreePanel = (snapshot) => {
+          let section = details.querySelector('#worktree-inspector-panel');
+          if (!section) {
+            section = document.createElement('section'); section.id = 'worktree-inspector-panel'; section.className = 'detail-section';
+            const label = document.createElement('div'); label.className = 'detail-label'; label.textContent = 'Git worktrees'; section.append(label);
+            const meta = document.createElement('div'); meta.className = 'trajectory-meta'; meta.id = 'worktree-ledger-meta'; section.append(meta);
+            const createRow = document.createElement('div'); createRow.className = 'worktree-create-row';
+            const branchInput = document.createElement('input'); branchInput.id = 'worktree-branch-input'; branchInput.placeholder = 'new branch (optional)'; branchInput.maxLength = 200; branchInput.setAttribute('aria-label', 'New worktree branch');
+            const create = document.createElement('button'); create.type = 'button'; create.className = 'worktree-action'; create.textContent = 'Create';
+            create.onclick = async () => {
+              if (!state.session || !typedRuntime?.api?.createWorktree) return;
+              create.disabled = true;
+              try { state.session = await typedRuntime.api.createWorktree(state.session.id, { ...(branchInput.value.trim() ? { branch: branchInput.value.trim() } : {}) }, commandKey()); typedConnection?.store.replaceProjection(state.session); branchInput.value = ''; await refreshWorktrees(); render(); }
+              catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); }
+              finally { create.disabled = false; }
+            };
+            createRow.append(branchInput, create); section.append(createRow);
+            const ledger = document.createElement('div'); ledger.className = 'worktree-ledger'; ledger.id = 'worktree-ledger'; section.append(ledger); details.append(section);
+          }
+          const meta = section.querySelector('#worktree-ledger-meta'); const ledger = section.querySelector('#worktree-ledger'); ledger.innerHTML = '';
+          const view = typedRuntime?.presentWorktrees ? typedRuntime.presentWorktrees(state.worktrees, snapshot?.session?.activeWorktreeId || state.session?.activeWorktreeId) : { visible: false, items: [], clean: 0, dirty: 0, conflicted: 0, summary: 'Worktree presenter unavailable.' };
+          meta.textContent = view.summary;
+          if (!view.items.length) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = 'No Git worktrees discovered, or the workspace is not a Git repository.'; ledger.append(empty); return; }
+          for (const item of view.items) {
+            const card = document.createElement('article'); card.className = `worktree-record ${item.status} ${item.id === (snapshot?.session?.activeWorktreeId || state.session?.activeWorktreeId) ? 'active' : ''}`;
+            const header = document.createElement('div'); header.className = 'worktree-record-header'; const copy = document.createElement('div'); copy.className = 'worktree-record-copy';
+            const label = document.createElement('span'); label.className = 'worktree-record-label'; label.textContent = item.label; label.title = item.path;
+            const pathText = document.createElement('span'); pathText.className = 'worktree-record-meta'; pathText.textContent = item.path;
+            copy.append(label, pathText); const status = document.createElement('span'); status.className = `worktree-status ${item.status}`; status.textContent = item.statusLabel; header.append(copy, status); card.append(header);
+            const actions = document.createElement('div'); actions.className = 'worktree-record-actions';
+            if (item.canAttach && typedRuntime?.api?.attachWorktree && state.session) { const attachButton = document.createElement('button'); attachButton.type = 'button'; attachButton.className = 'worktree-action'; attachButton.textContent = item.attached ? 'Attached' : 'Attach'; attachButton.disabled = item.attached; attachButton.onclick = async () => { attachButton.disabled = true; try { state.session = await typedRuntime.api.attachWorktree(state.session.id, item.id, commandKey()); typedConnection?.store.replaceProjection(state.session); await refreshWorktrees(); render(); } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); attachButton.disabled = false; } }; actions.append(attachButton); }
+            if (item.canSwitch && typedRuntime?.api?.switchWorktree && state.session) { const switchButton = document.createElement('button'); switchButton.type = 'button'; switchButton.className = 'worktree-action'; switchButton.textContent = 'Switch'; switchButton.onclick = async () => { switchButton.disabled = true; try { state.session = await typedRuntime.api.switchWorktree(state.session.id, item.id, commandKey()); typedConnection?.store.replaceProjection(state.session); await refreshWorktrees(); render(); } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); switchButton.disabled = false; } }; actions.append(switchButton); }
+            if (item.canCleanup && typedRuntime?.api?.cleanupWorktree && state.session) { const cleanup = document.createElement('button'); cleanup.type = 'button'; cleanup.className = 'worktree-action'; cleanup.textContent = item.dirty ? 'Force cleanup' : 'Cleanup'; cleanup.title = item.cleanupReason; cleanup.onclick = async () => { cleanup.disabled = true; try { state.session = await typedRuntime.api.cleanupWorktree(state.session.id, item.id, item.dirty, commandKey()); typedConnection?.store.replaceProjection(state.session); await refreshWorktrees(); render(); } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); cleanup.disabled = false; } }; actions.append(cleanup); }
+            card.append(actions); ledger.append(card);
+          }
+        };
         const trajectoryDetailsObserver = new MutationObserver(() => {
           if (!details.querySelector('#trajectory-inspector-panel')) renderTrajectoryPanel(typedConnection?.store.getSnapshot()?.trajectory);
           if (!details.querySelector('#task-inspector-panel')) renderTaskPanel(typedConnection?.store.getSnapshot());
@@ -1339,6 +1393,7 @@
           if (!details.querySelector('#mcp-inspector-panel')) renderMcpDetailsPanel();
           if (!details.querySelector('#request-recovery-panel')) renderRequestRecoveryPanel(typedConnection?.store.getSnapshot());
           if (!details.querySelector('#runtime-diagnostics-panel')) renderRuntimeDiagnosticsPanel(typedConnection?.store.getSnapshot());
+          if (!details.querySelector('#worktree-inspector-panel')) renderWorktreePanel(typedConnection?.store.getSnapshot());
           if (!details.querySelector('#planning-panel')) renderPlanningPanel(typedConnection?.store.getSnapshot());
         });
         trajectoryDetailsObserver.observe(details, { childList: true });
@@ -1367,6 +1422,7 @@
               renderMcpDetailsPanel();
               renderRequestRecoveryPanel(typedSnapshot);
               renderRuntimeDiagnosticsPanel(typedSnapshot);
+              renderWorktreePanel(typedSnapshot);
               renderPlanningPanel(typedSnapshot);
               requestAnimationFrame(() => { if (shouldFollowTail) conversation.scrollTop = conversation.scrollHeight; });
               return;
@@ -1623,12 +1679,16 @@
               renderConnectionBanner(snapshot);
               render();
               void refreshSubagents();
+              const latest = snapshot.events.at(-1);
+              if (latest?.type.startsWith('worktree/')) void refreshWorktrees().then(() => renderWorktreePanel(snapshot));
             };
             state.storeUnsubscribe = typedConnection.store.subscribe(syncTypedSnapshot);
             await typedConnection.open(id);
             syncTypedSnapshot(typedConnection.store.getSnapshot());
             await refreshSessionList();
             await refreshSubagents();
+            await refreshWorktrees();
+            renderWorktreePanel(typedConnection.store.getSnapshot());
             return;
           }
           state.session = await api(`/v1/sessions/${encodeURIComponent(id)}`);

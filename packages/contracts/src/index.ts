@@ -51,6 +51,11 @@ export type AgentEventType =
   | "todo/updated"
   | "context/compacted"
   | "context/compaction_failed"
+  | "worktree/created"
+  | "worktree/attached"
+  | "worktree/switched"
+  | "worktree/cleaned"
+  | "worktree/failed"
   | "tool/call"
   | "tool/progress"
   | "tool/result"
@@ -192,6 +197,9 @@ export interface SessionSummary {
   readonly childMode?: SubagentMode;
   readonly childProvider?: string;
   readonly delegationDepth?: number;
+  /** Worktree selected for tool execution, when the session has one. */
+  readonly activeWorktreeId?: string;
+  readonly activeWorkspaceRoot?: string;
 }
 
 export interface WorkspaceSummary {
@@ -316,6 +324,7 @@ export interface SessionProjection extends SessionSummary {
   readonly toolCalls: readonly ToolCallProjection[];
   readonly permissions: readonly PermissionProjection[];
   readonly contextCompaction?: ContextCompactionProjection;
+  readonly worktrees?: readonly WorktreeProjection[];
 }
 
 export type ContextCompactionStatus = "completed" | "failed";
@@ -328,6 +337,23 @@ export interface ContextCompactionProjection {
   readonly compactedMessageCount: number;
   readonly estimatedTokens: number;
   readonly droppedMessages: number;
+  readonly updatedAt: string;
+  readonly lastSequence: number;
+  readonly error?: string;
+}
+
+export type WorktreeStatus = "clean" | "dirty" | "conflicted" | "attached" | "removed" | "failed";
+
+export interface WorktreeProjection {
+  readonly id: string;
+  readonly repoRoot: string;
+  readonly path: string;
+  readonly status: WorktreeStatus;
+  readonly branch?: string;
+  readonly commit?: string;
+  readonly sessionId?: SessionId;
+  readonly taskId?: TaskId;
+  readonly createdAt: string;
   readonly updatedAt: string;
   readonly lastSequence: number;
   readonly error?: string;

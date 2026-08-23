@@ -95,6 +95,8 @@ mcp/prompt
 
 `context/compacted` 记录一次模型上下文压缩的 durable receipt：`sourceSequence`、bounded `summary`、原始/压缩后消息数、估算 token、丢弃数和受保护 tool 数。`context/compaction_failed` 记录失败原因并保留原上下文，不能因为压缩失败而丢弃 pending permission、pending interaction、running task 或 tool-call/tool-result 边界。Web 只展示 receipt，不把摘要当作新的用户事实。
 
+`worktree/*` 记录 Git worktree 的发现、绑定、切换、清理和失败。payload 至少包含 `{ id, repoRoot, path, status }`，可选包含 `branch`、`commit`、`sessionId`、`taskId` 和 bounded `error`。`worktree/switched` 还使 Session projection 的 `activeWorktreeId` 与 `activeWorkspaceRoot` 指向该 worktree；工具、权限和 system prompt 使用 active root，但主仓库 root 仍保留为 Session 的 `workspaceRoot`。清理必须先检查 dirty/conflicted 状态，除非显式 force，否则不能删除未提交修改；主仓库 worktree 永远不能被清理。
+
 MCP 生命周期事件只携带 `serverName`、状态、动作和脱敏错误；env/header/token 等配置秘密不得进入 payload。MCP 工具调用本身仍使用公共 `tool/*` 和 `permission/*` 事件。`mcp/resource` / `mcp/prompt` 只记录 server、资源 URI 或 prompt name、动作、bounded bytes/truncated 和 trust marker，不记录远端原始内容。
 
 `turn/steered` 表示用户向当前运行中的 turn 追加一条指导。payload 至少包含 `{ content, receiptId, status: "accepted" }`，并通过 `correlationId` 关联幂等 command。该事件先落盘，再注入下一次模型请求；它不会覆盖原始 `user/message`，回放时作为同一 turn 下的独立 user message。非运行中的 turn 返回 `accepted: false`，不追加 steer 事件。

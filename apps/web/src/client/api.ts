@@ -17,6 +17,7 @@ import type {
   ToolSource,
   TurnId,
   WorkspaceCatalog,
+  WorktreeProjection,
 } from "@code-review-agent/contracts";
 
 export interface ToolCatalogEntry {
@@ -308,6 +309,26 @@ export class WebApiClient {
       commandId,
       body: { todos, ...(expectedSequence === undefined ? {} : { expectedSequence }) },
     });
+  }
+
+  listWorktrees(sessionId: SessionId): Promise<{ readonly worktrees: readonly WorktreeProjection[] }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/worktrees`);
+  }
+
+  createWorktree(sessionId: SessionId, input: { readonly id?: string; readonly path?: string; readonly branch?: string; readonly taskId?: string }, commandId?: string): Promise<SessionProjection> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/worktrees`, { method: "POST", commandId, body: input });
+  }
+
+  attachWorktree(sessionId: SessionId, worktreeId: string, commandId?: string): Promise<SessionProjection> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/worktrees/${encodeURIComponent(worktreeId)}/attach`, { method: "POST", commandId, body: {} });
+  }
+
+  switchWorktree(sessionId: SessionId, worktreeId: string, commandId?: string): Promise<SessionProjection> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/worktrees/${encodeURIComponent(worktreeId)}/switch`, { method: "POST", commandId, body: {} });
+  }
+
+  cleanupWorktree(sessionId: SessionId, worktreeId: string, force = false, commandId?: string): Promise<SessionProjection> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/worktrees/${encodeURIComponent(worktreeId)}/cleanup`, { method: "POST", commandId, body: { force } });
   }
 
   listTools(sessionId?: SessionId): Promise<{ readonly tools: readonly ToolCatalogEntry[] }> {

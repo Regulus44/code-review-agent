@@ -155,4 +155,29 @@ describe("WebApiClient", () => {
     expect(calls[0]).toContain("limit=2");
     expect(page).toMatchObject({ hasMoreBefore: true, oldestSequence: 8, newestSequence: 9 });
   });
+
+  it("builds typed worktree lifecycle commands", async () => {
+    const calls: { url: string; init?: RequestInit | undefined }[] = [];
+    const client = new WebApiClient({
+      baseUrl: "http://localhost:4317",
+      fetcher: async (input, init) => {
+        calls.push({ url: String(input), init });
+        return new Response(JSON.stringify({ id: "ses_worktree", worktrees: [] }), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+    await client.listWorktrees("ses/worktree" as never);
+    await client.createWorktree("ses/worktree" as never, { branch: "feature/api" }, "wt-create");
+    await client.attachWorktree("ses/worktree" as never, "wt_1", "wt-attach");
+    await client.switchWorktree("ses/worktree" as never, "wt_1", "wt-switch");
+    await client.cleanupWorktree("ses/worktree" as never, "wt_1", true, "wt-clean");
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://localhost:4317/v1/sessions/ses%2Fworktree/worktrees",
+      "http://localhost:4317/v1/sessions/ses%2Fworktree/worktrees",
+      "http://localhost:4317/v1/sessions/ses%2Fworktree/worktrees/wt_1/attach",
+      "http://localhost:4317/v1/sessions/ses%2Fworktree/worktrees/wt_1/switch",
+      "http://localhost:4317/v1/sessions/ses%2Fworktree/worktrees/wt_1/cleanup",
+    ]);
+    expect(new Headers(calls[4]?.init?.headers).get("idempotency-key")).toBe("wt-clean");
+    expect(calls[4]?.init?.body).toBe(JSON.stringify({ force: true }));
+  });
 });

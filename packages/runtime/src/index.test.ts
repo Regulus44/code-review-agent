@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { AttachmentReceipt, ChatModel, InteractionId, ModelRequest, ModelStreamPart, PermissionId, ToolDefinition } from "@code-review-agent/contracts";
 import { InMemoryEventStore } from "@code-review-agent/storage";
 import { createBuiltinTools, DefaultPermissionPolicy, ToolRegistry, ToolRuntime } from "@code-review-agent/tools";
+import { GitWorktreeManager } from "@code-review-agent/workspace";
 import { AgentHost } from "./index.js";
+
+const execFileAsync = promisify(execFile);
 
 describe("AgentHost", () => {
   it("gives the model an explicit workspace and tool-use contract", async () => {
@@ -504,5 +512,96 @@ describe("AgentHost", () => {
     expect(events.at(-1)?.type).toBe("turn/ended");
     expect(events.at(-1)?.payload["status"]).toBe("failed");
     expect((await host.getSession(session.id))?.status).toBe("failed");
+  });
+
+  it("durably creates, switches, protects and replays a Git worktree", async () => {
+    try { await execFileAsync("git", ["--version"]); } catch { return; }
+    const parent = await mkdtemp(path.join(tmpdir(), "cra-runtime-worktree-"));
+    const repo = path.join(parent, "repo");
+    try {
+      await execFileAsync("git", ["init", "-q", repo]);
+      await execFileAsync("git", ["-C", repo, "config", "user.email", "agent@example.test"]);
+      await execFileAsync("git", ["-C", repo, "config", "user.name", "Coding Agent"]);
+      await writeFile(path.join(repo, "README.md"), "initial\n", "utf8");
+      await execFileAsync("git", ["-C", repo, "add", "README.md"]);
+      await execFileAsync("git", ["-C", repo, "commit", "-qm", "initial"]);
+      const store = new InMemoryEventStore();
+      const host = new AgentHost({ store });
+      const session = await host.createSession(repo);
+      const first = await host.createWorktree(session.id, { id: "feature-one", branch: "feature/one" }, "worktree-create-1");
+      const repeated = await host.createWorktree(session.id, { id: "feature-one", branch: "feature/one" }, "worktree-create-1");
+      expect(repeated.worktrees).toHaveLength(1);
+      const createdEvents = (await host.events(session.id)).filter((event) => event.type === "worktree/created");
+      expect(createdEvents).toHaveLength(1);
+      const created = first.worktrees?.find((item) => item.id === "feature-one");
+      expect(created?.status).toBe("clean");
+      const switched = await host.switchWorktree(session.id, "feature-one", "worktree-switch-1");
+      expect(switched.activeWorktreeId).toBe("feature-one");
+      expect(switched.activeWorkspaceRoot).toBe(created?.path);
+      await writeFile(path.join(created!.path, "dirty.txt"), "dirty\n", "utf8");
+      await expect(host.cleanupWorktree(session.id, "feature-one", false, "worktree-cleanup-1")).rejects.toMatchObject({ code: "WORKTREE_DIRTY" });
+      const cleaned = await host.cleanupWorktree(session.id, "feature-one", true, "worktree-cleanup-2");
+      expect(cleaned.activeWorktreeId).toBeUndefined();
+      expect(cleaned.worktrees?.find((item) => item.id === "feature-one")?.status).toBe("removed");
+      const restarted = new AgentHost({ store });
+      expect((await restarted.getSession(session.id))?.worktrees?.find((item) => item.id === "feature-one")?.status).toBe("removed");
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("recovers a pending worktree create after the Git side effect already happened", async () => {
+    try { await execFileAsync("git", ["--version"]); } catch { return; }
+    const parent = await mkdtemp(path.join(tmpdir(), "cra-runtime-worktree-recovery-"));
+    const repo = path.join(parent, "repo");
+    const linked = path.join(parent, "linked");
+    try {
+      await execFileAsync("git", ["init", "-q", repo]);
+      await execFileAsync("git", ["-C", repo, "config", "user.email", "agent@example.test"]);
+      await execFileAsync("git", ["-C", repo, "config", "user.name", "Coding Agent"]);
+      await writeFile(path.join(repo, "README.md"), "initial\n", "utf8");
+      await execFileAsync("git", ["-C", repo, "add", "README.md"]);
+      await execFileAsync("git", ["-C", repo, "commit", "-qm", "initial"]);
+
+      const store = new InMemoryEventStore();
+      const host = new AgentHost({ store });
+      const session = await host.createSession(repo);
+      await store.claimCommand({ sessionId: session.id, commandId: "worktree-crash-1", kind: "create_worktree", request: { id: "recovered", branch: "feature/recovered", path: linked }, result: { status: "pending" } });
+      await new GitWorktreeManager(repo).create({ id: "recovered", branch: "feature/recovered", path: linked });
+
+      const recovered = await host.createWorktree(session.id, { id: "recovered", branch: "feature/recovered", path: linked }, "worktree-crash-1");
+      expect(recovered.worktrees).toHaveLength(1);
+      expect(recovered.worktrees?.[0]).toMatchObject({ id: "recovered", path: path.resolve(linked), branch: "feature/recovered", status: "clean" });
+      expect((await host.events(session.id)).filter((event) => event.type === "worktree/created")).toHaveLength(1);
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("serializes concurrent creates and never projects duplicate paths", async () => {
+    try { await execFileAsync("git", ["--version"]); } catch { return; }
+    const parent = await mkdtemp(path.join(tmpdir(), "cra-runtime-worktree-lock-"));
+    const repo = path.join(parent, "repo");
+    const linked = path.join(parent, "linked");
+    try {
+      await execFileAsync("git", ["init", "-q", repo]);
+      await execFileAsync("git", ["-C", repo, "config", "user.email", "agent@example.test"]);
+      await execFileAsync("git", ["-C", repo, "config", "user.name", "Coding Agent"]);
+      await writeFile(path.join(repo, "README.md"), "initial\n", "utf8");
+      await execFileAsync("git", ["-C", repo, "add", "README.md"]);
+      await execFileAsync("git", ["-C", repo, "commit", "-qm", "initial"]);
+      const host = new AgentHost({ store: new InMemoryEventStore() });
+      const session = await host.createSession(repo);
+      const results = await Promise.allSettled([
+        host.createWorktree(session.id, { id: "lock-one", branch: "feature/lock", path: linked }, "worktree-lock-1"),
+        host.createWorktree(session.id, { id: "lock-two", branch: "feature/lock", path: linked }, "worktree-lock-2"),
+      ]);
+      expect(results.filter((item) => item.status === "fulfilled")).toHaveLength(1);
+      expect(results.find((item) => item.status === "rejected")?.reason).toMatchObject({ code: "WORKTREE_EXISTS" });
+      expect((await host.getSession(session.id))?.worktrees).toHaveLength(1);
+      expect((await host.events(session.id)).filter((event) => event.type === "worktree/created")).toHaveLength(1);
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+    }
   });
 });

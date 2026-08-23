@@ -132,6 +132,28 @@ describe("InMemoryEventStore", () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
+  it("replays worktree lifecycle and active root across SQLite reopen", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-worktree-replay-"));
+    const databasePath = join(directory, "agent.sqlite");
+    const first = new SqliteEventStore({ databasePath });
+    const sessionId = await first.createSession("D:/repo");
+    await first.append({ sessionId, type: "worktree/created", payload: { id: "wt_feature", repoRoot: "D:/repo", path: "D:/repo-worktree", branch: "feature/test", status: "clean", sessionId: String(sessionId) } });
+    await first.append({ sessionId, type: "worktree/switched", payload: { id: "wt_feature", repoRoot: "D:/repo", path: "D:/repo-worktree", branch: "feature/test", status: "attached", sessionId: String(sessionId) } });
+    const active = await first.project(sessionId);
+    expect(active).toMatchObject({ activeWorktreeId: "wt_feature", activeWorkspaceRoot: "D:/repo-worktree" });
+    const events = await first.list(sessionId);
+    first.close();
+
+    const second = new SqliteEventStore({ databasePath });
+    expect(await second.project(sessionId)).toEqual(active);
+    expect((await second.list(sessionId)).map((event) => event.type)).toEqual(events.map((event) => event.type));
+    await second.append({ sessionId, type: "worktree/cleaned", payload: { id: "wt_feature", repoRoot: "D:/repo", path: "D:/repo-worktree", branch: "feature/test", status: "removed", sessionId: String(sessionId) } });
+    expect((await second.project(sessionId))?.worktrees?.[0]).toMatchObject({ id: "wt_feature", status: "removed" });
+    expect((await second.project(sessionId))?.activeWorktreeId).toBeUndefined();
+    second.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
   it("keeps session sequences monotonic under concurrent appends", async () => {
     const store = new SqliteEventStore(":memory:");
     const sessionId = await store.createSession("D:/workspace");

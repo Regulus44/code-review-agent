@@ -368,6 +368,34 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       sendJson(response, 200, await host.updateTodos(id, parseTodoItems(body.todos), optionalSequence(body.expectedSequence), commandId(request, body)));
       return;
     }
+    const worktreesMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/worktrees$/u);
+    if (worktreesMatch?.[1] !== undefined) {
+      const id = sessionId(decodeURIComponent(worktreesMatch[1]));
+      if (request.method === "GET") {
+        sendJson(response, 200, { worktrees: await host.listWorktrees(id) });
+        return;
+      }
+      if (request.method === "POST") {
+        const body = await readJson(request);
+        sendJson(response, 201, await host.createWorktree(id, {
+          ...(body.id === undefined ? {} : { id: requireString(body.id, "id") }),
+          ...(body.path === undefined ? {} : { path: requireString(body.path, "path") }),
+          ...(body.branch === undefined ? {} : { branch: requireString(body.branch, "branch") }),
+          ...(body.taskId === undefined ? {} : { taskId: requireString(body.taskId, "taskId") }),
+        }, commandId(request, body)));
+        return;
+      }
+    }
+    const worktreeActionMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/worktrees\/([^/]+)\/(attach|switch|cleanup)$/u);
+    if (request.method === "POST" && worktreeActionMatch?.[1] !== undefined && worktreeActionMatch[2] !== undefined && worktreeActionMatch[3] !== undefined) {
+      const id = sessionId(decodeURIComponent(worktreeActionMatch[1]));
+      const worktreeId = decodeURIComponent(worktreeActionMatch[2]);
+      const body = await readJson(request);
+      if (worktreeActionMatch[3] === "attach") sendJson(response, 200, await host.attachWorktree(id, worktreeId, commandId(request, body)));
+      else if (worktreeActionMatch[3] === "switch") sendJson(response, 200, await host.switchWorktree(id, worktreeId, commandId(request, body)));
+      else sendJson(response, 200, await host.cleanupWorktree(id, worktreeId, body.force === true, commandId(request, body)));
+      return;
+    }
     const archiveMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/archive$/u);
     if (request.method === "POST" && archiveMatch?.[1] !== undefined) {
       const id = sessionId(decodeURIComponent(archiveMatch[1]));
@@ -563,7 +591,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     throw new HttpError(404, "not found");
   } catch (error) {
     const code = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : "";
-    const status = error instanceof HttpError ? error.status : code === "INVALID_TOOL_INPUT" ? 400 : code === "TOOL_NOT_FOUND" ? 404 : code === "TOOL_DISABLED" ? 409 : code === "MODEL_CONFIGURATION_ERROR" ? 400 : code === "COMMAND_CONFLICT" ? 409 : 500;
+    const status = error instanceof HttpError ? error.status : code === "INVALID_TOOL_INPUT" ? 400 : code === "TOOL_NOT_FOUND" ? 404 : code === "TOOL_DISABLED" ? 409 : code === "MODEL_CONFIGURATION_ERROR" ? 400 : code === "COMMAND_CONFLICT" || code === "WORKTREE_DIRTY" || code === "WORKTREE_INVALID" || code === "WORKTREE_EXISTS" ? 409 : 500;
     const message = error instanceof Error ? error.message : String(error);
     if (!response.headersSent) sendJson(response, status, { error: message });
     else response.end();

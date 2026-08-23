@@ -46,6 +46,8 @@ import {
   type McpConfigRecord,
   type McpCredentialReference,
   type ContextCompactionProjection,
+  type WorktreeProjection,
+  type WorktreeStatus,
 } from "@code-review-agent/contracts";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
@@ -221,6 +223,10 @@ function interactionStatus(value: unknown, fallback: InteractionStatus): Interac
   return value === "pending" || value === "answered" || value === "cancelled" || value === "expired" ? value : fallback;
 }
 
+function worktreeStatus(value: unknown, fallback: WorktreeStatus): WorktreeStatus {
+  return value === "clean" || value === "dirty" || value === "conflicted" || value === "attached" || value === "removed" || value === "failed" ? value : fallback;
+}
+
 function interactionOptions(value: unknown): readonly InteractionOption[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item): InteractionOption[] => {
@@ -260,6 +266,11 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
   if (event.type === "session/created" || event.type === "session/updated" || event.type === "session/deleted") {
     const workspaceRoot = event.payload["workspaceRoot"];
     if (typeof workspaceRoot === "string") next = { ...next, workspaceRoot };
+    if (typeof event.payload["activeWorkspaceRoot"] === "string") next = { ...next, activeWorkspaceRoot: event.payload["activeWorkspaceRoot"] };
+    if (event.payload["activeWorkspaceRoot"] === null) {
+      const { activeWorkspaceRoot: _activeWorkspaceRoot, activeWorktreeId: _activeWorktreeId, ...withoutActiveWorktree } = next;
+      next = withoutActiveWorktree;
+    }
     if (typeof event.payload["title"] === "string") next = { ...next, title: event.payload["title"] as string };
     const permissionPreset = event.payload["permissionPreset"];
     if (isPermissionPreset(permissionPreset)) next = { ...next, permissionPreset };
@@ -491,6 +502,34 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
       ...(typeof payload["error"] === "string" ? { error: payload["error"] } : {}),
     };
     next = { ...next, contextCompaction: projection };
+  }
+
+  if (event.type === "worktree/created" || event.type === "worktree/attached" || event.type === "worktree/switched" || event.type === "worktree/cleaned" || event.type === "worktree/failed") {
+    const rawId = event.payload["id"];
+    const rawPath = event.payload["path"];
+    const rawRepoRoot = event.payload["repoRoot"];
+    if (typeof rawId === "string" && typeof rawPath === "string" && typeof rawRepoRoot === "string") {
+      const current = (next.worktrees ?? []).find((item) => item.id === rawId);
+      const worktree: WorktreeProjection = {
+        ...(current ?? { id: rawId, repoRoot: rawRepoRoot, path: rawPath, status: "clean" as const, createdAt: event.createdAt, updatedAt: event.createdAt, lastSequence: event.sequence }),
+        repoRoot: rawRepoRoot,
+        path: rawPath,
+        status: worktreeStatus(event.payload["status"], event.type === "worktree/cleaned" ? "removed" : current?.status ?? "clean"),
+        ...(typeof event.payload["branch"] === "string" ? { branch: event.payload["branch"] } : {}),
+        ...(typeof event.payload["commit"] === "string" ? { commit: event.payload["commit"] } : {}),
+        ...(typeof event.payload["sessionId"] === "string" ? { sessionId: brand<string, "SessionId">(event.payload["sessionId"]) } : {}),
+        ...(typeof event.payload["taskId"] === "string" ? { taskId: brand<string, "TaskId">(event.payload["taskId"]) } : {}),
+        ...(typeof event.payload["error"] === "string" ? { error: event.payload["error"] } : {}),
+        updatedAt: event.createdAt,
+        lastSequence: event.sequence,
+      };
+      next = { ...next, worktrees: current === undefined ? [...(next.worktrees ?? []), worktree] : (next.worktrees ?? []).map((item) => item.id === rawId ? worktree : item) };
+      if (event.type === "worktree/switched") next = { ...next, activeWorktreeId: rawId, activeWorkspaceRoot: rawPath };
+      if (event.type === "worktree/cleaned" && next.activeWorktreeId === rawId) {
+        const { activeWorktreeId: _activeWorktreeId, activeWorkspaceRoot: _activeWorkspaceRoot, ...withoutActiveWorktree } = next;
+        next = withoutActiveWorktree;
+      }
+    }
   }
 
   if (event.type === "tool/call" || event.type === "tool/progress" || event.type === "tool/result") {
@@ -1172,6 +1211,8 @@ function toSummary(projection: SessionProjection): SessionSummary {
     ...(projection.childMode === undefined ? {} : { childMode: projection.childMode }),
     ...(projection.childProvider === undefined ? {} : { childProvider: projection.childProvider }),
     ...(projection.delegationDepth === undefined ? {} : { delegationDepth: projection.delegationDepth }),
+    ...(projection.activeWorktreeId === undefined ? {} : { activeWorktreeId: projection.activeWorktreeId }),
+    ...(projection.activeWorkspaceRoot === undefined ? {} : { activeWorkspaceRoot: projection.activeWorkspaceRoot }),
   };
 }
 
@@ -1198,6 +1239,8 @@ function readSummary(row: SqliteRow): SessionSummary {
     ...(projection?.childMode === undefined ? {} : { childMode: projection.childMode }),
     ...(projection?.childProvider === undefined ? {} : { childProvider: projection.childProvider }),
     ...(projection?.delegationDepth === undefined ? {} : { delegationDepth: projection.delegationDepth }),
+    ...(projection?.activeWorktreeId === undefined ? {} : { activeWorktreeId: projection.activeWorktreeId }),
+    ...(projection?.activeWorkspaceRoot === undefined ? {} : { activeWorkspaceRoot: projection.activeWorkspaceRoot }),
   };
 }
 

@@ -257,17 +257,33 @@ function foldProjection(session: SessionProjection, event: AgentEvent): SessionP
         const title = stringValue(payload["title"]);
         const preset = stringValue(payload["permissionPreset"]);
         const archived = booleanValue(payload["archived"]);
+        const activeWorkspaceRoot = stringValue(payload["activeWorkspaceRoot"]);
+        const clearedActive = payload["activeWorkspaceRoot"] === null;
+        const base = clearedActive
+          ? (() => { const { activeWorkspaceRoot: _activeWorkspaceRoot, activeWorktreeId: _activeWorktreeId, ...withoutActiveWorktree } = session; return withoutActiveWorktree; })()
+          : session;
         return {
-          ...session,
+          ...base,
           ...(title === undefined ? {} : { title }),
           ...(preset === undefined ? {} : { permissionPreset: preset as SessionProjection["permissionPreset"] }),
           ...(archived === undefined ? {} : { archived }),
+          ...(activeWorkspaceRoot === undefined ? {} : { activeWorkspaceRoot }),
           updatedAt: event.createdAt,
           lastSequence: event.sequence,
         };
       }
     case "session/deleted":
       return { ...session, deleted: true, updatedAt: event.createdAt, lastSequence: event.sequence };
+    case "worktree/switched": {
+      const id = stringValue(payload["id"]);
+      const root = stringValue(payload["path"]);
+      return { ...session, ...(id === undefined ? {} : { activeWorktreeId: id }), ...(root === undefined ? {} : { activeWorkspaceRoot: root }), updatedAt: event.createdAt, lastSequence: event.sequence };
+    }
+    case "worktree/cleaned": {
+      if (session.activeWorktreeId !== stringValue(payload["id"])) return { ...session, updatedAt: event.createdAt, lastSequence: event.sequence };
+      const { activeWorktreeId: _activeWorktreeId, activeWorkspaceRoot: _activeWorkspaceRoot, ...withoutActiveWorktree } = session;
+      return { ...withoutActiveWorktree, updatedAt: event.createdAt, lastSequence: event.sequence };
+    }
     case "user/message": {
       const content = stringValue(payload["content"]);
       if (content === undefined) return session;

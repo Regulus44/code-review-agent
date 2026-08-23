@@ -27,12 +27,14 @@ import {
   type GoalStatus,
   type PlanStatus,
   type TodoItem,
+  type WorktreeProjection,
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { compactMessages, type ContextBudget } from "@code-review-agent/compaction";
 import { randomUUID } from "node:crypto";
 import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type ExecuteToolOutput, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
 import type { SubagentRuntime } from "@code-review-agent/subagent";
+import { GitWorktreeManager } from "@code-review-agent/workspace";
 import { buildAgentSystemPrompt } from "./system-prompt.js";
 
 export interface AgentHostOptions {
@@ -105,6 +107,7 @@ export class AgentHost {
   private readonly toolPromptRegistry: ToolPromptRegistry;
   private readonly compactionEnabled: boolean;
   private readonly contextBudget: Partial<ContextBudget> | undefined;
+  private readonly worktreeOperations = new Map<SessionId, Promise<void>>();
 
   constructor(private readonly options: AgentHostOptions) {
     this.model = options.model ?? new EchoChatModel();
@@ -470,6 +473,150 @@ export class AgentHost {
     return updated;
   }
 
+  async listWorktrees(sessionId: SessionId): Promise<readonly WorktreeProjection[]> {
+    await this.ready;
+    const current = await this.options.store.project(sessionId);
+    if (current === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    const manager = new GitWorktreeManager(current.workspaceRoot);
+    const discovered = await manager.list();
+    const durable = new Map((current.worktrees ?? []).map((item) => [item.path, item] as const));
+    const live = discovered.map((item) => {
+      const owned = durable.get(item.path);
+      const status = item.status === "clean" && owned?.status === "attached" ? "attached" : item.status;
+      return { ...item, status, ...(owned?.id === undefined ? {} : { id: owned.id }), ...(owned?.sessionId === undefined ? {} : { sessionId: owned.sessionId }), ...(owned?.taskId === undefined ? {} : { taskId: owned.taskId }) };
+    });
+    const livePaths = new Set(live.map((item) => item.path));
+    return [...live, ...(current.worktrees ?? []).filter((item) => !livePaths.has(item.path))];
+  }
+
+  async createWorktree(sessionId: SessionId, input: { readonly id?: string; readonly path?: string; readonly branch?: string; readonly taskId?: string } = {}, commandId?: string): Promise<SessionProjection> {
+    return this.withWorktreeLock(sessionId, async () => {
+      await this.ready;
+      const current = await this.options.store.project(sessionId);
+      if (current === undefined) throw new Error(`Unknown session: ${sessionId}`);
+      const idempotencyKey = commandId ?? `cmd_${randomUUID()}`;
+      const normalizedInput = input.id === undefined && input.path === undefined && input.branch === undefined
+        ? { ...input, id: stableWorktreeId(idempotencyKey) }
+        : input;
+      const existingCommand = await this.options.store.getCommand(sessionId, idempotencyKey);
+      if (existingCommand !== undefined) {
+        const recorded = (current.worktrees ?? []).find((item) => item.id === normalizedInput.id || (normalizedInput.path !== undefined && item.path === normalizedInput.path));
+        const commandStatus = typeof existingCommand.result === "object" && existingCommand.result !== null ? (existingCommand.result as { readonly status?: unknown }).status : undefined;
+        if (recorded !== undefined || commandStatus !== "pending") return current;
+      }
+      const claim = existingCommand === undefined
+        ? await this.options.store.claimCommand({ sessionId, commandId: idempotencyKey, kind: "create_worktree", request: normalizedInput, result: { status: "pending" } })
+        : { created: false, record: existingCommand };
+      if (!claim.created && (current.worktrees ?? []).some((item) => item.id === normalizedInput.id || (normalizedInput.path !== undefined && item.path === normalizedInput.path))) return current;
+      const manager = new GitWorktreeManager(current.workspaceRoot);
+      let record: WorktreeProjection;
+      try {
+        const discovered = (await manager.list()).find((item) =>
+          (normalizedInput.path !== undefined && item.path === normalizedInput.path)
+          || (normalizedInput.branch !== undefined && item.branch === normalizedInput.branch));
+        if (discovered !== undefined && existingCommand === undefined) {
+          const error = new Error(`Worktree already exists at ${discovered.path}`);
+          Object.assign(error, { code: "WORKTREE_EXISTS" });
+          throw error;
+        }
+        record = discovered === undefined
+          ? await manager.create({ ...normalizedInput, sessionId: String(sessionId) })
+          : { ...discovered, ...(normalizedInput.id === undefined ? {} : { id: normalizedInput.id }), sessionId };
+      } catch (error) {
+        const code = error instanceof Error && "code" in error ? (error as { readonly code?: unknown }).code : undefined;
+        if (code !== "WORKTREE_EXISTS") {
+          await this.options.store.append({ sessionId, correlationId: idempotencyKey, type: "worktree/failed", payload: { id: normalizedInput.id ?? `wt_${randomUUID()}`, repoRoot: current.workspaceRoot, path: normalizedInput.path ?? "", status: "failed", error: error instanceof Error ? error.message : String(error) } });
+        }
+        throw error;
+      }
+      await this.options.store.append({ sessionId, correlationId: idempotencyKey, type: "worktree/created", payload: worktreePayload(record, sessionId, normalizedInput.taskId) });
+      const updated = await this.options.store.project(sessionId);
+      if (updated === undefined) throw new Error(`Session disappeared: ${sessionId}`);
+      return updated;
+    });
+  }
+
+  async attachWorktree(sessionId: SessionId, worktreeId: string, commandId?: string): Promise<SessionProjection> {
+    return this.withWorktreeLock(sessionId, async () => {
+      await this.ready;
+      const current = await this.options.store.project(sessionId);
+      if (current === undefined) throw new Error(`Unknown session: ${sessionId}`);
+      const existing = (await this.listWorktrees(sessionId)).find((item) => item.id === worktreeId);
+      if (existing === undefined || existing.status === "removed" || existing.status === "failed") throw new Error(`Unknown or unavailable worktree: ${worktreeId}`);
+      const idempotencyKey = commandId ?? `cmd_${randomUUID()}`;
+      const prior = await this.options.store.getCommand(sessionId, idempotencyKey);
+      if (prior !== undefined) return current;
+      const claim = await this.options.store.claimCommand({ sessionId, commandId: idempotencyKey, kind: "attach_worktree", request: { worktreeId }, result: { worktreeId } });
+      if (!claim.created) return current;
+      await this.options.store.append({ sessionId, correlationId: idempotencyKey, type: "worktree/attached", payload: worktreePayload({ ...existing, status: "attached", sessionId }, sessionId, existing.taskId === undefined ? undefined : String(existing.taskId)) });
+      const updated = await this.options.store.project(sessionId);
+      if (updated === undefined) throw new Error(`Session disappeared: ${sessionId}`);
+      return updated;
+    });
+  }
+
+  async switchWorktree(sessionId: SessionId, worktreeId: string, commandId?: string): Promise<SessionProjection> {
+    return this.withWorktreeLock(sessionId, async () => {
+      await this.ready;
+      const current = await this.options.store.project(sessionId);
+      if (current === undefined) throw new Error(`Unknown session: ${sessionId}`);
+      const existing = (await this.listWorktrees(sessionId)).find((item) => item.id === worktreeId);
+      if (existing === undefined || existing.status === "removed" || existing.status === "failed") throw new Error(`Unknown or unavailable worktree: ${worktreeId}`);
+      const idempotencyKey = commandId ?? `cmd_${randomUUID()}`;
+      const claim = await this.options.store.claimCommand({ sessionId, commandId: idempotencyKey, kind: "switch_worktree", request: { worktreeId }, result: { worktreeId, path: existing.path } });
+      if (!claim.created) return current;
+      await this.options.store.append({ sessionId, correlationId: idempotencyKey, type: "worktree/switched", payload: worktreePayload({ ...existing, status: "attached", sessionId }, sessionId, existing.taskId === undefined ? undefined : String(existing.taskId)) });
+      const updated = await this.options.store.project(sessionId);
+      if (updated === undefined) throw new Error(`Session disappeared: ${sessionId}`);
+      return updated;
+    });
+  }
+
+  async cleanupWorktree(sessionId: SessionId, worktreeId: string, force = false, commandId?: string): Promise<SessionProjection> {
+    return this.withWorktreeLock(sessionId, async () => {
+      await this.ready;
+      const current = await this.options.store.project(sessionId);
+      if (current === undefined) throw new Error(`Unknown session: ${sessionId}`);
+      const existing = (current.worktrees ?? []).find((item) => item.id === worktreeId);
+      if (existing === undefined) throw new Error(`Unknown worktree: ${worktreeId}`);
+      const idempotencyKey = commandId ?? `cmd_${randomUUID()}`;
+      const prior = await this.options.store.getCommand(sessionId, idempotencyKey);
+      if (prior !== undefined && !isPendingCommand(prior)) return current;
+      const claim = prior === undefined
+        ? await this.options.store.claimCommand({ sessionId, commandId: idempotencyKey, kind: "cleanup_worktree", request: { worktreeId, force }, result: { status: "pending", worktreeId } })
+        : { created: false, record: prior };
+      if (!claim.created && !isPendingCommand(claim.record)) return current;
+      const manager = new GitWorktreeManager(existing.repoRoot);
+      let removed: WorktreeProjection;
+      try {
+        removed = await manager.cleanup(existing.path, force);
+      } catch (error) {
+        if (!(error instanceof Error && "code" in error && (error as { readonly code?: unknown }).code === "WORKTREE_DIRTY")) {
+          await this.options.store.append({ sessionId, correlationId: idempotencyKey, type: "worktree/failed", payload: worktreePayload({ ...existing, status: "failed", error: error instanceof Error ? error.message : String(error) }, sessionId, existing.taskId === undefined ? undefined : String(existing.taskId)) });
+        }
+        throw error;
+      }
+      await this.options.store.append({ sessionId, correlationId: idempotencyKey, type: "worktree/cleaned", payload: worktreePayload({ ...removed, id: existing.id }, sessionId, existing.taskId === undefined ? undefined : String(existing.taskId)) });
+      const updated = await this.options.store.project(sessionId);
+      if (updated === undefined) throw new Error(`Session disappeared: ${sessionId}`);
+      return updated;
+    });
+  }
+
+  private async withWorktreeLock<T>(sessionId: SessionId, operation: () => Promise<T>): Promise<T> {
+    const previous = this.worktreeOperations.get(sessionId) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const queued = previous.then(() => gate);
+    this.worktreeOperations.set(sessionId, queued);
+    await previous;
+    try { return await operation(); }
+    finally {
+      release();
+      if (this.worktreeOperations.get(sessionId) === queued) this.worktreeOperations.delete(sessionId);
+    }
+  }
+
   async events(sessionId: SessionId, afterSequence = 0): Promise<readonly AgentEvent[]> {
     await this.ready;
     return this.options.store.list(sessionId, afterSequence);
@@ -535,9 +682,9 @@ export class AgentHost {
       const call = projection.toolCalls.find((item) => item.id === saved);
       if (call === undefined) throw new Error(`Tool call ${saved} is not available`);
       const permission = projection.permissions.find((item) => item.toolCallId === call.id && item.status === "pending");
-      return { toolCallId: call.id, status: call.status === "awaiting_permission" ? "awaiting_permission" : call.status === "completed" ? "completed" : call.status === "cancelled" ? "cancelled" : call.status === "denied" ? "denied" : "failed", ...(call.result === undefined ? {} : { result: call.result }), ...(permission === undefined ? {} : { permission: { id: permission.id, sessionId, toolCallId: permission.toolCallId, toolName: permission.toolName, riskLevel: permission.riskLevel, reason: permission.reason, input, caller: permission.caller ?? caller, workspaceRoot: permission.workspaceRoot ?? projection.workspaceRoot, createdAt: permission.createdAt, expiresAt: permission.expiresAt ?? new Date(Date.parse(permission.createdAt) + 15 * 60_000).toISOString() } satisfies PermissionRequest }) };
+      return { toolCallId: call.id, status: call.status === "awaiting_permission" ? "awaiting_permission" : call.status === "completed" ? "completed" : call.status === "cancelled" ? "cancelled" : call.status === "denied" ? "denied" : "failed", ...(call.result === undefined ? {} : { result: call.result }), ...(permission === undefined ? {} : { permission: { id: permission.id, sessionId, toolCallId: permission.toolCallId, toolName: permission.toolName, riskLevel: permission.riskLevel, reason: permission.reason, input, caller: permission.caller ?? caller, workspaceRoot: permission.workspaceRoot ?? effectiveWorkspaceRoot(projection), createdAt: permission.createdAt, expiresAt: permission.expiresAt ?? new Date(Date.parse(permission.createdAt) + 15 * 60_000).toISOString() } satisfies PermissionRequest }) };
     }
-    return this.toolRuntime.execute({ sessionId, workspaceRoot: projection.workspaceRoot, name, input, ...(turnId === undefined ? {} : { turnId }), toolCallId, ...(commandId === undefined ? {} : { commandId }), ...(signal === undefined ? {} : { signal }), caller });
+    return this.toolRuntime.execute({ sessionId, workspaceRoot: effectiveWorkspaceRoot(projection), name, input, ...(turnId === undefined ? {} : { turnId }), toolCallId, ...(commandId === undefined ? {} : { commandId }), ...(signal === undefined ? {} : { signal }), caller });
   }
 
   async resolvePermission(sessionId: SessionId, permissionId: PermissionId, status: "approved" | "denied" | "cancelled", commandId?: string): Promise<ExecuteToolOutput> {
@@ -889,7 +1036,7 @@ export class AgentHost {
       let projection = await this.options.store.project(summary.id);
       if (projection === undefined) continue;
       this.toolRuntime.setSessionPermissionPreset(summary.id, projection.permissionPreset ?? this.permissionPreset ?? "ask-on-write");
-      await this.toolRuntime.restorePending(summary.id, projection.workspaceRoot, await this.options.store.list(summary.id));
+      await this.toolRuntime.restorePending(summary.id, effectiveWorkspaceRoot(projection), await this.options.store.list(summary.id));
       projection = await this.options.store.project(summary.id);
       if (projection === undefined) continue;
       for (const turn of projection.turns
@@ -988,7 +1135,7 @@ export class AgentHost {
 
   private async systemMessage(sessionId: SessionId, recovery = false): Promise<string> {
     const projection = await this.options.store.project(sessionId);
-    const workspaceRoot = projection?.workspaceRoot ?? ".";
+    const workspaceRoot = projection === undefined ? "." : effectiveWorkspaceRoot(projection);
     return buildAgentSystemPrompt({
       workspaceRoot,
       tools: this.toolRuntime.listTools(sessionId),
@@ -1231,10 +1378,11 @@ export class AgentHost {
       return this.syntheticToolFailure(sessionId, turnId, toolCall, "MALFORMED_TOOL_ARGUMENTS", error instanceof Error ? error.message : String(error));
     }
     try {
+      const projection = await this.options.store.project(sessionId);
       const output = await this.toolRuntime.execute({
         sessionId,
         turnId,
-        workspaceRoot: (await this.options.store.project(sessionId))?.workspaceRoot ?? ".",
+        workspaceRoot: projection === undefined ? "." : effectiveWorkspaceRoot(projection),
         name: toolCall.name,
         input,
         toolCallId: brand<string, "ToolCallId">(toolCall.id),
@@ -1375,4 +1523,31 @@ function normalizeTodos(values: readonly TodoItem[]): readonly TodoItem[] {
     if (content.length > 500) throw new Error("Todo content must be 500 characters or fewer");
     return { id, content, status: item.status, ...(item.activeForm === undefined ? {} : { activeForm: item.activeForm.trim().slice(0, 500) }) };
   });
+}
+
+function worktreePayload(record: WorktreeProjection, sessionId: SessionId, taskId?: string): Readonly<Record<string, unknown>> {
+  return {
+    id: record.id,
+    repoRoot: record.repoRoot,
+    path: record.path,
+    status: record.status,
+    ...(record.branch === undefined ? {} : { branch: record.branch }),
+    ...(record.commit === undefined ? {} : { commit: record.commit }),
+    sessionId: String(sessionId),
+    ...(taskId === undefined ? {} : { taskId }),
+    ...(record.error === undefined ? {} : { error: record.error }),
+  };
+}
+
+function isPendingCommand(record: { readonly result: unknown }): boolean {
+  return typeof record.result === "object" && record.result !== null && (record.result as { readonly status?: unknown }).status === "pending";
+}
+
+function stableWorktreeId(commandId: string): string {
+  const safe = commandId.replace(/[^A-Za-z0-9._-]+/gu, "-").slice(0, 80).replace(/^-+|-+$/gu, "");
+  return `worktree-${safe || "command"}`;
+}
+
+function effectiveWorkspaceRoot(projection: SessionProjection): string {
+  return projection.activeWorkspaceRoot ?? projection.workspaceRoot;
 }

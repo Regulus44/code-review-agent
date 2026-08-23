@@ -97,6 +97,8 @@ discover
 | `lsp_diagnostics` / `lsp_definition` / `lsp_references` | read | auto | 只调用 host 配置的 LSP server，不接受任意 executable；transport 有生命周期、取消、消息/文档/stderr 预算和崩溃后一次重建 |
 | `capability_status` | read | auto | 展示 Web/Skill/Subagent/Workflow 的显式开关和预算/depth/iteration 限制 |
 
+Worktree 生命周期由 Host/API command 管理，不作为模型可任意调用的 Git shell 字符串：`createWorktree`、`attachWorktree`、`switchWorktree`、`cleanupWorktree` 都经过 workspace/repository 校验、command idempotency、dirty/conflict protection 和 durable `worktree/*` 事件。工具执行使用 Session 的 `activeWorkspaceRoot`（若存在），不能通过输入绕过仓库边界或删除主 worktree。
+
 ## 工具结果
 
 ```ts

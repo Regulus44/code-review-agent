@@ -54,6 +54,14 @@ Phase 7 的 DSH Web 调研与分步计划：
 - `SessionProjection.contextCompaction` 和 Web `ContextMeter` 展示压缩状态、估算 token、丢弃消息数和失败原因；未配置 provider budget 时显示 `unknown`；
 - `packages/compaction` unit 3 项、Runtime compaction/replay 21 项、Storage replay 11 项、Web context presenter 2 项已通过；当前状态仍为 `in_progress`，尚未完成长上下文 API/browser gate、预算配置面板和 Phase 8.1 独立退出审计。
 
+## Phase 8.2 Worktree（completed）
+
+- `packages/workspace` 的 `GitWorktreeManager` 已完成 Git repository/main-root/linked-worktree 识别、list/create/inspect/cleanup、branch/id/path 边界、dirty/conflicted protection、主仓库禁止 cleanup 和无 shell的 Git 执行；
+- `packages/runtime` 已将 create/attach/switch/cleanup 接入 durable `worktree/*` 事件、command idempotency、per-session operation lock、active worktree root、pending create recovery 和重复路径冲突保护；工具、权限和 system prompt 使用 active worktree root，Session 的主 `workspaceRoot` 保留不变；
+- `packages/storage`、Web SessionStore/SSE、API `/v1/sessions/:id/worktrees` 及 Web Worktree presenter/details panel 已接入 replay；
+- 已新增 linked worktree、SQLite reopen/replay、pending side-effect recovery、并发 create 去重、dirty cleanup protection 和 API/Web client tests；
+- `pnpm typecheck`、Workspace 6 项、Runtime 24 项、Storage 12 项、API 26 项、Web 98 项、`pnpm build:web`、`pnpm test:phase7:browser`、`pnpm test:phase8:worktree` 和 `git diff --check` 通过；本组变更建立独立的 Phase 8.2 Git checkpoint。
+
 ## Phase 7 Workspace lifecycle controls（当前 checkpoint）
 
 - `packages/contracts` / `docs/event-contract.md`：新增 `workspace/updated` 事件和 Workspace 生命周期元数据字段；

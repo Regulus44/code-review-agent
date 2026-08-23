@@ -109,6 +109,9 @@ importers:
       '@code-review-agent/tools':
         specifier: workspace:*
         version: link:../tools
+      '@code-review-agent/workspace':
+        specifier: workspace:*
+        version: link:../workspace
 
   packages/storage:
     dependencies:

@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync, readFileSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { createApiServer } from "./server.js";
 import { InMemoryEventStore } from "@code-review-agent/storage";
 import { sessionId } from "@code-review-agent/runtime";
@@ -67,6 +68,39 @@ describe("Phase 2 API", () => {
     expect((await plan.json() as { plan: { status: string } }).plan.status).toBe("approved");
     const todos = await fetch(`${baseUrl}/v1/sessions/${session.id}/todos`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "todo-api-1" }, body: JSON.stringify({ todos: [{ id: "one", content: "Test", status: "pending" }] }) });
     expect((await todos.json() as { todos: { id: string }[] }).todos).toEqual([{ id: "one", content: "Test", status: "pending" }]);
+  });
+
+  it("exposes durable Git worktree create, attach, switch, cleanup and replay", async () => {
+    const parent = mkdtempSync(join(tmpdir(), "cra-api-worktree-"));
+    const root = join(parent, "repo");
+    try {
+      execFileSync("git", ["init", "-q", root]);
+      execFileSync("git", ["-C", root, "config", "user.email", "agent@example.test"]);
+      execFileSync("git", ["-C", root, "config", "user.name", "Coding Agent"]);
+      writeFileSync(join(root, "README.md"), "initial\n");
+      execFileSync("git", ["-C", root, "add", "README.md"]);
+      execFileSync("git", ["-C", root, "commit", "-qm", "initial"]);
+      const session = await (await fetch(`${baseUrl}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: root }) })).json() as { id: string };
+      const initial = await (await fetch(`${baseUrl}/v1/sessions/${session.id}/worktrees`)).json() as { worktrees: { path: string }[] };
+      expect(initial.worktrees).toHaveLength(1);
+      const created = await fetch(`${baseUrl}/v1/sessions/${session.id}/worktrees`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "api-worktree-create-1" }, body: JSON.stringify({ id: "api-feature", branch: "feature/api" }) });
+      expect(created.status).toBe(201);
+      const projection = await created.json() as { worktrees: { id: string; path: string }[] };
+      const item = projection.worktrees.find((worktree) => worktree.id === "api-feature");
+      expect(item?.path).toBeTruthy();
+      expect((await fetch(`${baseUrl}/v1/sessions/${session.id}/worktrees/api-feature/attach`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "api-worktree-attach-1" }, body: "{}" })).status).toBe(200);
+      const switched = await fetch(`${baseUrl}/v1/sessions/${session.id}/worktrees/api-feature/switch`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "api-worktree-switch-1" }, body: "{}" });
+      expect((await switched.json() as { activeWorktreeId?: string }).activeWorktreeId).toBe("api-feature");
+      writeFileSync(join(item!.path, "dirty.txt"), "dirty\n");
+      const refused = await fetch(`${baseUrl}/v1/sessions/${session.id}/worktrees/api-feature/cleanup`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "api-worktree-cleanup-1" }, body: "{}" });
+      expect(refused.status).toBe(409);
+      const cleaned = await fetch(`${baseUrl}/v1/sessions/${session.id}/worktrees/api-feature/cleanup`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "api-worktree-cleanup-2" }, body: JSON.stringify({ force: true }) });
+      const events = await (await fetch(`${baseUrl}/v1/sessions/${session.id}/events?format=json`)).json() as { type: string }[];
+      expect((await cleaned.json() as { activeWorktreeId?: string }).activeWorktreeId).toBeUndefined();
+      expect(events.map((event) => event.type)).toEqual(expect.arrayContaining(["worktree/created", "worktree/attached", "worktree/switched", "worktree/cleaned"]));
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
   });
 
   it("serves latest and older event pages while keeping unpaged JSON replay compatible", async () => {
