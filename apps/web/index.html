@@ -257,10 +257,28 @@
       .trajectory-search { min-width: 0; flex: 1; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--surface-subtle); font-size: 11px; }
       .trajectory-running { display: inline-flex; align-items: center; gap: 4px; color: var(--text-tertiary); font-size: 10px; white-space: nowrap; }
       .trajectory-running input { margin: 0; accent-color: var(--blue); }
+      .trajectory-follow { flex: 0 0 auto; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-secondary); background: var(--surface-subtle); font-size: 10px; }
+      .trajectory-follow:hover, .trajectory-follow[aria-pressed="true"] { border-color: rgba(65,118,230,.28); color: var(--blue); background: var(--blue-soft); }
       .trajectory-meta { margin-bottom: 8px; color: var(--text-tertiary); font-size: 10px; }
+      .trajectory-timeline { display: grid; gap: 5px; margin-bottom: 10px; padding: 8px 0 9px; border-bottom: 1px solid var(--border); }
+      .trajectory-timeline-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-tertiary); font-size: 10px; }
+      .trajectory-timeline-row { min-width: 0; margin-left: calc(var(--timeline-depth, 0) * 10px); border: 1px solid transparent; border-radius: 7px; background: var(--surface-subtle); }
+      .trajectory-timeline-row[open] { border-color: rgba(65,118,230,.18); background: var(--blue-soft); }
+      .trajectory-timeline-summary { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 6px 7px; cursor: pointer; list-style: none; color: var(--text-secondary); font-size: 10px; }
+      .trajectory-timeline-summary::-webkit-details-marker { display: none; }
+      .trajectory-timeline-summary::before { content: "›"; flex: 0 0 8px; color: var(--text-tertiary); transition: transform .15s var(--ease); }
+      .trajectory-timeline-row[open] .trajectory-timeline-summary::before { transform: rotate(90deg); }
+      .trajectory-timeline-kind { flex: 0 0 auto; color: var(--text-tertiary); font-size: 9px; text-transform: uppercase; }
+      .trajectory-timeline-label { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; }
+      .trajectory-timeline-status { flex: 0 0 auto; color: var(--text-tertiary); font-size: 9px; }
+      .trajectory-timeline-bar { position: relative; height: 3px; margin: 0 7px 5px 21px; overflow: hidden; border-radius: 99px; background: var(--border); }
+      .trajectory-timeline-bar span { display: block; height: 100%; min-width: 3px; border-radius: inherit; background: var(--blue); }
+      .trajectory-timeline-row.running .trajectory-timeline-bar span { background: #c78327; }
+      .trajectory-timeline-detail { padding: 0 7px 7px 21px; color: var(--text-tertiary); font-size: 9px; line-height: 1.4; }
       .trajectory-lanes { display: grid; gap: 8px; }
       .trajectory-lane { display: grid; gap: 4px; }
-      .trajectory-lane-title { color: var(--text-tertiary); font-size: 10px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; }
+      .trajectory-lane-title { display: flex; align-items: center; gap: 5px; width: 100%; padding: 0; color: var(--text-tertiary); background: transparent; text-align: left; font-size: 10px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; }
+      .trajectory-lane-title:hover { color: var(--text); }
       .trajectory-record { display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; padding: 6px 7px; border: 1px solid transparent; border-radius: 8px; color: var(--text-secondary); background: var(--surface-subtle); text-align: left; font-size: 10px; }
       .trajectory-record:hover, .trajectory-record.selected { border-color: rgba(65,118,230,.28); color: var(--text); background: var(--blue-soft); }
       .trajectory-record-dot { flex: 0 0 5px; width: 5px; height: 5px; border-radius: 50%; background: var(--border-strong); }
@@ -437,7 +455,7 @@
       (() => {
         const typedRuntime = window.CodeReviewAgentWeb;
         const typedConnection = typedRuntime?.connection || null;
-        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], models: null, sidebarCollapsed: false, detailsOpen: true, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, taskSelectedId: null, mcpSelectedName: null };
+        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], models: null, sidebarCollapsed: false, detailsOpen: true, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
         const app = document.querySelector('#app');
         const list = document.querySelector('#session-list');
         const mcpList = document.querySelector('#mcp-list');
@@ -463,6 +481,8 @@
         const permissionPreset = document.querySelector('#permission-preset');
         const sessionSearch = document.querySelector('#session-search');
         const sessionMenu = document.querySelector('#session-menu');
+        const isNearConversationTail = () => conversation.scrollHeight === 0 || conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight <= 64;
+        conversation.addEventListener('scroll', () => { state.trajectoryFollow = isNearConversationTail(); }, { passive: true });
         const api = async (url, options) => { const response = await fetch(url, options); if (!response.ok) throw new Error(await response.text()); return response.json(); };
         const commandKey = () => globalThis.crypto?.randomUUID?.() || `web_${Date.now()}_${Math.random().toString(36).slice(2)}`;
         const commandApi = (url, body) => { const idempotencyKey = commandKey(); return api(url, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKey }, body: JSON.stringify({ ...body, commandId: idempotencyKey }) }); };
@@ -632,8 +652,12 @@
             const label = document.createElement('div'); label.className = 'detail-label'; label.textContent = 'Trajectory ledger'; section.append(label);
             const controls = document.createElement('div'); controls.className = 'trajectory-controls';
             const search = document.createElement('input'); search.className = 'trajectory-search'; search.type = 'search'; search.placeholder = 'Search records'; search.setAttribute('aria-label', 'Search trajectory records');
-            const running = document.createElement('label'); running.className = 'trajectory-running'; const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.setAttribute('aria-label', 'Show running records only'); running.append(checkbox, document.createTextNode('Running')); controls.append(search, running); section.append(controls);
+            const running = document.createElement('label'); running.className = 'trajectory-running'; const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.setAttribute('aria-label', 'Show running records only'); running.append(checkbox, document.createTextNode('Running'));
+            const follow = document.createElement('button'); follow.type = 'button'; follow.className = 'trajectory-follow'; follow.setAttribute('aria-label', 'Toggle trajectory tail follow');
+            follow.addEventListener('click', () => { state.trajectoryFollow = !state.trajectoryFollow; if (state.trajectoryFollow) requestAnimationFrame(() => { conversation.scrollTop = conversation.scrollHeight; }); refresh(); });
+            controls.append(search, running, follow); section.append(controls);
             const meta = document.createElement('div'); meta.className = 'trajectory-meta'; meta.id = 'trajectory-meta'; section.append(meta);
+            const timeline = document.createElement('div'); timeline.className = 'trajectory-timeline'; timeline.id = 'trajectory-timeline'; section.append(timeline);
             const lanes = document.createElement('div'); lanes.className = 'trajectory-lanes'; lanes.id = 'trajectory-lanes'; section.append(lanes);
             const inspector = document.createElement('div'); inspector.className = 'trajectory-inspector'; inspector.id = 'trajectory-record-inspector'; section.append(inspector);
             const refresh = () => renderTrajectoryPanel(typedConnection?.store.getSnapshot()?.trajectory);
@@ -643,12 +667,15 @@
           }
           const search = section.querySelector('.trajectory-search');
           const checkbox = section.querySelector('input[type="checkbox"]');
+          const follow = section.querySelector('.trajectory-follow');
           if (search && document.activeElement !== search) search.value = state.trajectoryQuery || '';
           if (checkbox && document.activeElement !== checkbox) checkbox.checked = state.trajectoryRunningOnly === true;
+          if (follow) { follow.textContent = state.trajectoryFollow ? 'Following tail' : 'Paused'; follow.setAttribute('aria-pressed', String(state.trajectoryFollow)); follow.title = state.trajectoryFollow ? 'Pause following new records' : 'Resume following new records'; }
           const meta = section.querySelector('#trajectory-meta');
+          const timeline = section.querySelector('#trajectory-timeline');
           const lanes = section.querySelector('#trajectory-lanes');
           const inspector = section.querySelector('#trajectory-record-inspector');
-          lanes.innerHTML = ''; inspector.innerHTML = '';
+          timeline.innerHTML = ''; lanes.innerHTML = ''; inspector.innerHTML = '';
           if (!projection || !typedRuntime?.queryTrajectory || !typedRuntime?.inspectTrajectory) {
             meta.textContent = 'Trajectory projection unavailable.';
             return;
@@ -658,9 +685,30 @@
           if (!view.records.length) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = state.trajectoryQuery || state.trajectoryRunningOnly ? 'No trajectory records match this filter.' : 'No trajectory records yet.'; lanes.append(empty); return; }
           const selected = view.records.find((record) => record.key === state.trajectorySelectedKey) || view.records[0];
           state.trajectorySelectedKey = selected.key;
+          const timelineView = typedRuntime.buildTrajectoryTimeline ? typedRuntime.buildTrajectoryTimeline(view.records, 200) : null;
+          if (timelineView) {
+            const timelineHeader = document.createElement('div'); timelineHeader.className = 'trajectory-timeline-header';
+            const timelineLabel = document.createElement('span'); timelineLabel.textContent = 'Timeline';
+            const timelineMeta = document.createElement('span'); timelineMeta.textContent = timelineView.spanMs === undefined ? 'recorded time unavailable' : `${timelineView.spanMs}ms span${timelineView.truncated ? ' · bounded' : ''}`;
+            timelineHeader.append(timelineLabel, timelineMeta); timeline.append(timelineHeader);
+            for (const row of timelineView.rows) {
+              const rowDetails = document.createElement('details'); rowDetails.className = `trajectory-timeline-row ${row.running ? 'running' : ''}`; rowDetails.style.setProperty('--timeline-depth', String(row.depth)); rowDetails.open = !state.trajectoryCollapsedRecords.has(row.key);
+              rowDetails.addEventListener('toggle', () => { if (rowDetails.open) state.trajectoryCollapsedRecords.delete(row.key); else state.trajectoryCollapsedRecords.add(row.key); });
+              const summary = document.createElement('summary'); summary.className = 'trajectory-timeline-summary'; summary.addEventListener('click', () => { state.trajectorySelectedKey = row.key; setTimeout(() => renderTrajectoryPanel(typedConnection?.store.getSnapshot()?.trajectory), 0); });
+              const kind = document.createElement('span'); kind.className = 'trajectory-timeline-kind'; kind.textContent = row.kind;
+              const label = document.createElement('span'); label.className = 'trajectory-timeline-label'; label.textContent = row.label;
+              const status = document.createElement('span'); status.className = 'trajectory-timeline-status'; status.textContent = `${row.status} · seq ${row.sourceSeq}`;
+              summary.append(kind, label, status);
+              const bar = document.createElement('div'); bar.className = 'trajectory-timeline-bar'; const fill = document.createElement('span'); fill.style.width = `${row.widthPercent ?? (row.running ? 24 : 3)}%`; bar.append(fill);
+              const detail = document.createElement('div'); detail.className = 'trajectory-timeline-detail'; detail.textContent = `${row.timing} · ${row.durationMs === undefined ? 'duration unknown' : `${row.durationMs}ms`} · last seq ${row.lastSeq}`;
+              rowDetails.append(summary, bar, detail); timeline.append(rowDetails);
+            }
+          }
           for (const laneView of view.lanes) {
             const lane = document.createElement('div'); lane.className = 'trajectory-lane';
-            const laneTitle = document.createElement('div'); laneTitle.className = 'trajectory-lane-title'; laneTitle.textContent = `${laneView.kind} · ${laneView.records.length}`; lane.append(laneTitle);
+            const collapsed = state.trajectoryCollapsedLanes.has(laneView.kind);
+            const laneTitle = document.createElement('button'); laneTitle.type = 'button'; laneTitle.className = 'trajectory-lane-title'; laneTitle.textContent = `${collapsed ? '＋' : '−'} ${laneView.kind} · ${laneView.records.length}`; laneTitle.setAttribute('aria-expanded', String(!collapsed)); laneTitle.onclick = () => { if (state.trajectoryCollapsedLanes.has(laneView.kind)) state.trajectoryCollapsedLanes.delete(laneView.kind); else state.trajectoryCollapsedLanes.add(laneView.kind); renderTrajectoryPanel(typedConnection?.store.getSnapshot()?.trajectory); }; lane.append(laneTitle);
+            if (collapsed) { lanes.append(lane); continue; }
             for (const record of laneView.records) {
               const button = document.createElement('button'); button.type = 'button'; button.className = `trajectory-record ${record.running ? 'running' : ''} ${record.key === selected.key ? 'selected' : ''}`;
               const dot = document.createElement('span'); dot.className = 'trajectory-record-dot';
@@ -810,7 +858,7 @@
         trajectoryDetailsObserver.observe(details, { childList: true });
         const render = () => {
           if (state.session) renderModes();
-          const wasNearBottom = conversation.scrollHeight === 0 || conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight <= 64;
+          const shouldFollowTail = state.trajectoryFollow === true && isNearConversationTail();
           conversation.innerHTML = '';
           const typedSnapshot = typedConnection?.store.getSnapshot();
           const typedProjection = typedSnapshot?.conversation;
@@ -824,7 +872,7 @@
               renderTaskPanel(typedSnapshot);
               renderMcpDetailsPanel();
               renderRequestRecoveryPanel(typedSnapshot);
-              requestAnimationFrame(() => { if (wasNearBottom) conversation.scrollTop = conversation.scrollHeight; });
+              requestAnimationFrame(() => { if (shouldFollowTail) conversation.scrollTop = conversation.scrollHeight; });
               return;
             }
             typedBody.remove();
@@ -873,7 +921,7 @@
           renderTaskPanel(typedSnapshot);
           renderMcpDetailsPanel();
           renderRequestRecoveryPanel(typedSnapshot);
-          requestAnimationFrame(() => { if (wasNearBottom) conversation.scrollTop = conversation.scrollHeight; });
+          requestAnimationFrame(() => { if (shouldFollowTail) conversation.scrollTop = conversation.scrollHeight; });
         };
         const renderWorkspaceRecent = () => { workspaceRecent.innerHTML = ''; const roots = [...new Set(state.recentWorkspaces.filter(Boolean))].slice(0, 6); if (!roots.length) return; const label = document.createElement('div'); label.className = 'workspace-recent-label'; label.textContent = 'Recent workspaces'; workspaceRecent.append(label); roots.forEach((root) => { const button = document.createElement('button'); button.type = 'button'; button.className = 'workspace-recent-button'; button.textContent = root; button.onclick = () => { workspaceInput.value = root; workspaceError.textContent = ''; workspaceInput.focus(); }; workspaceRecent.append(button); }); };
         const openWorkspacePicker = () => { workspaceError.textContent = ''; workspaceInput.value = state.session?.workspaceRoot || ''; permissionPreset.value = currentMode(); renderWorkspaceRecent(); workspaceModal.hidden = false; workspaceInput.focus(); workspaceInput.select(); };
@@ -967,7 +1015,7 @@
         const renderModes = () => { modeTrigger.textContent = `◉ Mode · ${modeLabels[currentMode()] || currentMode()}`; modePopover.innerHTML = '<div class="popover-label">Choose a work mode for this session</div>'; for (const [value, label] of Object.entries(modeLabels)) { const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${value === currentMode() ? 'selected' : ''}`; option.innerHTML = `<span class="model-check">${value === currentMode() ? '✓' : ''}</span><span>${label}<span class="model-meta">${value === 'read-only' ? 'Inspect without changing files' : value === 'danger-full-access' ? 'Run tools without approval' : 'Permission-controlled coding workflow'}</span></span>`; option.onclick = async () => { modePopover.hidden = true; modeTrigger.setAttribute('aria-expanded', 'false'); if (value === currentMode() || !state.session) return; modeTrigger.disabled = true; try { state.session = await api(`/v1/sessions/${encodeURIComponent(state.session.id)}/mode`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ permissionPreset: value }) }); renderModes(); renderDetails(); setStatus(`Mode · ${label}`); } catch (error) { setStatus(error.message, false); } finally { modeTrigger.disabled = false; } }; modePopover.append(option); } };
         const renderDetails = () => { const connected = state.mcp.filter((server) => !['disabled', 'failed', 'needs_auth'].includes(server.status)).length; const typedSnapshot = typedConnection?.store.getSnapshot(); const trajectory = typedSnapshot?.trajectory; const treeWarnings = typedSnapshot?.toolCallTree?.warnings || []; const pendingPermissions = typedSnapshot?.conversation?.nodes?.filter((node) => node.kind === 'permission' && node.status === 'pending').length || 0; const pendingInteractions = typedSnapshot?.conversation?.nodes?.filter((node) => node.kind === 'interaction' && node.status === 'pending').length || 0; const diagnostics = state.mcp.map((server) => { const name = server.config?.name || server.name; const catalog = Array.isArray(server.catalog) ? server.catalog : []; const disabled = catalog.filter((item) => item.enabled === false).length; const active = server.status === 'connected' ? catalog.length - disabled : 0; return `<div class="detail-line"><span>${esc(name)}</span><strong>${esc(server.status)} · g${server.generation || 0} · ${active}/${catalog.length} active</strong></div><div class="detail-line"><span>Auth</span><strong>${server.status === 'needs_auth' ? 'Needs authorization' : server.config?.credentialRef ? 'Credential reference configured' : 'No credential reference'}</strong></div>${server.retry?.nextAttemptAt ? `<div class="detail-line"><span>Next retry</span><strong>${esc(server.retry.nextAttemptAt)}</strong></div>` : ''}`; }).join(''); details.innerHTML = `<div class="detail-section"><div class="detail-label">Model</div><div class="detail-value">${esc(currentModel())}</div><div class="detail-line"><span>Provider</span><strong>${esc(state.models?.provider || 'DeepSeek-compatible')}</strong></div><div class="detail-line"><span>Default</span><strong>${esc(state.models?.defaultModel || 'deepseek-v4-flash')}</strong></div></div><div class="detail-section"><div class="detail-label">Session</div><div class="detail-line"><span>Status</span><span class="status-pill">Connected</span></div><div class="detail-line"><span>Events</span><strong>${state.events.size}</strong></div><div class="detail-line"><span>Workspace</span><strong title="${esc(state.session?.workspaceRoot || '.')}">${esc(state.session?.workspaceRoot || '.')}</strong></div></div><div class="detail-section"><div class="detail-label">Trajectory</div><div class="detail-line"><span>Records</span><strong>${trajectory?.records.length || 0} · seq ${trajectory?.lastSequence || 0}</strong></div><div class="detail-line"><span>Running</span><strong>${trajectory?.records.filter((record) => record.running).length || 0}</strong></div><div class="detail-line"><span>Lineage warnings</span><strong>${treeWarnings.length}</strong></div></div><div class="detail-section"><div class="detail-label">MCP diagnostics</div><div class="detail-line"><span>Servers</span><strong>${connected}/${state.mcp.length} connected</strong></div><div class="detail-line"><span>Tools</span><strong>${state.tools.size}</strong></div>${diagnostics || '<div class="empty-detail">No MCP servers configured.</div>'}</div><div class="detail-section"><div class="detail-label">Tools</div><div id="detail-tools" class="tool-list"></div></div><div class="detail-section"><div class="detail-label">Permissions</div><div class="detail-line"><span>Pending approvals</span><strong>${pendingPermissions}</strong></div><div class="detail-line"><span>Pending questions</span><strong>${pendingInteractions}</strong></div></div>`; const toolList = details.querySelector('#detail-tools'); const names = [...state.tools.keys()].slice(0, 8); if (!names.length) toolList.innerHTML = '<div class="empty-detail">No tools discovered.</div>'; else names.forEach((name) => { const row = document.createElement('div'); row.className = 'tool-list-item'; row.textContent = name; toolList.append(row); }); };
         const openSession = async (id) => {
-          state.trajectoryQuery = ''; state.trajectoryRunningOnly = false; state.trajectorySelectedKey = null; state.taskSelectedId = null;
+           state.trajectoryQuery = ''; state.trajectoryRunningOnly = false; state.trajectorySelectedKey = null; state.trajectoryFollow = true; state.trajectoryCollapsedLanes.clear(); state.trajectoryCollapsedRecords.clear(); state.taskSelectedId = null;
           if (state.storeUnsubscribe) { state.storeUnsubscribe(); state.storeUnsubscribe = null; }
           if (state.source) state.source.close();
           if (state.scopedSource) state.scopedSource.close();

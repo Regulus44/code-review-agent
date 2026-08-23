@@ -4,7 +4,7 @@ import { SessionStore } from "./client/store.js";
 import { projectConversation } from "./projection/conversation.js";
 import { buildToolCallTree } from "./projection/tool-call-tree.js";
 import { projectTrajectory } from "./projection/trajectory.js";
-import { inspectTrajectory, queryTrajectory } from "./presentation/trajectory-presenter.js";
+import { buildTrajectoryTimeline, inspectTrajectory, queryTrajectory } from "./presentation/trajectory-presenter.js";
 import { presentTask } from "./presentation/task-presenter.js";
 import { presentMcpServer } from "./presentation/mcp-presenter.js";
 import { presentToolCall } from "./presentation/tool-presenter.js";
@@ -17,6 +17,7 @@ export interface BrowserWebRuntime {
   readonly projectConversation: typeof projectConversation;
   readonly projectTrajectory: typeof projectTrajectory;
   readonly queryTrajectory: typeof queryTrajectory;
+  readonly buildTrajectoryTimeline: typeof buildTrajectoryTimeline;
   readonly inspectTrajectory: typeof inspectTrajectory;
   readonly presentTask: typeof presentTask;
   readonly presentMcpServer: typeof presentMcpServer;
@@ -36,6 +37,7 @@ const runtime: BrowserWebRuntime = {
   projectConversation,
   projectTrajectory,
   queryTrajectory,
+  buildTrajectoryTimeline,
   inspectTrajectory,
   presentTask,
   presentMcpServer,

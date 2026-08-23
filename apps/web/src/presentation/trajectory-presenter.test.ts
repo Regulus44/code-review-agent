@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { brand } from "@code-review-agent/contracts";
 import type { TrajectoryProjection, TrajectoryRecord } from "../projection/trajectory.js";
-import { inspectTrajectory, queryTrajectory } from "./trajectory-presenter.js";
+import { buildTrajectoryTimeline, inspectTrajectory, queryTrajectory } from "./trajectory-presenter.js";
 
 const sessionId = brand<string, "SessionId">("ses_presenter");
 
@@ -69,5 +69,24 @@ describe("trajectory presenter", () => {
     expect(timing?.entries.find((entry) => entry.label === "Duration")?.value).toBe("running");
     expect(detail?.entries[0]?.value).toContain("[redacted]");
     expect(detail?.entries[0]?.untrusted).toBe(true);
+  });
+
+  it("builds a bounded timeline with stable order, nested depth, and explicit timing state", () => {
+    const unknownRecord = record({ key: "event:unknown", kind: "event", label: "Unknown", sourceSeq: 1 });
+    const unknownMutable = unknownRecord as { startedAt?: string; endedAt?: string; durationMs?: number };
+    delete unknownMutable.startedAt;
+    delete unknownMutable.endedAt;
+    delete unknownMutable.durationMs;
+    const view = buildTrajectoryTimeline([
+      record({ key: "tool:root", callId: brand<string, "ToolCallId">("root"), sourceSeq: 2, startedAt: "2026-08-23T00:00:00.000Z", endedAt: "2026-08-23T00:00:04.000Z", durationMs: 4_000 }),
+      runningRecord("tool:child", 3) as TrajectoryRecord & { parentCallId?: string },
+      unknownRecord,
+    ].map((item) => item.key === "tool:child" ? { ...item, callId: brand<string, "ToolCallId">("child"), parentCallId: "root" } : item) as readonly TrajectoryRecord[]);
+    expect(view.rows.map((row) => row.key)).toEqual(["event:unknown", "tool:root", "tool:child"]);
+    expect(view.rows.find((row) => row.key === "tool:child")).toMatchObject({ depth: 1, timing: "running" });
+    expect(view.rows.find((row) => row.key === "tool:child")).not.toHaveProperty("widthPercent");
+    expect(view.rows.find((row) => row.key === "tool:root")).toMatchObject({ depth: 0, timing: "recorded", widthPercent: 100 });
+    expect(view.rows.find((row) => row.key === "event:unknown")?.timing).toBe("unknown");
+    expect(view.spanMs).toBe(4_000);
   });
 });

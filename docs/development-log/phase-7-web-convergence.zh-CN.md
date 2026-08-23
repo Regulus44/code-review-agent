@@ -457,3 +457,40 @@ git diff --check                                    ✓
 
 - 继续 Trajectory timeline 的 record 折叠/展开、tail-follow/pause-follow、load older 和 1000+ records 虚拟化；
 - 将 Read-only、Edit、Test/Recovery、Delegation、Inspection browser fixture 汇总为 Phase 7.10 可重复门禁，并补性能基线。
+
+## 2026-08-23：Trajectory timeline、折叠与 tail-follow
+
+### 目标与 DSH 对照
+
+- 对照 DSH `ui-trajectory`、`timeline.ts` 和 request inspector，把已有 query/lane/inspector projection 延伸为有界 timeline；
+- 保持 EventStore 唯一事实来源：timeline 只消费 `TrajectoryProjection`，record/lane 折叠和 tail-follow 是当前 Web session 的可丢弃 UI 状态；
+- 对真实时间字段保持诚实：只有同时存在合法 started/ended timestamp 才显示 recorded timing，running record 不显示伪造 duration。
+
+### 变更范围
+
+- `apps/web/src/presentation/trajectory-presenter.ts`：新增 `buildTrajectoryTimeline()`，提供 stable source order、recorded span、nested tool depth、offset/width、running/unknown timing 和 1000 行 bounded limit；
+- `apps/web/src/presentation/trajectory-presenter.test.ts`：覆盖稳定排序、嵌套深度、bounded width、unknown timing 和 running duration；Web 测试增至 35 项；
+- `apps/web/src/browser.ts`：向静态 shell 暴露 `buildTrajectoryTimeline`；
+- `apps/web/index.html`：Trajectory details 增加 Timeline record `<details>` 折叠、lane 折叠、`Following tail`/`Paused` 控件；conversation scroll 离开尾部时自动暂停跟随，回到尾部时恢复；Session 切换清理可丢弃的折叠/选择状态。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm test                                            ✓（全 workspace 通过）
+pnpm --filter @code-review-agent/web test            ✓（35 tests）
+pnpm -F @code-review-agent/web run build:browser    ✓
+git diff --check                                    ✓
+```
+
+真实 browser smoke：
+
+- parent fixture 的 timeline 显示 `1ms span`，completed record 为 `recorded`，cancellable record 为 `running · duration unknown`；
+- `Following tail` 切换为 `Paused` 后按钮状态和 `aria-pressed` 正确；
+- `task · 2` lane 可折叠，timeline record 可单独折叠，刷新后事实记录仍从 replay projection 重建；
+- browser console warn/error 为空，临时 fixture API 进程已关闭。
+
+### 下一步
+
+- 实现 Trajectory load older、tail append 的暂停/恢复边界和 1000+ records 虚拟化；
+- 继续收敛 Read-only、Edit、Test/Recovery、Delegation、Inspection 的 Phase 7.10 browser fixtures 和性能基线。
