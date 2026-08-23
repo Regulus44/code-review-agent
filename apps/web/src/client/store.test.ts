@@ -126,4 +126,13 @@ describe("SessionStore", () => {
     expect(snapshot.conversation?.nodes.filter((node) => node.kind === "assistant")).toHaveLength(2);
     expect(snapshot.trajectory?.lastSequence).toBe(5);
   });
+
+  it("clears a stale transport error after recovery", () => {
+    const store = new SessionStore();
+    store.open(session());
+    store.setConnection("failed", "connection lost");
+    expect(store.getSnapshot().error).toBe("connection lost");
+    store.setConnection("connected");
+    expect(store.getSnapshot().error).toBeUndefined();
+  });
 });

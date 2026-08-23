@@ -141,6 +141,13 @@
       .connection-state { display: inline-flex; align-items: center; gap: 6px; margin-right: 4px; color: var(--text-secondary); font-size: 11px; }
       .connection-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
       .connection-state.disconnected::before { background: var(--amber); }
+      .connection-banner { display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 7px 22px; border-bottom: 1px solid var(--border); color: var(--text-secondary); background: var(--surface-subtle); font-size: 11px; }
+      .connection-banner[hidden] { display: none; }
+      .connection-banner.warning { color: #8f5c13; background: #fff8e8; }
+      .connection-banner.error { color: #a13c3c; background: #fff0f0; }
+      .connection-banner-message { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .connection-retry { flex: 0 0 auto; height: 26px; padding: 0 9px; border: 1px solid currentColor; border-radius: 7px; color: inherit; background: transparent; font-size: 10px; font-weight: 650; }
+      .connection-retry:hover { background: rgba(255,255,255,.72); }
       .conversation { position: relative; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scroll-behavior: smooth; }
       .conversation::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 50% 20%, rgba(65,118,230,.07), transparent 38%); opacity: .75; }
       .conversation-body { position: relative; width: min(748px, calc(100% - 40px)); min-height: 100%; margin: 0 auto; padding: 34px 0 28px; }
@@ -441,6 +448,7 @@
           <span id="status" class="connection-state disconnected" role="status" aria-live="polite">Connecting…</span>
           <button id="details-toggle" class="icon-button details-toggle" type="button" aria-label="Toggle details panel">☷</button>
         </header>
+        <div id="connection-banner" class="connection-banner" role="status" aria-live="polite" hidden><span id="connection-banner-message" class="connection-banner-message"></span><button id="connection-retry" class="connection-retry" type="button" hidden>Retry</button></div>
         <section id="conversation" class="conversation" aria-live="polite"></section>
         <footer class="composer-shell">
           <form id="composer" class="composer-card">
@@ -530,6 +538,9 @@
          const permissionPreset = document.querySelector('#permission-preset');
          const sessionSearch = document.querySelector('#session-search');
          const sessionMenu = document.querySelector('#session-menu');
+         const connectionBanner = document.querySelector('#connection-banner');
+         const connectionBannerMessage = document.querySelector('#connection-banner-message');
+         const connectionRetry = document.querySelector('#connection-retry');
          const workspaceDialog = workspaceModal.querySelector('.workspace-modal');
          const settingsDialog = settingsModal.querySelector('.workspace-modal');
          const workspaceFocusTrap = typedRuntime?.createFocusTrap && workspaceDialog ? typedRuntime.createFocusTrap(workspaceDialog) : null;
@@ -545,7 +556,22 @@
         const currentMode = () => state.session?.permissionPreset || 'ask-on-write';
         const refreshSessionList = async () => { const payload = await api(`/v1/sessions?include_archived=${state.showArchived}`); showSessionsTree(payload); archiveToggle.classList.toggle('active', state.showArchived); archiveToggle.setAttribute('aria-pressed', String(state.showArchived)); };
         const refreshSubagents = async () => { if (!state.session) { state.subagents = []; renderSubagents(); if (typedConnection) renderTaskPanel(typedConnection.store.getSnapshot()); return; } try { state.subagents = (await api(`/v1/sessions/${encodeURIComponent(state.session.id)}/subagents?scope=children`)).agents || []; } catch { state.subagents = []; } renderSubagents(); if (typedConnection) renderTaskPanel(typedConnection.store.getSnapshot()); };
-        const setStatus = (text, connected = true) => { status.textContent = text; status.classList.toggle('disconnected', !connected); };
+         const setStatus = (text, connected = true) => { status.textContent = text; status.classList.toggle('disconnected', !connected); };
+         const renderConnectionBanner = (snapshot) => {
+           if (!typedRuntime?.presentConnection || !connectionBanner || !connectionBannerMessage || !connectionRetry) return;
+           const intent = typedRuntime.presentConnection(snapshot?.connection || 'idle', snapshot?.error);
+           connectionBanner.hidden = !intent.visible;
+           connectionBanner.className = `connection-banner ${intent.tone}`;
+           connectionBannerMessage.textContent = intent.message;
+           connectionRetry.hidden = !intent.retryable;
+           connectionRetry.disabled = false;
+         };
+         const retryConnection = async () => {
+           if (!typedConnection || !state.session || connectionRetry.hidden) return;
+           connectionRetry.disabled = true;
+           try { await typedConnection.open(state.session.id); } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); }
+           finally { connectionRetry.disabled = false; }
+         };
         const addEvent = (event, shouldRender = true) => { if (!event || state.events.has(event.sequence)) return; state.events.set(event.sequence, event); if (shouldRender) render(); };
         const orderedEvents = () => [...state.events.values()].sort((a, b) => a.sequence - b.sequence);
         const addEventRow = (parent, text) => { const row = document.createElement('div'); row.className = 'event-row'; row.textContent = text; parent.append(row); };
@@ -1194,6 +1220,7 @@
               path.textContent = `Workspace · ${state.session?.workspaceRoot || '.'}`;
               const connected = snapshot.connection === 'connected';
               setStatus(snapshot.connection === 'reconnecting' ? 'Reconnecting…' : snapshot.connection === 'failed' ? 'Connection failed' : connected ? 'Connected' : 'Connecting…', connected);
+              renderConnectionBanner(snapshot);
               render();
               void refreshSubagents();
             };
@@ -1228,7 +1255,8 @@
         document.querySelector('#sidebar-toggle').onclick = () => { state.sidebarCollapsed = !state.sidebarCollapsed; app.classList.toggle('sidebar-collapsed', state.sidebarCollapsed); };
         document.querySelector('#details-toggle').onclick = () => { state.detailsOpen = !state.detailsOpen; app.classList.toggle('details-collapsed', !state.detailsOpen); };
         document.querySelector('#details-close').onclick = () => { state.detailsOpen = false; app.classList.add('details-collapsed'); };
-        document.querySelector('#new-session').onclick = () => newSession();
+         document.querySelector('#new-session').onclick = () => newSession();
+         connectionRetry.onclick = () => { void retryConnection(); };
         settingsButton.onclick = () => openSettings();
         settingsClose.onclick = () => closeSettings();
         settingsDismiss.onclick = () => closeSettings();

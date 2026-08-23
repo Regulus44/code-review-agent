@@ -770,3 +770,48 @@ git diff --check                                    ✓
 - 将 Read-only、Edit、Test/Recovery、Delegation、Inspection、Settings、Deliverables 和 artifact access 汇总为统一 Phase 7.10 browser gate；
 - 补齐 loading/error/empty/reconnect 状态、窄屏布局、长任务 terminal/job 输出与失败诊断；
 - 推进 Shell 拆分、Workspace/Session 导航和 1,000+ trajectory 多页性能基线。
+
+## 2026-08-23：Loading/error/reconnect shell state
+
+### 目标与 DSH 对照
+
+- 对照 DSH `client/connection`、`ui-primitives` 的连接状态和断线重连反馈，让 Web 能区分 loading、reconnecting、failed 与 healthy 状态；
+- 失败状态提供 host-backed Retry，恢复成功后移除 stale error；正常连接不展示空 banner。
+
+### 变更范围
+
+- `apps/web/src/presentation/connection-presenter.ts`：新增 bounded `ConnectionRenderIntent`，统一 visibility、tone、message 和 retryable；
+- `apps/web/src/presentation/connection-presenter.test.ts`：覆盖 idle/connected、connecting、reconnecting、failed 和错误长度限制；
+- `apps/web/src/client/store.ts`、`apps/web/src/client/store.test.ts`：修复 `setConnection()` 在恢复后清理 transport error，新增回归测试；
+- `apps/web/src/browser.ts`、`apps/web/index.html`：新增 connection banner、Retry、`role=status`/`aria-live`，并从统一 `SessionStoreSnapshot` 渲染，不另建连接事实状态。
+
+### 根治理七问
+
+1. **Phase**：Phase 7.9 loading/error/reconnect shell state。
+2. **问题类型**：Web 状态呈现、断线恢复 UX 和错误可观测性。
+3. **契约影响**：不改变 Event、Tool、Task、Permission 或 Workspace contract；只修正 Web Store error 生命周期并增加 render intent。
+4. **参考入口**：DSH `client/connection`、`ui-primitives`；实现继续使用本项目 SessionConnectionController/EventStore projection。
+5. **上游来源**：只做行为参考，无代码复制或许可证新增。
+6. **验收场景**：连接中显示 loading；SSE 断线显示 reconnecting；达到重试上限显示 failed/Retry；恢复后 banner 隐藏且 stale error 清除；浏览器 console 无 warning/error。
+7. **回滚**：移除 connection presenter/banner，恢复 header status 文案；不影响 SSE、SessionStore 事件回放或 API。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/web test -- --run  ✓（50 tests）
+pnpm -F @code-review-agent/web run build:browser    ✓
+git diff --check                                    ✓
+```
+
+真实 browser smoke：
+
+- 正常 API 页面 header 显示 `Connected`，connection banner 为 hidden 且无残留文案；
+- presenter/store 回归覆盖 failed retry、reconnecting warning、bounded error 和 recovery clear；
+- browser console warn/error 为空。
+
+### 下一步
+
+- 将 Read-only、Edit、Test/Recovery、Delegation、Inspection、Settings、Deliverables 和 artifact access 汇总为统一 Phase 7.10 browser gate；
+- 补齐 loading/error/empty/reconnect 的各面板空态、窄屏布局、长任务 terminal/job 输出与失败诊断；
+- 推进 Shell 拆分、Workspace/Session 导航和 1,000+ trajectory 多页性能基线。

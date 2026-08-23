@@ -12,6 +12,7 @@ import { presentInteraction, presentPermission } from "./presentation/request-pr
 import { presentSettings } from "./presentation/settings-presenter.js";
 import { presentDeliverables } from "./presentation/deliverables-presenter.js";
 import { createFocusTrap, FOCUSABLE_SELECTOR, nextFocusableIndex } from "./presentation/focus-trap.js";
+import { presentConnection } from "./presentation/connection-presenter.js";
 
 export interface BrowserWebRuntime {
   readonly api: WebApiClient;
@@ -32,6 +33,7 @@ export interface BrowserWebRuntime {
   readonly createFocusTrap: typeof createFocusTrap;
   readonly focusableSelector: typeof FOCUSABLE_SELECTOR;
   readonly nextFocusableIndex: typeof nextFocusableIndex;
+  readonly presentConnection: typeof presentConnection;
   readonly buildToolCallTree: typeof buildToolCallTree;
   readonly presentToolCall: typeof presentToolCall;
 }
@@ -58,6 +60,7 @@ const runtime: BrowserWebRuntime = {
   createFocusTrap,
   focusableSelector: FOCUSABLE_SELECTOR,
   nextFocusableIndex,
+  presentConnection,
   buildToolCallTree,
   presentToolCall,
 };

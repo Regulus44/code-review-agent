@@ -1,6 +1,6 @@
 # Phase 7：DSH Web 前端收敛与可观测工作台
 
-状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface 与 modal keyboard/focus semantics、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API 已完成；7.1 Shell 拆分、7.3 导航收敛、7.6 queue/steer/attachment 深化、统一五场景 browser gate、性能基线继续推进）
+状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API 已完成；7.1 Shell 拆分、7.3 导航收敛、7.6 queue/steer/attachment 深化、统一五场景 browser gate、性能基线继续推进）
 
 ## 当前执行 checkpoint：typed Web client 与 Session replay foundation
 
@@ -119,6 +119,17 @@
 - `apps/web/src/browser.ts` 将 focus trap 作为 typed browser bridge 暴露；`apps/web/index.html` 为 Workspace picker 增加 `role=dialog`/`aria-labelledby`，Settings/Workspace 均支持 Escape 关闭、Tab 循环和 opener focus restore；连接状态增加 `role=status`/`aria-live=polite`；
 
 验证：`pnpm typecheck`、Web 46 项测试、browser bundle 和 `git diff --check` 通过。真实 browser smoke 验证 Workspace picker 打开后焦点落在输入框、反向/正向 Tab 在首尾回环、Escape 关闭后焦点回到 `new-session`；Settings dialog 同样回环并将焦点恢复到 `settings-button`；browser console warn/error 为空。
+
+## 当前执行 checkpoint：Loading/error/reconnect shell state（2026-08-23）
+
+本 checkpoint 对照 DSH `client/connection`、`ui-primitives` 和断线恢复行为，把连接状态从单一 header 文案推进为可操作的 shell state：
+
+- `apps/web/src/presentation/connection-presenter.ts` 将 `idle/connecting/connected/reconnecting/failed` 转为 bounded message、tone、可重试性和 visibility；错误文本限制长度，渲染层只使用 textContent；
+- `apps/web/src/presentation/connection-presenter.test.ts` 覆盖 healthy/idle 隐藏、初始 loading、reconnecting warning、failed retry 和 bounded error；
+- `apps/web/src/client/store.ts` 修复恢复后 stale transport error 继续残留的问题；`setConnection()` 在无新错误时显式移除旧 error；Store 测试增至 6 项；
+- `apps/web/src/browser.ts` 与 `apps/web/index.html` 接入 typed connection banner：loading/reconnecting/failed 显示可访问 banner，failed 提供 Retry，connected/idle 自动隐藏；
+
+验证：`pnpm typecheck`、Web 50 项测试、browser bundle 和 `git diff --check` 通过。真实 browser smoke 在正常 API 下确认 header 为 `Connected`、connection banner `hidden=true`、banner 文案为空，console warn/error 为空；异常分支由 presenter/store 测试覆盖。
 
 ## 1. 目标与边界
 

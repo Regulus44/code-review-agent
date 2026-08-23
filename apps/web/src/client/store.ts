@@ -181,11 +181,12 @@ export class SessionStore {
   }
 
   setConnection(connection: WebConnectionState, error?: string): void {
-    this.commit({
-      ...this.snapshot,
-      connection,
-      ...(error === undefined ? {} : { error }),
-    });
+    if (error === undefined) {
+      const { error: _previousError, ...withoutError } = this.snapshot;
+      this.commit({ ...withoutError, connection });
+      return;
+    }
+    this.commit({ ...this.snapshot, connection, error });
   }
 
   clear(): void {
