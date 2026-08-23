@@ -25,7 +25,7 @@ git diff --check                             ✓
 
 ### 尚未关闭
 
-8.4 的 model fallback 与基础 metrics 已补齐；仍需 trace propagation 和更完整的 browser recovery matrix。8.0 parity gaps、8.3 完整退出审计和 8.5 产品化也仍未完成。
+8.4 的 model fallback、基础 metrics 和 turn trace propagation 已补齐；仍需更完整的 browser recovery matrix。8.0 parity gaps、8.3 完整退出审计和 8.5 产品化也仍未完成。
 
 ## 2026-08-24：8.3 LSP/Code Mode 第一阶段收口
 

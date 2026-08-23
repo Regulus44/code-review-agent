@@ -129,6 +129,7 @@ export class AgentHost {
   private readonly recoveredTurns = new Map<TurnId, RecoveredTurn>();
   private readonly recoveredPermissionIndex = new Map<PermissionId, TurnId>();
   private readonly recoveredInteractionIndex = new Map<InteractionId, TurnId>();
+  private readonly turnTraces = new Map<TurnId, string>();
   private readonly maxSteps: number;
   private readonly ready: Promise<void>;
   private readonly toolRuntime: ToolRuntime;
@@ -250,6 +251,7 @@ export class AgentHost {
       activeTurns: this.activeTurns.size,
       queuedTurns: [...this.queues.values()].reduce((sum, queue) => sum + queue.length, 0),
       pendingPermissionWaiters: this.permissionWaiters.size,
+      activeTraces: this.turnTraces.size,
       metrics: this.metrics(),
     };
   }
@@ -1316,7 +1318,9 @@ export class AgentHost {
   ): Promise<void> {
     try {
       this.metricCounters.turnsStarted += 1;
-      await this.options.store.append({ sessionId, turnId, type: "turn/started", payload: {} });
+      const traceId = `trace_${randomUUID()}`;
+      this.turnTraces.set(turnId, traceId);
+      await this.options.store.append({ sessionId, turnId, type: "turn/started", payload: { traceId } });
       const messages: ChatMessage[] = [
         { role: "system", content: await this.systemMessage(sessionId) },
         ...previousMessages,
@@ -1325,17 +1329,23 @@ export class AgentHost {
       await this.runSteps(sessionId, turnId, controller, messages);
     } catch (error) {
       await this.finishTurnAfterError(sessionId, turnId, controller, error);
+    } finally {
+      this.turnTraces.delete(turnId);
     }
   }
 
   private async runRecoveredTurn(sessionId: SessionId, turnId: TurnId, controller: AbortController): Promise<void> {
     try {
       this.metricCounters.turnsStarted += 1;
-      await this.options.store.append({ sessionId, turnId, type: "agent/status", payload: { status: "running", reason: "permission_resolved_after_restart" } });
+      const traceId = `trace_${randomUUID()}`;
+      this.turnTraces.set(turnId, traceId);
+      await this.options.store.append({ sessionId, turnId, type: "agent/status", payload: { status: "running", reason: "permission_resolved_after_restart", traceId } });
       const messages: ChatMessage[] = [{ role: "system", content: await this.systemMessage(sessionId, true) }, ...(await this.conversationMessages(sessionId))];
       await this.runSteps(sessionId, turnId, controller, messages);
     } catch (error) {
       await this.finishTurnAfterError(sessionId, turnId, controller, error);
+    } finally {
+      this.turnTraces.delete(turnId);
     }
   }
 
@@ -1358,7 +1368,7 @@ export class AgentHost {
           continue;
         }
         await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "completed" } });
-        await this.options.store.append({ sessionId, turnId, type: "turn/ended", payload: { status: "completed" } });
+        await this.options.store.append({ sessionId, turnId, type: "turn/ended", payload: { status: "completed", ...(this.turnTraces.get(turnId) === undefined ? {} : { traceId: this.turnTraces.get(turnId) }) } });
         this.metricCounters.turnsCompleted += 1;
         return;
       }
@@ -1432,14 +1442,15 @@ export class AgentHost {
   }
 
   private async finishTurnAfterError(sessionId: SessionId, turnId: TurnId, controller: AbortController, error: unknown): Promise<void> {
+    const traceId = this.turnTraces.get(turnId);
     if (controller.signal.aborted) {
       this.metricCounters.turnsStopped += 1;
-      await this.options.store.append({ sessionId, turnId, type: "turn/ended", payload: { status: "stopped" } });
+      await this.options.store.append({ sessionId, turnId, type: "turn/ended", payload: { status: "stopped", ...(traceId === undefined ? {} : { traceId }) } });
     } else {
       this.metricCounters.turnsFailed += 1;
       const message = error instanceof Error ? error.message : String(error);
-      await this.options.store.append({ sessionId, turnId, type: "agent/error", payload: { message } });
-      await this.options.store.append({ sessionId, turnId, type: "turn/ended", payload: { status: "failed", message } });
+      await this.options.store.append({ sessionId, turnId, type: "agent/error", payload: { message, ...(traceId === undefined ? {} : { traceId }) } });
+      await this.options.store.append({ sessionId, turnId, type: "turn/ended", payload: { status: "failed", message, ...(traceId === undefined ? {} : { traceId }) } });
     }
   }
 

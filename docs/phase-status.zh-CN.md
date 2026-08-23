@@ -71,8 +71,8 @@ Phase 7 的 DSH Web 调研与分步计划：
 - `pnpm test:phase8:web` 已通过（planning/question replay gate）；`pnpm test:phase8:lsp` 已通过（LSP/Code Mode safety/recovery gate）；Web 100 tests、Tools 56 tests、API 27 tests、Runtime 25 tests 和 `pnpm typecheck` 通过；
 - `6ac8e7e`：8.3 第一阶段 checkpoint 已建立；`8.3` 的真实 Web fixture、OS 级网络隔离评估和完整退出审计仍待补齐。
 - 当前已进入 `Phase 8.4 Reliability`：`JobManager` 已持久化可重试 executable/args 元数据，支持 bounded retry、deadline 结构化失败、取消原因和 graceful shutdown；`AgentHost` 提供 job action、session export/replay 和 structured diagnostics；API 暴露 `/v1/sessions/:id/jobs`、`/retry`、`/cancel`、`/export` 与 `/v1/diagnostics`；Web Job center 已提供 Cancel/Retry actions。
-- `AgentHost` 已支持显式 `fallbackModels`：主模型在产生部分输出前失败时切换到下一个模型，并追加 `MODEL_FALLBACK` 审计事件；`metrics()` 与 API `/v1/metrics` 提供 turns、fallback、tool failure counters。
-- 新增 `scripts/phase8-reliability-gate.mjs`，覆盖 retry、deadline、shutdown、session export、diagnostics 和 metrics；`pnpm test:phase8:reliability` 已通过。当前 8.4 仍未整体完成，trace propagation 和更完整的 browser recovery matrix 仍是后续工作。
+- `AgentHost` 已支持显式 `fallbackModels`：主模型在产生部分输出前失败时切换到下一个模型，并追加 `MODEL_FALLBACK` 审计事件；`metrics()` 与 API `/v1/metrics` 提供 turns、fallback、tool failure counters；每个 turn 的 `traceId` 会在 started/ended/error 边界中保持一致。
+- 新增 `scripts/phase8-reliability-gate.mjs`，覆盖 retry、deadline、shutdown、session export、diagnostics 和 metrics；`pnpm test:phase8:reliability` 已通过。当前 8.4 仍未整体完成，更完整的 browser recovery matrix 仍是后续工作。
 - 当前 Phase 8 仍为 `pending`。8.0 的 Workspace Flat/Tree、sorting/picker、Settings failure/retry、visual baseline 和总 parity gate 仍未关闭。
 
 ## Phase 7 Workspace lifecycle controls（当前 checkpoint）

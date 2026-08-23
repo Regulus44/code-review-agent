@@ -87,6 +87,8 @@ mcp/prompt
 
 `job/started`、`job/output`、`job/ended` 记录显式 bash/pwsh background job 的归属、增量输出和最终 exit/signal/status。完整 stdout/stderr 持久化到 workspace 内 `.agent-artifacts/jobs/<jobId>.log`；事件中的 `text` 只允许 bounded live chunk，并携带 `spillPath`、`totalBytes` 和 `truncated` metadata。`job/started` 可记录 bounded executable/args、attempt/maxAttempts 和 deadlineAt，供受控 retry/recovery 使用；不得记录环境变量或凭据。deadline、调用方取消和 host shutdown 通过结构化 error/status 保留。job 只能由同一 session/workspace 通过 `job_output`、`job_kill`、`job_retry` 和 `job_list` 访问。
 
+Turn 的 `traceId` 在 `turn/started`、`agent/error` 和 `turn/ended` 边界中保持一致，用于有限的运行追踪和 recovery correlation；trace id 不携带凭据、prompt 内容或外部租户信息。
+
 `patch/*` 记录多文件 unified patch 的 preview、apply、reject 和 rollback 决策。完整 before/after snapshot 持久化到 workspace 内 `.agent-artifacts/patches/<patchId>.json`，payload 只携带 `patchId`、文件操作/哈希/统计和安全错误，不把未经预算的完整 patch 文本写入 model view；rollback 必须再次比较 after-state，不能覆盖更新后的用户文件。reject/rollback 成功后删除对应快照 artifact，但保留事件历史。
 
 `lsp/server` 记录 host-configured LSP transport 的 started、initialized、crashed、restart_requested 和 disposed 生命周期；`lsp/request` 记录 initialize/diagnostics/definition/references 等请求的 started、completed、cancelled、timeout 或 failed。事件只保留 serverId、workspace、method、requestId、状态、错误 code、stderr 字节数等 bounded metadata，不写入原始 stderr、凭据或完整文档。

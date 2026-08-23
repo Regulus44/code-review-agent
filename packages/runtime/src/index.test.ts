@@ -50,6 +50,8 @@ describe("AgentHost", () => {
     expect(events.some((event) => event.type === "agent/error" && event.payload["code"] === "MODEL_FALLBACK")).toBe(true);
     expect(events.some((event) => event.type === "assistant/message" && event.payload["content"] === "fallback-ok")).toBe(true);
     expect(events.find((event) => event.type === "turn/ended")?.payload["status"]).toBe("completed");
+    expect(events.find((event) => event.type === "turn/started")?.payload["traceId"]).toMatch(/^trace_/u);
+    expect(events.find((event) => event.type === "turn/ended")?.payload["traceId"]).toBe(events.find((event) => event.type === "turn/started")?.payload["traceId"]);
     expect(host.metrics()).toMatchObject({ turnsStarted: 1, turnsCompleted: 1, modelFallbacks: 1 });
   });
 
