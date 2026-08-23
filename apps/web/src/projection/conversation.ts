@@ -170,6 +170,13 @@ export function applyConversationEvent(projection: MutableConversationProjection
       projection.nodes.set(key, { ...base(key, "user", previous), kind: "user", content, partial: false });
       return true;
     }
+    case "turn/steered": {
+      const content = stringValue(event.payload["content"]);
+      if (content === undefined) return markUnkeyedEvent(projection, event);
+      const key = messageKey("user", undefined, event.eventId);
+      projection.nodes.set(key, { ...base(key, "user", projection.nodes.get(key)), kind: "user", content, partial: false });
+      return true;
+    }
     case "assistant/chunk": {
       const text = stringValue(event.payload["text"]) ?? stringValue(event.payload["content"]);
       if (text === undefined || text.length === 0) return markUnkeyedEvent(projection, event);

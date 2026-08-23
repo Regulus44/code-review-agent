@@ -7,6 +7,7 @@ export const AGENT_EVENT_TYPES: readonly AgentEventType[] = [
   "session/updated",
   "session/deleted",
   "user/message",
+  "turn/steered",
   "turn/queued",
   "turn/started",
   "step/started",

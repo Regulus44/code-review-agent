@@ -20,6 +20,7 @@ export type AgentEventType =
   | "session/updated"
   | "session/deleted"
   | "user/message"
+  | "turn/steered"
   | "turn/queued"
   | "queue/changed"
   | "turn/started"

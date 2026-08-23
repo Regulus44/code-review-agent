@@ -50,6 +50,21 @@ describe("WebApiClient", () => {
     expect(calls[0]?.init?.body).toBe(JSON.stringify({ turnId: "turn_3", position: 0 }));
   });
 
+  it("builds the host-backed steer command", async () => {
+    const calls: { url: string; init?: RequestInit | undefined }[] = [];
+    const client = new WebApiClient({
+      baseUrl: "http://localhost:4317",
+      fetcher: async (input, init) => {
+        calls.push({ url: String(input), init });
+        return new Response(JSON.stringify({ accepted: true, turnId: "turn_running", receiptId: "steer_1" }), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+    await client.steerTurn("ses_steer" as never, "turn_running" as never, "focus on tests", "steer_cmd_1");
+    expect(calls[0]?.url).toBe("http://localhost:4317/v1/sessions/ses_steer/turns/turn_running/steer");
+    expect(new Headers(calls[0]?.init?.headers).get("idempotency-key")).toBe("steer_cmd_1");
+    expect(calls[0]?.init?.body).toBe(JSON.stringify({ content: "focus on tests" }));
+  });
+
   it("normalizes non-2xx JSON responses as ApiError", async () => {
     const client = new WebApiClient({
       fetcher: async () => new Response(JSON.stringify({ error: "permission denied" }), { status: 403, headers: { "content-type": "application/json" } }),

@@ -430,6 +430,15 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       sendJson(response, 200, await host.reorderQueue(id, turnId(body.turnId), body.position, commandId(request, body)));
       return;
     }
+    const steerMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/turns\/([^/]+)\/steer$/u);
+    if (request.method === "POST" && steerMatch?.[1] !== undefined && steerMatch[2] !== undefined) {
+      const id = sessionId(decodeURIComponent(steerMatch[1]));
+      const targetTurn = turnId(decodeURIComponent(steerMatch[2]));
+      const body = await readJson(request);
+      if (typeof body.content !== "string") throw new HttpError(400, "content is required");
+      sendJson(response, 200, await host.steerTurn(id, targetTurn, body.content, commandId(request, body)));
+      return;
+    }
     const sessionMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)$/u);
     if (sessionMatch?.[1] !== undefined) {
       const id = sessionId(decodeURIComponent(sessionMatch[1]));

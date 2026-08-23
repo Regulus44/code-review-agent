@@ -1,5 +1,27 @@
 # Phase 7：DSH Web 前端收敛
 
+## 2026-08-23：Host-backed steer receipt
+
+### 变更范围
+
+- `turn/steered` 加入事件契约、Storage replay、SessionStore 和 Conversation projection；steer 不覆盖原始 prompt，而是作为同一 turn 下的独立 user message。
+- `AgentHost.steerTurn()` 只接受当前运行中的 turn，事件先落盘再注入下一次模型请求；command idempotency 保证重复请求返回相同 receipt，非运行态返回 `accepted: false`。
+- API 增加 `POST /v1/sessions/:id/turns/:turnId/steer`；Web API client、SSE typed event list 和 composer Steer action 已接入。
+- 普通 Send 的 queue 行为保持不变；Steer 只在存在 running turn 且输入非空时可用。
+
+### 验证
+
+```text
+pnpm typecheck ✓
+Runtime/API/Web 定向测试 ✓（41 tests）
+git diff --check ✓
+```
+
+### 下一步
+
+- attachment capability gate、大小/type rejection 和 upload receipt；
+- 物理拆分 Conversation/Details/Overlay、Workspace reorder 生命周期和窄屏视觉基线。
+
 ## 2026-08-23：Terminal/Job diagnostics render intent
 
 ### 变更范围

@@ -2,6 +2,18 @@
 
 状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、terminal/job diagnostics、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection、7.1 shell layout state/reducer、mobile sidebar 行为、typed overlay state/reducer、queue dock/cancel/reorder surface 和 Session rename 生命周期已完成；物理 Shell 拆分、Workspace reorder 生命周期、steer/attachment 深化和窄屏视觉基线继续推进）
 
+## 当前执行 checkpoint：Host-backed steer receipt（2026-08-23）
+
+本 checkpoint 完成了运行中 turn 的 Web steer 纵向切片：
+
+- `turn/steered` 纳入 Event/Storage/Web replay contract；原始 `user/message` 保留，steer 作为同一 turn 下的独立 user message；
+- `AgentHost.steerTurn()` 只接受当前运行中的 turn，先追加 receipt 事件，再把指导注入下一次模型请求；重复 command 返回相同 receipt，非运行中的 turn 返回 `accepted: false`；
+- API 增加 `POST /v1/sessions/:id/turns/:turnId/steer`，Web API client 与 SSE typed event list 同步；
+- composer 在存在运行中 turn 时显示 Steer，普通 Send 仍走既有队列命令；
+- Runtime、API、Store、Conversation 和 Web API client 均有定向测试。
+
+验证：`pnpm typecheck`、Runtime/API/Web 定向测试通过；完整 workspace 与 Phase 7 browser gate 在提交前执行。
+
 ## 当前执行 checkpoint：typed Web client 与 Session replay foundation
 
 本 checkpoint 对照 DSH 的 `client/connection`、Session snapshot 和 Conversation assembler，已落地以下基础：

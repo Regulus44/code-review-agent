@@ -255,6 +255,8 @@
       .send-button { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; color: #fff; background: var(--blue); font-size: 15px; transition: background .15s var(--ease), transform .15s var(--ease); }
       .send-button:hover { background: var(--blue-hover); transform: translateY(-1px); }
       .send-button:disabled { opacity: .5; transform: none; }
+      .steer-button { border: 1px solid rgba(190, 120, 35, .55); color: #8a5a16; background: #fff8e8; }
+      .steer-button[hidden] { display: none; }
       .model-popover { position: absolute; right: 43px; bottom: 49px; z-index: 5; width: 250px; padding: 7px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface); box-shadow: var(--shadow); }
       .model-popover[hidden] { display: none; }
       .popover-label { padding: 7px 9px 6px; color: var(--text-tertiary); font-size: 10px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
@@ -494,6 +496,7 @@
               <span class="toolbar-spacer"></span>
               <button id="model-trigger" class="toolbar-button model-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">Model · Loading…</button>
               <span class="context-meter">Context · —</span>
+              <button id="steer" class="toolbar-button steer-button" type="button" title="Send guidance to the running turn" hidden>↳ <span>Steer</span></button>
               <button id="send" class="send-button" type="submit" aria-label="Send message">↑</button>
             </div>
             <div id="model-popover" class="model-popover" hidden></div>
@@ -561,6 +564,7 @@
         const path = document.querySelector('#session-path');
         const input = document.querySelector('#input');
         const send = document.querySelector('#send');
+        const steer = document.querySelector('#steer');
         const modelTrigger = document.querySelector('#model-trigger');
         const modelPopover = document.querySelector('#model-popover');
         const modeTrigger = document.querySelector('#mode-trigger');
@@ -1221,6 +1225,9 @@
           const shouldFollowTail = state.trajectoryFollow === true && isNearConversationTail();
           conversation.innerHTML = '';
           const typedSnapshot = typedConnection?.store.getSnapshot();
+          const runningTurn = typedSnapshot?.session?.turns.find((turn) => turn.status === 'running');
+          steer.hidden = runningTurn === undefined;
+          steer.disabled = runningTurn === undefined || !input.value.trim();
           renderQueue(typedSnapshot || { session: state.session });
           const typedProjection = typedSnapshot?.conversation;
           if (typedProjection && typedProjection.nodes.length > 0) {
@@ -1241,14 +1248,14 @@
             typedBody.remove();
           }
           const ordered = orderedEvents();
-          const hasMessage = ordered.some((event) => event.type === 'user/message' || event.type === 'assistant/chunk' || event.type === 'assistant/message');
+          const hasMessage = ordered.some((event) => event.type === 'user/message' || event.type === 'turn/steered' || event.type === 'assistant/chunk' || event.type === 'assistant/message');
           const hasActivity = ordered.some((event) => event.type !== 'session/created');
           if (!hasMessage && !hasActivity) { const hero = document.createElement('div'); hero.className = 'hero'; hero.innerHTML = `<div class="hero-inner"><div class="hero-mark">⌁</div><h1>Ready to review your code</h1><p>Ask the agent to inspect a repository, explain a file, or plan the next change.</p><span class="workspace-chip">${esc(state.session?.workspaceRoot || '.')}</span></div>`; conversation.append(hero); }
           else {
             const body = document.createElement('div'); body.className = 'conversation-body'; conversation.append(body); const assistant = new Map(); const permissions = new Map(); const interactions = new Map(); const toolRows = new Map();
             const upsertTool = (id, name, text, statusText) => { const key = id || `${name}-${toolRows.size}`; let card = toolRows.get(key); if (!card) { card = appendTool(body, name || 'tool', text, statusText); toolRows.set(key, card); } else { card.toolStatus.textContent = statusText; card.pre.textContent = text; } return card; };
             for (const event of ordered) {
-              if (event.type === 'user/message') appendMessage(body, 'user', event.payload?.content || '');
+              if (event.type === 'user/message' || event.type === 'turn/steered') appendMessage(body, 'user', event.payload?.content || '');
               else if (event.type === 'turn/started') addTurnStateRow(body, 'Agent is working…', 'running');
               else if (event.type === 'turn/ended') { const turnStatus = event.payload?.status || 'completed'; addTurnStateRow(body, turnStatus === 'completed' ? 'Turn completed' : `Turn ${turnStatus}`, turnStatus === 'completed' ? 'completed' : 'failed'); }
               else if (event.type === 'assistant/chunk') { const key = event.turnId || 'assistant'; let messageBody = assistant.get(key); if (!messageBody) { messageBody = appendMessage(body, 'assistant', ''); assistant.set(key, messageBody); } setMessageContent(messageBody, `${messageBody.dataset.rawContent || ''}${event.payload?.text || ''}`); }
@@ -1463,7 +1470,7 @@
           for (const event of history) addEvent(event, false);
           render();
           state.source = new EventSource(`/v1/sessions/${encodeURIComponent(id)}/events?after_sequence=${state.session.lastSequence || 0}`);
-          const types = ['session/created','session/updated','session/deleted','user/message','turn/queued','queue/changed','turn/started','step/started','step/ended','turn/ended','assistant/chunk','assistant/message','task/created','task/updated','task/input-required','task/report','task/artifact','task/ended','subagent/descriptor','subagent/start','subagent/end','subagent/inbox','subagent/settlement','goal/created','goal/updated','goal/ended','plan/updated','todo/updated','tool/call','tool/progress','tool/result','diff/preview','patch/preview','patch/applied','patch/rejected','patch/rolled_back','lsp/server','lsp/request','permission/requested','permission/resolved','interaction/requested','interaction/resolved','terminal/session','job/started','job/output','job/ended','mcp/server','mcp/tool','mcp/resource','mcp/prompt','agent/status','agent/error'];
+          const types = ['session/created','session/updated','session/deleted','user/message','turn/steered','turn/queued','queue/changed','turn/started','step/started','step/ended','turn/ended','assistant/chunk','assistant/message','task/created','task/updated','task/input-required','task/report','task/artifact','task/ended','subagent/descriptor','subagent/start','subagent/end','subagent/inbox','subagent/settlement','goal/created','goal/updated','goal/ended','plan/updated','todo/updated','tool/call','tool/progress','tool/result','diff/preview','patch/preview','patch/applied','patch/rejected','patch/rolled_back','lsp/server','lsp/request','permission/requested','permission/resolved','interaction/requested','interaction/resolved','terminal/session','job/started','job/output','job/ended','mcp/server','mcp/tool','mcp/resource','mcp/prompt','agent/status','agent/error'];
           types.forEach((type) => state.source.addEventListener(type, (message) => { addEvent(JSON.parse(message.data)); void refreshSubagents(); }));
           state.source.onerror = () => setStatus('Reconnecting…', false);
           state.source.onopen = () => setStatus('Connected', true);
@@ -1502,7 +1509,24 @@
         modelTrigger.onclick = () => { dispatchOverlay({ type: 'toggle', overlay: 'model-popover' }); };
         modeTrigger.onclick = () => { dispatchOverlay({ type: 'toggle', overlay: 'mode-popover' }); renderModes(); };
         document.addEventListener('click', (event) => { if (!modelPopover.hidden && !modelPopover.contains(event.target) && event.target !== modelTrigger) dispatchOverlay({ type: 'close', overlay: 'model-popover' }); if (!modePopover.hidden && !modePopover.contains(event.target) && event.target !== modeTrigger) dispatchOverlay({ type: 'close', overlay: 'mode-popover' }); if (!sessionMenu.hidden && !sessionMenu.contains(event.target)) closeSessionMenu(); });
-        input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 220)}px`; });
+        input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 220)}px`; const snapshot = typedConnection?.store.getSnapshot(); const runningTurn = snapshot?.session?.turns.find((turn) => turn.status === 'running'); steer.hidden = runningTurn === undefined; steer.disabled = runningTurn === undefined || !input.value.trim(); });
+        steer.addEventListener('click', async () => {
+          const snapshot = typedConnection?.store.getSnapshot();
+          const runningTurn = snapshot?.session?.turns.find((turn) => turn.status === 'running');
+          const content = input.value.trim();
+          if (!runningTurn || !state.session || !content || !typedRuntime?.api?.steerTurn) return;
+          steer.disabled = true;
+          try {
+            const receipt = await typedRuntime.api.steerTurn(state.session.id, runningTurn.id, content, commandKey());
+            input.value = '';
+            input.style.height = 'auto';
+            setStatus(receipt.accepted ? 'Guidance sent to running turn' : 'Turn is no longer running', receipt.accepted);
+            render();
+          } catch (error) {
+            setStatus(error instanceof Error ? error.message : String(error), false);
+            render();
+          } finally { input.focus(); }
+        });
         input.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); document.querySelector('#composer').requestSubmit(); } });
         document.querySelector('#composer').addEventListener('submit', async (event) => { event.preventDefault(); const content = input.value.trim(); if (!content || !state.session) return; send.disabled = true; input.value = ''; input.style.height = 'auto'; try { await api(`/v1/sessions/${encodeURIComponent(state.session.id)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content }) }); } catch (error) { setStatus(error.message, false); } finally { send.disabled = false; input.focus(); } });
         applyShellLayout();

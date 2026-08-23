@@ -337,7 +337,7 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
     };
   }
 
-  if (event.type === "user/message") {
+  if (event.type === "user/message" || event.type === "turn/steered") {
     const content = event.payload["content"];
     if (typeof content === "string") {
       next = {

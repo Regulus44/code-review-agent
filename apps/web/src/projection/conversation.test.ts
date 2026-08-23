@@ -53,6 +53,15 @@ describe("conversation projection", () => {
     });
   });
 
+  it("projects steering as a distinct user row", () => {
+    const projection = projectConversation(sessionId, [
+      event(1, "user/message", { content: "original prompt" }),
+      event(2, "turn/steered", { content: "additional guidance", receiptId: "steer_1", status: "accepted" }),
+    ]);
+
+    expect(projection.nodes.filter((node) => node.kind === "user").map((node) => "content" in node ? node.content : "")).toEqual(["original prompt", "additional guidance"]);
+  });
+
   it("retains unmapped events as inspectable generic nodes", () => {
     const projection = projectConversation(sessionId, [event(1, "mcp/resource", { uri: "resource://fixture" })]);
     expect(projection.nodes[0]).toMatchObject({ kind: "event", eventType: "mcp/resource" });

@@ -210,6 +210,14 @@ export class WebApiClient {
     });
   }
 
+  steerTurn(sessionId: SessionId, turnId: TurnId, content: string, commandId?: string): Promise<{ readonly accepted: boolean; readonly turnId: TurnId; readonly receiptId?: string }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/steer`, {
+      method: "POST",
+      commandId,
+      body: { content },
+    });
+  }
+
   resolvePermission(sessionId: SessionId, permissionId: PermissionId, status: "approved" | "denied" | "cancelled", commandId?: string): Promise<unknown> {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/permissions/${encodeURIComponent(permissionId)}`, {
       method: "POST",

@@ -279,6 +279,16 @@ function foldProjection(session: SessionProjection, event: AgentEvent): SessionP
         lastSequence: event.sequence,
       };
     }
+    case "turn/steered": {
+      const content = stringValue(payload["content"]);
+      if (content === undefined) return session;
+      return {
+        ...session,
+        messages: appendMessage(session.messages, { role: "user", content, ...(event.turnId === undefined ? {} : { turnId: event.turnId }) }),
+        updatedAt: event.createdAt,
+        lastSequence: event.sequence,
+      };
+    }
     case "assistant/message": {
       const content = stringValue(payload["content"]);
       if (content === undefined) return session;

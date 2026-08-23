@@ -26,6 +26,7 @@ type AgentEvent = {
 session/created
 session/updated
 user/message
+turn/steered
 turn/queued
 turn/started
 step/started
@@ -90,6 +91,8 @@ mcp/prompt
 
 MCP 生命周期事件只携带 `serverName`、状态、动作和脱敏错误；env/header/token 等配置秘密不得进入 payload。MCP 工具调用本身仍使用公共 `tool/*` 和 `permission/*` 事件。`mcp/resource` / `mcp/prompt` 只记录 server、资源 URI 或 prompt name、动作、bounded bytes/truncated 和 trust marker，不记录远端原始内容。
 
+`turn/steered` 表示用户向当前运行中的 turn 追加一条指导。payload 至少包含 `{ content, receiptId, status: "accepted" }`，并通过 `correlationId` 关联幂等 command。该事件先落盘，再注入下一次模型请求；它不会覆盖原始 `user/message`，回放时作为同一 turn 下的独立 user message。非运行中的 turn 返回 `accepted: false`，不追加 steer 事件。
+
 ## 不变量
 
 - 任何到达模型请求的输入，都能从 Session 事件重建；
@@ -102,6 +105,7 @@ MCP 生命周期事件只携带 `serverName`、状态、动作和脱敏错误；
 - permission 事件必须记录 caller、workspace、toolCall、创建时间和过期时间；过期、拒绝、取消都必须有 terminal tool/result；
 - 事件先落盘，再推送 SSE；
 - 重复发送消息、重复批准、重复取消必须幂等；
+- 重复 steer command 必须返回同一个 receipt；只有当前运行中的 turn 可以接受 steer；
 - 客户端可以用 `Last-Event-ID` 或 `after_sequence` 补发事件；
 - 事件 payload 不直接暴露第三方仓库的内部类型。
 

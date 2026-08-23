@@ -86,6 +86,20 @@ describe("SessionStore", () => {
     expect(store.getSnapshot().session?.turns).toMatchObject([{ id: turnId, status: "queued", userMessage: "queued prompt" }]);
   });
 
+  it("replays steering as an additional user message without overwriting the prompt", () => {
+    const store = new SessionStore();
+    store.open(session());
+    store.apply(event(1, "user/message", { content: "original prompt" }));
+    store.apply(event(2, "turn/started", {}));
+    store.apply(event(3, "turn/steered", { content: "additional guidance", receiptId: "steer_1", status: "accepted" }));
+
+    expect(store.getSnapshot().session?.messages).toEqual([
+      { role: "user", content: "original prompt", turnId },
+      { role: "user", content: "additional guidance", turnId },
+    ]);
+    expect(store.getSnapshot().session?.turns).toMatchObject([{ id: turnId, userMessage: "original prompt", status: "running" }]);
+  });
+
   it("replays queue order from queue/changed instead of local array order", () => {
     const secondTurn = brand<string, "TurnId">("turn_second");
     const store = new SessionStore();

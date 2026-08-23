@@ -303,6 +303,41 @@ describe("AgentHost", () => {
     expect((await host.getSession(session.id))?.turns.map((turn) => turn.status)).toEqual(["completed", "completed"]);
   });
 
+  it("steers a running turn with a durable receipt and idempotent replay", async () => {
+    const store = new InMemoryEventStore();
+    const requests: ModelRequest[] = [];
+    let releaseFirst!: () => void;
+    let firstStartedResolve!: () => void;
+    const firstStarted = new Promise<void>((resolve) => { firstStartedResolve = resolve; });
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        requests.push(request);
+        if (requests.length === 1) {
+          firstStartedResolve();
+          await new Promise<void>((resolve) => { releaseFirst = resolve; });
+          yield { type: "text_delta", text: "Initial answer" };
+        } else {
+          yield { type: "text_delta", text: "Steered answer" };
+        }
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store, model });
+    const session = await host.createSession("D:/steer-fixture");
+    const turn = await host.sendMessage(session.id, "start work");
+    await firstStarted;
+    const receipt = await host.steerTurn(session.id, turn, "focus on the failing test", "steer-1");
+    expect(receipt.accepted).toBe(true);
+    expect(receipt.receiptId).toMatch(/^steer_/u);
+    expect(await host.steerTurn(session.id, turn, "focus on the failing test", "steer-1")).toEqual(receipt);
+    releaseFirst();
+    await host.waitForTurn(turn);
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.messages.at(-1)).toEqual({ role: "user", content: "focus on the failing test" });
+    expect((await host.events(session.id)).some((event) => event.type === "turn/steered" && event.payload["receiptId"] === receipt.receiptId)).toBe(true);
+    expect((await host.steerTurn(session.id, turn, "too late", "steer-late")).accepted).toBe(false);
+  });
+
   it("reorders queued turns durably and keeps the command idempotent", async () => {
     const store = new InMemoryEventStore();
     let releaseFirst!: () => void;

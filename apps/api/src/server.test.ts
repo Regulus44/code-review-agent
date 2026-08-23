@@ -329,6 +329,31 @@ describe("Phase 2 API", () => {
     expect(await response.json()).toEqual({ reordered: false, queuedTurnIds: [] });
   });
 
+  it("serves the host-backed steer command with validation and idempotency", async () => {
+    const created = await fetch(`${baseUrl}/v1/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspaceRoot: "D:/workspace/steer-fixture" }),
+    });
+    const session = await created.json() as { id: string };
+    const missing = await fetch(`${baseUrl}/v1/sessions/${session.id}/turns/turn_missing/steer`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(missing.status).toBe(400);
+    const headers = { "content-type": "application/json", "idempotency-key": "api-steer-1" };
+    const response = await fetch(`${baseUrl}/v1/sessions/${session.id}/turns/turn_missing/steer`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ content: "focus on the failing test" }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ accepted: false, turnId: "turn_missing" });
+    const repeated = await fetch(`${baseUrl}/v1/sessions/${session.id}/turns/turn_missing/steer`, { method: "POST", headers, body: JSON.stringify({ content: "focus on the failing test" }) });
+    expect(await repeated.json()).toEqual({ accepted: false, turnId: "turn_missing" });
+  });
+
   it("soft-deletes a session and keeps its event history out of active lists", async () => {
     const created = await fetch(`${baseUrl}/v1/sessions`, {
       method: "POST",

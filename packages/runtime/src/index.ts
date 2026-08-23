@@ -76,6 +76,7 @@ export class AgentHost {
   private readonly activeTurns = new Map<SessionId, TurnId>();
   private readonly queues = new Map<SessionId, PendingTurn[]>();
   private readonly queueChangeTails = new Map<SessionId, Promise<void>>();
+  private readonly steerQueues = new Map<TurnId, string[]>();
   private readonly permissionWaiters = new Map<PermissionId, PendingPermissionWaiter>();
   private readonly recoveredTurns = new Map<TurnId, RecoveredTurn>();
   private readonly recoveredPermissionIndex = new Map<PermissionId, TurnId>();
@@ -427,6 +428,45 @@ export class AgentHost {
     return true;
   }
 
+  async steerTurn(sessionId: SessionId, turnId: TurnId, content: string, commandId?: string): Promise<{ readonly accepted: boolean; readonly turnId: TurnId; readonly receiptId?: string }> {
+    await this.ready;
+    if (await this.options.store.project(sessionId) === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    const normalized = content.trim();
+    if (normalized.length === 0) throw new Error("Steer content cannot be empty");
+    if (normalized.length > 4_000) throw new Error("Steer content must be 4,000 characters or fewer");
+    const accepted = this.controllers.has(turnId) && this.activeTurns.get(sessionId) === turnId;
+    const receiptId = `steer_${randomUUID()}`;
+    const idempotencyKey = commandId ?? `cmd_${randomUUID()}`;
+    const result = { accepted, turnId, ...(accepted ? { receiptId } : {}) };
+    const claim = await this.options.store.claimCommand({
+      sessionId,
+      commandId: idempotencyKey,
+      kind: "steer_turn",
+      request: { turnId, content: normalized },
+      result,
+    });
+    if (!claim.created) {
+      const saved = claim.record.result as { accepted?: unknown; turnId?: unknown; receiptId?: unknown };
+      return {
+        accepted: saved.accepted === true,
+        turnId: brand<string, "TurnId">(typeof saved.turnId === "string" ? saved.turnId : String(turnId)),
+        ...(typeof saved.receiptId === "string" ? { receiptId: saved.receiptId } : {}),
+      };
+    }
+    if (!accepted) return result;
+    const queue = this.steerQueues.get(turnId) ?? [];
+    queue.push(normalized);
+    this.steerQueues.set(turnId, queue);
+    await this.options.store.append({
+      sessionId,
+      turnId,
+      correlationId: idempotencyKey,
+      type: "turn/steered",
+      payload: { content: normalized, receiptId, status: "accepted" },
+    });
+    return result;
+  }
+
   async reorderQueue(sessionId: SessionId, turnId: TurnId, position: number, commandId?: string): Promise<{ readonly reordered: boolean; readonly queuedTurnIds: readonly TurnId[] }> {
     await this.ready;
     if (await this.options.store.project(sessionId) === undefined) throw new Error(`Unknown session: ${sessionId}`);
@@ -598,6 +638,7 @@ export class AgentHost {
     void this.runRecoveredTurn(recovered.sessionId, recovered.turnId, controller).finally(() => {
       this.controllers.delete(recovered.turnId);
       this.activeTurns.delete(recovered.sessionId);
+      this.steerQueues.delete(recovered.turnId);
       void this.drainSession(recovered.sessionId);
     });
   }
@@ -622,7 +663,7 @@ export class AgentHost {
     const messages: ChatMessage[] = [];
     for (const event of await this.options.store.list(sessionId)) {
       if (beforeTurnId !== undefined && event.type === "user/message" && event.turnId === beforeTurnId) break;
-      if (event.type === "user/message") {
+      if (event.type === "user/message" || event.type === "turn/steered") {
         const content = event.payload["content"];
         if (typeof content === "string") messages.push({ role: "user", content });
       } else if (event.type === "assistant/message") {
@@ -682,6 +723,7 @@ export class AgentHost {
     void this.runTurn(sessionId, pending.turnId, controller, pending.previousMessages, pending.content).finally(() => {
       this.controllers.delete(pending.turnId);
       this.activeTurns.delete(sessionId);
+      this.steerQueues.delete(pending.turnId);
       void this.drainSession(sessionId);
     });
   }
@@ -734,17 +776,26 @@ export class AgentHost {
   private async runSteps(sessionId: SessionId, turnId: TurnId, controller: AbortController, messages: ChatMessage[]): Promise<void> {
     for (let step = 1; step <= this.maxSteps; step += 1) {
       if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
+      this.appendSteers(messages, turnId);
       await this.options.store.append({ sessionId, turnId, type: "step/started", payload: { step } });
       const response = await this.collectModelResponse(sessionId, turnId, controller, messages);
       if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
       const assistantPayload = { content: response.text, ...(response.toolCalls.length === 0 ? {} : { toolCalls: response.toolCalls }) };
       await this.options.store.append({ sessionId, turnId, type: "assistant/message", payload: assistantPayload });
+      const steersAfterResponse = this.takeSteers(turnId);
       if (response.toolCalls.length === 0) {
+        if (steersAfterResponse.length > 0) {
+          messages.push({ role: "assistant", content: response.text });
+          for (const steer of steersAfterResponse) messages.push({ role: "user", content: steer });
+          await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "steered" } });
+          continue;
+        }
         await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "completed" } });
         await this.options.store.append({ sessionId, turnId, type: "turn/ended", payload: { status: "completed" } });
         return;
       }
       messages.push({ role: "assistant", content: response.text, toolCalls: response.toolCalls });
+      for (const steer of steersAfterResponse) messages.push({ role: "user", content: steer });
       const outputs = await Promise.all(response.toolCalls.map((toolCall) => this.executeModelToolCall(sessionId, turnId, controller, toolCall)));
       for (let index = 0; index < outputs.length; index += 1) {
         const output = outputs[index];
@@ -755,6 +806,17 @@ export class AgentHost {
       await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "completed", toolCalls: response.toolCalls.length } });
     }
     throw new Error(`MAX_AGENT_STEPS_EXCEEDED: model did not produce a final response within ${this.maxSteps} steps`);
+  }
+
+  private appendSteers(messages: ChatMessage[], turnId: TurnId): void {
+    for (const steer of this.takeSteers(turnId)) messages.push({ role: "user", content: steer });
+  }
+
+  private takeSteers(turnId: TurnId): readonly string[] {
+    const queue = this.steerQueues.get(turnId);
+    if (queue === undefined || queue.length === 0) return [];
+    this.steerQueues.delete(turnId);
+    return [...queue];
   }
 
   private async finishTurnAfterError(sessionId: SessionId, turnId: TurnId, controller: AbortController, error: unknown): Promise<void> {
