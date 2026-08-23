@@ -64,6 +64,7 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
   const server = createServer((request, response) => {
     void handleRequest(request, response, host, mcp, subagentRuntime, webRoot, persistence, modelRuntime, options.attachmentPolicy);
   });
+  server.on("close", () => { void host.shutdown(); });
   if (ownsStore && store instanceof SqliteEventStore) server.on("close", () => store.close());
   if (ownsMcp) server.on("close", () => { void mcp.close(); });
   return server;
@@ -120,6 +121,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   try {
     if (request.method === "GET" && url.pathname === "/health") {
       sendJson(response, 200, { ok: true, service: "code-review-agent", runtime: "typescript", persistence, ...(modelRuntime.info === undefined ? {} : { model: modelRuntime.info }) });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/v1/diagnostics") {
+      const rawSessionId = url.searchParams.get("sessionId");
+      sendJson(response, 200, await host.diagnostics(rawSessionId === null ? undefined : sessionId(rawSessionId)));
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/models") {
@@ -459,6 +465,31 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const workspaceRoot = typeof body.workspaceRoot === "string" ? body.workspaceRoot : undefined;
       sendJson(response, 201, { sessionId: await host.forkSession(id, workspaceRoot, commandId(request, body)) });
       return;
+    }
+    const exportMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/export$/u);
+    if (request.method === "GET" && exportMatch?.[1] !== undefined) {
+      const id = sessionId(decodeURIComponent(exportMatch[1]));
+      sendJson(response, 200, await host.exportSession(id));
+      return;
+    }
+    const jobActionMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/jobs(?:\/([^/]+)\/(retry|cancel))?$/u);
+    if (jobActionMatch?.[1] !== undefined) {
+      const id = sessionId(decodeURIComponent(jobActionMatch[1]));
+      if (request.method === "GET" && jobActionMatch[2] === undefined) {
+        sendJson(response, 200, { jobs: await host.listJobs(id) });
+        return;
+      }
+      if (request.method === "POST" && jobActionMatch[2] !== undefined && jobActionMatch[3] !== undefined) {
+        const body = await readJson(request);
+        const jobId = decodeURIComponent(jobActionMatch[2]);
+        if (jobActionMatch[3] === "retry") {
+          const backoffMs = body.backoffMs === undefined ? undefined : requireFiniteNumber(body.backoffMs, "backoffMs");
+          sendJson(response, 200, await host.retryJob(id, jobId, backoffMs));
+        } else {
+          sendJson(response, 200, await host.killJob(id, jobId));
+        }
+        return;
+      }
     }
     const subagentsMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/subagents$/u);
     if (subagentsMatch?.[1] !== undefined) {
@@ -817,6 +848,11 @@ function optionalSequence(value: unknown): number | undefined {
 
 function requireString(value: unknown, field: string): string {
   if (typeof value !== "string") throw new HttpError(400, `${field} must be a string`);
+  return value;
+}
+
+function requireFiniteNumber(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new HttpError(400, `${field} must be a non-negative number`);
   return value;
 }
 

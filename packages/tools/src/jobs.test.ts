@@ -115,4 +115,39 @@ describe("JobManager", () => {
       expect((await readFile(path.join(root, spillPath!), "utf8"))).toHaveLength(20_000);
     } finally { await removeTempTree(root); }
   });
+
+  it("retries a failed job with durable executable metadata and bounded idempotency", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-job-retry-"));
+    try {
+      const marker = path.join(root, "retry.marker").replaceAll("\\", "/");
+      const script = `const fs=require('node:fs'); if(!fs.existsSync('${marker}')){fs.writeFileSync('${marker}','1'); process.exit(2)}; process.stdout.write('retry-ok')`;
+      const jobs = new JobManager();
+      const started = await jobs.start({ sessionId: "ses_job_retry", workspaceRoot: root, cwd: root, executable: process.execPath, args: ["-e", script], command: "node retry", retry: { maxAttempts: 2 } });
+      const jobId = (started.output as { jobId: string }).jobId;
+      for (let attempt = 0; attempt < 40 && jobs.list("ses_job_retry", root)[0]?.status === "running"; attempt += 1) await new Promise<void>((resolve) => setTimeout(resolve, 25));
+      expect(jobs.list("ses_job_retry", root)[0]).toMatchObject({ status: "failed", retryable: true, attempt: 1, maxAttempts: 2 });
+      const retry = await jobs.retry("ses_job_retry", jobId, { backoffMs: 0 });
+      const replacementJobId = (retry.output as { replacementJobId: string }).replacementJobId;
+      expect(replacementJobId).toBeTruthy();
+      for (let attempt = 0; attempt < 40 && jobs.list("ses_job_retry", root).some((job) => job.jobId === replacementJobId && job.status === "running"); attempt += 1) await new Promise<void>((resolve) => setTimeout(resolve, 25));
+      const output = await jobs.read("ses_job_retry", replacementJobId, 100);
+      expect(output.output).toMatchObject({ status: "completed", output: "retry-ok" });
+      expect((await jobs.retry("ses_job_retry", jobId, { backoffMs: 0 })).ok).toBe(false);
+    } finally { await removeTempTree(root); }
+  });
+
+  it("turns a deadline into a structured failed job and shuts down running jobs", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-job-deadline-"));
+    try {
+      const jobs = new JobManager();
+      const started = await jobs.start({ sessionId: "ses_job_deadline", workspaceRoot: root, cwd: root, executable: process.execPath, args: ["-e", "setInterval(() => {}, 1000)"], command: "node deadline", deadlineMs: 30 });
+      const jobId = (started.output as { jobId: string }).jobId;
+      for (let attempt = 0; attempt < 80 && jobs.list("ses_job_deadline", root)[0]?.status === "running"; attempt += 1) await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      expect(jobs.list("ses_job_deadline", root)[0]).toMatchObject({ status: "failed", lastError: { code: "JOB_DEADLINE_EXCEEDED" } });
+      const other = await jobs.start({ sessionId: "ses_job_deadline", workspaceRoot: root, cwd: root, executable: process.execPath, args: ["-e", "setInterval(() => {}, 1000)"], command: "node shutdown" });
+      await jobs.shutdown();
+      expect(jobs.list("ses_job_deadline", root).find((job) => job.jobId === (other.output as { jobId: string }).jobId)?.status).toBe("cancelled");
+      expect(jobId).toBeTruthy();
+    } finally { await removeTempTree(root); }
+  });
 });

@@ -1343,6 +1343,20 @@
             for (const [label, value] of fields) { const row = document.createElement('div'); row.className = 'detail-line'; const left = document.createElement('span'); left.textContent = label; const right = document.createElement('strong'); right.textContent = value; row.append(left, right); card.append(row); }
             if (job.diagnostics) { const diagnostic = document.createElement('div'); diagnostic.className = 'empty-detail'; diagnostic.textContent = job.diagnostics; card.append(diagnostic); }
             if (job.output) { const pre = document.createElement('pre'); pre.textContent = job.output; card.append(pre); }
+            if (snapshot?.session?.id && typedRuntime?.api) {
+              const actions = document.createElement('div'); actions.className = 'planning-actions';
+              if (job.status === 'running') {
+                const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'goal-bar-action'; cancel.textContent = 'Cancel job';
+                cancel.onclick = async () => { cancel.disabled = true; try { await typedRuntime.api.cancelJob(snapshot.session.id, job.jobId, commandKey()); await typedConnection?.open(snapshot.session.id); } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); } finally { cancel.disabled = false; } };
+                actions.append(cancel);
+              }
+              if (job.retryable || job.status === 'failed' || job.status === 'orphaned') {
+                const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'goal-bar-action'; retry.textContent = 'Retry job';
+                retry.onclick = async () => { retry.disabled = true; try { await typedRuntime.api.retryJob(snapshot.session.id, job.jobId, 0, commandKey()); await typedConnection?.open(snapshot.session.id); } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); } finally { retry.disabled = false; } };
+                actions.append(retry);
+              }
+              if (actions.childElementCount) card.append(actions);
+            }
             body.append(card);
           }
           for (const terminal of intent.terminals) {

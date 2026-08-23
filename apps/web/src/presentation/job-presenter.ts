@@ -23,6 +23,9 @@ export interface JobView {
   readonly sourceSequence: number;
   readonly lastSequence: number;
   readonly recovery: "live" | "completed" | "failed" | "orphaned";
+  readonly attempt: number;
+  readonly maxAttempts: number;
+  readonly retryable: boolean;
 }
 
 export interface TerminalView {
@@ -103,6 +106,9 @@ interface MutableJob {
   diagnostics: string | undefined;
   sourceSequence: number;
   lastSequence: number;
+  attempt: number;
+  maxAttempts: number;
+  retryable: boolean;
 }
 
 interface MutableTerminal {
@@ -140,6 +146,9 @@ function foldJobStarted(jobs: Map<string, MutableJob>, event: AgentEvent, maxOut
     diagnostics: undefined,
     sourceSequence: event.sequence,
     lastSequence: event.sequence,
+    attempt: 1,
+    maxAttempts: 1,
+    retryable: false,
   } satisfies MutableJob;
   job.status = jobStatus(event.payload["status"], "running");
   job.command = bounded(stringValue(event.payload["command"]) ?? job.command, 400);
@@ -148,6 +157,9 @@ function foldJobStarted(jobs: Map<string, MutableJob>, event: AgentEvent, maxOut
   job.startedAt = stringValue(event.payload["startedAt"]) ?? job.startedAt;
   job.totalBytes = numberValue(event.payload["totalBytes"]) ?? job.totalBytes;
   job.spillPath = stringValue(event.payload["spillPath"]) ?? job.spillPath;
+  job.attempt = numberValue(event.payload["attempt"]) ?? job.attempt;
+  job.maxAttempts = numberValue(event.payload["maxAttempts"]) ?? job.maxAttempts;
+  job.retryable = event.payload["retryable"] === true || (job.status !== "running" && job.attempt < job.maxAttempts);
   job.lastSequence = event.sequence;
   jobs.set(jobId, job);
   if (job.output.length > maxOutputChars) job.output = job.output.slice(-maxOutputChars);
@@ -189,6 +201,9 @@ function foldJobEnded(jobs: Map<string, MutableJob>, event: AgentEvent, maxOutpu
   target.truncated = target.truncated || event.payload["truncated"] === true;
   target.spillPath = stringValue(event.payload["spillPath"]) ?? target.spillPath;
   target.diagnostics = diagnosticText(event.payload["error"] ?? event.payload["message"]);
+  target.attempt = numberValue(event.payload["attempt"]) ?? target.attempt;
+  target.maxAttempts = numberValue(event.payload["maxAttempts"]) ?? target.maxAttempts;
+  target.retryable = event.payload["retryable"] === true || (target.attempt < target.maxAttempts && target.status !== "running");
   target.lastSequence = event.sequence;
 }
 
@@ -246,6 +261,9 @@ function finalizeJob(job: MutableJob, interruptedAt: number): JobView {
     sourceSequence: job.sourceSequence,
     lastSequence: job.lastSequence,
     recovery,
+    attempt: job.attempt,
+    maxAttempts: job.maxAttempts,
+    retryable: job.retryable,
   };
 }
 

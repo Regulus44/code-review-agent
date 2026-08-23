@@ -63,13 +63,16 @@ Phase 7 的 DSH Web 调研与分步计划：
 - 已新增 linked worktree、SQLite reopen/replay、pending side-effect recovery、并发 create 去重、dirty cleanup protection 和 API/Web client tests；
 - `pnpm typecheck`、Workspace 6 项、Runtime 24 项、Storage 12 项、API 26 项、Web 98 项、`pnpm build:web`、`pnpm test:phase7:browser`、`pnpm test:phase8:worktree` 和 `git diff --check` 通过；本组变更建立独立的 Phase 8.2 Git checkpoint。
 
-## Phase 8.0 Web parity 与 Phase 8.3 LSP/Code Mode（进行中）
+## Phase 8.0 Web parity、Phase 8.3 LSP/Code Mode 与 Phase 8.4 Reliability（进行中）
 
 - `c0cf1d3`：新增独立 `scripts/phase8-web-gate.mjs`，使用真实 SQLite/API/AgentHost fixture 验证 Goal/Plan/Todo/Question replay、回答/取消、Plan review、Goal CAS conflict、Todo idempotency 和 browser bundle；Trajectory Inspector 增加 Options、Usage、Diff、Request、Tool catalog、Rendered、Raw、Input、Output、Schema 等 bounded sections；
 - `presentLspTool` 与 Web LSP details surface 已接入，diagnostics、definition、references、source location、restart/crash 和失败状态均保持 host-backed；
 - `CodeModeSandbox` 已接入可选 `code_mode` builtin，默认 disabled；支持 workspace-bound child process、`node` allowlist、网络禁用、runtime/output/code budget 和取消；API `/v1/capabilities` 与 Settings 暴露 Code Mode/LSP metadata；
 - `pnpm test:phase8:web` 已通过（planning/question replay gate）；`pnpm test:phase8:lsp` 已通过（LSP/Code Mode safety/recovery gate）；Web 100 tests、Tools 56 tests、API 27 tests、Runtime 25 tests 和 `pnpm typecheck` 通过；
-- 当前 Phase 8 仍为 `pending`。8.0 的 Workspace Flat/Tree、sorting/picker、Settings failure/retry、visual baseline 和总 parity gate 仍未关闭；8.3 仍需真实 Web fixture、OS 级网络隔离评估和退出审计，尚未进入 8.4。
+- `6ac8e7e`：8.3 第一阶段 checkpoint 已建立；`8.3` 的真实 Web fixture、OS 级网络隔离评估和完整退出审计仍待补齐。
+- 当前已进入 `Phase 8.4 Reliability`：`JobManager` 已持久化可重试 executable/args 元数据，支持 bounded retry、deadline 结构化失败、取消原因和 graceful shutdown；`AgentHost` 提供 job action、session export/replay 和 structured diagnostics；API 暴露 `/v1/sessions/:id/jobs`、`/retry`、`/cancel`、`/export` 与 `/v1/diagnostics`；Web Job center 已提供 Cancel/Retry actions。
+- 新增 `scripts/phase8-reliability-gate.mjs`，覆盖 retry、deadline、shutdown、session export 和 diagnostics；`pnpm test:phase8:reliability` 已通过。当前 8.4 仍未整体完成，model fallback、metrics/tracing 和更完整的 browser recovery matrix 仍是后续工作。
+- 当前 Phase 8 仍为 `pending`。8.0 的 Workspace Flat/Tree、sorting/picker、Settings failure/retry、visual baseline 和总 parity gate 仍未关闭。
 
 ## Phase 7 Workspace lifecycle controls（当前 checkpoint）
 

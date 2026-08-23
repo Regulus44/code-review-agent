@@ -210,6 +210,16 @@ export class TerminalManager {
     return ok({ terminalId: terminal.terminalId, status: terminal.status, outputBytes: terminal.totalBytes });
   }
 
+  async shutdown(): Promise<void> {
+    const running = [...this.sessions.values()].filter((terminal) => terminal.status === "running" && terminal.child !== undefined);
+    for (const terminal of running) {
+      terminateProcessTree(terminal.child as ChildProcessWithoutNullStreams);
+      await waitForChildClose(terminal.child as ChildProcessWithoutNullStreams, 1_000);
+      terminal.status = "interrupted";
+      await terminal.appendEvent?.({ ...this.eventPayload(terminal), action: "host_shutdown" });
+    }
+  }
+
   list(sessionId: string, workspaceRoot: string): readonly TerminalSummary[] {
     return [...this.sessions.values()]
       .filter((terminal) => terminal.sessionId === sessionId && terminal.workspaceRoot === path.resolve(workspaceRoot))
@@ -356,11 +366,11 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
       execute: async (input, context) => { const args = input as { command: string; args?: string[] }; if (!isAllowedExecutable(args.command)) return fail("COMMAND_NOT_ALLOWED", "Test command is not on the allowlist"); return runArgv(args.command, args.args ?? [], context.workspaceRoot, context.signal); },
     },
     {
-      name: "bash", description: "Run an explicit bash command in a fresh workspace-bound shell, optionally as a background job.", inputSchema: object({ command: string, description: string, workdir: string, timeoutMs: integer(1, 600_000), run_in_background: boolean }, ["command"]), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
+      name: "bash", description: "Run an explicit bash command in a fresh workspace-bound shell, optionally as a background job.", inputSchema: object({ command: string, description: string, workdir: string, timeoutMs: integer(1, 600_000), deadlineMs: integer(1, 86_400_000), maxAttempts: integer(1, 5), retryBackoffMs: integer(0, 60_000), run_in_background: boolean }, ["command"]), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
       execute: async (input, context) => executeShellCommand("bash", input as ShellToolInput, context, jobs),
     },
     {
-      name: "pwsh", description: "Run an explicit PowerShell command with native Windows path and environment semantics, optionally as a background job.", inputSchema: object({ command: string, description: string, workdir: string, timeoutMs: integer(1, 600_000), run_in_background: boolean }, ["command"]), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
+      name: "pwsh", description: "Run an explicit PowerShell command with native Windows path and environment semantics, optionally as a background job.", inputSchema: object({ command: string, description: string, workdir: string, timeoutMs: integer(1, 600_000), deadlineMs: integer(1, 86_400_000), maxAttempts: integer(1, 5), retryBackoffMs: integer(0, 60_000), run_in_background: boolean }, ["command"]), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
       execute: async (input, context) => executeShellCommand("pwsh", input as ShellToolInput, context, jobs),
     },
     {
@@ -370,6 +380,10 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
     {
       name: "job_kill", description: "Stop a running background job in this session.", inputSchema: object({ jobId: string }, ["jobId"]), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
       execute: async (input, context) => jobs.kill(context.sessionId, (input as { jobId: string }).jobId),
+    },
+    {
+      name: "job_retry", description: "Retry a completed or failed background job using its durable executable metadata.", inputSchema: object({ jobId: string, backoffMs: integer(0, 60_000) }, ["jobId"]), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
+      execute: async (input, context) => { const args = input as { jobId: string; backoffMs?: number }; return jobs.retry(context.sessionId, args.jobId, args.backoffMs === undefined ? {} : { backoffMs: args.backoffMs }); },
     },
     {
       name: "job_list", description: "List background jobs belonging to this session and workspace.", inputSchema: object({}), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
@@ -507,6 +521,9 @@ interface ShellToolInput {
   readonly description?: string;
   readonly workdir?: string;
   readonly timeoutMs?: number;
+  readonly deadlineMs?: number;
+  readonly maxAttempts?: number;
+  readonly retryBackoffMs?: number;
   readonly run_in_background?: boolean;
 }
 
@@ -521,7 +538,7 @@ async function executeShellCommand(kind: ShellKind, args: ShellToolInput, contex
   const launch = shellLaunch(kind, args.command);
   const label = args.description?.trim() || args.command;
   if (args.run_in_background === true) {
-    return jobs.start({ sessionId: context.sessionId, workspaceRoot: context.workspaceRoot, cwd, executable: launch.executable, args: launch.args, command: args.command, signal: context.signal, appendEvent: async (type, payload) => context.appendEvent(type, payload) });
+    return jobs.start({ sessionId: context.sessionId, workspaceRoot: context.workspaceRoot, cwd, executable: launch.executable, args: launch.args, command: args.command, ...(args.maxAttempts === undefined ? {} : { retry: { maxAttempts: args.maxAttempts, ...(args.retryBackoffMs === undefined ? {} : { backoffMs: args.retryBackoffMs }) } }), ...(args.deadlineMs === undefined ? {} : { deadlineMs: args.deadlineMs }), signal: context.signal, appendEvent: async (type, payload) => context.appendEvent(type, payload) });
   }
   return runShellForeground(kind, args.command, label, cwd, launch.executable, launch.args, args.timeoutMs ?? 120_000, context.signal);
 }

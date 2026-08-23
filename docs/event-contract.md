@@ -85,7 +85,7 @@ mcp/prompt
 
 `terminal/session` 记录持久终端的元数据生命周期。payload 至少包含 `action`（`opened`、`signalled`、`exited`、`closed` 或 `interrupted`）、`terminalId`、`workspaceRoot`、`cwd`、`command` 和 `status`；它只记录可回放的会话摘要，不记录环境变量或完整 stdout。进程重启时，最近状态为 `running` 的终端必须追加 `interrupted` 事件并在 `terminal_list` 中显示为 `interrupted`，不得伪造一个仍然存在的子进程。
 
-`job/started`、`job/output`、`job/ended` 记录显式 bash/pwsh background job 的归属、增量输出和最终 exit/signal/status。完整 stdout/stderr 持久化到 workspace 内 `.agent-artifacts/jobs/<jobId>.log`；事件中的 `text` 只允许 bounded live chunk，并携带 `spillPath`、`totalBytes` 和 `truncated` metadata。job payload 不得包含环境变量或凭据；job 只能由同一 session/workspace 通过 `job_output`、`job_kill` 和 `job_list` 访问。
+`job/started`、`job/output`、`job/ended` 记录显式 bash/pwsh background job 的归属、增量输出和最终 exit/signal/status。完整 stdout/stderr 持久化到 workspace 内 `.agent-artifacts/jobs/<jobId>.log`；事件中的 `text` 只允许 bounded live chunk，并携带 `spillPath`、`totalBytes` 和 `truncated` metadata。`job/started` 可记录 bounded executable/args、attempt/maxAttempts 和 deadlineAt，供受控 retry/recovery 使用；不得记录环境变量或凭据。deadline、调用方取消和 host shutdown 通过结构化 error/status 保留。job 只能由同一 session/workspace 通过 `job_output`、`job_kill`、`job_retry` 和 `job_list` 访问。
 
 `patch/*` 记录多文件 unified patch 的 preview、apply、reject 和 rollback 决策。完整 before/after snapshot 持久化到 workspace 内 `.agent-artifacts/patches/<patchId>.json`，payload 只携带 `patchId`、文件操作/哈希/统计和安全错误，不把未经预算的完整 patch 文本写入 model view；rollback 必须再次比较 after-state，不能覆盖更新后的用户文件。reject/rollback 成功后删除对应快照 artifact，但保留事件历史。
 

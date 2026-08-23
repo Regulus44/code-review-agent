@@ -104,6 +104,30 @@ export interface TaskOutputResponse {
   readonly events: readonly AgentEvent[];
 }
 
+export interface JobSummaryResponse {
+  readonly jobId: string;
+  readonly sessionId: string;
+  readonly workspaceRoot: string;
+  readonly cwd: string;
+  readonly command: string;
+  readonly status: "running" | "completed" | "failed" | "cancelled" | "orphaned";
+  readonly startedAt: string;
+  readonly endedAt?: string;
+  readonly exitCode?: number;
+  readonly signal?: string;
+  readonly bufferedBytes: number;
+  readonly truncated: boolean;
+  readonly totalBytes: number;
+  readonly spillPath?: string;
+  readonly executable?: string;
+  readonly args?: readonly string[];
+  readonly attempt: number;
+  readonly maxAttempts: number;
+  readonly deadlineAt?: string;
+  readonly retryable: boolean;
+  readonly lastError?: { readonly code: string; readonly message: string };
+}
+
 export type ArtifactAvailability = "available" | "external" | "blocked" | "missing" | "not_file" | "too_large" | "unavailable";
 
 export interface ArtifactAccessResponse {
@@ -230,6 +254,26 @@ export class WebApiClient {
     if (options.beforeSequence !== undefined) params.set("before_sequence", String(Math.max(0, Math.floor(options.beforeSequence))));
     if (options.limit !== undefined) params.set("limit", String(Math.min(1_000, Math.max(1, Math.floor(options.limit)))));
     return this.request<unknown>(`/v1/sessions/${encodeURIComponent(sessionId)}/events?${params.toString()}`).then(normalizeEventPage);
+  }
+
+  listJobs(sessionId: SessionId): Promise<{ readonly jobs: readonly JobSummaryResponse[] }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/jobs`);
+  }
+
+  retryJob(sessionId: SessionId, jobId: string, backoffMs?: number, commandId?: string): Promise<unknown> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/jobs/${encodeURIComponent(jobId)}/retry`, { method: "POST", commandId, body: backoffMs === undefined ? {} : { backoffMs } });
+  }
+
+  cancelJob(sessionId: SessionId, jobId: string, commandId?: string): Promise<unknown> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST", commandId, body: {} });
+  }
+
+  exportSession(sessionId: SessionId): Promise<{ readonly session: SessionProjection; readonly events: readonly AgentEvent[] }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/export`);
+  }
+
+  diagnostics(sessionId?: SessionId): Promise<Readonly<Record<string, unknown>>> {
+    return this.request(sessionId === undefined ? "/v1/diagnostics" : `/v1/diagnostics?sessionId=${encodeURIComponent(sessionId)}`);
   }
 
   sendMessage(sessionId: SessionId, content: string, commandId?: string): Promise<{ readonly turnId: TurnId }> {

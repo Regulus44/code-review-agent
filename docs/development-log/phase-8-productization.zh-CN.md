@@ -1,5 +1,32 @@
 # Phase 8 开发日志
 
+## 2026-08-24：8.4 Reliability 第一阶段收口
+
+本次工作属于 Phase 8.4，目标是让后台 Job、Session export/replay、诊断和 Web Job center 具备可恢复的可靠性边界。A2A 保持 `deferred`，不进入本次实现。
+
+### 已完成
+
+- `JobManager` 持久化 executable/args、attempt/deadline 元数据，支持显式 bounded retry、deadline 失败原因、调用方取消原因和 graceful shutdown；retry 创建新的 durable attempt，原失败保留在事件审计中；
+- `AgentHost` 增加 job list/retry/kill、session export/replay、structured diagnostics 和 shutdown；
+- API 增加 `/v1/sessions/:id/jobs`、`/retry`、`/cancel`、`/export` 与 `/v1/diagnostics`；Web API client 与 Job center 增加 Cancel/Retry 操作；
+- 新增 `scripts/phase8-reliability-gate.mjs`，覆盖 retry、deadline、shutdown、session export 和 diagnostics 的真实运行路径。
+
+### 验证
+
+```text
+pnpm typecheck                              ✓
+pnpm --filter @code-review-agent/tools test  ✓ (58 tests)
+pnpm --filter @code-review-agent/api test    ✓ (31 tests)
+pnpm --filter @code-review-agent/web test    ✓ (100 tests)
+pnpm build:web                               ✓
+pnpm test:phase8:reliability                 ✓
+git diff --check                             ✓
+```
+
+### 尚未关闭
+
+8.4 仍需 model fallback、metrics/tracing 和更完整的 browser recovery matrix；8.0 parity gaps、8.3 完整退出审计和 8.5 产品化也仍未完成。
+
 ## 2026-08-24：8.3 LSP/Code Mode 第一阶段收口
 
 本次工作属于 Phase 8.3，补齐受控 Code Mode、LSP Web source-location surface 和 capability metadata。A2A 保持 deferred。

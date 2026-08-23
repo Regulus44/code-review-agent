@@ -76,6 +76,7 @@ discover
 | `pwsh` | execute | ask | 显式 PowerShell、native cwd/环境语义、非交互约束、exit/timeout/cancel |
 | `job_output` | read | auto | session/workspace 归属、增量输出、状态、truncated/spill 边界 |
 | `job_kill` | execute | ask | 只终止当前 session 的 background job，记录取消和最终状态 |
+| `job_retry` | execute | ask | 仅使用 durable executable/args 元数据创建 bounded replacement attempt；原失败保留审计 |
 | `job_list` | read | auto | 只列出当前 session/workspace 的 job 元数据 |
 | `terminal_open` | execute | ask | 独立 session、固定 cwd、argv 或受控 shell、输出缓冲；生命周期写入 `terminal/session` |
 | `terminal_send` | execute | ask-on-execute | 只能写入当前 session 的 terminal，不能跨 workspace |
@@ -153,7 +154,7 @@ LSP 只读工具必须遵守以下不变量：
 
 进程工具的 `audit` 至少记录 `stdout`、`stderr`、`exitCode` 和终止 signal。取消或超时必须终止进程树，而不仅是顶层 shell/child process。
 
-`bash` 和 `pwsh` 是显式 shell 工具：每次前台调用使用 fresh shell，`workdir` 由 workspace resolver 解析，shell 字符串不会进入默认 `run_command` argv 接口。`pwsh` 使用非交互、无 profile 启动，并注入受控 LanguageMode 约束；环境变量使用 PowerShell 原生 `$env:NAME` 语义。长任务通过 `run_in_background` 返回 `jobId`，后续只通过 `job_output`/`job_kill`/`job_list` 操作，job 状态和输出通过 `job/started`、`job/output`、`job/ended` 事件审计。
+`bash` 和 `pwsh` 是显式 shell 工具：每次前台调用使用 fresh shell，`workdir` 由 workspace resolver 解析，shell 字符串不会进入默认 `run_command` argv 接口。`pwsh` 使用非交互、无 profile 启动，并注入受控 LanguageMode 约束；环境变量使用 PowerShell 原生 `$env:NAME` 语义。长任务通过 `run_in_background` 返回 `jobId`，后续只通过 `job_output`/`job_kill`/`job_retry`/`job_list` 操作，job 状态和输出通过 `job/started`、`job/output`、`job/ended` 事件审计。`job/started` 可携带 bounded executable/args、attempt/maxAttempts 和 deadlineAt；不得写入环境变量或凭据。deadline、调用方取消和 host shutdown 必须在最终 job error/status 中可区分。
 
 ## 调度与禁用
 

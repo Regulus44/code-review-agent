@@ -32,7 +32,7 @@ import {
 import { EchoChatModel } from "@code-review-agent/llm";
 import { compactMessages, type ContextBudget } from "@code-review-agent/compaction";
 import { randomUUID } from "node:crypto";
-import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModeSandbox, type ExecuteToolOutput, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
+import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModeSandbox, type ExecuteToolOutput, type JobSummary, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
 import type { SubagentRuntime } from "@code-review-agent/subagent";
 import { GitWorktreeManager } from "@code-review-agent/workspace";
 import { buildAgentSystemPrompt } from "./system-prompt.js";
@@ -189,6 +189,60 @@ export class AgentHost {
   async listSessions(includeArchived = false): Promise<readonly SessionSummary[]> {
     await this.ready;
     return this.options.store.listSessions(includeArchived);
+  }
+
+  async listJobs(sessionId: SessionId): Promise<readonly JobSummary[]> {
+    await this.ready;
+    const projection = await this.options.store.project(sessionId);
+    if (projection === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    return this.jobManager?.listForSession(sessionId, effectiveWorkspaceRoot(projection)) ?? [];
+  }
+
+  async retryJob(sessionId: SessionId, jobId: string, backoffMs?: number): Promise<ToolResult> {
+    await this.ready;
+    const projection = await this.options.store.project(sessionId);
+    if (projection === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    if (this.jobManager === undefined) throw new Error("JOB_MANAGER_UNAVAILABLE: background jobs are disabled for this host");
+    return this.jobManager.retry(sessionId, jobId, backoffMs === undefined ? {} : { backoffMs });
+  }
+
+  async killJob(sessionId: SessionId, jobId: string): Promise<ToolResult> {
+    await this.ready;
+    const projection = await this.options.store.project(sessionId);
+    if (projection === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    if (this.jobManager === undefined) throw new Error("JOB_MANAGER_UNAVAILABLE: background jobs are disabled for this host");
+    return this.jobManager.kill(sessionId, jobId);
+  }
+
+  async exportSession(sessionId: SessionId): Promise<{ readonly session: SessionProjection; readonly events: readonly AgentEvent[] }> {
+    await this.ready;
+    const session = await this.options.store.project(sessionId);
+    if (session === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    return { session, events: await this.options.store.list(sessionId, 0) };
+  }
+
+  async diagnostics(sessionId?: SessionId): Promise<Readonly<Record<string, unknown>>> {
+    await this.ready;
+    const sessions = sessionId === undefined ? await this.options.store.listSessions(true) : [];
+    const target = sessionId === undefined ? undefined : await this.options.store.project(sessionId);
+    if (sessionId !== undefined && target === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    const jobs = target === undefined || this.jobManager === undefined ? [] : await this.jobManager.listForSession(target.id, effectiveWorkspaceRoot(target));
+    return {
+      runtime: "typescript",
+      generatedAt: new Date().toISOString(),
+      sessions: sessionId === undefined ? sessions.length : 1,
+      ...(target === undefined ? {} : { session: { id: target.id, status: target.status, turns: target.turns.length, pendingPermissions: target.permissions.filter((item) => item.status === "pending").length, pendingInteractions: target.interactions.filter((item) => item.status === "pending").length } }),
+      jobs,
+      activeTurns: this.activeTurns.size,
+      queuedTurns: [...this.queues.values()].reduce((sum, queue) => sum + queue.length, 0),
+      pendingPermissionWaiters: this.permissionWaiters.size,
+    };
+  }
+
+  async shutdown(): Promise<void> {
+    for (const controller of this.controllers.values()) controller.abort();
+    await this.terminalManager?.shutdown();
+    await this.jobManager?.shutdown();
   }
 
   async listWorkspaces(includeArchived = false): Promise<WorkspaceCatalog> {
