@@ -28,6 +28,7 @@ import {
   type PlanStatus,
   type TodoItem,
   type WorktreeProjection,
+  type ProductizationCapability,
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { compactMessages, type ContextBudget } from "@code-review-agent/compaction";
@@ -79,6 +80,8 @@ export interface PluginsSettings {
   readonly status: "available" | "deferred" | "unavailable";
   readonly reason: string;
 }
+
+export type ProductizationSettings = ProductizationCapability;
 
 export interface RuntimeMetricsSnapshot {
   readonly turnsStarted: number;
@@ -204,6 +207,27 @@ export class AgentHost {
       enabled: false,
       status: "deferred",
       reason: "Plugin runtime is deferred until a Phase 8.5 productization requirement is accepted.",
+    };
+  }
+
+  /**
+   * Reports the productization boundary exposed by this host. The default
+   * local runtime intentionally keeps remote auth, tenant isolation and quota
+   * disabled until their durable contracts and recovery gates are accepted.
+   */
+  productizationSettings(): ProductizationSettings {
+    return {
+      version: 1,
+      enabled: false,
+      status: "deferred",
+      reason: "Remote auth, tenant isolation and quota enforcement are deferred until the Phase 8.5 productization contract is implemented.",
+      auth: { status: "deferred", mode: "disabled", required: false },
+      multiUser: { status: "deferred", principalCatalog: "disabled" },
+      tenantIsolation: { status: "deferred", sessionOwnership: "disabled" },
+      quota: { status: "disabled", enforcement: "disabled" },
+      routing: { status: "available", providerCount: this.fallbackModels.length + 1, modelSelector: "host-local" },
+      credentials: { status: "configured", secretStore: "host-only", redaction: "required" },
+      operations: { status: "deferred", backup: "deferred", migration: "deferred", upgrade: "deferred" },
     };
   }
 

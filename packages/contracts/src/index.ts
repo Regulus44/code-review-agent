@@ -381,6 +381,49 @@ export interface McpCredentialReference {
   readonly label?: string;
 }
 
+/** Productization readiness is host fact, not a promise that a UI may infer. */
+export type ProductizationFeatureStatus = "available" | "configured" | "deferred" | "disabled" | "unavailable";
+
+export interface ProductizationCapability {
+  readonly version: 1;
+  readonly enabled: boolean;
+  readonly status: "configured" | "deferred" | "unavailable";
+  readonly reason: string;
+  readonly auth: {
+    readonly status: ProductizationFeatureStatus;
+    readonly mode: "disabled" | "bearer";
+    readonly required: boolean;
+  };
+  readonly multiUser: {
+    readonly status: ProductizationFeatureStatus;
+    readonly principalCatalog: "disabled" | "host-local" | "external";
+  };
+  readonly tenantIsolation: {
+    readonly status: ProductizationFeatureStatus;
+    readonly sessionOwnership: "disabled" | "durable" | "external";
+  };
+  readonly quota: {
+    readonly status: ProductizationFeatureStatus;
+    readonly enforcement: "disabled" | "soft" | "hard";
+  };
+  readonly routing: {
+    readonly status: ProductizationFeatureStatus;
+    readonly providerCount: number;
+    readonly modelSelector: "disabled" | "host-local" | "tenant-scoped";
+  };
+  readonly credentials: {
+    readonly status: ProductizationFeatureStatus;
+    readonly secretStore: "disabled" | "host-only" | "external";
+    readonly redaction: "required" | "unavailable";
+  };
+  readonly operations: {
+    readonly status: ProductizationFeatureStatus;
+    readonly backup: "deferred" | "available";
+    readonly migration: "deferred" | "available";
+    readonly upgrade: "deferred" | "available";
+  };
+}
+
 export interface McpConfigRecord {
   readonly name: string;
   readonly scope: McpServerScope;

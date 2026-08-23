@@ -18,6 +18,7 @@ import type {
   TurnId,
   WorkspaceCatalog,
   WorktreeProjection,
+  ProductizationCapability,
 } from "@code-review-agent/contracts";
 
 export interface ToolCatalogEntry {
@@ -83,12 +84,15 @@ export interface PluginsCapability {
   readonly reason: string;
 }
 
+export type ProductizationCapabilityResponse = ProductizationCapability;
+
 export interface CapabilityResponse {
   readonly attachments: AttachmentCapability;
   readonly context: ContextCapability;
   readonly codeMode: CodeModeCapability;
   readonly lsp: LspCapability;
   readonly plugins: PluginsCapability;
+  readonly productization: ProductizationCapabilityResponse;
 }
 
 export interface HealthResponse {

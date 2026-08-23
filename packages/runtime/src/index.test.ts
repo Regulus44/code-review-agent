@@ -13,6 +13,22 @@ import { AgentHost } from "./index.js";
 const execFileAsync = promisify(execFile);
 
 describe("AgentHost", () => {
+  it("exposes an explicit deferred productization boundary", () => {
+    const host = new AgentHost({ store: new InMemoryEventStore() });
+    expect(host.productizationSettings()).toMatchObject({
+      version: 1,
+      enabled: false,
+      status: "deferred",
+      auth: { status: "deferred", mode: "disabled", required: false },
+      multiUser: { status: "deferred" },
+      tenantIsolation: { status: "deferred" },
+      quota: { status: "disabled", enforcement: "disabled" },
+      routing: { status: "available", modelSelector: "host-local" },
+      credentials: { status: "configured", secretStore: "host-only", redaction: "required" },
+      operations: { status: "deferred" },
+    });
+  });
+
   it("gives the model an explicit workspace and tool-use contract", async () => {
     const requests: ModelRequest[] = [];
     const model: ChatModel = {

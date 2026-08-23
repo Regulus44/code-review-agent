@@ -22,7 +22,15 @@
 
 - [Phase 8：高级能力、DSH Web 对齐与产品化](phase-plans/phase-8-productization.zh-CN.md) 已扩展为 8.0 Web 对齐、8.1 Context Compaction、8.2 Worktree、8.3 LSP/Code Mode、8.4 后台任务与可靠性、8.5 产品化；
 - [ADR：Phase 8 Web 与 DSH 前端行为对齐](adr/phase-8-web-dsh-alignment.zh-CN.md) 已接受，记录行为参考、REST/SSE 边界、typed Web 拆分、契约变更和回滚规则；
-- Phase 8 已进入 `in_progress`。8.0 的 aggregate Web parity contract gate 与真实 600/900/1024 Shell/Settings 视觉基线 gate 已通过；完整响应式/可访问性 browser 矩阵、真实 Job 跨场景恢复矩阵、8.3 完整退出审计和 8.5 产品化仍未完成。
+- Phase 8 已进入 `in_progress`。8.0 的 aggregate Web parity contract gate 与真实 600/900/1024 Shell/Settings 视觉基线 gate 已通过；8.5 已建立产品化边界 ADR 和 host-backed capability 第一切片，但完整响应式/可访问性 browser 矩阵、真实 Job 跨场景恢复矩阵、8.3 完整退出审计和 8.5 认证/租户/quota 等核心能力仍未完成。
+
+## Phase 8.5 产品化第一切片（partial）
+
+- 新增 [ADR：Phase 8.5 产品化边界与渐进式启用](adr/phase-8-5-productization-boundary.zh-CN.md)，明确 remote auth、multi-user/tenant、quota、provider/model routing、credentials 和运维能力的状态语义、默认禁用态与回滚边界；
+- `packages/contracts` 新增 `ProductizationCapability`，逐项表达 auth、multi-user、tenant isolation、quota、routing、credentials 和 operations 状态；
+- Runtime `AgentHost.productizationSettings()` 和 API `/v1/capabilities.productization` 返回真实 host-backed readiness；默认本地 Host 保持 auth/tenant/quota/运维能力 `deferred` 或 `disabled`，不会宣称已启用；
+- Web Settings 和 typed browser bundle 展示 Productization 状态；新增 `scripts/phase8-productization-gate.mjs` 与 `pnpm test:phase8:productization`；
+- 当前仍未实现 bearer auth、durable Session ownership、tenant isolation、quota enforcement、tenant-scoped routing 或 backup/migration/upgrade policy，不能将 8.5 或 Phase 8 标记为完成。
 
 ## Phase 6 A2A 暂缓决策
 

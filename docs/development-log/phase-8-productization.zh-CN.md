@@ -1,5 +1,32 @@
 # Phase 8 开发日志
 
+## 2026-08-24：8.5 产品化边界与 capability 第一切片
+
+本次 checkpoint 属于 Phase 8.5 产品化，先建立可回滚的契约边界和默认禁用态。A2A 保持 `deferred`，未引入认证或租户推断。
+
+### 已完成
+
+- 新增 `docs/adr/phase-8-5-productization-boundary.zh-CN.md`，明确 remote auth、multi-user/tenant、quota、provider/model routing、credentials 和 deployment/backup/migration/upgrade 的状态语义与后续实现门槛；
+- `packages/contracts` 新增 `ProductizationCapability`；Runtime、API `/v1/capabilities`、Web Settings 和 typed browser bundle 均消费同一 host-backed 状态；
+- 默认本地 Host 明确返回 auth/tenant/quota/运维能力的 `deferred` 或 `disabled`，routing 保持 host-local，credentials 只保留 host-owned/redaction-required 语义；
+- 新增 `scripts/phase8-productization-gate.mjs` 与 `pnpm test:phase8:productization`，验证 capability 版本、fail-closed 状态和 Web bundle 传播；
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm test                                            ✓
+pnpm test:phase8:productization                     ✓
+pnpm --filter @code-review-agent/runtime test -- --run src/index.test.ts ✓
+pnpm --filter @code-review-agent/api test -- --run src/server.test.ts ✓
+pnpm --filter @code-review-agent/web test -- --run src/presentation/settings-presenter.test.ts ✓
+git diff --check                                     ✓
+```
+
+### 尚未关闭
+
+该切片不实现 bearer auth、durable Session ownership、tenant isolation、quota enforcement、tenant-scoped provider routing 或 backup/migration/upgrade policy；8.5 与 Phase 8 仍保持 `in_progress`。
+
 ## 2026-08-24：8.4 Job recovery 重复重启矩阵
 
 本次 checkpoint 属于 Phase 8.4 可靠性，扩展 API/SQLite recovery slice 的重复重启与 Web Job Center 回放证据。A2A 保持 `deferred`。
