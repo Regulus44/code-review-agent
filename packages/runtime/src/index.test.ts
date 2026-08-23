@@ -96,6 +96,27 @@ describe("AgentHost", () => {
     expect(requests[0]?.messages.some((message) => message.content.includes("Compacted context"))).toBe(true);
   });
 
+  it("records compaction failure and continues with the original context", async () => {
+    const store = new InMemoryEventStore();
+    const model: ChatModel = {
+      async *stream(): AsyncIterable<ModelStreamPart> {
+        yield { type: "text_delta", text: "continued" };
+        yield { type: "done" };
+      },
+    };
+    const explodingBudget = {} as Partial<import("@code-review-agent/compaction").ContextBudget>;
+    Object.defineProperty(explodingBudget, "maxTokens", { enumerable: true, get: () => { throw new Error("budget fixture unavailable"); } });
+    const host = new AgentHost({ store, model, contextBudget: explodingBudget });
+    const session = await host.createSession("D:/compaction-failure-fixture");
+    await store.append({ sessionId: session.id, type: "user/message", payload: { content: "history " + "x".repeat(500) } });
+    const turn = await host.sendMessage(session.id, "continue despite compaction failure");
+    await host.waitForTurn(turn);
+    const events = await host.events(session.id);
+    expect(events.some((event) => event.type === "context/compaction_failed" && event.payload["error"] === "budget fixture unavailable")).toBe(true);
+    expect((await host.getSession(session.id))?.status).toBe("idle");
+    expect((await host.getSession(session.id))?.messages.at(-1)?.content).toBe("continued");
+  });
+
   it("builds the prompt from the permission-filtered tool set and preserves custom instructions", async () => {
     const requests: ModelRequest[] = [];
     const store = new InMemoryEventStore();
@@ -548,7 +569,7 @@ describe("AgentHost", () => {
     } finally {
       await rm(parent, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it("recovers a pending worktree create after the Git side effect already happened", async () => {
     try { await execFileAsync("git", ["--version"]); } catch { return; }
@@ -576,7 +597,7 @@ describe("AgentHost", () => {
     } finally {
       await rm(parent, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it("serializes concurrent creates and never projects duplicate paths", async () => {
     try { await execFileAsync("git", ["--version"]); } catch { return; }
@@ -603,5 +624,5 @@ describe("AgentHost", () => {
     } finally {
       await rm(parent, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 });

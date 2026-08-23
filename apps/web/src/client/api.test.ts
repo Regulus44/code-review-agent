@@ -110,7 +110,7 @@ describe("WebApiClient", () => {
       baseUrl: "http://localhost:4317",
       fetcher: async (input, init) => {
         calls.push({ url: String(input), init });
-        return new Response(JSON.stringify({ attachments: { enabled: true, maxBytes: 524288, allowedMediaTypes: ["text/plain"], imagesEnabled: false } }), { status: 200, headers: { "content-type": "application/json" } });
+        return new Response(JSON.stringify({ attachments: { enabled: true, maxBytes: 524288, allowedMediaTypes: ["text/plain"], imagesEnabled: false }, context: { enabled: true, configured: true, budget: { maxTokens: 12000 } } }), { status: 200, headers: { "content-type": "application/json" } });
       },
     });
     await client.listCapabilities();

@@ -464,6 +464,19 @@ describe("Phase 2 API", () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
+  it("exposes configured context compaction budget metadata without leaking defaults", async () => {
+    const configured = createApiServer({ store: new InMemoryEventStore(), contextBudget: { maxTokens: 120, recentMessageTokens: 40, maxToolResultChars: 200, maxSummaryChars: 100 } });
+    await new Promise<void>((resolve) => configured.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = configured.address();
+      if (address === null || typeof address === "string") throw new Error("Context API did not bind");
+      const capability = await (await fetch(`http://127.0.0.1:${address.port}/v1/capabilities`)).json() as { context: { enabled: boolean; configured: boolean; budget?: { maxTokens?: number; recentMessageTokens?: number } } };
+      expect(capability.context).toMatchObject({ enabled: true, configured: true, budget: { maxTokens: 120, recentMessageTokens: 40 } });
+    } finally {
+      await new Promise<void>((resolve, reject) => configured.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
   it("soft-deletes a session and keeps its event history out of active lists", async () => {
     const created = await fetch(`${baseUrl}/v1/sessions`, {
       method: "POST",

@@ -33,4 +33,27 @@ git diff --check                        ✓
 
 ### 尚未关闭
 
-本记录对应的代码已建立独立的 Phase 8.2 Git checkpoint；Phase 8.1 Compaction、8.0 Web parity、8.3 LSP/Code Mode、8.4 可靠性和 8.5 产品化仍未完成。
+本记录对应的代码已建立独立的 Phase 8.2 Git checkpoint；Phase 8.1 Compaction 已完成，8.0 Web parity、8.3 LSP/Code Mode、8.4 可靠性和 8.5 产品化仍未完成。
+
+## 2026-08-24：8.1 Context Compaction 收口
+
+### 已完成
+
+- API capabilities 返回 host-backed context compaction enabled/configured/budget metadata；Web Settings 和 ContextMeter 显示真实配置，未配置 provider budget 时保持 `unknown`；
+- Context projection 保留 summary、dropped message、protected tool 和 truncated tool result 计数；
+- 增加 compaction failure continuation 测试，压缩失败时保留原上下文并继续完成 turn；
+- 增加真实 API 长上下文 fixture、SQLite restart/replay 和 Web bundle gate。
+
+### 验证
+
+```text
+pnpm typecheck
+pnpm --filter @code-review-agent/runtime test        ✓ (25 tests)
+pnpm --filter @code-review-agent/storage test        ✓ (12 tests)
+pnpm --filter @code-review-agent/api test -- --run src/server.test.ts ✓ (27 tests)
+pnpm --filter @code-review-agent/web test             ✓ (98 tests)
+pnpm test:phase8:compaction                           ✓
+git diff --check                                      ✓
+```
+
+本记录对应的代码已建立独立 Phase 8.1 Git checkpoint；8.0 Web parity、8.3 LSP/Code Mode、8.4 可靠性和 8.5 产品化仍未完成。

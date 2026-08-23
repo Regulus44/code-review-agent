@@ -14,8 +14,9 @@ describe("presentContextMeter", () => {
   });
 
   it("surfaces durable compaction status and ratio", () => {
-    const view = presentContextMeter(session({ contextCompaction: { status: "completed", sourceSequence: 2, summary: "summary", originalMessageCount: 4, compactedMessageCount: 2, estimatedTokens: 80, droppedMessages: 2, updatedAt: "2026-08-24T00:00:00.000Z", lastSequence: 3 } }), 100);
+    const view = presentContextMeter(session({ contextCompaction: { status: "completed", sourceSequence: 2, summary: "summary", originalMessageCount: 4, compactedMessageCount: 2, estimatedTokens: 80, droppedMessages: 2, truncatedToolResults: 1, updatedAt: "2026-08-24T00:00:00.000Z", lastSequence: 3 } }), 100);
     expect(view).toMatchObject({ status: "compacted", usedTokens: 80, maxTokens: 100, ratio: 0.8 });
     expect(view.detail).toContain("Compacted 2 messages");
+    expect(view.detail).toContain("truncated 1 tool result");
   });
 });

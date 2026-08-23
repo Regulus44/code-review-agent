@@ -46,8 +46,20 @@ export interface AttachmentCapability {
   readonly reason?: string;
 }
 
+export interface ContextCapability {
+  readonly enabled: boolean;
+  readonly configured: boolean;
+  readonly budget?: {
+    readonly maxTokens?: number;
+    readonly recentMessageTokens?: number;
+    readonly maxToolResultChars?: number;
+    readonly maxSummaryChars?: number;
+  };
+}
+
 export interface CapabilityResponse {
   readonly attachments: AttachmentCapability;
+  readonly context: ContextCapability;
 }
 
 export interface HealthResponse {

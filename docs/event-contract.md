@@ -93,7 +93,7 @@ mcp/prompt
 
 `goal/*` 记录 durable goal 的 title、successCriteria、status、budget/result/reason 和 last sequence。状态为 `active`、`paused`、`completed`、`blocked` 或 `cancelled`；`active`/`paused` 追加 `goal/updated`，终态追加 `goal/ended`。Host 的 Web command 以 goal `lastSequence` 执行 CAS，并使用 durable command idempotency；冲突不得追加事件。`get_goal` 只读取当前 session projection，`update_goal` 不允许凭空创建未知 goal。`job/*` 的完成状态和 bounded output 可以在 AgentHost 重启后由事件恢复；若原进程不再附着，恢复记录标记为 `orphaned`，不能继续 kill 或 send 一个虚构的进程。
 
-`context/compacted` 记录一次模型上下文压缩的 durable receipt：`sourceSequence`、bounded `summary`、原始/压缩后消息数、估算 token、丢弃数和受保护 tool 数。`context/compaction_failed` 记录失败原因并保留原上下文，不能因为压缩失败而丢弃 pending permission、pending interaction、running task 或 tool-call/tool-result 边界。Web 只展示 receipt，不把摘要当作新的用户事实。
+`context/compacted` 记录一次模型上下文压缩的 durable receipt：`sourceSequence`、bounded `summary`、原始/压缩后消息数、估算 token、丢弃数、受保护 tool 数和被 microcompact 的 tool result 数。`context/compaction_failed` 记录失败原因并保留原上下文，不能因为压缩失败而丢弃 pending permission、pending interaction、running task 或 tool-call/tool-result 边界。Web 只展示 receipt，不把摘要当作新的用户事实。
 
 `worktree/*` 记录 Git worktree 的发现、绑定、切换、清理和失败。payload 至少包含 `{ id, repoRoot, path, status }`，可选包含 `branch`、`commit`、`sessionId`、`taskId` 和 bounded `error`。`worktree/switched` 还使 Session projection 的 `activeWorktreeId` 与 `activeWorkspaceRoot` 指向该 worktree；工具、权限和 system prompt 使用 active root，但主仓库 root 仍保留为 Session 的 `workspaceRoot`。清理必须先检查 dirty/conflicted 状态，除非显式 force，否则不能删除未提交修改；主仓库 worktree 永远不能被清理。
 

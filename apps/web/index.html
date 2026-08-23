@@ -1097,7 +1097,7 @@
           if (!settingsContent) return;
           settingsContent.innerHTML = '';
           const view = typedRuntime?.presentSettings
-            ? typedRuntime.presentSettings(state.session, state.models, [...state.tools.values()], state.mcp, { hasSubagentRuntime: true, a2aStatus: 'deferred', attachmentCapability: state.capabilities?.attachments })
+            ? typedRuntime.presentSettings(state.session, state.models, [...state.tools.values()], state.mcp, { hasSubagentRuntime: true, a2aStatus: 'deferred', attachmentCapability: state.capabilities?.attachments, contextCapability: state.capabilities?.context })
             : null;
           if (!view) {
             const empty = document.createElement('div'); empty.className = 'settings-muted'; empty.textContent = 'Typed settings projection is unavailable.'; settingsContent.append(empty); return;

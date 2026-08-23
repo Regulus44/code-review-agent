@@ -19,6 +19,6 @@ export function presentContextMeter(session: SessionProjection | undefined, maxT
   const status = compaction?.status === "failed" ? "failed" : compaction?.status === "completed" ? "compacted" : budget === undefined ? "unknown" : "healthy";
   const ratio = budget === undefined ? undefined : Math.min(1, effectiveUsed / budget);
   const label = budget === undefined ? `Context · ${effectiveUsed} tokens` : `Context · ${effectiveUsed}/${budget}`;
-  const detail = compaction?.status === "failed" ? `Compaction failed: ${compaction.error ?? "unknown error"}` : compaction?.status === "completed" ? `Compacted ${compaction.droppedMessages} message${compaction.droppedMessages === 1 ? "" : "s"} at sequence ${compaction.lastSequence}.` : "Context is estimated from the replayed session messages.";
+  const detail = compaction?.status === "failed" ? `Compaction failed: ${compaction.error ?? "unknown error"}` : compaction?.status === "completed" ? `Compacted ${compaction.droppedMessages} message${compaction.droppedMessages === 1 ? "" : "s"} at sequence ${compaction.lastSequence}${compaction.truncatedToolResults === undefined || compaction.truncatedToolResults === 0 ? "" : `; truncated ${compaction.truncatedToolResults} tool result${compaction.truncatedToolResults === 1 ? "" : "s"}`}.` : "Context is estimated from the replayed session messages.";
   return { status, label, ...(budget === undefined ? {} : { maxTokens: budget, ratio: ratio as number }), usedTokens: effectiveUsed, detail };
 }

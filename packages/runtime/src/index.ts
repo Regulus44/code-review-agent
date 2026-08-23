@@ -54,6 +54,12 @@ export interface AgentHostOptions {
   readonly contextBudget?: Partial<ContextBudget>;
 }
 
+export interface ContextSettings {
+  readonly enabled: boolean;
+  readonly configured: boolean;
+  readonly budget?: Partial<ContextBudget>;
+}
+
 interface PendingTurn {
   readonly sessionId: SessionId;
   readonly turnId: TurnId;
@@ -135,6 +141,14 @@ export class AgentHost {
   /** Replaces the model used for turns that have not started yet. */
   setModel(model: ChatModel): void {
     this.model = model;
+  }
+
+  contextSettings(): ContextSettings {
+    return {
+      enabled: this.compactionEnabled,
+      configured: this.contextBudget !== undefined,
+      ...(this.contextBudget === undefined ? {} : { budget: { ...this.contextBudget } }),
+    };
   }
 
   async createSession(workspaceRoot: string, permissionPreset?: PermissionPreset, metadata?: ChildSessionMetadata): Promise<SessionProjection> {

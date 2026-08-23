@@ -67,8 +67,8 @@ describe("InMemoryEventStore", () => {
   it("replays context compaction receipts and failures", async () => {
     const store = new InMemoryEventStore();
     const sessionId = await store.createSession("D:/context-replay");
-    await store.append({ sessionId, type: "context/compacted", payload: { sourceSequence: 2, summary: "bounded summary", originalMessageCount: 8, compactedMessageCount: 4, estimatedTokens: 120, droppedMessages: 4 } });
-    expect((await store.project(sessionId))?.contextCompaction).toMatchObject({ status: "completed", sourceSequence: 2, droppedMessages: 4 });
+    await store.append({ sessionId, type: "context/compacted", payload: { sourceSequence: 2, summary: "bounded summary", originalMessageCount: 8, compactedMessageCount: 4, estimatedTokens: 120, droppedMessages: 4, protectedMessageCount: 1, truncatedToolResults: 2 } });
+    expect((await store.project(sessionId))?.contextCompaction).toMatchObject({ status: "completed", sourceSequence: 2, droppedMessages: 4, protectedMessageCount: 1, truncatedToolResults: 2 });
     await store.append({ sessionId, type: "context/compaction_failed", payload: { sourceSequence: 3, summary: "", originalMessageCount: 8, compactedMessageCount: 8, estimatedTokens: 0, droppedMessages: 0, error: "fixture failure" } });
     expect((await store.project(sessionId))?.contextCompaction).toMatchObject({ status: "failed", error: "fixture failure" });
   });

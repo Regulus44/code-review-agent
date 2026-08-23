@@ -337,6 +337,8 @@ export interface ContextCompactionProjection {
   readonly compactedMessageCount: number;
   readonly estimatedTokens: number;
   readonly droppedMessages: number;
+  readonly protectedMessageCount?: number;
+  readonly truncatedToolResults?: number;
   readonly updatedAt: string;
   readonly lastSequence: number;
   readonly error?: string;

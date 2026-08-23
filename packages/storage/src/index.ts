@@ -497,6 +497,8 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
       compactedMessageCount: typeof payload["compactedMessageCount"] === "number" ? payload["compactedMessageCount"] : 0,
       estimatedTokens: typeof payload["estimatedTokens"] === "number" ? payload["estimatedTokens"] : 0,
       droppedMessages: typeof payload["droppedMessages"] === "number" ? payload["droppedMessages"] : 0,
+      ...(typeof payload["protectedMessageCount"] === "number" ? { protectedMessageCount: payload["protectedMessageCount"] } : {}),
+      ...(typeof payload["truncatedToolResults"] === "number" ? { truncatedToolResults: payload["truncatedToolResults"] } : {}),
       updatedAt: event.createdAt,
       lastSequence: event.sequence,
       ...(typeof payload["error"] === "string" ? { error: payload["error"] } : {}),

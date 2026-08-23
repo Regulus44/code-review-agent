@@ -31,6 +31,12 @@ export interface ApiServerOptions {
   readonly mcp?: McpConnectionManager;
   readonly subagentRuntime?: SubagentRuntime;
   readonly attachmentPolicy?: AttachmentPolicy;
+  readonly contextBudget?: {
+    readonly maxTokens?: number;
+    readonly recentMessageTokens?: number;
+    readonly maxToolResultChars?: number;
+    readonly maxSummaryChars?: number;
+  };
   readonly webRoot?: string;
 }
 
@@ -38,7 +44,7 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
   const ownsStore = options.store === undefined && options.host === undefined;
   const store = options.store ?? (options.host === undefined ? new SqliteEventStore({ databasePath: options.databasePath ?? defaultDatabasePath() }) : undefined);
   const subagentRuntime = options.subagentRuntime ?? new SubagentRuntime({ store: store as SessionEventStore });
-  const host = options.host ?? new AgentHost({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), ...(options.permissionPreset === undefined ? {} : { permissionPreset: options.permissionPreset }), subagentRuntime });
+  const host = options.host ?? new AgentHost({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), ...(options.permissionPreset === undefined ? {} : { permissionPreset: options.permissionPreset }), ...(options.contextBudget === undefined ? {} : { contextBudget: options.contextBudget }), subagentRuntime });
   if (!subagentRuntime.providerCatalog().some((provider) => provider.name === "in-process")) subagentRuntime.registerProvider(createInProcessSubagentProvider({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), baseToolDefinitions: host.toolRegistry().listAll(), subagentRuntime }));
   const modelRuntime: ModelRuntimeState = {
     availableModels: options.availableModels ?? [],
@@ -140,7 +146,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/capabilities") {
-      sendJson(response, 200, { attachments: currentAttachmentCapability(attachmentPolicy, modelRuntime) });
+      sendJson(response, 200, { attachments: currentAttachmentCapability(attachmentPolicy, modelRuntime), context: host.contextSettings() });
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/workspaces") {
