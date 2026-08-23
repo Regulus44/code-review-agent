@@ -28,6 +28,11 @@ describe("presentGoalBar", () => {
     expect(view.statusLabel).toBe("Completed");
   });
 
+  it("exposes host-backed pause and resume actions without inventing a command", () => {
+    expect(presentGoalBar([goal()], { commandSurfaceAvailable: true })).toMatchObject({ canPause: true, canResume: false, canClear: true });
+    expect(presentGoalBar([goal({ status: "paused" })], { commandSurfaceAvailable: true })).toMatchObject({ statusLabel: "Paused", canPause: false, canResume: true });
+  });
+
   it("returns an explicit empty state", () => {
     expect(presentGoalBar([])).toMatchObject({ visible: false, status: "unknown" });
   });

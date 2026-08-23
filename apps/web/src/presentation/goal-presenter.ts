@@ -74,14 +74,14 @@ export function presentGoalBar(
     detail: presentBoundedValue({ budget: goal.budget, result: goal.result, reason: goal.reason }, options.maxDetailChars ?? 4_000),
     canEdit: commandSurfaceAvailable && goal.status === "active",
     canPause: commandSurfaceAvailable && goal.status === "active",
-    canResume: commandSurfaceAvailable && goal.status === "blocked",
+    canResume: commandSurfaceAvailable && (goal.status === "paused" || goal.status === "blocked"),
     canClear: commandSurfaceAvailable && !["completed", "cancelled"].includes(goal.status),
     ...(commandSurfaceAvailable ? {} : { unavailableReason: "Goal controls are deferred until the host exposes an idempotent command surface." }),
   };
 }
 
 function statusLabel(status: GoalStatus): string {
-  return status === "active" ? "Active" : status === "completed" ? "Completed" : status === "blocked" ? "Blocked" : "Cancelled";
+  return status === "active" ? "Active" : status === "paused" ? "Paused" : status === "completed" ? "Completed" : status === "blocked" ? "Blocked" : "Cancelled";
 }
 
 function bounded(value: string, maxChars: number): string {

@@ -91,7 +91,7 @@ mcp/prompt
 
 `lsp/server` 记录 host-configured LSP transport 的 started、initialized、crashed、restart_requested 和 disposed 生命周期；`lsp/request` 记录 initialize/diagnostics/definition/references 等请求的 started、completed、cancelled、timeout 或 failed。事件只保留 serverId、workspace、method、requestId、状态、错误 code、stderr 字节数等 bounded metadata，不写入原始 stderr、凭据或完整文档。
 
-`goal/*` 记录 durable goal 的 title、successCriteria、status、budget/result/reason 和 last sequence；`get_goal` 只读取当前 session projection，`update_goal` 不允许凭空创建未知 goal。`job/*` 的完成状态和 bounded output 可以在 AgentHost 重启后由事件恢复；若原进程不再附着，恢复记录标记为 `orphaned`，不能继续 kill 或 send 一个虚构的进程。
+`goal/*` 记录 durable goal 的 title、successCriteria、status、budget/result/reason 和 last sequence。状态为 `active`、`paused`、`completed`、`blocked` 或 `cancelled`；`active`/`paused` 追加 `goal/updated`，终态追加 `goal/ended`。Host 的 Web command 以 goal `lastSequence` 执行 CAS，并使用 durable command idempotency；冲突不得追加事件。`get_goal` 只读取当前 session projection，`update_goal` 不允许凭空创建未知 goal。`job/*` 的完成状态和 bounded output 可以在 AgentHost 重启后由事件恢复；若原进程不再附着，恢复记录标记为 `orphaned`，不能继续 kill 或 send 一个虚构的进程。
 
 MCP 生命周期事件只携带 `serverName`、状态、动作和脱敏错误；env/header/token 等配置秘密不得进入 payload。MCP 工具调用本身仍使用公共 `tool/*` 和 `permission/*` 事件。`mcp/resource` / `mcp/prompt` 只记录 server、资源 URI 或 prompt name、动作、bounded bytes/truncated 和 trust marker，不记录远端原始内容。
 

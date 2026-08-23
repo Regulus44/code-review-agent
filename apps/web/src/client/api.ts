@@ -3,13 +3,16 @@ import type {
   AttachmentReceipt,
   ArtifactRef,
   InteractionId,
+  GoalStatus,
   PermissionId,
   PermissionPreset,
+  PlanStatus,
   SessionId,
   SessionProjection,
   SessionSummary,
   TaskId,
   TaskProjection,
+  TodoItem,
   ToolRiskLevel,
   ToolSource,
   TurnId,
@@ -280,6 +283,30 @@ export class WebApiClient {
       method: "POST",
       commandId,
       body: { status, ...(answer === undefined ? {} : { answer }) },
+    });
+  }
+
+  updateGoal(sessionId: SessionId, goalId: string, input: { readonly status?: GoalStatus; readonly title?: string; readonly successCriteria?: readonly string[]; readonly budget?: Readonly<Record<string, unknown>>; readonly result?: unknown; readonly reason?: string }, expectedSequence?: number, commandId?: string): Promise<SessionProjection> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/goals/${encodeURIComponent(goalId)}`, {
+      method: "POST",
+      commandId,
+      body: { ...input, ...(expectedSequence === undefined ? {} : { expectedSequence }) },
+    });
+  }
+
+  updatePlan(sessionId: SessionId, content: string, status: PlanStatus, expectedSequence?: number, commandId?: string): Promise<SessionProjection> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/plan`, {
+      method: "POST",
+      commandId,
+      body: { content, status, ...(expectedSequence === undefined ? {} : { expectedSequence }) },
+    });
+  }
+
+  updateTodos(sessionId: SessionId, todos: readonly TodoItem[], expectedSequence?: number, commandId?: string): Promise<SessionProjection> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/todos`, {
+      method: "POST",
+      commandId,
+      body: { todos, ...(expectedSequence === undefined ? {} : { expectedSequence }) },
     });
   }
 

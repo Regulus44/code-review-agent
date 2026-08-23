@@ -94,7 +94,7 @@ export type SubagentStatus = "queued" | "running" | "ready" | "waiting" | "compl
 export type TaskTerminalStatus = "completed" | "failed" | "cancelled" | "rejected" | "partial";
 export type TaskStopReason = "completed" | "aborted" | "error" | "max-tokens" | "refusal";
 export type ReportDeliveryPolicy = "wakeup" | "quiet";
-export type GoalStatus = "active" | "completed" | "blocked" | "cancelled";
+export type GoalStatus = "active" | "paused" | "completed" | "blocked" | "cancelled";
 export type PermissionPreset = "read-only" | "workspace-write" | "ask-on-write" | "ask-on-execute" | "danger-full-access";
 
 export interface ArtifactRef {
@@ -603,6 +603,7 @@ export interface SessionEventStore extends EventStore {
   listChildSessions(parentSessionId: SessionId): Promise<readonly SessionSummary[]>;
   createChildSession(input: { readonly id?: SessionId; readonly workspaceRoot: string; readonly permissionPreset: PermissionPreset; readonly metadata: ChildSessionMetadata }): Promise<SessionId>;
   claimCommand(input: ClaimCommandInput): Promise<CommandClaim>;
+  getCommand(sessionId: SessionId, commandId: string): Promise<CommandRecord | undefined>;
   forkSession(sessionId: SessionId, workspaceRoot?: string, id?: SessionId, permissionPreset?: PermissionPreset): Promise<SessionId>;
 }
 

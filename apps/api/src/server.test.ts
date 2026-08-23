@@ -53,6 +53,22 @@ describe("Phase 2 API", () => {
     expect(await shell.text()).toContain("Code Review Agent");
   });
 
+  it("persists Goal CAS, Plan review, and Todo commands through the API", async () => {
+    const created = await fetch(`${baseUrl}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: "D:/workspace/planning-api" }) });
+    const session = await created.json() as { id: string };
+    await store.append({ sessionId: sessionId(session.id), type: "goal/created", payload: { goalId: "goal_api", title: "Review", successCriteria: ["Plan approved"], status: "active" } });
+    const baseline = await (await fetch(`${baseUrl}/v1/sessions/${session.id}`)).json() as { goals: { lastSequence: number; status: string }[]; plan: { lastSequence: number } };
+    const pause = await fetch(`${baseUrl}/v1/sessions/${session.id}/goals/goal_api`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "goal-api-1" }, body: JSON.stringify({ status: "paused", expectedSequence: baseline.goals[0]!.lastSequence }) });
+    expect(pause.status).toBe(200);
+    expect((await pause.json() as { goals: { status: string }[] }).goals[0]?.status).toBe("paused");
+    const stale = await fetch(`${baseUrl}/v1/sessions/${session.id}/goals/goal_api`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "active", expectedSequence: baseline.goals[0]!.lastSequence }) });
+    expect(stale.status).toBe(409);
+    const plan = await fetch(`${baseUrl}/v1/sessions/${session.id}/plan`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "plan-api-1" }, body: JSON.stringify({ content: "Inspect and test", status: "approved", expectedSequence: baseline.plan.lastSequence }) });
+    expect((await plan.json() as { plan: { status: string } }).plan.status).toBe("approved");
+    const todos = await fetch(`${baseUrl}/v1/sessions/${session.id}/todos`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "todo-api-1" }, body: JSON.stringify({ todos: [{ id: "one", content: "Test", status: "pending" }] }) });
+    expect((await todos.json() as { todos: { id: string }[] }).todos).toEqual([{ id: "one", content: "Test", status: "pending" }]);
+  });
+
   it("serves latest and older event pages while keeping unpaged JSON replay compatible", async () => {
     const created = await fetch(`${baseUrl}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: "D:/workspace/paging" }) });
     const session = await created.json() as { id: string };

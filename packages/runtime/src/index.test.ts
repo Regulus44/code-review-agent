@@ -44,6 +44,28 @@ describe("AgentHost", () => {
     await expect(host.renameSession(session.id, " ")).rejects.toThrow("Session title cannot be empty");
   });
 
+  it("updates Goal, Plan and Todo through durable idempotent CAS commands", async () => {
+    const store = new InMemoryEventStore();
+    const host = new AgentHost({ store });
+    const session = await host.createSession("D:/planning-command-fixture");
+    await store.append({ sessionId: session.id, type: "goal/created", payload: { goalId: "goal_one", title: "Ship", successCriteria: ["Tests pass"], status: "active" } });
+    const before = await host.getSession(session.id);
+    const paused = await host.updateGoal(session.id, "goal_one", { status: "paused", title: "Ship safely" }, before!.goals[0]!.lastSequence, "goal-command-1");
+    const repeatedGoal = await host.updateGoal(session.id, "goal_one", { status: "paused", title: "Ship safely" }, before!.goals[0]!.lastSequence, "goal-command-1");
+    expect(paused.goals[0]).toMatchObject({ status: "paused", title: "Ship safely" });
+    expect(repeatedGoal.goals[0]).toMatchObject({ status: "paused", title: "Ship safely" });
+    await expect(host.updateGoal(session.id, "goal_one", { status: "active" }, before!.goals[0]!.lastSequence, "goal-command-stale")).rejects.toMatchObject({ code: "COMMAND_CONFLICT" });
+
+    const drafted = await host.updatePlan(session.id, "Inspect then test", "draft", paused.plan.lastSequence, "plan-command-1");
+    const approved = await host.updatePlan(session.id, "Inspect then test", "approved", drafted.plan.lastSequence, "plan-command-2");
+    expect(approved.plan).toMatchObject({ content: "Inspect then test", status: "approved" });
+
+    const todos = await host.updateTodos(session.id, [{ id: "todo_one", content: "Test", status: "in_progress", activeForm: "Testing" }], approved.lastSequence, "todo-command-1");
+    expect(todos.todos).toEqual([{ id: "todo_one", content: "Test", status: "in_progress", activeForm: "Testing" }]);
+    expect((await host.events(session.id)).filter((event) => event.type === "goal/updated")).toHaveLength(1);
+    expect((await store.getCommand(session.id, "plan-command-2"))?.kind).toBe("update_plan");
+  });
+
   it("builds the prompt from the permission-filtered tool set and preserves custom instructions", async () => {
     const requests: ModelRequest[] = [];
     const store = new InMemoryEventStore();

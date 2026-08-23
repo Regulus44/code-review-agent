@@ -42,9 +42,10 @@ Phase 7 的 DSH Web 调研与分步计划：
 - `apps/web/src/presentation/todo-presenter.ts`：提供 pending/in_progress/completed/cancelled 的 TodoPanel 投影、计数、折叠提示和 bounded detail；
 - `apps/web/src/presentation/question-presenter.ts`：提供按 turn/standalone 批次筛选、多问题、选项、freeform、expiry、恢复标记和状态计数；
 - `apps/web/src/browser.ts`：typed Web bridge 暴露四个 presenter；`apps/web/index.html` 增加 GoalBar、Plan toolbar 入口和 Goal/Plan/Todo/Questions details panel，所有事实仍来自 SessionStore/SessionProjection；
-- 不新增 Event/Task/Permission contract，也没有把 deferred 的 Goal 编辑、暂停/恢复、Plan review 命令伪装成可用；这些能力进入下一切片，需先增加 host-backed idempotent command 和 CAS/replay contract；
-- 定向 presenter 测试 9 项、Web 全量测试 92 项、`pnpm typecheck`、`pnpm build:web`、`pnpm test:phase7:browser` 和 `git diff --check` 通过；browser gate 五场景、1,250 条 trajectory replay 继续通过；
-- 当前状态仍为 `pending`，该 checkpoint 只关闭 8.0.3 的 projection/presentation 基线，不代表 Phase 8 或 8.0 Web parity 完成。
+- `packages/contracts` / `packages/storage` / `packages/runtime`：Goal 增加 durable `paused` 状态；`getCommand` 支持重启后的幂等检查；Goal、Plan、Todo host command 使用 command idempotency 与 `lastSequence` CAS，冲突返回 `COMMAND_CONFLICT` 且不追加事件；
+- `apps/api` / `apps/web/src/client/api.ts`：新增 Goal、Plan、Todo command API，GoalBar pause/resume/edit/clear 与 Plan review 只在 host command surface 存在时启用；
+- 当前状态仍为 `pending`，8.0.3 的 projection/presentation 与 Goal/Plan/Todo command 闭环已具备，但 Question batch 仍需 browser fixture，8.0.0–8.0.7 和 Phase 8 其余工作流尚未完成；
+- 定向 presenter、Runtime 20 项、API 25 项，Web 全量 93 项、`pnpm typecheck`、全量 `pnpm test`、`pnpm build:web`、`pnpm test:phase7:browser` 和 `git diff --check` 通过；browser gate 五场景、1,250 条 trajectory replay 继续通过。
 
 ## Phase 7 Workspace lifecycle controls（当前 checkpoint）
 

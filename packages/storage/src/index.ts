@@ -205,7 +205,7 @@ function normalizeReport(value: unknown): TaskReport | undefined {
 }
 
 function goalStatus(value: unknown, fallback: GoalStatus): GoalStatus {
-  return value === "active" || value === "completed" || value === "blocked" || value === "cancelled" ? value : fallback;
+  return value === "active" || value === "paused" || value === "completed" || value === "blocked" || value === "cancelled" ? value : fallback;
 }
 
 function planStatus(value: unknown, fallback: PlanStatus): PlanStatus {
@@ -761,6 +761,10 @@ export class InMemoryEventStore implements SessionEventStore {
     return { created: true, record };
   }
 
+  async getCommand(sessionId: SessionId, commandId: string): Promise<CommandRecord | undefined> {
+    return this.sessions.get(sessionId)?.commands.get(commandId);
+  }
+
   async forkSession(sessionId: SessionId, workspaceRoot?: string, id?: SessionId, permissionPreset?: PermissionPreset): Promise<SessionId> {
     const source = await this.project(sessionId);
     if (source === undefined) throw new Error(`Unknown session: ${sessionId}`);
@@ -922,6 +926,11 @@ export class SqliteEventStore implements SessionEventStore, McpConfigBackend {
       this.db.prepare("INSERT INTO commands (session_id, command_id, kind, request_json, result_json, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(input.sessionId, input.commandId, input.kind, JSON.stringify(input.request), JSON.stringify(input.result), record.createdAt);
       return { created: true, record };
     });
+  }
+
+  async getCommand(sessionId: SessionId, commandId: string): Promise<CommandRecord | undefined> {
+    const row = this.db.prepare("SELECT session_id, command_id, kind, request_json, result_json, created_at FROM commands WHERE session_id = ? AND command_id = ?").get(sessionId, commandId) as SqliteRow | undefined;
+    return row === undefined ? undefined : readCommand(row);
   }
 
   async forkSession(sessionId: SessionId, workspaceRoot?: string, id?: SessionId, permissionPreset?: PermissionPreset): Promise<SessionId> {

@@ -24,6 +24,9 @@ import {
   type ChildSessionMetadata,
   type EventListOptions,
   type EventPage,
+  type GoalStatus,
+  type PlanStatus,
+  type TodoItem,
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { randomUUID } from "node:crypto";
@@ -369,6 +372,92 @@ export class AgentHost {
     if (current === undefined) throw new Error(`Unknown session: ${sessionId}`);
     this.toolRuntime.setSessionPermissionPreset(sessionId, permissionPreset);
     await this.options.store.append({ sessionId, type: "session/updated", payload: { permissionPreset } });
+    const updated = await this.options.store.project(sessionId);
+    if (updated === undefined) throw new Error(`Session disappeared: ${sessionId}`);
+    return updated;
+  }
+
+  async updateGoal(
+    sessionId: SessionId,
+    goalId: string,
+    input: { readonly status?: GoalStatus; readonly title?: string; readonly successCriteria?: readonly string[]; readonly budget?: Readonly<Record<string, unknown>>; readonly result?: unknown; readonly reason?: string },
+    expectedSequence?: number,
+    commandId?: string,
+  ): Promise<SessionProjection> {
+    await this.ready;
+    const current = await this.options.store.project(sessionId);
+    if (current === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    const goal = current.goals.find((item) => String(item.id) === goalId);
+    if (goal === undefined) throw new Error(`Unknown goal: ${goalId}`);
+    const idempotencyKey = commandId ?? `cmd_${randomUUID()}`;
+    const existing = await this.options.store.getCommand(sessionId, idempotencyKey);
+    if (existing !== undefined) {
+      if (existing.kind !== "update_goal") throw new Error(`Command ${idempotencyKey} was already used for ${existing.kind}`);
+      return current;
+    }
+    if (expectedSequence !== undefined && goal.lastSequence !== expectedSequence) throw commandConflict(`Goal ${goalId} changed at sequence ${goal.lastSequence}; expected ${expectedSequence}`);
+    const status = input.status ?? goal.status;
+    const title = input.title === undefined ? goal.title : normalizeGoalTitle(input.title);
+    const successCriteria = input.successCriteria === undefined ? goal.successCriteria : normalizeCriteria(input.successCriteria);
+    if (successCriteria.length === 0) throw new Error("Goal requires at least one success criterion");
+    const claim = await this.options.store.claimCommand({ sessionId, commandId: idempotencyKey, kind: "update_goal", request: { goalId, input, expectedSequence }, result: { goalId } });
+    if (!claim.created) return current;
+    const eventType = status === "active" || status === "paused" ? "goal/updated" : "goal/ended";
+    await this.options.store.append({
+      sessionId,
+      correlationId: idempotencyKey,
+      type: eventType,
+      payload: {
+        goalId,
+        status,
+        title,
+        successCriteria,
+        ...(input.budget === undefined ? {} : { budget: input.budget }),
+        ...(input.result === undefined ? {} : { result: input.result }),
+        ...(input.reason === undefined ? {} : { reason: input.reason }),
+      },
+    });
+    const updated = await this.options.store.project(sessionId);
+    if (updated === undefined) throw new Error(`Session disappeared: ${sessionId}`);
+    return updated;
+  }
+
+  async updatePlan(sessionId: SessionId, content: string, status: PlanStatus, expectedSequence?: number, commandId?: string): Promise<SessionProjection> {
+    await this.ready;
+    const current = await this.options.store.project(sessionId);
+    if (current === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    const idempotencyKey = commandId ?? `cmd_${randomUUID()}`;
+    const existing = await this.options.store.getCommand(sessionId, idempotencyKey);
+    if (existing !== undefined) {
+      if (existing.kind !== "update_plan") throw new Error(`Command ${idempotencyKey} was already used for ${existing.kind}`);
+      return current;
+    }
+    if (expectedSequence !== undefined && current.plan.lastSequence !== expectedSequence) throw commandConflict(`Plan changed at sequence ${current.plan.lastSequence}; expected ${expectedSequence}`);
+    const normalized = content.trim();
+    if (status !== "cleared" && normalized.length === 0) throw new Error("Plan content cannot be empty unless status is cleared");
+    const claim = await this.options.store.claimCommand({ sessionId, commandId: idempotencyKey, kind: "update_plan", request: { content: normalized, status, expectedSequence }, result: { status } });
+    if (!claim.created) return current;
+    await this.options.store.append({ sessionId, correlationId: idempotencyKey, type: "plan/updated", payload: { content: normalized, status } });
+    const updated = await this.options.store.project(sessionId);
+    if (updated === undefined) throw new Error(`Session disappeared: ${sessionId}`);
+    return updated;
+  }
+
+  async updateTodos(sessionId: SessionId, todos: readonly TodoItem[], expectedSequence?: number, commandId?: string): Promise<SessionProjection> {
+    await this.ready;
+    const current = await this.options.store.project(sessionId);
+    if (current === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    const idempotencyKey = commandId ?? `cmd_${randomUUID()}`;
+    const existing = await this.options.store.getCommand(sessionId, idempotencyKey);
+    if (existing !== undefined) {
+      if (existing.kind !== "update_todos") throw new Error(`Command ${idempotencyKey} was already used for ${existing.kind}`);
+      return current;
+    }
+    if (expectedSequence !== undefined && current.lastSequence !== expectedSequence) throw commandConflict(`Session changed at sequence ${current.lastSequence}; expected ${expectedSequence}`);
+    const normalized = normalizeTodos(todos);
+    const claim = await this.options.store.claimCommand({ sessionId, commandId: idempotencyKey, kind: "update_todos", request: { todos: normalized, expectedSequence }, result: { count: normalized.length } });
+    if (!claim.created) return current;
+    await this.options.store.append({ sessionId, correlationId: idempotencyKey, type: "todo/updated", payload: { todos: normalized } });
     const updated = await this.options.store.project(sessionId);
     if (updated === undefined) throw new Error(`Session disappeared: ${sessionId}`);
     return updated;
@@ -1202,4 +1291,36 @@ function sessionIdFrom(value: string): SessionId {
 
 function turnIdFrom(value: string): TurnId {
   return brand<string, "TurnId">(value);
+}
+
+function commandConflict(message: string): Error {
+  const error = new Error(message);
+  Object.assign(error, { code: "COMMAND_CONFLICT" });
+  return error;
+}
+
+function normalizeGoalTitle(value: string): string {
+  const normalized = value.trim();
+  if (normalized.length === 0) throw new Error("Goal title cannot be empty");
+  if (normalized.length > 180) throw new Error("Goal title must be 180 characters or fewer");
+  return normalized;
+}
+
+function normalizeCriteria(values: readonly string[]): readonly string[] {
+  const criteria = values.map((value) => value.trim()).filter(Boolean).slice(0, 32);
+  if (criteria.some((value) => value.length > 500)) throw new Error("Goal success criteria must be 500 characters or fewer");
+  return criteria;
+}
+
+function normalizeTodos(values: readonly TodoItem[]): readonly TodoItem[] {
+  const seen = new Set<string>();
+  return values.slice(0, 128).map((item) => {
+    const id = item.id.trim();
+    const content = item.content.trim();
+    if (id.length === 0 || content.length === 0) throw new Error("Todo id and content cannot be empty");
+    if (seen.has(id)) throw new Error(`TODO_DUPLICATE_ID: ${id}`);
+    seen.add(id);
+    if (content.length > 500) throw new Error("Todo content must be 500 characters or fewer");
+    return { id, content, status: item.status, ...(item.activeForm === undefined ? {} : { activeForm: item.activeForm.trim().slice(0, 500) }) };
+  });
 }

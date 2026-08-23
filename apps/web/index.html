@@ -283,6 +283,7 @@
       .detail-line strong { max-width: 165px; overflow: hidden; color: var(--text); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
       .planning-heading { margin-bottom: 8px; color: var(--text); font-size: 12px; font-weight: 650; }
       .planning-list { display: grid; gap: 4px; margin: 4px 0 8px; padding-left: 16px; color: var(--text-secondary); font-size: 11px; }
+      .planning-actions { display: flex; gap: 6px; margin: 6px 0 8px; }
       .goal-bar { display: flex; align-items: center; gap: 12px; margin: 12px auto 0; padding: 9px 12px; width: min(100% - 40px, 748px); border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
       .goal-bar-copy { min-width: 0; flex: 1; }
       .goal-bar-title { display: block; overflow: hidden; color: var(--text); font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
@@ -290,6 +291,9 @@
       .goal-bar-status { flex: 0 0 auto; color: var(--green); font-size: 10px; }
       .goal-bar-status.blocked { color: var(--red); }
       .goal-bar-status.completed { color: var(--green); }
+      .goal-bar-actions { display: inline-flex; gap: 4px; flex: 0 0 auto; }
+      .goal-bar-action { border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; color: var(--text-secondary); background: var(--surface); font-size: 10px; cursor: pointer; }
+      .goal-bar-action:hover { color: var(--text); border-color: var(--accent); }
       .status-pill { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border-radius: 99px; color: var(--green); background: #edf9f1; font-size: 10px; }
       .status-pill::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
       .tool-list { display: grid; gap: 5px; }
@@ -1042,7 +1046,7 @@
         };
         const renderGoalBar = (snapshot) => {
           if (!goalBar) return;
-          const intent = typedRuntime?.presentGoalBar ? typedRuntime.presentGoalBar(snapshot?.session?.goals || state.session?.goals) : { visible: false };
+          const intent = typedRuntime?.presentGoalBar ? typedRuntime.presentGoalBar(snapshot?.session?.goals || state.session?.goals, { commandSurfaceAvailable: typedRuntime?.api?.updateGoal !== undefined }) : { visible: false };
           goalBar.hidden = !intent.visible;
           goalBar.innerHTML = '';
           if (!intent.visible) return;
@@ -1052,6 +1056,16 @@
           copy.append(heading, meta);
           const statusBadge = document.createElement('span'); statusBadge.className = `goal-bar-status ${intent.status}`; statusBadge.textContent = intent.statusLabel;
           goalBar.append(copy, statusBadge);
+          if (intent.id && typedRuntime?.api?.updateGoal) {
+            const actions = document.createElement('span'); actions.className = 'goal-bar-actions';
+            const goal = (snapshot?.session?.goals || state.session?.goals || []).find((item) => String(item.id) === intent.id);
+            const commit = async (input) => { if (!goal || !state.session) return; try { const updated = await typedRuntime.api.updateGoal(state.session.id, intent.id, input, goal.lastSequence, commandKey()); state.session = updated; typedConnection?.store.replaceProjection(updated); render(); } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); } };
+            if (intent.canPause) { const pause = document.createElement('button'); pause.type = 'button'; pause.className = 'goal-bar-action'; pause.textContent = 'Pause'; pause.onclick = () => { void commit({ status: 'paused' }); }; actions.append(pause); }
+            if (intent.canResume) { const resume = document.createElement('button'); resume.type = 'button'; resume.className = 'goal-bar-action'; resume.textContent = 'Resume'; resume.onclick = () => { void commit({ status: 'active' }); }; actions.append(resume); }
+            if (intent.canEdit) { const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'goal-bar-action'; edit.textContent = 'Edit'; edit.onclick = () => { const nextTitle = window.prompt('Goal title', goal.title); if (nextTitle !== null) void commit({ title: nextTitle }); }; actions.append(edit); }
+            if (intent.canClear) { const clear = document.createElement('button'); clear.type = 'button'; clear.className = 'goal-bar-action'; clear.textContent = 'Clear'; clear.onclick = () => { void commit({ status: 'cancelled', reason: 'Cleared from Web GoalBar' }); }; actions.append(clear); }
+            goalBar.append(actions);
+          }
         };
         const renderSettings = () => {
           if (!settingsContent) return;
@@ -1245,13 +1259,20 @@
           const body = section.querySelector('#planning-body'); body.innerHTML = '';
           const session = snapshot?.session || state.session;
           const goal = typedRuntime?.presentGoalBar ? typedRuntime.presentGoalBar(session?.goals) : { visible: false, title: 'No goal', statusLabel: 'No goal', completion: { label: 'unknown' }, criteria: [], unavailableReason: 'Typed presenter unavailable.' };
-          const plan = typedRuntime?.presentPlan ? typedRuntime.presentPlan(session?.plan) : { visible: false, statusLabel: 'unknown', content: '', reviewable: false, unavailableReason: 'Typed presenter unavailable.' };
+          const plan = typedRuntime?.presentPlan ? typedRuntime.presentPlan(session?.plan, { commandSurfaceAvailable: typedRuntime?.api?.updatePlan !== undefined }) : { visible: false, statusLabel: 'unknown', content: '', reviewable: false, unavailableReason: 'Typed presenter unavailable.' };
           const todos = typedRuntime?.presentTodoPanel ? typedRuntime.presentTodoPanel(session?.todos) : { visible: false, summary: 'unknown', items: [] };
           const questions = typedRuntime?.presentQuestionBatch ? typedRuntime.presentQuestionBatch(session?.interactions, { now: Date.now() }) : { visible: false, summary: 'unknown', questions: [] };
           const heading = document.createElement('div'); heading.className = 'planning-heading'; heading.textContent = goal.visible ? `${goal.title} · ${goal.statusLabel}` : goal.title; body.append(heading);
           const goalMeta = document.createElement('div'); goalMeta.className = 'detail-line'; const goalLabel = document.createElement('span'); goalLabel.textContent = 'Goal'; const goalValue = document.createElement('strong'); goalValue.textContent = goal.visible ? goal.completion.label : 'No durable goal'; goalMeta.append(goalLabel, goalValue); body.append(goalMeta);
           if (goal.criteria?.length) { const criteria = document.createElement('ul'); criteria.className = 'planning-list'; for (const item of goal.criteria) { const row = document.createElement('li'); row.textContent = `${item.state === 'satisfied' ? '✓' : '·'} ${item.text}`; criteria.append(row); } body.append(criteria); }
           const planMeta = document.createElement('div'); planMeta.className = 'detail-line'; const planLabel = document.createElement('span'); planLabel.textContent = 'Plan'; const planValue = document.createElement('strong'); planValue.textContent = plan.visible ? `${plan.statusLabel} · ${plan.content || 'empty'}` : 'No plan'; planMeta.append(planLabel, planValue); body.append(planMeta);
+          if (plan.reviewable && typedRuntime?.api?.updatePlan && session?.id) {
+            const actions = document.createElement('div'); actions.className = 'planning-actions';
+            const review = async (status) => { try { const updated = await typedRuntime.api.updatePlan(session.id, plan.content, status, session.plan.lastSequence, commandKey()); state.session = updated; typedConnection?.store.replaceProjection(updated); render(); } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); } };
+            const approve = document.createElement('button'); approve.type = 'button'; approve.className = 'goal-bar-action'; approve.textContent = 'Approve plan'; approve.onclick = () => { void review('approved'); };
+            const reject = document.createElement('button'); reject.type = 'button'; reject.className = 'goal-bar-action'; reject.textContent = 'Reject plan'; reject.onclick = () => { void review('rejected'); };
+            actions.append(approve, reject); body.append(actions);
+          }
           const todoMeta = document.createElement('div'); todoMeta.className = 'detail-line'; const todoLabel = document.createElement('span'); todoLabel.textContent = 'Todo'; const todoValue = document.createElement('strong'); todoValue.textContent = todos.summary; todoMeta.append(todoLabel, todoValue); body.append(todoMeta);
           if (todos.items?.length) { const list = document.createElement('ul'); list.className = 'planning-list'; for (const item of todos.items.slice(0, 8)) { const row = document.createElement('li'); row.textContent = `${item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '→' : '·'} ${item.detail}`; list.append(row); } body.append(list); }
           const questionMeta = document.createElement('div'); questionMeta.className = 'detail-line'; const questionLabel = document.createElement('span'); questionLabel.textContent = 'Questions'; const questionValue = document.createElement('strong'); questionValue.textContent = questions.summary; questionMeta.append(questionLabel, questionValue); body.append(questionMeta);

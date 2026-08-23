@@ -90,7 +90,7 @@ discover
 | `plan` | read | auto | 全量写入可回放的计划 projection |
 | `todo_write` | read | auto | 全量替换可回放的 todo projection |
 | `create_goal` | read | auto | 创建带 success criteria/budget 的 durable goal |
-| `update_goal` | read | auto | 只更新当前 session 已存在的 goal，终态写入 `goal/ended` |
+| `update_goal` | read | auto | 只更新当前 session 已存在的 goal；`active`/`paused` 写入 `goal/updated`，终态写入 `goal/ended` |
 | `get_goal` | read | auto | 读取当前 session 的 goal projection |
 | `session_query` | read | auto | 只查询当前 session 的 bounded public events，不暴露 SQL |
 | `read_image` | read | auto | 仅在 vision capability 可见时提供，先做 media/size/workspace 检查 |

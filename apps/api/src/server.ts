@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { createInProcessSubagentProvider, sessionId, AgentHost, turnId } from "@code-review-agent/runtime";
 import { SqliteEventStore } from "@code-review-agent/storage";
-import { brand, type AgentEvent, type ChatModel, type InteractionId, type PermissionId, type SessionEventStore } from "@code-review-agent/contracts";
+import { brand, type AgentEvent, type ChatModel, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem } from "@code-review-agent/contracts";
 import { SubagentRuntime } from "@code-review-agent/subagent";
 import { createConfiguredChatModel, DEEPSEEK_MODELS, type ModelConfigView } from "@code-review-agent/llm";
 import { McpConnectionManager, type McpServerConfig } from "@code-review-agent/mcp-client";
@@ -339,6 +339,35 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       sendJson(response, 200, await host.renameSession(id, body.title, commandId(request, body)));
       return;
     }
+    const goalMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/goals\/([^/]+)$/u);
+    if (request.method === "POST" && goalMatch?.[1] !== undefined && goalMatch[2] !== undefined) {
+      const id = sessionId(decodeURIComponent(goalMatch[1]));
+      const body = await readJson(request);
+      const input = {
+        ...(body.status === undefined ? {} : { status: parseGoalStatus(body.status) }),
+        ...(body.title === undefined ? {} : { title: requireString(body.title, "title") }),
+        ...(body.successCriteria === undefined ? {} : { successCriteria: requireStringArray(body.successCriteria, "successCriteria") }),
+        ...(body.budget === undefined ? {} : { budget: requireRecord(body.budget, "budget") }),
+        ...(Object.prototype.hasOwnProperty.call(body, "result") ? { result: body.result } : {}),
+        ...(body.reason === undefined ? {} : { reason: requireString(body.reason, "reason") }),
+      };
+      sendJson(response, 200, await host.updateGoal(id, decodeURIComponent(goalMatch[2]), input, optionalSequence(body.expectedSequence), commandId(request, body)));
+      return;
+    }
+    const planMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/plan$/u);
+    if (request.method === "POST" && planMatch?.[1] !== undefined) {
+      const id = sessionId(decodeURIComponent(planMatch[1]));
+      const body = await readJson(request);
+      sendJson(response, 200, await host.updatePlan(id, requireString(body.content, "content"), parsePlanStatus(body.status), optionalSequence(body.expectedSequence), commandId(request, body)));
+      return;
+    }
+    const todoMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/todos$/u);
+    if (request.method === "POST" && todoMatch?.[1] !== undefined) {
+      const id = sessionId(decodeURIComponent(todoMatch[1]));
+      const body = await readJson(request);
+      sendJson(response, 200, await host.updateTodos(id, parseTodoItems(body.todos), optionalSequence(body.expectedSequence), commandId(request, body)));
+      return;
+    }
     const archiveMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/archive$/u);
     if (request.method === "POST" && archiveMatch?.[1] !== undefined) {
       const id = sessionId(decodeURIComponent(archiveMatch[1]));
@@ -534,7 +563,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     throw new HttpError(404, "not found");
   } catch (error) {
     const code = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : "";
-    const status = error instanceof HttpError ? error.status : code === "INVALID_TOOL_INPUT" ? 400 : code === "TOOL_NOT_FOUND" ? 404 : code === "TOOL_DISABLED" ? 409 : code === "MODEL_CONFIGURATION_ERROR" ? 400 : 500;
+    const status = error instanceof HttpError ? error.status : code === "INVALID_TOOL_INPUT" ? 400 : code === "TOOL_NOT_FOUND" ? 404 : code === "TOOL_DISABLED" ? 409 : code === "MODEL_CONFIGURATION_ERROR" ? 400 : code === "COMMAND_CONFLICT" ? 409 : 500;
     const message = error instanceof Error ? error.message : String(error);
     if (!response.headersSent) sendJson(response, status, { error: message });
     else response.end();
@@ -733,6 +762,48 @@ function parsePageLimit(value: string | string[] | null | undefined): number | u
 function parsePermissionPreset(value: unknown): PermissionPreset {
   if (value === "read-only" || value === "workspace-write" || value === "ask-on-write" || value === "ask-on-execute" || value === "danger-full-access") return value;
   throw new HttpError(400, "permissionPreset must be read-only, workspace-write, ask-on-write, ask-on-execute, or danger-full-access");
+}
+
+function parseGoalStatus(value: unknown): GoalStatus {
+  if (value === "active" || value === "paused" || value === "completed" || value === "blocked" || value === "cancelled") return value;
+  throw new HttpError(400, "goal status must be active, paused, completed, blocked, or cancelled");
+}
+
+function parsePlanStatus(value: unknown): PlanStatus {
+  if (value === "draft" || value === "active" || value === "approved" || value === "rejected" || value === "cleared") return value;
+  throw new HttpError(400, "plan status must be draft, active, approved, rejected, or cleared");
+}
+
+function optionalSequence(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) throw new HttpError(400, "expectedSequence must be a non-negative integer");
+  return value;
+}
+
+function requireString(value: unknown, field: string): string {
+  if (typeof value !== "string") throw new HttpError(400, `${field} must be a string`);
+  return value;
+}
+
+function requireStringArray(value: unknown, field: string): readonly string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) throw new HttpError(400, `${field} must be an array of strings`);
+  return value as string[];
+}
+
+function requireRecord(value: unknown, field: string): Readonly<Record<string, unknown>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new HttpError(400, `${field} must be an object`);
+  return value as Readonly<Record<string, unknown>>;
+}
+
+function parseTodoItems(value: unknown): readonly TodoItem[] {
+  if (!Array.isArray(value)) throw new HttpError(400, "todos must be an array");
+  return value.map((item): TodoItem => {
+    if (typeof item !== "object" || item === null) throw new HttpError(400, "todo items must be objects");
+    const record = item as Record<string, unknown>;
+    if (typeof record.id !== "string" || typeof record.content !== "string") throw new HttpError(400, "todo id and content are required");
+    if (record.status !== "pending" && record.status !== "in_progress" && record.status !== "completed" && record.status !== "cancelled") throw new HttpError(400, "invalid todo status");
+    return { id: record.id, content: record.content, status: record.status, ...(typeof record.activeForm === "string" ? { activeForm: record.activeForm } : {}) };
+  });
 }
 
 class HttpError extends Error {
