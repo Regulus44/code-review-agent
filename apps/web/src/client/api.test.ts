@@ -35,6 +35,21 @@ describe("WebApiClient", () => {
     expect(calls[0]?.init?.body).toBe(JSON.stringify({ title: "Renamed" }));
   });
 
+  it("builds the host-backed queue reorder command", async () => {
+    const calls: { url: string; init?: RequestInit | undefined }[] = [];
+    const client = new WebApiClient({
+      baseUrl: "http://localhost:4317",
+      fetcher: async (input, init) => {
+        calls.push({ url: String(input), init });
+        return new Response(JSON.stringify({ reordered: true, queuedTurnIds: ["turn_3", "turn_2"] }), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+    await client.reorderQueue("ses_queue" as never, "turn_3" as never, 0, "queue_1");
+    expect(calls[0]?.url).toBe("http://localhost:4317/v1/sessions/ses_queue/queue");
+    expect(new Headers(calls[0]?.init?.headers).get("idempotency-key")).toBe("queue_1");
+    expect(calls[0]?.init?.body).toBe(JSON.stringify({ turnId: "turn_3", position: 0 }));
+  });
+
   it("normalizes non-2xx JSON responses as ApiError", async () => {
     const client = new WebApiClient({
       fetcher: async () => new Response(JSON.stringify({ error: "permission denied" }), { status: 403, headers: { "content-type": "application/json" } }),

@@ -6,9 +6,12 @@ export interface QueueItemView {
   readonly turnId: TurnId;
   readonly status: QueueItemStatus;
   readonly position: number;
+  readonly queuePosition?: number;
   readonly message: string;
   readonly createdAt: string;
   readonly cancellable: boolean;
+  readonly canMoveUp: boolean;
+  readonly canMoveDown: boolean;
 }
 
 export interface QueueRenderIntent {
@@ -27,25 +30,36 @@ export interface QueueRenderIntent {
 export function presentQueue(session?: SessionProjection, maxMessageChars = 180): QueueRenderIntent {
   const turns = session?.turns
     .filter((turn): turn is TurnProjection & { readonly status: QueueItemStatus } => turn.status === "queued" || turn.status === "running")
-    .sort((left, right) => left.lastSequence - right.lastSequence) ?? [];
-  const items = turns.map((turn, index) => ({
+    .sort((left, right) => {
+      if (left.status === "running" && right.status !== "running") return -1;
+      if (right.status === "running" && left.status !== "running") return 1;
+      return (left.queuePosition ?? Number.MAX_SAFE_INTEGER) - (right.queuePosition ?? Number.MAX_SAFE_INTEGER) || left.lastSequence - right.lastSequence;
+    }) ?? [];
+  const queued = turns.filter((turn) => turn.status === "queued");
+  const items = turns.map((turn, index) => {
+    const queuePosition = turn.status === "queued"
+      ? (turn.queuePosition ?? (queued.findIndex((item) => item.id === turn.id) + 1))
+      : undefined;
+    return {
     turnId: turn.id,
     status: turn.status,
     position: index + 1,
+    ...(queuePosition === undefined ? {} : { queuePosition }),
     message: bounded(turn.userMessage ?? "Queued turn", maxMessageChars),
     createdAt: turn.createdAt,
     cancellable: true,
-  }));
+    canMoveUp: turn.status === "queued" && (queuePosition ?? 1) > 1,
+    canMoveDown: turn.status === "queued" && (queuePosition ?? 1) < queued.length,
+    };
+  });
   const active = items.find((item) => item.status === "running");
   return {
     visible: items.length > 0,
     pendingCount: items.filter((item) => item.status === "queued").length,
     ...(active === undefined ? {} : { activeTurnId: active.turnId }),
     items,
-    // The current host contract exposes cancellation but not queue reorder.
-    // Keep that limitation explicit instead of simulating a reorder locally.
-    reorderSupported: false,
-    reorderReason: "Ordering is managed by the AgentHost; reordering is not available yet.",
+    reorderSupported: queued.length > 1,
+    reorderReason: queued.length > 1 ? "" : "Queue reorder requires at least two queued turns.",
   };
 }
 

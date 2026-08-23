@@ -34,6 +34,18 @@ describe("presentQueue", () => {
       ["turn_1", 1, "running"],
       ["turn_2", 2, "queued"],
     ]);
+    expect(intent.items[1]?.canMoveUp).toBe(false);
+  });
+
+  it("exposes durable move affordances for queued turns", () => {
+    const intent = presentQueue(session([
+      { id: "turn_1" as never, status: "running", createdAt: "2026-08-23T00:00:01.000Z", updatedAt: "2026-08-23T00:00:01.000Z", userMessage: "first", lastSequence: 2 },
+      { id: "turn_2" as never, status: "queued", queuePosition: 1, createdAt: "2026-08-23T00:00:02.000Z", updatedAt: "2026-08-23T00:00:02.000Z", userMessage: "second", lastSequence: 3 },
+      { id: "turn_3" as never, status: "queued", queuePosition: 2, createdAt: "2026-08-23T00:00:03.000Z", updatedAt: "2026-08-23T00:00:03.000Z", userMessage: "third", lastSequence: 4 },
+    ]));
+    expect(intent.reorderSupported).toBe(true);
+    expect(intent.items[1]).toMatchObject({ queuePosition: 1, canMoveUp: false, canMoveDown: true });
+    expect(intent.items[2]).toMatchObject({ queuePosition: 2, canMoveUp: true, canMoveDown: false });
   });
 
   it("uses bounded, whitespace-normalized messages and explicit empty state", () => {

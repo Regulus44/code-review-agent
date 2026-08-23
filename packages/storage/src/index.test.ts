@@ -72,6 +72,7 @@ describe("InMemoryEventStore", () => {
     const turnId = brand<string, "TurnId">("turn_fixture");
     await first.append({ sessionId, turnId, type: "user/message", payload: { content: "hello" } });
     await first.append({ sessionId, turnId, type: "turn/queued", payload: {} });
+    await first.append({ sessionId, type: "queue/changed", payload: { queuedTurnIds: [turnId] } });
     await first.append({ sessionId, type: "task/created", payload: { taskId: "task_fixture", title: "inspect" } });
     const claim = await first.claimCommand({ sessionId, commandId: "cmd-1", kind: "send_message", request: { content: "hello" }, result: { turnId } });
     expect(claim.created).toBe(true);
@@ -81,16 +82,17 @@ describe("InMemoryEventStore", () => {
     expect(before?.tasks[0]?.title).toBe("inspect");
     const fixture = await first.list(sessionId);
     const latestPage = await first.listPage!(sessionId, { limit: 2 });
-    expect(latestPage.events.map((event) => event.sequence)).toEqual([3, 4]);
+    expect(latestPage.events.map((event) => event.sequence)).toEqual([4, 5]);
     expect(latestPage.hasMoreBefore).toBe(true);
-    expect((await first.listPage!(sessionId, { ...(latestPage.oldestSequence === undefined ? {} : { beforeSequence: latestPage.oldestSequence }), limit: 2 })).events.map((event) => event.sequence)).toEqual([1, 2]);
+    expect((await first.listPage!(sessionId, { ...(latestPage.oldestSequence === undefined ? {} : { beforeSequence: latestPage.oldestSequence }), limit: 2 })).events.map((event) => event.sequence)).toEqual([2, 3]);
     first.close();
     const corrupted = new DatabaseSync(databasePath);
     corrupted.prepare("UPDATE projections SET projection_json = ? WHERE session_id = ?").run(JSON.stringify({ broken: true }), sessionId);
     corrupted.close();
 
     const second = new SqliteEventStore({ databasePath });
-    expect((await second.list(sessionId)).map((event) => event.sequence)).toEqual([1, 2, 3, 4]);
+    expect((await second.list(sessionId)).map((event) => event.sequence)).toEqual([1, 2, 3, 4, 5]);
+    expect((await second.project(sessionId))?.turns[0]?.queuePosition).toBe(1);
     expect(await second.project(sessionId)).toEqual(before);
     const rebuilt = replayProjection(
       { ...before!, messages: [], turns: [], tasks: [], status: "idle", lastSequence: 0 },

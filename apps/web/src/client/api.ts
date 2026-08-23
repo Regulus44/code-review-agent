@@ -202,6 +202,14 @@ export class WebApiClient {
     });
   }
 
+  reorderQueue(sessionId: SessionId, turnId: TurnId, position: number, commandId?: string): Promise<{ readonly reordered: boolean; readonly queuedTurnIds: readonly TurnId[] }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/queue`, {
+      method: "POST",
+      commandId,
+      body: { turnId, position },
+    });
+  }
+
   resolvePermission(sessionId: SessionId, permissionId: PermissionId, status: "approved" | "denied" | "cancelled", commandId?: string): Promise<unknown> {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/permissions/${encodeURIComponent(permissionId)}`, {
       method: "POST",

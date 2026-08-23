@@ -21,6 +21,7 @@ export type AgentEventType =
   | "session/deleted"
   | "user/message"
   | "turn/queued"
+  | "queue/changed"
   | "turn/started"
   | "step/started"
   | "step/ended"
@@ -189,6 +190,8 @@ export interface SessionSummary {
 export interface TurnProjection {
   readonly id: TurnId;
   readonly status: TurnStatus;
+  /** Durable position among queued turns; absent while running or terminal. */
+  readonly queuePosition?: number;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly startedAt?: string;

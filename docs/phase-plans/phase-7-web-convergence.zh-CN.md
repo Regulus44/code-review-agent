@@ -1,6 +1,6 @@
 # Phase 7：DSH Web 前端收敛与可观测工作台
 
-状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection、7.1 shell layout state/reducer、mobile sidebar 行为、typed overlay state/reducer、queue dock/cancel surface 和 Session rename 生命周期已完成；物理 Shell 拆分、Workspace reorder 生命周期、7.6 queue reorder/steer/attachment 深化、长任务 terminal/job 失败诊断和窄屏视觉基线继续推进）
+状态：`in_progress`（7.2 连接与回放基础、7.4 typed Conversation renderer、7.5 Tool projection 基础、7.6 Permission/Interaction expiry/restart recovery、7.7 Task/Subagent/MCP details 与非空 Delegation browser fixture、7.8 Trajectory ledger 的 query/lane/inspector/timeline/fold/tail-follow/load-older/bounded-window 切片、7.9 Settings/general/permission/capability surface、modal keyboard/focus semantics、loading/error/reconnect banner、booting/ready/failed boot error boundary、7.10 Read-only/Edit/Test-Recovery Coding fixture、Deliverables/Produced Files render surface、workspace-scoped artifact API、统一五场景 browser/replay gate 与性能基线、7.1/7.3 typed navigation projection、7.1 shell layout state/reducer、mobile sidebar 行为、typed overlay state/reducer、queue dock/cancel/reorder surface 和 Session rename 生命周期已完成；物理 Shell 拆分、Workspace reorder 生命周期、steer/attachment 深化、长任务 terminal/job 失败诊断和窄屏视觉基线继续推进）
 
 ## 当前执行 checkpoint：typed Web client 与 Session replay foundation
 
@@ -165,6 +165,18 @@
 - 没有新增前端队列事实、没有模拟 reorder，也没有把 attachment/steer 能力伪造为已实现。
 
 验证：`pnpm typecheck`、Web 65 项测试、`pnpm --filter @code-review-agent/web run build:browser`、`pnpm test:phase7:browser`（五场景通过，trajectory full replay 18.91ms）和 `git diff --check` 通过。该切片可通过移除 queue dock 恢复原有 composer，不影响 Runtime/EventStore。
+
+## 当前执行 checkpoint：Queue reorder contract 与 host-backed controls（2026-08-23）
+
+本 checkpoint 继续推进 Phase 7.6 queue surface，补齐可回放的队列重排：
+
+- `packages/contracts` 增加 `queue/changed` 事件和 `TurnProjection.queuePosition`；Storage/Web projection 从事件快照重建队列顺序；
+- `AgentHost.reorderQueue()` 通过 command claim 保证幂等，只能移动尚未启动的同一 Session turn；发送、取消、启动、重启恢复都会维护 `queuedTurnIds` 快照；
+- `apps/api` 增加 `POST /v1/sessions/:id/queue`，`apps/web/src/client/api.ts` 暴露 typed `reorderQueue()`；
+- Queue presenter 与 Queue dock 提供上移/下移按钮，按钮只调用 host command，不在浏览器创建第二套队列事实；
+- 没有实现 steer、attachment 或跨 Session 队列操作。
+
+验证：`pnpm typecheck`；Runtime、API、Web presenter/store/client 定向测试 50 项通过。完整 workspace 测试、browser bundle 和 Phase 7 browser gate 在提交前执行。
 
 ## 当前执行 checkpoint：Session rename 生命周期（2026-08-23）
 

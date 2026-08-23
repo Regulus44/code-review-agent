@@ -313,6 +313,22 @@ describe("Phase 2 API", () => {
     expect(history.filter((event) => event.type === "session/updated" && event.payload.title === "Review queue")).toHaveLength(1);
   });
 
+  it("serves the host-backed queue reorder command", async () => {
+    const created = await fetch(`${baseUrl}/v1/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspaceRoot: "D:/workspace/queue-fixture" }),
+    });
+    const session = await created.json() as { id: string };
+    const response = await fetch(`${baseUrl}/v1/sessions/${session.id}/queue`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "api-queue-1" },
+      body: JSON.stringify({ turnId: "turn_not_queued", position: 0 }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ reordered: false, queuedTurnIds: [] });
+  });
+
   it("soft-deletes a session and keeps its event history out of active lists", async () => {
     const created = await fetch(`${baseUrl}/v1/sessions`, {
       method: "POST",

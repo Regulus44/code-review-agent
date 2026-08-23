@@ -75,6 +75,7 @@ export class AgentHost {
   private readonly controllers = new Map<TurnId, AbortController>();
   private readonly activeTurns = new Map<SessionId, TurnId>();
   private readonly queues = new Map<SessionId, PendingTurn[]>();
+  private readonly queueChangeTails = new Map<SessionId, Promise<void>>();
   private readonly permissionWaiters = new Map<PermissionId, PendingPermissionWaiter>();
   private readonly recoveredTurns = new Map<TurnId, RecoveredTurn>();
   private readonly recoveredPermissionIndex = new Map<PermissionId, TurnId>();
@@ -383,6 +384,7 @@ export class AgentHost {
     const queue = this.queues.get(sessionId) ?? [];
     queue.push(pending);
     this.queues.set(sessionId, queue);
+    await this.appendQueueChanged(sessionId, queue, idempotencyKey);
     void this.drainSession(sessionId);
     return turnId;
   }
@@ -402,7 +404,7 @@ export class AgentHost {
     if (!cancellationRequested) return false;
 
     const controller = this.controllers.get(turnId);
-    if (controller === undefined) this.removeQueuedTurn(sessionId, turnId);
+    const removed = controller === undefined ? this.removeQueuedTurn(sessionId, turnId) : undefined;
     if (controller !== undefined) controller.abort(new Error("Cancelled by user"));
     await this.options.store.append({
       sessionId,
@@ -412,6 +414,7 @@ export class AgentHost {
       payload: { status: "stopped", reason: "cancelled_by_user" },
     });
     if (controller === undefined) {
+      if (removed !== undefined) await this.appendQueueChanged(sessionId, this.queues.get(sessionId) ?? [], idempotencyKey);
       await this.options.store.append({
         sessionId,
         turnId,
@@ -422,6 +425,42 @@ export class AgentHost {
       void this.drainSession(sessionId);
     }
     return true;
+  }
+
+  async reorderQueue(sessionId: SessionId, turnId: TurnId, position: number, commandId?: string): Promise<{ readonly reordered: boolean; readonly queuedTurnIds: readonly TurnId[] }> {
+    await this.ready;
+    if (await this.options.store.project(sessionId) === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    const queue = this.queues.get(sessionId) ?? [];
+    const currentIndex = queue.findIndex((item) => item.turnId === turnId);
+    const normalizedPosition = queue.length === 0 ? 0 : Math.min(queue.length - 1, Math.max(0, Math.floor(position)));
+    const idempotencyKey = commandId ?? `cmd_${randomUUID()}`;
+    const reordered = currentIndex >= 0 && currentIndex !== normalizedPosition;
+    const nextOrder = queue.map((item) => item.turnId);
+    if (reordered) {
+      const [moved] = nextOrder.splice(currentIndex, 1);
+      if (moved !== undefined) nextOrder.splice(normalizedPosition, 0, moved);
+    }
+    const result = { reordered, queuedTurnIds: nextOrder };
+    const claim = await this.options.store.claimCommand({
+      sessionId,
+      commandId: idempotencyKey,
+      kind: "reorder_queue",
+      request: { turnId, position: normalizedPosition },
+      result,
+    });
+    if (!claim.created) {
+      const saved = claim.record.result as { reordered?: unknown; queuedTurnIds?: unknown };
+      return {
+        reordered: saved.reordered === true,
+        queuedTurnIds: Array.isArray(saved.queuedTurnIds) ? saved.queuedTurnIds.filter((value): value is TurnId => typeof value === "string").map((value) => brand<string, "TurnId">(value)) : [],
+      };
+    }
+    if (!reordered) return result;
+    const [moved] = queue.splice(currentIndex, 1);
+    if (moved !== undefined) queue.splice(normalizedPosition, 0, moved);
+    this.queues.set(sessionId, queue);
+    await this.appendQueueChanged(sessionId, queue, idempotencyKey);
+    return result;
   }
 
   async resumeSession(sessionId: SessionId, commandId?: string): Promise<SessionProjection> {
@@ -508,7 +547,9 @@ export class AgentHost {
       await this.toolRuntime.restorePending(summary.id, projection.workspaceRoot, await this.options.store.list(summary.id));
       projection = await this.options.store.project(summary.id);
       if (projection === undefined) continue;
-      for (const turn of projection.turns.filter((item) => item.status === "queued" && item.userMessage !== undefined)) {
+      for (const turn of projection.turns
+        .filter((item) => item.status === "queued" && item.userMessage !== undefined)
+        .sort((left, right) => (left.queuePosition ?? Number.MAX_SAFE_INTEGER) - (right.queuePosition ?? Number.MAX_SAFE_INTEGER) || left.lastSequence - right.lastSequence)) {
         this.enqueue({
           sessionId: summary.id,
           turnId: turn.id,
@@ -637,11 +678,27 @@ export class AgentHost {
     const controller = new AbortController();
     this.activeTurns.set(sessionId, pending.turnId);
     this.controllers.set(pending.turnId, controller);
+    await this.appendQueueChanged(sessionId, queue ?? [], undefined);
     void this.runTurn(sessionId, pending.turnId, controller, pending.previousMessages, pending.content).finally(() => {
       this.controllers.delete(pending.turnId);
       this.activeTurns.delete(sessionId);
       void this.drainSession(sessionId);
     });
+  }
+
+  private async appendQueueChanged(sessionId: SessionId, queue: readonly PendingTurn[], correlationId?: string): Promise<void> {
+    const queuedTurnIds = queue.map((item) => item.turnId);
+    const previous = this.queueChangeTails.get(sessionId) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(async () => {
+      await this.options.store.append({
+        sessionId,
+        ...(correlationId === undefined ? {} : { correlationId }),
+        type: "queue/changed",
+        payload: { queuedTurnIds },
+      });
+    });
+    this.queueChangeTails.set(sessionId, next);
+    await next;
   }
 
   private async runTurn(

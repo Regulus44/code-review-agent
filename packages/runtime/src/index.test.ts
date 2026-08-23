@@ -303,6 +303,42 @@ describe("AgentHost", () => {
     expect((await host.getSession(session.id))?.turns.map((turn) => turn.status)).toEqual(["completed", "completed"]);
   });
 
+  it("reorders queued turns durably and keeps the command idempotent", async () => {
+    const store = new InMemoryEventStore();
+    let releaseFirst!: () => void;
+    let firstStartedResolve!: () => void;
+    const firstStarted = new Promise<void>((resolve) => { firstStartedResolve = resolve; });
+    let calls = 0;
+    const model: ChatModel = {
+      async *stream(): AsyncIterable<ModelStreamPart> {
+        calls += 1;
+        if (calls === 1) {
+          firstStartedResolve();
+          await new Promise<void>((release) => { releaseFirst = release; });
+        }
+        yield { type: "text_delta", text: "done" };
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store, model });
+    const session = await host.createSession("D:/workspace");
+    const first = await host.sendMessage(session.id, "first");
+    await firstStarted;
+    const second = await host.sendMessage(session.id, "second");
+    const third = await host.sendMessage(session.id, "third");
+    const moved = await host.reorderQueue(session.id, third, 0, "queue-move-1");
+    const repeated = await host.reorderQueue(session.id, third, 0, "queue-move-1");
+    expect(moved).toMatchObject({ reordered: true, queuedTurnIds: [third, second] });
+    expect(repeated).toEqual(moved);
+    expect((await host.getSession(session.id))?.turns.filter((turn) => turn.status === "queued").sort((a, b) => (a.queuePosition ?? 0) - (b.queuePosition ?? 0)).map((turn) => turn.id)).toEqual([third, second]);
+    releaseFirst();
+    await host.waitForTurn(first);
+    await host.waitForTurn(third);
+    await host.waitForTurn(second);
+    const queueEvents = (await host.events(session.id)).filter((event) => event.type === "queue/changed");
+    expect(queueEvents.some((event) => JSON.stringify(event.payload["queuedTurnIds"]) === JSON.stringify([third, second]))).toBe(true);
+  });
+
   it("supports resume and fork commands", async () => {
     const store = new InMemoryEventStore();
     const host = new AgentHost({ store });

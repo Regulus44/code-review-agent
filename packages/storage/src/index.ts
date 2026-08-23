@@ -291,7 +291,10 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
       if (typeof content === "string") updated = { ...updated, userMessage: content };
     }
     if (event.type === "turn/queued") updated = { ...updated, status: "queued" };
-    if (event.type === "turn/started") updated = { ...updated, status: "running", startedAt: timestamp };
+    if (event.type === "turn/started") {
+      const { queuePosition: _queuePosition, ...withoutQueuePosition } = updated;
+      updated = { ...withoutQueuePosition, status: "running", startedAt: timestamp };
+    }
     if (event.type === "assistant/chunk") {
       const text = event.payload["text"];
       if (typeof text === "string") updated = { ...updated, assistantMessage: `${updated.assistantMessage ?? ""}${text}` };
@@ -301,8 +304,9 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
       if (typeof content === "string") updated = { ...updated, assistantMessage: content };
     }
     if (event.type === "turn/ended") {
+      const { queuePosition: _queuePosition, ...withoutQueuePosition } = updated;
       updated = {
-        ...updated,
+        ...withoutQueuePosition,
         status: turnStatus(event.payload["status"], "completed"),
         endedAt: timestamp,
       };
@@ -314,6 +318,23 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
 
     const turns = current === undefined ? [...next.turns, updated] : next.turns.map((turn) => (turn.id === turnId ? updated : turn));
     next = { ...next, turns };
+  }
+
+  if (event.type === "queue/changed") {
+    const rawTurnIds = event.payload["queuedTurnIds"];
+    const queuedTurnIds = Array.isArray(rawTurnIds) ? rawTurnIds.filter((value): value is string => typeof value === "string") : [];
+    const positions = new Map(queuedTurnIds.map((id, index) => [id, index + 1] as const));
+    next = {
+      ...next,
+      turns: next.turns.map((turn) => {
+        const position = positions.get(turn.id);
+        if (position === undefined) {
+          const { queuePosition: _queuePosition, ...withoutQueuePosition } = turn;
+          return withoutQueuePosition;
+        }
+        return { ...turn, status: "queued", queuePosition: position };
+      }),
+    };
   }
 
   if (event.type === "user/message") {

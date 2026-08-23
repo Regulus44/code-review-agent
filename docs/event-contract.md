@@ -70,6 +70,14 @@ mcp/prompt
 
 `step/started` / `step/ended` 标记一个 turn 内的模型请求和工具执行边界。`assistant/message` 的 payload 可以包含 `toolCalls`，每个元素至少包含 `id`、`name` 和 JSON `arguments`；后续 `tool/result` 通过 `toolCallId` 关联到该调用。`plan/updated` 是当前实施计划的全量替换事件，`todo/updated` 是当前待办列表的全量替换事件。`interaction/requested` / `interaction/resolved` 表示 `ask_user` 暂停和恢复，不等同于工具权限审批。工具、权限、交互和 queue 事件都必须经过同一事件存储和 SSE 回放管线。
 
+`queue/changed` 的 payload 是当前 Session 尚未启动的队列快照：
+
+```ts
+{ queuedTurnIds: string[] }
+```
+
+数组顺序是唯一的队列顺序，`queuedTurnIds[0]` 将最先启动。事件不携带父 Session 之外的队列事实，也不允许客户端自行修改顺序；projection 可将该顺序投影为 `TurnProjection.queuePosition`。运行中的 turn 不出现在数组中。重排、取消、启动和重启恢复都必须通过该快照重建，重复命令仍由 command idempotency 保证。
+
 `terminal/session` 记录持久终端的元数据生命周期。payload 至少包含 `action`（`opened`、`signalled`、`exited`、`closed` 或 `interrupted`）、`terminalId`、`workspaceRoot`、`cwd`、`command` 和 `status`；它只记录可回放的会话摘要，不记录环境变量或完整 stdout。进程重启时，最近状态为 `running` 的终端必须追加 `interrupted` 事件并在 `terminal_list` 中显示为 `interrupted`，不得伪造一个仍然存在的子进程。
 
 `job/started`、`job/output`、`job/ended` 记录显式 bash/pwsh background job 的归属、增量输出和最终 exit/signal/status。完整 stdout/stderr 持久化到 workspace 内 `.agent-artifacts/jobs/<jobId>.log`；事件中的 `text` 只允许 bounded live chunk，并携带 `spillPath`、`totalBytes` 和 `truncated` metadata。job payload 不得包含环境变量或凭据；job 只能由同一 session/workspace 通过 `job_output`、`job_kill` 和 `job_list` 访问。

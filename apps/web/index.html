@@ -689,6 +689,13 @@
              const copy = document.createElement('span'); copy.className = 'queue-item-copy'; copy.textContent = item.message;
              const itemStatus = document.createElement('span'); itemStatus.className = 'queue-item-status'; itemStatus.textContent = item.status === 'running' ? 'running' : 'queued';
              row.append(position, copy, itemStatus);
+             if (item.status === 'queued' && snapshot?.session?.id && intent.reorderSupported) {
+               const moveUp = document.createElement('button'); moveUp.type = 'button'; moveUp.className = 'queue-item-move'; moveUp.textContent = '↑'; moveUp.title = 'Move up'; moveUp.setAttribute('aria-label', `Move queued turn ${item.position} up`); moveUp.disabled = !item.canMoveUp;
+               moveUp.onclick = async () => { moveUp.disabled = true; try { await typedRuntime.api.reorderQueue(snapshot.session.id, item.turnId, (item.queuePosition || 1) - 2, commandKey()); } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); moveUp.disabled = !item.canMoveUp; } };
+               const moveDown = document.createElement('button'); moveDown.type = 'button'; moveDown.className = 'queue-item-move'; moveDown.textContent = '↓'; moveDown.title = 'Move down'; moveDown.setAttribute('aria-label', `Move queued turn ${item.position} down`); moveDown.disabled = !item.canMoveDown;
+               moveDown.onclick = async () => { moveDown.disabled = true; try { await typedRuntime.api.reorderQueue(snapshot.session.id, item.turnId, item.queuePosition || 1, commandKey()); } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); moveDown.disabled = !item.canMoveDown; } };
+               row.append(moveUp, moveDown);
+             }
              if (item.cancellable && snapshot?.session?.id) {
                const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'queue-item-cancel'; cancel.textContent = 'Cancel'; cancel.title = 'Cancel this turn';
                cancel.onclick = async () => { cancel.disabled = true; try { await typedRuntime.api.cancelTurn(snapshot.session.id, item.turnId, commandKey()); } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); cancel.disabled = false; } };

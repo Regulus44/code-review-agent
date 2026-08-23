@@ -86,6 +86,22 @@ describe("SessionStore", () => {
     expect(store.getSnapshot().session?.turns).toMatchObject([{ id: turnId, status: "queued", userMessage: "queued prompt" }]);
   });
 
+  it("replays queue order from queue/changed instead of local array order", () => {
+    const secondTurn = brand<string, "TurnId">("turn_second");
+    const store = new SessionStore();
+    store.open(session());
+    store.apply(event(1, "user/message", { content: "first" }));
+    store.apply(event(2, "turn/queued", {}));
+    store.apply({ ...event(3, "user/message", { content: "second" }), turnId: secondTurn });
+    store.apply({ ...event(4, "turn/queued", {}), turnId: secondTurn });
+    store.apply(event(5, "queue/changed", { queuedTurnIds: [secondTurn, turnId] }, false));
+
+    expect(store.getSnapshot().session?.turns.map((turn) => [turn.id, turn.queuePosition])).toEqual([
+      [turnId, 2],
+      [secondTurn, 1],
+    ]);
+  });
+
   it("publishes conversation, tool lineage and trajectory from one event window", () => {
     const store = new SessionStore();
     store.open(session(), [

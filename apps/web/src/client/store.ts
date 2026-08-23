@@ -303,10 +303,37 @@ function foldProjection(session: SessionProjection, event: AgentEvent): SessionP
         ...(event.type === "turn/started" ? { startedAt: event.createdAt } : {}),
         ...(event.type === "turn/ended" ? { endedAt: event.createdAt } : {}),
       };
-      return {
+      const nextSession = {
         ...session,
         turns: upsertTurn(session.turns, event.turnId, event.createdAt, event.sequence, turnPatch),
         status: sessionStatus(event),
+        updatedAt: event.createdAt,
+        lastSequence: event.sequence,
+      };
+      if (event.type !== "turn/started" && event.type !== "turn/ended") return nextSession;
+      return {
+        ...nextSession,
+        turns: nextSession.turns.map((turn) => {
+          if (turn.id !== event.turnId) return turn;
+          const { queuePosition: _queuePosition, ...withoutQueuePosition } = turn;
+          return withoutQueuePosition;
+        }),
+      };
+    }
+    case "queue/changed": {
+      const rawTurnIds = payload["queuedTurnIds"];
+      const queuedTurnIds = Array.isArray(rawTurnIds) ? rawTurnIds.filter((value): value is string => typeof value === "string") : [];
+      const positions = new Map(queuedTurnIds.map((id, index) => [id, index + 1] as const));
+      return {
+        ...session,
+        turns: session.turns.map((turn) => {
+          const position = positions.get(turn.id);
+          if (position === undefined) {
+            const { queuePosition: _queuePosition, ...withoutQueuePosition } = turn;
+            return withoutQueuePosition;
+          }
+          return { ...turn, status: "queued", queuePosition: position, lastSequence: event.sequence, updatedAt: event.createdAt };
+        }),
         updatedAt: event.createdAt,
         lastSequence: event.sequence,
       };

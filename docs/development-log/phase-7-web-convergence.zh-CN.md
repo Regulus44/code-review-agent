@@ -1,5 +1,22 @@
 # Phase 7：DSH Web 前端收敛
 
+## 2026-08-23：Queue reorder contract 与 host-backed controls
+
+### 变更范围
+
+- 增加 `queue/changed` durable event，payload 使用当前 Session 的 `queuedTurnIds` 快照；Storage、Web SessionStore 和重启恢复均按该快照重建顺序。
+- `AgentHost.reorderQueue()` 提供幂等的队列位置调整，只作用于尚未启动的同一 Session turn；发送、取消、启动和重启恢复会同步队列快照。
+- API 增加 `POST /v1/sessions/:id/queue`，Web API client、Queue presenter 和 Queue dock 增加上移/下移控件。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm exec vitest run runtime/web/api 定向测试       ✓（50 tests）
+```
+
+浏览器只发起 host-backed reorder command，不维护本地队列副本；steer、attachment 和 Workspace reorder 仍未宣称完成。
+
 ## 2026-08-22：第一批 DSH 风格 Web 垂直切片
 
 ### 变更范围

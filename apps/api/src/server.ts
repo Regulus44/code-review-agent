@@ -421,6 +421,15 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       sendJson(response, 200, { cancelled: await host.cancelTurn(id, turnId(rawTurnId), commandId(request, body)) });
       return;
     }
+    const queueMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/queue$/u);
+    if (request.method === "POST" && queueMatch?.[1] !== undefined) {
+      const id = sessionId(decodeURIComponent(queueMatch[1]));
+      const body = await readJson(request);
+      if (typeof body.turnId !== "string") throw new HttpError(400, "turnId is required");
+      if (typeof body.position !== "number" || !Number.isFinite(body.position)) throw new HttpError(400, "position is required");
+      sendJson(response, 200, await host.reorderQueue(id, turnId(body.turnId), body.position, commandId(request, body)));
+      return;
+    }
     const sessionMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)$/u);
     if (sessionMatch?.[1] !== undefined) {
       const id = sessionId(decodeURIComponent(sessionMatch[1]));
