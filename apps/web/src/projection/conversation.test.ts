@@ -33,15 +33,24 @@ describe("conversation projection", () => {
   it("keeps tool, permission and interaction rows keyed by durable ids", () => {
     const projection = projectConversation(sessionId, [
       event(1, "tool/call", { toolCallId: "tool_1", name: "edit_file", input: { path: "a.ts" }, riskLevel: "write" }),
-      event(2, "permission/requested", { permissionId: "perm_1", toolCallId: "tool_1", toolName: "edit_file", reason: "write approval" }),
+      event(2, "permission/requested", { permissionId: "perm_1", toolCallId: "tool_1", toolName: "edit_file", reason: "write approval", caller: "agent", workspaceRoot: "D:/workspace", expiresAt: "2026-08-23T00:15:00.000Z" }),
       event(3, "tool/progress", { toolCallId: "tool_1", message: "preparing" }),
-      event(4, "interaction/requested", { interactionId: "interaction_1", toolCallId: "tool_1", question: "Continue?" }),
+      event(4, "interaction/requested", { interactionId: "interaction_1", toolCallId: "tool_1", question: "Continue?", allowFreeform: false, expiresAt: "2026-08-23T00:16:00.000Z" }),
       event(5, "tool/result", { toolCallId: "tool_1", status: "completed", result: { ok: true } }),
     ]);
 
     expect(projection.tools[0]).toMatchObject({ id: "tool_1", status: "completed", progress: ["preparing"] });
-    expect(projection.nodes.filter((node) => node.kind === "permission")).toHaveLength(1);
-    expect(projection.nodes.filter((node) => node.kind === "interaction")).toHaveLength(1);
+    expect(projection.nodes.find((node) => node.kind === "permission")).toMatchObject({
+      caller: "agent",
+      workspaceRoot: "D:/workspace",
+      expiresAt: "2026-08-23T00:15:00.000Z",
+      status: "pending",
+    });
+    expect(projection.nodes.find((node) => node.kind === "interaction")).toMatchObject({
+      allowFreeform: false,
+      expiresAt: "2026-08-23T00:16:00.000Z",
+      status: "pending",
+    });
   });
 
   it("retains unmapped events as inspectable generic nodes", () => {

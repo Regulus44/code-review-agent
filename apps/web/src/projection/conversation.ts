@@ -6,6 +6,7 @@ import type {
   TaskId,
   ToolCallId,
   ToolCallStatus,
+  ToolCaller,
   ToolRiskLevel,
   TurnId,
 } from "@code-review-agent/contracts";
@@ -52,6 +53,7 @@ export interface ToolCallView {
   readonly result?: unknown;
   readonly progress?: readonly string[];
   readonly presentation?: unknown;
+  readonly rootCallId?: string;
   readonly parentCallId?: string;
   readonly turnId?: TurnId;
   readonly createdAt: string;
@@ -72,6 +74,9 @@ export interface PermissionNode extends ConversationNodeBase {
   readonly toolName: string;
   readonly status: "pending" | "approved" | "denied" | "cancelled" | "expired" | "unknown";
   readonly reason: string;
+  readonly caller?: ToolCaller;
+  readonly workspaceRoot?: string;
+  readonly expiresAt?: string;
   readonly input?: unknown;
 }
 
@@ -81,6 +86,9 @@ export interface InteractionNode extends ConversationNodeBase {
   readonly toolCallId: ToolCallId;
   readonly question: string;
   readonly status: "pending" | "answered" | "cancelled" | "expired" | "unknown";
+  readonly caller?: ToolCaller;
+  readonly allowFreeform: boolean;
+  readonly expiresAt?: string;
   readonly answer?: string;
   readonly options: readonly { readonly label: string; readonly value: string }[];
 }
@@ -224,6 +232,7 @@ export function applyConversationEvent(projection: MutableConversationProjection
         ? appendProgress(previous?.progress, event.payload["message"] ?? event.payload["text"])
         : previous?.progress;
       const parentCallId = stringValue(event.payload["parentCallId"]) ?? previous?.parentCallId;
+      const rootCallId = stringValue(event.payload["rootCallId"]) ?? previous?.rootCallId;
       const tool: ToolCallView = {
         id,
         name: stringValue(event.payload["name"]) ?? previous?.name ?? "unknown",
@@ -234,6 +243,7 @@ export function applyConversationEvent(projection: MutableConversationProjection
         ...(progress === undefined ? {} : { progress }),
         ...(event.payload["presentation"] === undefined ? previous?.presentation === undefined ? {} : { presentation: previous.presentation } : { presentation: event.payload["presentation"] }),
         ...(parentCallId === undefined ? {} : { parentCallId }),
+        ...(rootCallId === undefined ? {} : { rootCallId }),
         ...(turnId === undefined ? previous?.turnId === undefined ? {} : { turnId: previous.turnId } : { turnId }),
         createdAt: previous?.createdAt ?? event.createdAt,
         updatedAt: event.createdAt,
@@ -254,6 +264,9 @@ export function applyConversationEvent(projection: MutableConversationProjection
       const key = `permission:${permissionId}`;
       const previous = projection.nodes.get(key);
       const old = isPermissionNode(previous) ? previous : undefined;
+      const caller = toolCaller(event.payload["caller"]) ?? old?.caller;
+      const workspaceRoot = stringValue(event.payload["workspaceRoot"]) ?? old?.workspaceRoot;
+      const expiresAt = stringValue(event.payload["expiresAt"]) ?? old?.expiresAt;
       projection.nodes.set(key, {
         ...base(key, "permission", previous),
         kind: "permission",
@@ -262,6 +275,9 @@ export function applyConversationEvent(projection: MutableConversationProjection
         toolName: stringValue(event.payload["toolName"]) ?? old?.toolName ?? "unknown",
         status: event.type === "permission/requested" ? "pending" : permissionStatus(event.payload["status"]),
         reason: stringValue(event.payload["reason"]) ?? old?.reason ?? "Tool approval required",
+        ...(caller === undefined ? {} : { caller }),
+        ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
+        ...(expiresAt === undefined ? {} : { expiresAt }),
         ...(event.payload["input"] === undefined ? old?.input === undefined ? {} : { input: old.input } : { input: event.payload["input"] }),
       });
       return true;
@@ -276,6 +292,8 @@ export function applyConversationEvent(projection: MutableConversationProjection
       const previous = projection.nodes.get(key);
       const old = isInteractionNode(previous) ? previous : undefined;
       const answer = stringValue(event.payload["answer"]) ?? old?.answer;
+      const caller = toolCaller(event.payload["caller"]) ?? old?.caller;
+      const expiresAt = stringValue(event.payload["expiresAt"]) ?? old?.expiresAt;
       projection.nodes.set(key, {
         ...base(key, "interaction", previous),
         kind: "interaction",
@@ -284,6 +302,9 @@ export function applyConversationEvent(projection: MutableConversationProjection
         question,
         status: event.type === "interaction/requested" ? "pending" : interactionStatus(event.payload["status"]),
         options: interactionOptions(event.payload["options"], old?.options ?? []),
+        allowFreeform: booleanValue(event.payload["allowFreeform"]) ?? old?.allowFreeform ?? true,
+        ...(caller === undefined ? {} : { caller }),
+        ...(expiresAt === undefined ? {} : { expiresAt }),
         ...(answer === undefined ? {} : { answer }),
       });
       return true;
@@ -396,6 +417,14 @@ function isTaskNode(node: ConversationNode | undefined): node is TaskNode {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function booleanValue(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function toolCaller(value: unknown): ToolCaller | undefined {
+  return value === "agent" || value === "user" || value === "system" ? value : undefined;
 }
 
 function asRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {

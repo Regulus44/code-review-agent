@@ -76,6 +76,25 @@ describe("SessionStore", () => {
     expect(store.getSnapshot().session?.status).toBe("idle");
   });
 
+  it("publishes conversation, tool lineage and trajectory from one event window", () => {
+    const store = new SessionStore();
+    store.open(session(), [
+      event(1, "turn/started", {}),
+      event(2, "tool/call", { toolCallId: "root", name: "read_file" }),
+      event(3, "tool/call", { toolCallId: "child", name: "grep", parentCallId: "root" }),
+      event(4, "tool/result", { toolCallId: "child", status: "completed", result: { ok: true } }),
+    ]);
+
+    const snapshot = store.getSnapshot();
+    expect(snapshot.lastSequence).toBe(4);
+    expect(snapshot.conversation?.lastSequence).toBe(4);
+    expect(snapshot.trajectory?.lastSequence).toBe(4);
+    expect(snapshot.trajectory?.records.map((record) => record.kind)).toEqual(["turn", "tool", "tool"]);
+    expect(snapshot.toolCallTree?.roots).toHaveLength(1);
+    expect(snapshot.toolCallTree?.roots[0]?.children).toHaveLength(1);
+    expect(snapshot.events).toHaveLength(4);
+  });
+
   it("does not let a late lower-sequence frame overwrite the current projection", () => {
     const store = new SessionStore();
     store.open(session());

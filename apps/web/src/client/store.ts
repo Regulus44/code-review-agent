@@ -12,6 +12,13 @@ import {
   type ConversationProjection,
   type MutableConversationProjection,
 } from "../projection/conversation.js";
+import { buildToolCallTree, type ToolCallTree } from "../projection/tool-call-tree.js";
+import {
+  applyTrajectoryEvent,
+  snapshotTrajectory,
+  type MutableTrajectoryProjection,
+  type TrajectoryProjection,
+} from "../projection/trajectory.js";
 
 export type WebConnectionState = "idle" | "connecting" | "connected" | "reconnecting" | "failed";
 
@@ -20,6 +27,8 @@ export interface SessionStoreSnapshot {
   readonly session?: SessionProjection;
   readonly events: readonly AgentEvent[];
   readonly conversation?: ConversationProjection;
+  readonly toolCallTree?: ToolCallTree;
+  readonly trajectory?: TrajectoryProjection;
   readonly lastSequence: number;
   readonly connection: WebConnectionState;
   readonly error?: string;
@@ -42,6 +51,7 @@ export class SessionStore {
   private snapshot: SessionStoreSnapshot = EMPTY_SNAPSHOT;
   private readonly listeners = new Set<SessionStoreListener>();
   private conversationState: MutableConversationProjection | undefined;
+  private trajectoryState: MutableTrajectoryProjection | undefined;
 
   getSnapshot(): SessionStoreSnapshot {
     return this.snapshot;
@@ -56,12 +66,21 @@ export class SessionStore {
     const accepted = uniqueEvents(session.id, history);
     const lastSequence = Math.max(session.lastSequence, ...accepted.map((event) => event.sequence), 0);
     this.conversationState = createConversationProjection(session.id);
+    this.trajectoryState = {
+      sessionId: session.id,
+      records: new Map(),
+      lastSequence: 0,
+    };
     for (const event of accepted) applyConversationEvent(this.conversationState, event);
+    for (const event of accepted) applyTrajectoryEvent(this.trajectoryState, event);
+    const conversation = snapshotConversationProjection(this.conversationState);
     this.commit({
       sessionId: session.id,
       session,
       events: accepted,
-      conversation: snapshotConversationProjection(this.conversationState),
+      conversation,
+      toolCallTree: buildToolCallTree(conversation.tools),
+      trajectory: snapshotTrajectory(this.trajectoryState),
       lastSequence,
       connection: "connecting",
     });
@@ -85,11 +104,19 @@ export class SessionStore {
     const isNewer = event.sequence > this.snapshot.lastSequence;
     const session = isNewer && this.snapshot.session !== undefined ? foldProjection(this.snapshot.session, event) : this.snapshot.session;
     if (isNewer && this.conversationState !== undefined) applyConversationEvent(this.conversationState, event);
+    if (isNewer && this.trajectoryState !== undefined) applyTrajectoryEvent(this.trajectoryState, event);
+    const conversation = isNewer && this.conversationState !== undefined
+      ? snapshotConversationProjection(this.conversationState)
+      : this.snapshot.conversation;
     this.commit({
       ...this.snapshot,
       ...(session === undefined ? {} : { session }),
       events,
-      ...(this.conversationState === undefined ? {} : { conversation: snapshotConversationProjection(this.conversationState) }),
+      ...(conversation === undefined ? {} : {
+        conversation,
+        toolCallTree: buildToolCallTree(conversation.tools),
+      }),
+      ...(this.trajectoryState === undefined ? {} : { trajectory: snapshotTrajectory(this.trajectoryState) }),
       lastSequence: Math.max(this.snapshot.lastSequence, event.sequence),
     }, notify);
     return true;
@@ -105,6 +132,7 @@ export class SessionStore {
 
   clear(): void {
     this.conversationState = undefined;
+    this.trajectoryState = undefined;
     this.commit(EMPTY_SNAPSHOT);
   }
 
