@@ -30,6 +30,8 @@ describe("CodeModeSandbox", () => {
       const sandbox = new CodeModeSandbox({ enabled: true });
       await expect(sandbox.run({ code: "console.log(1)", cwd: "../" }, { workspaceRoot: root, signal })).resolves.toMatchObject({ ok: false, error: { code: "CODE_MODE_PATH_INVALID" } });
       await expect(sandbox.run({ code: "fetch('https://example.com')" }, { workspaceRoot: root, signal })).resolves.toMatchObject({ ok: false, error: { code: "CODE_MODE_NETWORK_DENIED" } });
+      await expect(sandbox.run({ code: "globalThis.fetch('https://example.com')" }, { workspaceRoot: root, signal })).resolves.toMatchObject({ ok: false, error: { code: "CODE_MODE_NETWORK_DENIED" } });
+      await expect(sandbox.run({ code: "process.getBuiltinModule('node:http')" }, { workspaceRoot: root, signal })).resolves.toMatchObject({ ok: false, error: { code: "CODE_MODE_NETWORK_DENIED" } });
       await expect(sandbox.run({ language: "python" as "javascript", code: "print(1)" }, { workspaceRoot: root, signal })).resolves.toMatchObject({ ok: false, error: { code: "CODE_MODE_LANGUAGE_UNSUPPORTED" } });
       await expect(new CodeModeSandbox({ enabled: true, allowedCommands: ["python"] }).run({ code: "console.log(1)" }, { workspaceRoot: root, signal })).resolves.toMatchObject({ ok: false, error: { code: "CODE_MODE_COMMAND_NOT_ALLOWED" } });
     } finally { await rm(root, { recursive: true, force: true }); }

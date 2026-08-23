@@ -1,5 +1,5 @@
 /** Phase 8.3 LSP/Code Mode safety and recovery gate. */
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CodeModeSandbox, LspManager } from "../packages/tools/dist/index.js";
@@ -7,6 +7,10 @@ import { CodeModeSandbox, LspManager } from "../packages/tools/dist/index.js";
 const root = await mkdtemp(join(tmpdir(), "code-review-agent-phase8-lsp-"));
 const fixture = join(process.cwd(), "packages", "tools", "test-fixtures", "lsp-server.mjs");
 const assert = (condition, message) => { if (!condition) throw new Error(`Phase 8.3 gate: ${message}`); };
+const webShell = await readFile(join(process.cwd(), "apps", "web", "index.html"), "utf8");
+const browserBundle = await readFile(join(process.cwd(), "apps", "web", "dist", "browser.js"), "utf8");
+assert(webShell.includes("LSP diagnostics & source locations") && webShell.includes("source locations"), "Web LSP details surface is missing");
+assert(browserBundle.includes("presentLspTool") && browserBundle.includes("lsp"), "browser bundle is missing the typed LSP presenter");
 
 try {
   await writeFile(join(root, "fixture.ts"), "const value = 1;\n", "utf8");

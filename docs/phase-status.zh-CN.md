@@ -68,6 +68,8 @@ Phase 7 的 DSH Web 调研与分步计划：
 - `c0cf1d3`：新增独立 `scripts/phase8-web-gate.mjs`，使用真实 SQLite/API/AgentHost fixture 验证 Goal/Plan/Todo/Question replay、回答/取消、Plan review、Goal CAS conflict、Todo idempotency 和 browser bundle；Trajectory Inspector 增加 Options、Usage、Diff、Request、Tool catalog、Rendered、Raw、Input、Output、Schema 等 bounded sections；
 - `presentLspTool` 与 Web LSP details surface 已接入，diagnostics、definition、references、source location、restart/crash 和失败状态均保持 host-backed；
 - `CodeModeSandbox` 已接入可选 `code_mode` builtin，默认 disabled；支持 workspace-bound child process、`node` allowlist、网络禁用、runtime/output/code budget 和取消；API `/v1/capabilities` 与 Settings 暴露 Code Mode/LSP metadata；
+- Code Mode 的网络策略继续保持 deny-by-default，并额外拦截 `globalThis.fetch`、`globalThis.WebSocket` 与 `process.getBuiltinModule` 入口；该策略仍是进程内策略检查，不等同于 OS 级网络隔离。
+- `scripts/phase8-lsp-codemode-gate.mjs` 现在同时检查 Web LSP details 文案和 typed browser bundle；`pnpm test:phase8:lsp` 与 Code Mode 定向测试通过。
 - `pnpm test:phase8:web` 已通过（planning/question replay gate）；`pnpm test:phase8:lsp` 已通过（LSP/Code Mode safety/recovery gate）；Web 100 tests、Tools 56 tests、API 27 tests、Runtime 25 tests 和 `pnpm typecheck` 通过；
 - `6ac8e7e`：8.3 第一阶段 checkpoint 已建立；`8.3` 的真实 Web fixture、OS 级网络隔离评估和完整退出审计仍待补齐。
 - 当前已进入 `Phase 8.4 Reliability`：`JobManager` 已持久化可重试 executable/args 元数据，支持 bounded retry、deadline 结构化失败、取消原因和 graceful shutdown；`AgentHost` 提供 job action、session export/replay 和 structured diagnostics；API 暴露 `/v1/sessions/:id/jobs`、`/retry`、`/cancel`、`/export` 与 `/v1/diagnostics`；Web Job center 已提供 Cancel/Retry actions。

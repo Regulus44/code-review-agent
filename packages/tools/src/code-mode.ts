@@ -30,7 +30,7 @@ const DEFAULT_MAX_RUNTIME_MS = 30_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 256 * 1024;
 const MAX_RUNTIME_MS = 120_000;
 const MAX_OUTPUT_BYTES = 1 * 1024 * 1024;
-const NETWORK_IMPORT_PATTERN = /(?:\bfetch\s*\(|\bWebSocket\s*\(|\bXMLHttpRequest\b|(?:require|import)\s*\(?\s*["'](?:node:)?(?:http|https|net|tls|dgram|dns|undici)["'])/iu;
+const NETWORK_IMPORT_PATTERN = /(?:\bfetch\s*\(|\bWebSocket\s*\(|\bXMLHttpRequest\b|\bglobalThis\s*\.\s*(?:fetch|WebSocket|XMLHttpRequest)\b|\bprocess\s*\.\s*getBuiltinModule\s*\(|(?:require|import)\s*\(?\s*["'](?:node:)?(?:http|https|net|tls|dgram|dns|undici)["'])/iu;
 
 /**
  * Execute bounded JavaScript in a child process with explicit workspace

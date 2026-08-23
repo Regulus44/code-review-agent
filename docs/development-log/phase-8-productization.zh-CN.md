@@ -91,6 +91,7 @@ git diff --check                             ✓
 - 新增 `presentLspTool`，把 diagnostics、definition、references、source location、server restart/crash 和失败原因投影为 bounded Web render intent；
 - Web Details 增加 LSP diagnostics & source locations surface；Settings capabilities 公开 Code Mode 与 LSP 的真实 host 状态；
 - 新增 `scripts/phase8-lsp-codemode-gate.mjs`，覆盖 Code Mode 成功、网络越权、输出预算、LSP diagnostics/definition、server crash restart 和 cancellation。
+- LSP/Code Mode gate 增加 Web LSP details/source-location 静态 surface 检查；Code Mode 网络拒绝模式补充 `globalThis.fetch`、`globalThis.WebSocket` 与 `process.getBuiltinModule` 入口测试。
 
 ### 验证
 
@@ -107,7 +108,7 @@ git diff --check                                     ✓
 
 ### 尚未关闭
 
-8.3 仍需继续补充真实 Web/browser fixture、网络策略的更强 OS 级隔离评估和完整 Phase 8.3 退出审计；8.4 可靠性与 8.5 产品化尚未开始。
+8.3 仍需继续补充真实 Web/browser fixture、网络策略的更强 OS 级隔离评估和完整 Phase 8.3 退出审计；当前新增 gate 只证明 typed Web surface 存在，不宣称浏览器交互矩阵已完成。
 
 ## 2026-08-24：8.2 Worktree 收口
 
