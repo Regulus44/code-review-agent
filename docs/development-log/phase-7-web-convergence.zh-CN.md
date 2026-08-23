@@ -726,6 +726,50 @@ git diff --check                                    ✓
 - 补齐 loading/error、键盘焦点恢复、窄屏布局、长任务 terminal/job 输出与失败诊断；
 - 推进 Shell 拆分、Workspace/Session 导航和 1,000+ trajectory 多页性能基线。
 
+## 2026-08-23：统一 Phase 7.10 browser/replay gate
+
+### 目标
+
+把 Read-only、Edit、Test/Recovery、Delegation、Inspection 五个验收场景收敛为一个可重复命令，验证浏览器实际消费的 API、静态 bundle、Session projection 和 EventStore replay。
+
+### 变更范围
+
+- `scripts/phase7-browser-gate.mjs`：编排三个隔离 fixture server，读取启动 JSON，统一执行五场景断言并在失败时清理子进程；
+- Read-only：验证静态 Web shell/typed browser bundle、assistant summary、completed `read_file`、tool call/result replay；
+- Edit：通过真实 permission API 批准 `edit_file`，验证 completed tool、diff summary 和 permission/tool settlement replay；
+- Test/Recovery：使用 SQLite fixture 的真实 API/AgentHost 重启状态，验证 `run_tests` pending permission、批准后的 completed tool、recovery status event 和重复批准不重复执行；
+- Delegation：验证 parent/child catalog、非空 child transcript/report、scoped replay、workspace artifact inline/download、external/blocked artifact 和 cancellable child cleanup；
+- Inspection：验证 1,250 条 trajectory records、2,501 条事件的 monotonic replay、latest/older bounded pages、100 条 page limit 和 prepend cursor；
+- 性能记录：输出 HTTP 最大单请求耗时、trajectory latest/older/full replay 和 gate 总耗时，作为后续浏览器渲染基线输入。
+
+### 根治理七问
+
+1. **Phase**：Phase 7.10 browser/replay gate。
+2. **问题类型**：Web 验收、事件回放、权限恢复、workspace 安全和 trajectory 性能证据。
+3. **契约影响**：新增测试编排脚本和 package command；不改变 Event、Tool、Task、Permission 或 Workspace contract。
+4. **参考入口**：DSH `client/connection`、`ui-conversation`、`ui-subagent`、`ui-deliverables`、`ui-trajectory`；实现只调用本项目 host/API。
+5. **上游来源**：只做行为对照，没有复制上游代码或资产。
+6. **验收场景**：五场景全部通过，重复批准不重复工具执行，artifact 越界被阻断，trajectory replay 序列无重复。
+7. **回滚**：删除 gate 脚本和 package command，不影响生产 AgentHost、Web bridge、EventStore 或 fixture 之外的运行路径。
+
+### 验证
+
+```text
+pnpm test:phase7:browser                         ✓
+五场景通过；总耗时 2.66s；trajectory latest/older/full replay 2.59/1.41/8.60ms
+pnpm typecheck                                   ✓
+pnpm test                                        ✓
+pnpm --filter @code-review-agent/web test -- --run ✓（50 tests）
+pnpm -F @code-review-agent/web run build:browser  ✓
+git diff --check                                  ✓
+```
+
+### 下一步
+
+- 补齐各面板 loading/error/empty/reconnect 细节和长任务 terminal/job 失败诊断；
+- 推进 Shell 拆分、Workspace/Session 导航和窄屏视觉基线；
+- 保持 gate 作为每个后续 Phase 7 Web 切片的回归入口。
+
 ## 2026-08-23：Modal keyboard/focus semantics
 
 ### 目标与 DSH 对照

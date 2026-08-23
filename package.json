@@ -11,6 +11,7 @@
     "build": "tsc -b",
     "build:web": "pnpm --filter @code-review-agent/web build && pnpm --filter @code-review-agent/web build:browser",
     "build:web:browser": "pnpm --filter @code-review-agent/web build:browser",
+    "test:phase7:browser": "pnpm typecheck && pnpm build:web && node scripts/phase7-browser-gate.mjs",
     "typecheck": "tsc -b",
     "test": "pnpm -r --if-present test",
     "test:contracts": "pnpm --filter @code-review-agent/contracts test",
