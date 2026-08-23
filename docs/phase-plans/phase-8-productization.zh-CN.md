@@ -1,83 +1,347 @@
-# Phase 8：高级能力与产品化
+# Phase 8：高级能力、DSH Web 对齐与产品化
 
-## 目标
+状态：`pending`。进入条件是 Phase 7 已完成并保留独立 checkpoint；当前 Phase 7 checkpoint 为 `82326d6`。
 
-在前七个阶段稳定后补齐生产级 Coding Agent 能力。此阶段不再改变 Agent/Event/Tool/Task 的核心契约，只在既有扩展点上增加能力。
+## 1. 阶段目标
 
-## 参考入口
+Phase 8 在稳定的 Agent、Event、Tool、Task、Permission、Workspace contract 之上，推进两条相互依赖的产品线：
 
-DSH：
+1. **DSH Web 对齐**：吸收 DSH 的 Web 信息架构、状态投影、Composer、Goal/Plan/Todo、Trajectory、Settings 和浏览器验收行为，形成可维护的 TypeScript Web 工作台。
+2. **高级 Coding Agent 能力**：补齐上下文压缩、Worktree、LSP/Code Mode、后台任务可靠性和产品化基础设施。
 
-- `D:/Develop/deepseek-harness-fork/packages/compaction`
-- `D:/Develop/deepseek-harness-fork/packages/lsp`
-- `D:/Develop/deepseek-harness-fork/packages/workspace`
-- `D:/Develop/deepseek-harness-fork/packages/terminal`
-- `D:/Develop/deepseek-harness-fork/packages/workflow`
-- `D:/Develop/deepseek-harness-fork/packages/guard`
+Phase 8 的第一优先级是 Web 对齐，因为 Goal/Plan/Todo、Trajectory Inspector、Settings 和可靠性诊断需要先有稳定的 Web 组件边界与 presenter contract。
 
-Claude Code：
+## 2. 核心架构决策
 
-- `D:/Develop/claude-code/src/services/contextCollapse`
-- `D:/Develop/claude-code/src/utils/context*`
-- `D:/Develop/claude-code/packages/builtin-tools/src/tools/EnterWorktree*`
-- `D:/Develop/claude-code/packages/builtin-tools/src/tools/LSP*`
-- `D:/Develop/claude-code/packages/builtin-tools/src/tools/REPL*`
-- `D:/Develop/claude-code/src/services`
+### 2.1 采用 DSH 的行为与信息架构
 
-## 能力顺序
+- 三栏 AppFrame：Sidebar、Conversation、Details；
+- Workspace/Session Browser、父子 Session 树、搜索、排序和生命周期操作；
+- Conversation snapshot、Tool render intent、Permission/Question card、Queue dock；
+- GoalBar、Plan/Todo、Job、Subagent、MCP、Deliverables 和 Settings 面板；
+- Trajectory ledger、timeline、search、fold、older page、tail-follow 和 inspector；
+- loading、empty、error、reconnecting、expired、recovered 和 blocked 的显式状态；
+- 组件测试、浏览器 e2e、恢复测试和视觉基线。
 
-### 8.1 Context Compaction
+### 2.2 保留本项目的运行时边界
+
+- Web 只消费 `packages/contracts`、API projection 和 SSE；
+- EventStore 是唯一事实来源，浏览器状态只保存可丢弃的选择、折叠和布局状态；
+- 继续使用 REST + SSE、generation guard、sequence replay 和 idempotency；
+- 不引入 DSH Cordis、完整插件 graph、账户、桌面端、CLI、遥测或发布系统；
+- 不直接复制 DSH 组件或内部类型；行为参考登记在 `docs/source-reuse-register.md`；
+- 缺少后端事实的字段显示 `unknown`、`unavailable` 或 `deferred`，不由 UI 猜测成功状态。
+
+### 2.3 契约变更规则
+
+Phase 8.0 默认只增加 Web projection/query DTO。若必须新增 Event、Task、Permission 或 Workspace 字段，必须同时更新：
+
+- `packages/contracts`；
+- `docs/event-contract.md` 或 `docs/tool-contract.md`；
+- Storage projection/replay；
+- API/SSE contract test；
+- browser fixture 和恢复测试；
+- 对应 ADR 或阶段日志。
+
+## 3. DSH 源码对照矩阵
+
+| DSH 能力 | DSH 参考入口 | 当前项目入口 | 当前差距 | Phase 8 目标 |
+|---|---|---|---|---|
+| Boot/失败边界 | `packages/client/web/src/AppRoot.tsx`、`boot.tsx`、`app-shell.ts` | `apps/web/src/shell/boot.ts`、`apps/web/index.html` | 有 boot reducer 和 fallback，缺少 entry graph 与可观测 boot report | typed boot boundary、失败详情、feature registry |
+| Shell/Layout | `packages/client/ui-layout/src/client/AppFrame.tsx` | `apps/web/src/shell/layout.ts`、`app-frame.ts` | 三栏和响应式已有，缺少拖拽 resize、concession 和完整 slot mount | 组件化 AppFrame、resize、details identity、rail/drawer 动画 |
+| Sidebar | `packages/client/ui-sidebar/src/client/SidebarRoot.tsx` | `apps/web/index.html` | rail、折叠、Workspace tree 已有，缺少 DSH 的滚动条、tooltip 和过渡策略 | SidebarRoot typed surface、滚动和可访问性一致 |
+| Workspace Browser | `packages/client/ui-workspace/src/client/WorkspaceBrowser.tsx`、`tree.ts`、`rows/Rows.tsx` | `navigation-presenter.ts`、Workspace API | 树、搜索、生命周期和 reorder 已有；flat/group、排序菜单、拖拽排序不完整 | Workspace/Flat、排序、拖拽、row action 和 picker 统一 |
+| Conversation | `packages/client/ui-conversation/src/client/skeleton/ConversationRoot.tsx`、`ConversationSession.tsx`、`InputBar.tsx` | `projection/conversation.ts`、`index.html` | typed node 和 Markdown 已有；branch、context meter、message action、Todo surface 不完整 | Conversation/Composer 分层和稳定 input state machine |
+| Tool/ Diff | `packages/client/ui-tool`、`core/tools/presentation.ts` | `tool-presenter.ts`、`tool-call-tree.ts` | generic、source/risk、递归 tree、redaction 已有；专用 tool view 和 path action 较薄 | 专用 presenter、path action、bounded diff 和 generic fallback |
+| Permission/Question | `ui-conversation/skeleton/ApprovalPanel.tsx`、`ui-user-questions/QuestionComposer.tsx`、`PlanReviewPanel.tsx` | `request-presenter.ts`、interaction card | approve/deny/cancel、expiry、recovery 已有；批次 question、plan review 不完整 | batch question、plan review、receipt、CAS 和恢复 |
+| Queue/Steer/Attachment | `ui-conversation` queue/input tests、`steering.e2e.ts` | `queue-presenter.ts`、`api.ts`、`index.html` | queue、reorder、steer、attachment 已有 host path；视觉和状态机仍分散 | 统一 composer input machine 和 queue dock |
+| Goal | `packages/client/ui-goal/src/client/GoalBar.tsx` | contracts/storage projection、generic event row | 没有 GoalBar 的 pause/resume/edit/clear | GoalBar + CAS error + composer dock |
+| Plan/Todo | `ui-conversation/src/client/skeleton/TodoPanel.tsx`、`ui-user-questions/PlanReviewPanel.tsx` | plan/todo projection、静态 Plan 按钮 | 缺少独立面板、审批和编辑流程 | Plan mode、TodoPanel、PlanReviewPanel |
+| Jobs/Terminal | `packages/client/ui-jobs/src/client/JobListAction.tsx` | `job-presenter.ts`、details diagnostics | output、exit、orphaned、interrupted 已有；action surface 不完整 | job list、cancel/retry/open、terminal details |
+| Subagent | `packages/client/ui-subagent`、`host/apiproxy/src/api/subagents.ts` | `task-presenter.ts`、Subagent API | parent/child、report/artifact、cancel、scoped replay 已有 | child action、continuation、history navigation 视觉统一 |
+| MCP | DSH MCP roster/panels | `mcp-presenter.ts`、MCP API | status、scope、generation、catalog、retry 已有 | server/tool/resource/prompt tabs 和 trust marker |
+| Deliverables | `packages/client/ui-deliverables/src/client/ProducedFiles.tsx` | `deliverables-presenter.ts`、artifact API | workspace/external/blocked、preview/open/download 已有 | produced file mentions、preview、action reason 和 empty/loading |
+| Trajectory | `ui-trajectory/TrajectoryView.tsx`、`TrajectoryTable.tsx`、`TrajectoryTimeline.tsx`、`TrajectoryToolbar.tsx` | `trajectory-presenter.ts`、`projection/trajectory.ts` | ledger、timeline、paging、fold、tail-follow 已有；Inspector 栏目和 usage metadata 较少 | Usage、Options、Request、Diff、Raw/Input/Output/Schema inspector |
+| Settings/Models | `ui-settings-general`、`ui-settings-models`、`ui-settings-plugins` | `settings-presenter.ts`、settings modal | host-backed summary 已有；多 section、provider onboarding、failure/retry 不完整 | General/Models/Permission/Capabilities/MCP/Plugins sections |
+| Visual/e2e | DSH `apps/web/tests/*.e2e.ts`、`packages/client/*/tests` | Phase 7 gate、Web/Vitest | 核心 replay 和恢复已有；视觉 snapshot、Goal/Plan/Question 矩阵不足 | Phase 8 Web parity gate 和视觉基线 |
+
+## 4. Phase 8.0：DSH Web 对齐工作流
+
+### 8.0.0 Parity contract、设计 token 与基线
+
+交付物：
+
+- DSH → 本项目功能矩阵冻结；
+- `apps/web/src` 的 Shell、Sidebar、Conversation、Composer、Details、Panels 边界；
+- spacing、color、typography、state、focus 和 density token；
+- 600×800、900×800、1024×800 当前页面截图基线；
+- Web parity ADR 和 source-reuse 记录。
+
+依赖：Phase 7 完成、工作树干净、`pnpm typecheck` 和 `pnpm test` 通过。
+
+验收：矩阵中的每项标记为 complete、partial 或 deferred；没有隐含的 DSH 全量复制承诺。
+
+回滚：只提交文档、token 和测试 fixture，不改变生产运行时。
+
+### 8.0.1 Shell、Sidebar 与组件化
+
+交付物：
+
+- typed AppFrame mount/apply contract；
+- Sidebar rail/drawer、details open/close、resize handle 和 concession；
+- Session 切换时关闭 details，保持主 Session identity；
+- boot/loading/error/retry banner；
+- 旧 `index.html` fallback 保持可用。
+
+参考：DSH `ui-layout/AppFrame.tsx`、`ui-sidebar/SidebarRoot.tsx`、`web/AppRoot.tsx`。
+
+验收：600/900/1024 viewport 无横向溢出；拖拽、折叠、Escape、Tab 和 focus restore 均通过浏览器测试。
+
+### 8.0.2 Workspace/Session Browser
+
+交付物：
+
+- Workspace/Flat 视图切换；
+- manual/updated 排序菜单；
+- Workspace 拖拽排序和现有 host-backed reorder；
+- row 状态点、更新时间、permission mode、context menu；
+- picker、rename、archive、restore、delete 视觉统一。
+
+参考：DSH `ui-workspace/WorkspaceBrowser.tsx`、`tree.ts`、`rows/Rows.tsx`。
+
+验收：active/archived/deleted、搜索、父子 Session、刷新回放和重复 command 一致；导航不保存第二套事实。
+
+### 8.0.3 Conversation/Composer、Goal、Plan、Todo、Question
+
+交付物：
+
+- Conversation node renderer 和 composer state machine；
+- GoalBar：active/paused/blocked、edit/pause/resume/clear、CAS error；
+- TodoPanel：queued/running/completed、折叠和 bounded detail；
+- Plan mode 和 PlanReviewPanel；
+- QuestionComposer：多问题批次、选项、freeform、cancel、expiry、恢复；
+- queue dock、steer、attachment、permission preset、model/reasoning selector 统一到 composer。
+
+参考：DSH `ui-goal/GoalBar.tsx`、`ui-conversation/skeleton/InputBar.tsx`、`TodoPanel.tsx`、`ui-user-questions/QuestionComposer.tsx`、`PlanReviewPanel.tsx`。
+
+契约要求：问题批次、Goal CAS 或 reasoning metadata 若缺少后端字段，先补 contract 和 replay fixture，再实现 UI。
+
+验收：Read-only、Edit、Question、Plan review 四个真实浏览器场景通过；刷新、重连、API 重启不重复提交回答或计划。
+
+### 8.0.4 Tool、Diff、Terminal、Job、MCP、Deliverables
+
+交付物：
+
+- read/edit/grep/glob/bash/patch/diff/terminal/MCP/subagent 专用 presenter；
+- generic JSON fallback、source/risk/permission、recursive call tree；
+- job list、cancel/retry/open output、orphaned/interrupted diagnostics；
+- MCP server/tool/resource/prompt tabs、scope、generation、trust marker；
+- Produced Files preview、mentions、open/download、disabled reason。
+
+参考：DSH `ui-tool`、`ui-jobs/JobListAction.tsx`、`ui-deliverables/ProducedFiles.tsx` 及 MCP panels。
+
+验收：Edit、Test/Recovery、Delegation、Deliverables 场景通过；路径越界、symlink、未授权工具和敏感输出安全测试通过。
+
+### 8.0.5 Trajectory parity
+
+交付物：
+
+- `TrajectoryTable` 风格的 turn/assistant/tool/request ledger；
+- search index、kind filter、running-only、fold、selection、older page、tail-follow；
+- actual/recorded duration 和 timeline range；
+- Inspector sections：Overview、Options、Usage、Timing、Diff、Request、Tool catalog、Rendered、Raw、Source、Input、Output、Schema；
+- token/usage/TTFT/provider/model 字段缺失时显示 `unknown`。
+
+参考：DSH `ui-trajectory/TrajectoryView.tsx`、`TrajectoryTable.tsx`、`TrajectoryTimeline.tsx`、`TrajectoryToolbar.tsx`。
+
+验收：1,250+ records、prepend replay、running duration、redaction、unknown fields、Conversation selection 联动通过。
+
+### 8.0.6 Settings、响应式与可访问性
+
+交付物：
+
+- General、Models、Permission、Capabilities、MCP、Plugins 分区；
+- provider/model loading、failure、retry 和 selection receipt；
+- settings dialog、menu、toast、focus trap、aria-live 统一；
+- mobile drawer、rail、details、composer 的主题和品牌 token。
+
+参考：DSH `ui-settings-general`、`ui-settings-models`、`ui-settings-plugins`、`ui-primitives`。
+
+验收：keyboard smoke、focus restore、axe-like aria 检查、600/900/1024 视觉基线和错误/空态/加载态通过。
+
+### 8.0.7 Web parity gate
+
+将 DSH 行为场景转为本项目自己的 fixture，不复制 DSH 测试代码：
+
+- GoalBar；
+- Plan review；
+- Question composer；
+- Queue/steer/attachment；
+- Workspace navigation/lifecycle；
+- Tool/permission/diff/job；
+- Trajectory virtualization/inspection；
+- Produced files；
+- Subagent interrupt/history；
+- Settings/model failure；
+- reconnect/replay/API restart。
+
+门禁命令：
+
+```powershell
+pnpm typecheck
+pnpm test
+pnpm build:web
+pnpm test:phase7:browser
+pnpm test:phase8:web
+git diff --check
+```
+
+退出条件：所有已承诺能力有 unit、contract、recovery、security 和 browser 证据；未实现能力不会显示为可用。
+
+## 5. Phase 8.1：Context Compaction
+
+交付物：
 
 - token budget、tool result budget、microcompact、collapse、autocompact；
-- 保证 tool_use/tool_result、thinking 和任务状态不会被错误截断；
-- 压缩前后可从事件和摘要恢复。
+- `tool_use/tool_result`、thinking、Task 和 Permission 状态的不可破坏边界；
+- 压缩前后的 durable summary、source sequence 和恢复 cursor；
+- Web Context meter、compaction status 和恢复诊断。
 
-### 8.2 Workspace / Worktree
+参考：DSH `packages/compaction`；Claude Code `src/services/contextCollapse`、`src/utils/context*`。
 
-- branch/worktree 生命周期；
-- workspace 与 Session/Task 绑定；
-- 并发修改冲突、清理和回收；
-- 继续沿用 permission 和审计策略。
+验收：长上下文、工具结果超预算、pending approval、running Task、压缩失败和重启恢复均可回放。
 
-### 8.3 LSP / Code Mode
+## 6. Phase 8.2：Workspace/Worktree
 
-- LSP 诊断、符号和跳转以受控工具提供；
-- Code Mode 只能在明确 sandbox、预算和权限下执行；
-- 不因为增加代码执行能力而绕过 `run_command` policy。
+交付物：
 
-### 8.4 后台任务和可靠性
+- branch/worktree create、attach、switch、cleanup；
+- Workspace 与 Session/Task 绑定；
+- 并发修改、冲突、dirty tree、回收和失败清理；
+- Web Worktree picker、状态、冲突和安全提示。
 
-- background jobs、retry、model fallback、deadline；
+参考：DSH `packages/workspace`；Claude Code `EnterWorktree` 工具。
+
+验收：路径边界、权限、并发冲突、进程崩溃、重启恢复和回收幂等通过。
+
+## 7. Phase 8.3：LSP/Code Mode
+
+交付物：
+
+- 受控 LSP server lifecycle、诊断、符号和跳转；
+- Code Mode sandbox、命令 allowlist、资源/网络预算；
+- Web LSP diagnostics、source location、跳转失败和 server restart 状态。
+
+参考：DSH `packages/lsp`、`packages/guard`；Claude Code `builtin-tools/src/tools/LSP*`、`REPL*`。
+
+验收：LSP 超时、server 崩溃、恶意 executable、路径穿越、网络越权和取消恢复通过。
+
+## 8. Phase 8.4：后台任务与可靠性
+
+交付物：
+
+- background jobs、retry、model fallback、deadline、graceful shutdown；
 - session fork/replay/export；
-- metrics、tracing、structured diagnostics；
-- graceful shutdown 和进程恢复。
+- structured diagnostics、metrics、tracing；
+- Web Job center、恢复提示和导出状态。
 
-### 8.5 产品化
+参考：DSH `packages/terminal`、`packages/workflow`、`packages/guard`；Claude Code `src/services`。
+
+验收：重试、取消、幂等、进程重启、断线、deadline、fork/export 和敏感信息审计通过。
+
+## 9. Phase 8.5：产品化
+
+交付物：
 
 - remote auth、multi-user、tenant、quota；
 - provider/model routing；
 - secrets/credentials 管理；
-- deployment、backup、migration 和 upgrade policy；
-- 必要时再做 desktop wrapper。
+- deployment、backup、migration、upgrade policy；
+- 必要时再增加 desktop wrapper。
 
-## 不包含
+验收：认证、租户隔离、quota、凭据脱敏、备份恢复、migration rollback 和部署 smoke 通过。
 
-- 改写已稳定的 Event/Tool/Task 契约；
-- 为单一 provider 定制整个 Runtime；
-- 没有安全评估的任意代码执行；
-- 在没有用户场景的情况下引入完整 workflow/plugin 平台。
+## 10. 阶段依赖与执行顺序
 
-## 测试与验收
+```text
+8.0.0 parity contract
+  ↓
+8.0.1 shell/components
+  ↓
+8.0.2 workspace browser ─────┐
+  ↓                          │
+8.0.3 composer/goal/plan ────┤
+  ↓                          ├→ 8.0.7 Web parity gate
+8.0.4 tool/details ──────────┤
+  ↓                          │
+8.0.5 trajectory ────────────┤
+  ↓                          │
+8.0.6 settings/a11y ─────────┘
 
-- 长上下文、工具结果超预算和 compaction 恢复；
-- worktree 并发、冲突、清理和崩溃恢复；
-- LSP 服务故障和超时；
-- Code Mode sandbox、权限、资源和网络隔离；
-- 后台任务重试、取消、幂等和进程重启；
-- 多用户认证、租户隔离、quota 和敏感数据审计。
+8.1 compaction → 8.2 worktree → 8.3 LSP/Code Mode
+                                      ↓
+                               8.4 reliability
+                                      ↓
+                               8.5 productization
+```
 
-退出条件：核心四个验收场景在长会话、并发、断线和多用户部署下仍满足事件、工具、任务和安全不变量。
+8.0.x 可以在 8.1–8.3 的调研阶段并行，但不能让 Web UI 伪造尚未完成的后端能力。
 
-## 回滚点
+## 11. 每个 checkpoint 的固定要求
 
-高级能力逐项 feature flag 化；每项能力有独立 migration、配置开关和禁用后的 fallback 行为。
+每个 8.x checkpoint 必须：
+
+1. 说明属于哪个 Phase 和工作流；
+2. 说明是否改变 Event/Tool/Task/Permission/Workspace contract；
+3. 登记 DSH/Claude Code 行为参考和许可证边界；
+4. 提供 unit、contract、recovery、security、browser 验收；
+5. 运行匹配范围的 typecheck/test/build；
+6. 创建独立 Git checkpoint，提交信息包含 `Phase 8`、范围和验证结果；
+7. 提供 feature flag、禁用行为和回滚方式。
+
+## 12. 阶段进入条件
+
+- Phase 7 退出条件全部满足；
+- `pnpm typecheck`、`pnpm test`、`pnpm test:phase7:browser` 通过；
+- 工作树干净；
+- Phase 8.0 parity ADR 已创建，进入 8.0.0 编码前必须接受；
+- 当前 DSH 对照矩阵、source-reuse 登记和本计划一致；
+- 前端新增能力有对应的 fixture 和禁用态设计。
+
+## 13. 阶段退出条件
+
+- 8.0 Web parity gate 通过，且未承诺能力没有伪成功状态；
+- 选择进入的 8.1–8.5 工作流均完成对应验收或明确延期；
+- 长会话、断线、重启、并发、取消和权限安全不变量保持成立；
+- Event/Tool/Task/Permission/Workspace contract、ADR、阶段状态、开发日志和 source-reuse 已同步；
+- 每个工作流均有独立 checkpoint、feature flag 和回滚验证；
+- 下一阶段或产品发布入口有明确命令与运行结果证明。
+
+## 14. 明确不包含
+
+- 复制 DSH Cordis/plugin runtime 或内部类型；
+- DSH 账户、桌面端、CLI、遥测、商业 provider 和发布系统；
+- 没有用户场景的完整 workflow/plugin 平台；
+- 没有安全评估的任意代码执行或网络访问；
+- 为了视觉相似而绕过 EventStore、Permission、Workspace 或审计边界；
+- 通过前端文本伪造 goal、plan、usage、artifact、LSP、worktree 或 compaction 状态。
+
+## 15. 回滚策略
+
+- 8.0 Web 组件通过 typed bridge 和 capability flags 启用；失败时回退 Phase 7 Shell/generic presenter；
+- 8.1–8.4 每项能力独立 feature flag、migration 和禁用态；
+- 8.5 认证、租户和 quota 以独立配置开关部署；
+- 数据迁移保持向后兼容，失败时可回到上一 schema checkpoint；
+- 每个 checkpoint 使用独立 Git commit，不跨工作流混合提交。
+
+## 16. 阶段决策七问
+
+| 问题 | Phase 8 统一回答 |
+|---|---|
+| 属于哪个 Phase | Phase 8；8.0 为 DSH Web 对齐，8.1–8.5 为高级能力与产品化 |
+| 解决什么问题 | UI 组件边界、Coding Agent 可观测性、长会话可靠性、Worktree/LSP 和生产部署能力 |
+| 是否改变公共 contract | 默认只增加 projection/query DTO；事实 contract 变化必须同步事件、回放和安全测试 |
+| 参考哪些入口 | DSH `packages/client/*`、`packages/compaction`、`packages/workspace`、`packages/lsp`、`packages/terminal`；Claude Code 只参考行为与边界 |
+| 是否登记来源 | 行为参考登记文档；直接改编 DSH 文件前确认 MIT notice 并登记具体来源；无明确许可证的快照只做行为参考 |
+| 验收场景 | Web parity、Read-only、Edit、Test/Recovery、Delegation、Inspection、长上下文、Worktree、LSP、后台任务和产品化安全场景 |
+| 如何回滚或禁用 | 每个工作流独立 checkpoint、feature flag、migration 和 fallback；Web 保留 Phase 7 Shell/generic fallback |

@@ -18,6 +18,12 @@
 | Phase 7：DSH Web 前端收敛 | completed | 7.1–7.10 Web shell、连接与回放、Workspace/Session navigation、Conversation/Tool/Permission/Interaction、Trajectory、Task/Subagent/MCP、Settings/Deliverables、响应式与可访问性、五场景 browser/replay gate、Workspace reorder 与 Workspace rename/archive/delete lifecycle 已完成；`pnpm typecheck`、`pnpm test`、`pnpm test:phase7:browser` 和 `git diff --check` 通过；browser gate 总耗时 2.14s、trajectory full replay 19.03ms；独立 checkpoint `82326d6` |
 | Phase 8：高级能力与产品化 | pending | 等前置阶段完成 |
 
+## Phase 8 计划范围（proposed）
+
+- [Phase 8：高级能力、DSH Web 对齐与产品化](phase-plans/phase-8-productization.zh-CN.md) 已扩展为 8.0 Web 对齐、8.1 Context Compaction、8.2 Worktree、8.3 LSP/Code Mode、8.4 后台任务与可靠性、8.5 产品化；
+- [ADR：Phase 8 Web 与 DSH 前端行为对齐](adr/phase-8-web-dsh-alignment.zh-CN.md) 记录了行为参考、REST/SSE 边界、typed Web 拆分、契约变更和回滚规则；
+- Phase 8 仍为 `pending`。进入 8.0.0 编码前需要接受该 ADR，并复核 Phase 7 browser/replay gate、工作树和前端 parity matrix。
+
 ## Phase 6 A2A 暂缓决策
 
 Phase 5 已经稳定了内部 parent/child Task、Session、权限、workspace、MCP scope、report、cancel 和恢复语义。当前产品目标是 Web Coding Agent，暂无跨产品或跨组织 Agent 互操作的验收场景，因此 Phase 6 A2A 暂缓，不阻塞 Phase 7 Web 收敛。
