@@ -33,10 +33,10 @@ git diff --check                                    ✓
 
 真实 browser fixture 已验证：Rename 成功更新导航 label；Archive/Restore 正确切换 active/archived 视图；Delete confirmation 确认后 Workspace 从导航消失，Session 历史仍可通过 API 获取。
 
-### 下一步
+### 退出结果
 
-- 按 Phase 7.final 退出条件执行全 workspace 回归、browser/replay gate、文档契约同步和独立 Git checkpoint；
-- 完成后进入 Phase 8 高级能力与产品化。
+- Phase 7.final 退出条件已完成；`82326d6 feat(phase-7): add workspace lifecycle controls` 是独立可回滚 checkpoint；
+- 全 workspace 测试、类型检查、browser/replay gate、契约文档同步和真实浏览器生命周期 smoke 均通过；下一阶段入口为 Phase 8。
 
 ## 2026-08-23：Responsive viewport baseline
 
