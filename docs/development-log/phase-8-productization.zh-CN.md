@@ -50,7 +50,19 @@ git diff --check                             ✓
 
 ### 尚未关闭
 
-仍需真实 provider failure fixture、visual baseline 和总 Web parity gate；8.3 完整退出审计、8.4 browser recovery matrix 与 8.5 产品化也未完成。
+仍需 visual baseline 和总 Web parity gate；8.3 完整退出审计、8.4 browser recovery matrix 与 8.5 产品化也未完成。
+
+## 2026-08-24：8.0 provider failure fixture 与真实页面回归
+
+### 已完成
+
+- API 增加受控 `modelCatalogFailures` fixture hook，只用于测试/部署 smoke，不改变默认 provider 行为；
+- `scripts/phase8-settings-gate.mjs` 覆盖首次 503、Retry 后 200、Session 数据仍可加载；
+- 真实 Web 页面验证 Settings 显示 `Catalog status: error`、provider failure 文案和 `Retry model catalog`，点击后恢复 `ready` 与 `fixture-model`。
+
+### 尚未关闭
+
+8.0 仍需 visual baseline、总 Web parity gate 和更完整的响应式/section 矩阵。
 
 ## 2026-08-24：8.4 Reliability 第一阶段收口
 

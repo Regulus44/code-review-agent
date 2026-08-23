@@ -690,6 +690,22 @@ describe("Phase 2 API", () => {
     }
   });
 
+  it("exposes a bounded model catalog failure that recovers on retry", async () => {
+    const fixture = createApiServer({ store: new InMemoryEventStore(), modelCatalogFailures: 1, availableModels: ["fixture-model"], modelInfo: { provider: "echo", model: "fixture-model", configured: false } });
+    await new Promise<void>((resolve) => fixture.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = fixture.address();
+      if (address === null || typeof address === "string") throw new Error("Model fixture API did not bind");
+      const url = `http://127.0.0.1:${address.port}/v1/models`;
+      expect((await fetch(url)).status).toBe(503);
+      const recovered = await fetch(url);
+      expect(recovered.status).toBe(200);
+      expect(await recovered.json()).toMatchObject({ provider: "echo", models: ["fixture-model"] });
+    } finally {
+      await new Promise<void>((resolve, reject) => fixture.close((error) => (error ? reject(error) : resolve())));
+    }
+  });
+
   it("supports idempotent commands and session lifecycle endpoints", async () => {
     const created = await fetch(`${baseUrl}/v1/sessions`, {
       method: "POST",

@@ -28,6 +28,8 @@ export interface ApiServerOptions {
   readonly modelInfo?: ModelConfigView;
   readonly availableModels?: readonly string[];
   readonly modelSelector?: (model: string) => ModelSelection;
+  /** Test/deployment hook for bounded provider catalog recovery fixtures. */
+  readonly modelCatalogFailures?: number;
   readonly permissionPreset?: PermissionPreset;
   readonly mcp?: McpConnectionManager;
   readonly subagentRuntime?: SubagentRuntime;
@@ -50,6 +52,7 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
   if (!subagentRuntime.providerCatalog().some((provider) => provider.name === "in-process")) subagentRuntime.registerProvider(createInProcessSubagentProvider({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), baseToolDefinitions: host.toolRegistry().listAll(), subagentRuntime }));
   const modelRuntime: ModelRuntimeState = {
     availableModels: options.availableModels ?? [],
+    remainingCatalogFailures: Math.max(0, Math.floor(options.modelCatalogFailures ?? 0)),
     ...(options.modelInfo === undefined ? {} : { info: options.modelInfo }),
     ...(options.modelSelector === undefined ? {} : { selector: options.modelSelector }),
   };
@@ -104,6 +107,7 @@ interface ModelRuntimeState {
   info?: ModelConfigView;
   readonly availableModels: readonly string[];
   readonly selector?: (model: string) => ModelSelection;
+  remainingCatalogFailures: number;
 }
 
 function currentAttachmentCapability(policy: AttachmentPolicy | undefined, modelRuntime: ModelRuntimeState) {
@@ -134,6 +138,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/models") {
+      if (modelRuntime.remainingCatalogFailures > 0) {
+        modelRuntime.remainingCatalogFailures -= 1;
+        throw new HttpError(503, "model catalog temporarily unavailable");
+      }
       sendJson(response, 200, {
         provider: modelRuntime.info?.provider ?? "custom",
         current: modelRuntime.info?.model ?? "custom",

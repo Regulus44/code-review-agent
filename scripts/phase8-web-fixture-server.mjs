@@ -72,7 +72,14 @@ await store.append({ sessionId: session.id, turnId, type: "assistant/message", p
 
 const host = new AgentHost({ store });
 
-const server = createApiServer({ store, host, ...(webRoot === undefined ? {} : { webRoot }) });
+const server = createApiServer({
+  store,
+  host,
+  ...(webRoot === undefined ? {} : { webRoot }),
+  ...(process.env.PHASE8_MODEL_FAILURES === undefined ? {} : { modelCatalogFailures: Number(process.env.PHASE8_MODEL_FAILURES) }),
+  ...(process.env.PHASE8_MODEL_FAILURES === undefined ? {} : { availableModels: ["fixture-model"] }),
+  ...(process.env.PHASE8_MODEL_FAILURES === undefined ? {} : { modelInfo: { provider: "echo", model: "fixture-model", configured: false } }),
+});
 await new Promise((resolve) => server.listen(Number(process.env.PHASE8_WEB_PORT ?? 0), "127.0.0.1", resolve));
 const address = server.address();
 if (address === null || typeof address === "string") throw new Error("Phase 8 Web fixture did not bind");

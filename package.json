@@ -15,6 +15,7 @@
     "test:phase8:worktree": "pnpm typecheck && pnpm build:web && node scripts/phase8-worktree-gate.mjs",
     "test:phase8:compaction": "pnpm typecheck && pnpm build:web && node scripts/phase8-compaction-gate.mjs",
     "test:phase8:web": "pnpm typecheck && pnpm build:web && node scripts/phase8-web-gate.mjs",
+    "test:phase8:settings": "pnpm typecheck && pnpm build:web && node scripts/phase8-settings-gate.mjs",
     "test:phase8:lsp": "pnpm typecheck && pnpm build:web && node scripts/phase8-lsp-codemode-gate.mjs",
     "test:phase8:reliability": "pnpm typecheck && pnpm build:web && node scripts/phase8-reliability-gate.mjs",
     "typecheck": "tsc -b",
