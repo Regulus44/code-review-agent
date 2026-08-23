@@ -70,6 +70,7 @@ Phase 7 的 DSH Web 调研与分步计划：
 - `CodeModeSandbox` 已接入可选 `code_mode` builtin，默认 disabled；支持 workspace-bound child process、`node` allowlist、网络禁用、runtime/output/code budget 和取消；API `/v1/capabilities` 与 Settings 暴露 Code Mode/LSP metadata；
 - Code Mode 的网络策略继续保持 deny-by-default，并额外拦截 `globalThis.fetch`、`globalThis.WebSocket` 与 `process.getBuiltinModule` 入口；该策略仍是进程内策略检查，不等同于 OS 级网络隔离。
 - Code Mode capability metadata 现在显式暴露 `networkEnforcement`：默认 `process-policy`，并报告 `osNetworkIsolation: false`；若配置 `os-required`，host 会以 `CODE_MODE_OS_ISOLATION_UNAVAILABLE` fail closed，不会把进程内检查冒充为 OS 级隔离。
+- 新增 `scripts/phase8-lsp-codemode-exit-gate.mjs` 与 `pnpm test:phase8:lsp:exit`，对 workspace/process boundary、网络 deny-by-default、OS-required fail-closed、资源预算、LSP restart/timeout/cancel 和 Web host-backed surface 做可重复审计；gate 通过但状态明确为 `partial`，残余风险是缺少 OS-level network isolation adapter 和部署级证据。
 - `scripts/phase8-lsp-codemode-gate.mjs` 现在同时检查 Web LSP details 文案和 typed browser bundle；`pnpm test:phase8:lsp` 与 Code Mode 定向测试通过。
 - `pnpm test:phase8:web` 已通过（planning/question replay gate）；`pnpm test:phase8:lsp` 已通过（LSP/Code Mode safety/recovery gate）；Web 100 tests、Tools 56 tests、API 27 tests、Runtime 25 tests 和 `pnpm typecheck` 通过；
 - `6ac8e7e`：8.3 第一阶段 checkpoint 已建立；随后新增 `scripts/phase8-lsp-fixture-server.mjs` 与 `scripts/phase8-lsp-web-gate.mjs`，真实 SQLite/API/AgentHost/Web replay 已覆盖 diagnostics、definition、references、Code Mode 成功结果和网络拒绝结果；`pnpm test:phase8:lsp:web` 已通过。网络 boundary assessment 已记录，当前 host 仍没有 OS 级网络隔离；完整退出审计仍待补齐。

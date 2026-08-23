@@ -19,6 +19,7 @@
     "test:phase8:parity": "pnpm typecheck && pnpm build:web && node scripts/phase8-parity-gate.mjs",
     "test:phase8:visual": "node scripts/phase8-visual-gate.mjs",
     "test:phase8:lsp": "pnpm typecheck && pnpm build:web && node scripts/phase8-lsp-codemode-gate.mjs",
+    "test:phase8:lsp:exit": "pnpm typecheck && pnpm build:web && node scripts/phase8-lsp-codemode-exit-gate.mjs",
     "test:phase8:lsp:web": "pnpm typecheck && pnpm build:web && node scripts/phase8-lsp-web-gate.mjs",
     "test:phase8:reliability": "pnpm typecheck && pnpm build:web && node scripts/phase8-reliability-gate.mjs",
     "test:phase8:jobs": "pnpm typecheck && pnpm build:web && node scripts/phase8-job-browser-gate.mjs",

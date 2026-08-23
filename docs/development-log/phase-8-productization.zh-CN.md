@@ -1,5 +1,26 @@
 # Phase 8 开发日志
 
+## 2026-08-24：8.3 LSP/Code Mode 有界退出审计
+
+本次 checkpoint 属于 Phase 8.3 安全退出审计，固化当前可证明的边界和残余风险。A2A 保持 `deferred`。
+
+### 已完成
+
+- 新增 `scripts/phase8-lsp-codemode-exit-gate.mjs`，审计 workspace/process boundary、网络 deny-by-default、OS-required fail-closed、代码/运行时/输出预算、LSP restart/timeout/cancel 和 Web host-backed surface；
+- gate 读取实现源码、单元 fixture、现有 LSP/Code Mode gate、Settings presenter 和构建后的 browser bundle，避免仅凭文案判定安全能力；
+- 审计结果显式输出 `status: partial`，保留 OS-level network isolation adapter 和部署级证据两项 residual risk，不把 process-policy 宣称为 OS 隔离。
+
+### 验证
+
+```text
+pnpm test:phase8:lsp:exit ✓
+  lsp-codemode-bounded-exit-audit: passed, status=partial
+```
+
+### 尚未关闭
+
+8.3 仍需 host-specific OS isolation assessment 与部署级安全证据；8.4 跨场景 browser recovery matrix 和 8.5 产品化也未完成。
+
 ## 2026-08-24：8.0 响应式视觉基线与 Plugins 状态收口
 
 本次 checkpoint 属于 Phase 8.0 Web 对齐，完成真实 Web fixture 的响应式视觉基线门禁，并补齐 Settings 的 Plugins 分区状态。A2A 保持 `deferred`，不进入本次实现。
