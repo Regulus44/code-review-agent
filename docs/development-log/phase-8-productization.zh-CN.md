@@ -1,5 +1,30 @@
 # Phase 8 开发日志
 
+## 2026-08-24：8.5 外部 IdP/JWT 与 durable principal catalog
+
+本次继续属于 Phase 8.5，依据计划中的 DSH connection identity boundary 与 host-owned guard policy 行为参考，补齐静态 bearer fixture 与外部身份接入之间的缺口；没有复制 DSH 代码、内部类型或品牌资产。
+
+### 已完成
+
+- `packages/contracts` 新增 `PrincipalRecord` / `PrincipalBackend`；SQLite schema 从 v6 迁移到 v7，支持 principal metadata 的持久化、reopen、subject lookup、tenant filter 和 backup/restore migration。
+- 新增 `apps/api/src/auth.ts` JWT verifier，支持 HS256/RS256、`kid`、issuer、audience、signature、`exp`、`nbf`、tenant claim，以及由 host 显式提供的 JWKS refresh hook；不接受 `none` 或未验签降级。
+- verified subject 必须命中 active principal catalog；unknown、disabled、tenant mismatch、缺少 catalog 和无效 key 均 fail closed。静态 bearer 保留为 local/test adapter。
+- API 新增 tenant-scoped `GET /v1/principals` 和 detail route，只投影 principal metadata；capability 在 JWT 模式下报告 `auth.mode=jwt` 与 external principal catalog。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/storage test       ✓（17 tests）
+pnpm --filter @code-review-agent/api test -- --run src/auth.test.ts src/jwt-server.test.ts  ✓（4 tests）
+pnpm test:phase8:operations                         ✓（schema v7 / legacy v5 → v7）
+git diff --check                                    ✓
+```
+
+### 边界与剩余工作
+
+JWT verifier 和 principal catalog 是 host-backed identity capability，不等于已经连接某个具体外部 IdP；真实部署仍需注入 JWKS provider、运行 key rotation smoke 并保留 IdP/Docker 证据。external secret manager、upgrade/deployment policy 继续保留。
+
 ## 2026-08-24：8.3 OS/container isolation 与 deployment evidence
 
 本次继续属于 Phase 8.3，依据计划中的 DSH `packages/guard` host-owned boundary 与 `packages/lsp` lifecycle 行为参考，补齐 Code Mode 进程级策略和 OS/container 隔离之间的缺口；没有复制 DSH 代码、内部类型或品牌资产。

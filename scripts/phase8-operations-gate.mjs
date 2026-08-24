@@ -23,19 +23,19 @@ try {
   await first.append({ sessionId, type: "user/message", payload: { content: "operations fixture" } });
   first.upsertCredential({ id: "cred_ops", tenantId: "tenant-ops", kind: "header", label: "Operations provider", status: "active", version: 1, createdAt: "2026-08-24T00:00:00.000Z", updatedAt: "2026-08-24T00:00:00.000Z" });
   const backup = first.backup(backupPath);
-  assert(backup.schemaVersion === 6 && backup.sessions === 1 && backup.events === 2 && backup.credentials === 1, "backup metadata does not describe the durable database");
+  assert(backup.schemaVersion === 7 && backup.sessions === 1 && backup.events === 2 && backup.credentials === 1 && backup.principals === 0, "backup metadata does not describe the durable database");
   assert(!readFileSync(backupPath).toString("utf8").includes("operations-secret-material"), "backup contains secret material");
   first.close();
 
   copyFileSync(backupPath, legacyPath);
   const legacy = new DatabaseSync(legacyPath);
-  legacy.exec("DROP TABLE credentials; DELETE FROM schema_migrations WHERE version = 6; PRAGMA user_version = 5;");
+  legacy.exec("DROP TABLE credentials; DROP TABLE principals; DELETE FROM schema_migrations WHERE version >= 6; PRAGMA user_version = 5;");
   legacy.close();
   const legacyInspection = inspectSqliteDatabase(legacyPath);
   assert(legacyInspection.schemaVersion === 5 && legacyInspection.integrity === "ok", "legacy v5 fixture is not a valid migration input");
 
   const restored = restoreSqliteDatabase(legacyPath, restoredPath);
-  assert(restored.migrated === true && restored.sourceSchemaVersion === 5 && restored.restoredSchemaVersion === 6, "restore did not migrate the legacy snapshot to schema v6");
+  assert(restored.migrated === true && restored.sourceSchemaVersion === 5 && restored.restoredSchemaVersion === 7, "restore did not migrate the legacy snapshot to schema v7");
   const restoredStore = new SqliteEventStore({ databasePath: restoredPath });
   assert((await restoredStore.list(sessionId)).length === 2, "restored event history is incomplete");
   restoredStore.close();

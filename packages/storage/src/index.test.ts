@@ -255,6 +255,29 @@ describe("InMemoryEventStore", () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
+  it("persists principal catalog entries and keeps subject/tenant lookup isolated", () => {
+    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-principals-"));
+    const databasePath = join(directory, "agent.sqlite");
+    const first = new SqliteEventStore({ databasePath });
+    const principal = first.upsertPrincipal({
+      id: "principal-a" as never,
+      subject: "idp|a",
+      tenantId: "tenant-a" as never,
+      displayName: "Tenant A user",
+      roles: ["member", "reviewer"],
+      status: "active",
+      createdAt: "2026-08-24T00:00:00.000Z",
+      updatedAt: "2026-08-24T00:00:00.000Z",
+    });
+    expect(first.getPrincipal("idp|a")).toEqual(principal);
+    expect(first.listPrincipals("tenant-b")).toEqual([]);
+    first.close();
+    const second = new SqliteEventStore({ databasePath });
+    expect(second.getPrincipal("idp|a")).toMatchObject({ tenantId: "tenant-a", status: "active", roles: ["member", "reviewer"] });
+    second.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
   it("creates consistent backups, migrates legacy snapshots, and preserves rollback targets", async () => {
     const directory = mkdtempSync(join(tmpdir(), "code-review-agent-operations-"));
     const databasePath = join(directory, "active.sqlite");
@@ -266,17 +289,17 @@ describe("InMemoryEventStore", () => {
     await first.append({ sessionId, type: "user/message", payload: { content: "durable operations fixture" } });
     first.upsertCredential({ id: "cred_ops", tenantId: "tenant-ops", kind: "header", label: "Operations provider", status: "active", version: 1, createdAt: "2026-08-24T00:00:00.000Z", updatedAt: "2026-08-24T00:00:00.000Z" });
     const backup = first.backup(backupPath);
-    expect(backup).toMatchObject({ schemaVersion: 6, sessions: 1, events: 2, credentials: 1, backupPath });
+    expect(backup).toMatchObject({ schemaVersion: 7, sessions: 1, events: 2, credentials: 1, principals: 0, backupPath });
     expect(readFileSync(backupPath).toString("utf8")).not.toContain("backup-secret-material");
     first.close();
 
     copyFileSync(backupPath, legacyPath);
     const legacy = new DatabaseSync(legacyPath);
-    legacy.exec("DROP TABLE credentials; DELETE FROM schema_migrations WHERE version = 6; PRAGMA user_version = 5;");
+    legacy.exec("DROP TABLE credentials; DROP TABLE principals; DELETE FROM schema_migrations WHERE version >= 6; PRAGMA user_version = 5;");
     legacy.close();
 
     const restored = restoreSqliteDatabase(legacyPath, restoredPath);
-    expect(restored).toMatchObject({ sourceSchemaVersion: 5, restoredSchemaVersion: 6, migrated: true });
+    expect(restored).toMatchObject({ sourceSchemaVersion: 5, restoredSchemaVersion: 7, migrated: true });
     const restoredStore = new SqliteEventStore({ databasePath: restoredPath });
     expect((await restoredStore.list(sessionId)).map((event) => event.type)).toEqual(["session/created", "user/message"]);
     expect(restoredStore.getCredential("tenant-ops", "cred_ops")).toBeUndefined();

@@ -80,6 +80,15 @@
 - `scripts/phase8-operations-gate.mjs` 已覆盖 schema v6 backup、v5 → v6 restore、overwrite rollback、event preservation、integrity check 和 secret redaction；`pnpm test:phase8:operations` 已通过。
 - 当前仍需外部 secret manager、外部 IdP/JWT、完整 principal catalog、8.3 OS-level isolation/deployment evidence、graphical browser recovery matrix 和 upgrade/deployment policy。
 
+## Phase 8.5 外部 IdP/JWT 与 durable principal catalog slice（implemented，仍需 secret manager/upgrade policy）
+
+- `packages/contracts` 新增 `PrincipalRecord` / `PrincipalBackend`；principal 只保存 subject、tenant、roles、status 和时间，不保存 token 或 secret material。
+- SQLite schema v7 新增 `principals`，支持旧 v5/v6 数据库迁移、reopen、subject lookup、tenant filter 和备份/恢复；InMemory fixture 与 SQLite 共用 principal contract。
+- API 新增独立 JWT verifier：支持 host-provided HS256/RS256 key set 与可选 JWKS refresh hook，校验 `kid`、issuer、audience、signature、`exp`、`nbf` 和 tenant claim；JWT subject 必须命中 active principal catalog，否则 401 fail closed。
+- `GET /v1/principals` 与 detail route 只投影调用者 tenant 的 principal metadata；JWT capability 报告 `auth.mode=jwt`、`multiUser.principalCatalog=external`，静态 bearer 继续作为 local/test adapter。
+- `apps/api/src/auth.test.ts`、`jwt-server.test.ts`、Storage principal/reopen test 和 operations gate 已覆盖签名失败、时间窗、JWKS rotation、unknown/disabled principal、tenant mismatch、API 401、catalog filter 和 schema v7 recovery。
+- 本 slice 未改变 Session/Event/Tool/Permission/Workspace event contract；剩余 8.5 缺口为 external secret manager、upgrade/deployment policy，以及将 JWT/JWKS 在真实 IdP/Docker deployment 中做现场 smoke。
+
 ## Phase 8.3 OS/container isolation 与 deployment evidence slice（implemented，宿主能力依赖）
 
 - `packages/tools/src/code-mode.ts` 新增 `CodeModeIsolationAdapter`，将真正的 OS/container network boundary 与现有 process-policy 分开；`os-required` 在 adapter 缺失或探测失败时保持 `CODE_MODE_OS_ISOLATION_UNAVAILABLE`。

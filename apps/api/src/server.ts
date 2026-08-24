@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { createInProcessSubagentProvider, sessionId, AgentHost, turnId, type TenantModelRoute } from "@code-review-agent/runtime";
 import { SqliteEventStore } from "@code-review-agent/storage";
-import { brand, type AgentEvent, type ChatModel, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem, type ProductizationCapability, type SessionOwnership, type ModelRouteBackend, type ModelRouteRecord, type CredentialBackend, type McpCredentialReference } from "@code-review-agent/contracts";
+import { brand, type AgentEvent, type ChatModel, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem, type ProductizationCapability, type SessionOwnership, type ModelRouteBackend, type ModelRouteRecord, type CredentialBackend, type McpCredentialReference, type PrincipalBackend } from "@code-review-agent/contracts";
 import { SubagentRuntime } from "@code-review-agent/subagent";
 import { createConfiguredChatModel, DEEPSEEK_MODELS, type ModelConfigView } from "@code-review-agent/llm";
 import { McpConnectionManager, type McpServerConfig } from "@code-review-agent/mcp-client";
@@ -14,6 +14,7 @@ import type { CodeModeSandbox, PermissionPreset } from "@code-review-agent/tools
 import { artifactAccessResponse, inspectArtifact, isAvailableArtifact, type ArtifactAccess } from "./artifacts.js";
 import { attachmentCapability, AttachmentInputError, stageAttachment, type AttachmentPolicy } from "./attachments.js";
 import { CredentialLifecycleError, CredentialVault, type CredentialInput, type CredentialMaterial } from "./credentials.js";
+import { verifyProductizationJwt, type ProductizationJwtOptions } from "./auth.js";
 
 export interface ModelSelection {
   readonly model: ChatModel;
@@ -32,6 +33,7 @@ export interface ProductizationServerOptions {
   readonly auth?: {
     readonly required?: boolean;
     readonly tokens: readonly ProductizationToken[];
+    readonly jwt?: ProductizationJwtOptions;
   };
   readonly quota?: {
     readonly maxSessionsPerTenant?: number;
@@ -52,6 +54,8 @@ export interface ApiServerOptions {
   readonly modelRouting?: ModelRouteBackend;
   /** Optional durable credential metadata backend; SQLite stores implement it directly. */
   readonly credentialBackend?: CredentialBackend;
+  /** Durable principal catalog used by verified external IdP subjects. */
+  readonly principalBackend?: PrincipalBackend;
   /** Test/deployment hook for a host-owned credential vault. */
   readonly credentials?: CredentialVault;
   /** Test/deployment hook for bounded provider catalog recovery fixtures. */
@@ -75,6 +79,7 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
   const ownsStore = options.store === undefined && options.host === undefined;
   const store = options.store ?? (options.host === undefined ? new SqliteEventStore({ databasePath: options.databasePath ?? defaultDatabasePath() }) : undefined);
   const credentials = options.credentials ?? new CredentialVault(options.credentialBackend ?? credentialBackendFrom(store));
+  const principals = options.principalBackend ?? principalBackendFrom(store);
   const subagentRuntime = options.subagentRuntime ?? new SubagentRuntime({ store: store as SessionEventStore });
   const host = options.host ?? new AgentHost({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), ...(options.fallbackModels === undefined ? {} : { fallbackModels: options.fallbackModels }), ...(options.permissionPreset === undefined ? {} : { permissionPreset: options.permissionPreset }), ...(options.contextBudget === undefined ? {} : { contextBudget: options.contextBudget }), ...(options.codeMode === undefined ? {} : { codeMode: options.codeMode }), ...(options.productization?.quota === undefined ? {} : { quota: options.productization.quota }), ...(store instanceof SqliteEventStore ? { operations: { backup: "available", migration: "available", upgrade: "deferred" } } : {}), subagentRuntime });
   if (!subagentRuntime.providerCatalog().some((provider) => provider.name === "in-process")) subagentRuntime.registerProvider(createInProcessSubagentProvider({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), baseToolDefinitions: host.toolRegistry().listAll(), subagentRuntime }));
@@ -106,7 +111,7 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
   const persistence = store instanceof SqliteEventStore ? "sqlite" : "custom";
   const webRoot = options.webRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web");
   const server = createServer((request, response) => {
-    void handleRequest(request, response, host, mcp, subagentRuntime, webRoot, persistence, modelRuntime, credentials, options.attachmentPolicy, options.productization);
+    void handleRequest(request, response, host, mcp, subagentRuntime, webRoot, persistence, modelRuntime, credentials, principals, options.attachmentPolicy, options.productization);
   });
   server.on("close", () => { void host.shutdown(); });
   if (ownsStore && store instanceof SqliteEventStore) server.on("close", () => store.close());
@@ -162,6 +167,13 @@ function credentialBackendFrom(store: SessionEventStore | undefined): Credential
   const candidate = store as Partial<CredentialBackend>;
   return typeof candidate.listCredentials === "function" && typeof candidate.getCredential === "function" && typeof candidate.upsertCredential === "function" && typeof candidate.deleteCredential === "function"
     ? store as unknown as CredentialBackend
+    : undefined;
+}
+
+function principalBackendFrom(store: SessionEventStore | undefined): PrincipalBackend | undefined {
+  const candidate = store as Partial<PrincipalBackend> | undefined;
+  return candidate !== undefined && typeof candidate.getPrincipal === "function" && typeof candidate.listPrincipals === "function" && typeof candidate.upsertPrincipal === "function"
+    ? store as unknown as PrincipalBackend
     : undefined;
 }
 
@@ -258,7 +270,7 @@ function clearModelCredential(tenantId: string, credentialId: string, host: Agen
   host.clearTenantModel(tenantId);
 }
 
-async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, mcp: McpConnectionManager, subagents: SubagentRuntime, webRoot: string, persistence: string, modelRuntime: ModelRuntimeState, credentials: CredentialVault, attachmentPolicy: AttachmentPolicy | undefined, productization: ProductizationServerOptions | undefined): Promise<void> {
+async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, mcp: McpConnectionManager, subagents: SubagentRuntime, webRoot: string, persistence: string, modelRuntime: ModelRuntimeState, credentials: CredentialVault, principals: PrincipalBackend | undefined, attachmentPolicy: AttachmentPolicy | undefined, productization: ProductizationServerOptions | undefined): Promise<void> {
   response.setHeader("access-control-allow-origin", "*");
   response.setHeader("access-control-allow-headers", "content-type, idempotency-key, last-event-id");
   response.setHeader("access-control-allow-methods", "GET,POST,DELETE,OPTIONS");
@@ -268,7 +280,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   }
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
   try {
-    const identity = authenticateRequest(request, url.pathname, productization);
+    const identity = await authenticateRequest(request, url.pathname, productization, principals);
     const sessionResource = url.pathname.match(/^\/v1\/sessions\/([^/]+)/u);
     if (identity !== undefined && sessionResource?.[1] !== undefined) {
       await assertSessionAccess(host, sessionId(decodeURIComponent(sessionResource[1])), identity);
@@ -374,7 +386,16 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/capabilities") {
-      sendJson(response, 200, { attachments: currentAttachmentCapability(attachmentPolicy, modelRuntime, identity?.tenantId), context: host.contextSettings(), codeMode: host.codeModeSettings(), lsp: host.lspSettings(), plugins: host.pluginsSettings(), productization: productizationCapability(host.productizationSettings(identity?.tenantId), productization) });
+      sendJson(response, 200, { attachments: currentAttachmentCapability(attachmentPolicy, modelRuntime, identity?.tenantId), context: host.contextSettings(), codeMode: host.codeModeSettings(), lsp: host.lspSettings(), plugins: host.pluginsSettings(), productization: productizationCapability(host.productizationSettings(identity?.tenantId), productization, principals) });
+      return;
+    }
+    if (request.method === "GET" && (url.pathname === "/v1/principals" || url.pathname.startsWith("/v1/principals/"))) {
+      if (identity === undefined) throw new HttpError(401, "Principal catalog requires authenticated identity");
+      if (principals === undefined) throw new HttpError(409, "Principal catalog is not configured");
+      const requestedId = url.pathname === "/v1/principals" ? undefined : decodeURIComponent(url.pathname.slice("/v1/principals/".length));
+      const catalog = principals.listPrincipals(identity.tenantId).filter((principal) => requestedId === undefined || principal.id === requestedId);
+      if (requestedId !== undefined && catalog.length === 0) throw new HttpError(404, "principal not found");
+      sendJson(response, 200, { principals: catalog.map(publicPrincipal) });
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/workspaces") {
@@ -953,7 +974,7 @@ function commandId(request: IncomingMessage, body: Record<string, unknown> = {})
   return typeof body.commandId === "string" && body.commandId.length > 0 ? body.commandId : undefined;
 }
 
-function authenticateRequest(request: IncomingMessage, pathname: string, productization: ProductizationServerOptions | undefined): SessionOwnership | undefined {
+async function authenticateRequest(request: IncomingMessage, pathname: string, productization: ProductizationServerOptions | undefined, principals: PrincipalBackend | undefined): Promise<SessionOwnership | undefined> {
   const auth = productization?.auth;
   if (auth === undefined) return undefined;
   const publicPath = pathname === "/health" || pathname === "/" || pathname === "/index.html" || pathname.startsWith("/web/");
@@ -970,6 +991,13 @@ function authenticateRequest(request: IncomingMessage, pathname: string, product
     if (!timingSafeEqual(left, right)) continue;
     return { principalId: brand<string, "PrincipalId">(candidate.principalId), tenantId: brand<string, "TenantId">(candidate.tenantId) };
   }
+  if (auth.jwt !== undefined) {
+    try {
+      return await verifyProductizationJwt(presented, auth.jwt, principals);
+    } catch (error) {
+      throw new HttpError(401, error instanceof Error ? error.message : "Invalid JWT");
+    }
+  }
   throw new HttpError(401, "Invalid bearer token");
 }
 
@@ -978,18 +1006,20 @@ async function assertSessionAccess(host: AgentHost, id: ReturnType<typeof sessio
   if (projection === undefined || projection.ownership?.tenantId !== identity.tenantId) throw new HttpError(404, "session not found");
 }
 
-function productizationCapability(base: ProductizationCapability, policy: ProductizationServerOptions | undefined): ProductizationCapability {
+function productizationCapability(base: ProductizationCapability, policy: ProductizationServerOptions | undefined, principals: PrincipalBackend | undefined): ProductizationCapability {
   const auth = policy?.auth;
   if (auth === undefined && policy?.quota === undefined) return base;
-  const authStatus = auth === undefined ? base.auth.status : auth.tokens.length === 0 && auth.required === true ? "unavailable" : "configured";
-  const authEnabled = auth?.required === true && auth.tokens.length > 0;
+  const jwtConfigured = auth?.jwt !== undefined && principals !== undefined && auth.jwt.keys.length > 0;
+  const authStatus = auth === undefined ? base.auth.status : jwtConfigured || auth.tokens.length > 0 ? "configured" : auth.required === true ? "unavailable" : base.auth.status;
+  const authEnabled = auth?.required === true && (auth.tokens.length > 0 || jwtConfigured);
   const quotaEnabled = authEnabled && base.quota.status === "configured";
   return {
     ...base,
     enabled: authEnabled || quotaEnabled,
     status: authEnabled ? "configured" : base.status,
     reason: authEnabled ? "Bearer authentication and durable tenant-scoped Session ownership are enabled for this host." : base.reason,
-    auth: { status: authStatus, mode: auth === undefined || auth.tokens.length === 0 ? "disabled" : "bearer", required: auth?.required === true },
+    auth: { status: authStatus, mode: auth?.jwt === undefined ? (auth === undefined || auth.tokens.length === 0 ? "disabled" : "bearer") : "jwt", required: auth?.required === true },
+    multiUser: auth?.jwt === undefined ? base.multiUser : { status: principals === undefined ? "unavailable" : "configured", principalCatalog: "external" },
     tenantIsolation: authEnabled ? { status: "configured", sessionOwnership: "durable" } : base.tenantIsolation,
     quota: quotaEnabled ? base.quota : policy?.quota === undefined ? base.quota : { status: "deferred", enforcement: "disabled" },
   };
@@ -1012,6 +1042,10 @@ function publicModelRoute(route: ModelRouteRecord): Record<string, unknown> {
     ...(route.credentialRef === undefined ? {} : { credentialRef: route.credentialRef }),
     updatedAt: route.updatedAt,
   };
+}
+
+function publicPrincipal(principal: import("@code-review-agent/contracts").PrincipalRecord): Record<string, unknown> {
+  return { id: principal.id, subject: principal.subject, tenantId: principal.tenantId, ...(principal.displayName === undefined ? {} : { displayName: principal.displayName }), roles: principal.roles, status: principal.status, createdAt: principal.createdAt, updatedAt: principal.updatedAt };
 }
 
 function serveIndex(response: ServerResponse, webRoot: string): void {

@@ -459,6 +459,36 @@ pnpm typecheck
 git diff --check
 ```
 
+### 9.4 当前执行切片：外部 IdP/JWT 与 durable principal catalog
+
+该切片补齐现有静态 bearer fixture 与完整 remote auth 边界之间的缺口。DSH 对照采用 `packages/client/connection/src/client/connection.ts` 的连接身份边界和 `packages/guard` 的 host-owned policy boundary；本项目不复制 DSH 代码，只实现独立 JWT verifier、JWKS refresh hook 和 principal catalog。
+
+交付物：
+
+- `packages/contracts` 提供 `PrincipalRecord` / `PrincipalBackend`，记录 subject、tenant、roles、status 和时间；secret/token 不进入 catalog；
+- SQLite schema v7 持久化 principal catalog，支持 v5/v6 旧库迁移、reopen、按 tenant 查询和 subject lookup；InMemory 与 SQLite 共享 contract；
+- API 支持 `HS256`/`RS256` JWT，验证签名、`kid`、issuer、audience、`exp`、`nbf` 和 tenant claim；JWKS refresh 由 host 提供，便于 key rotation 且不隐含网络权限；
+- verified subject 必须在 active principal catalog 中存在，并映射到唯一 tenant/principal ownership；disabled、unknown、tenant mismatch 和缺少 catalog 均 fail closed；
+- `GET /v1/principals` 与 tenant-scoped detail 只返回 principal metadata；静态 bearer 保留为受控 local/test adapter，JWT capability 明确显示 `auth.mode=jwt`、`principalCatalog=external`；
+- auth、catalog、key rotation、API 401、跨租户过滤和 SQLite recovery 有独立 unit/API/storage evidence。
+
+契约与安全边界：
+
+- JWT/principal 是 control-plane identity contract，不新增 Session event type；Session ownership 仍由既有 `session/created` 事件和 EventStore 回放承载；
+- JWT claims 不能绕过 principal catalog、tenant ownership、quota、workspace、permission 或 diagnostics boundary；认证失败统一 401，跨租户 catalog 只返回同 tenant 数据；
+- JWKS provider 是显式 host capability，未配置或刷新失败时不会降级为未验签 token；算法仅允许 `HS256`/`RS256`，不接受 `none`；
+- 回滚时停用 JWT adapter/API catalog，保留 schema v7 principal metadata 和既有静态 bearer fixture；旧 schema migration 不删除 Session/EventStore 历史。
+
+验收命令：
+
+```powershell
+pnpm typecheck
+pnpm --filter @code-review-agent/storage test
+pnpm --filter @code-review-agent/api test -- --run src/auth.test.ts src/jwt-server.test.ts
+pnpm test:phase8:operations
+git diff --check
+```
+
 ## 10. 阶段依赖与执行顺序
 
 ```text

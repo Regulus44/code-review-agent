@@ -190,6 +190,27 @@ export interface SessionOwnership {
   readonly tenantId: TenantId;
 }
 
+export type PrincipalStatus = "active" | "disabled";
+
+/** Durable external-identity catalog entry; tokens remain the source of claims. */
+export interface PrincipalRecord {
+  readonly id: PrincipalId;
+  readonly subject: string;
+  readonly tenantId: TenantId;
+  readonly displayName?: string;
+  readonly roles: readonly string[];
+  readonly status: PrincipalStatus;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+/** Host-owned principal catalog used to bind verified IdP subjects to tenants. */
+export interface PrincipalBackend {
+  listPrincipals(tenantId?: string): readonly PrincipalRecord[];
+  getPrincipal(subject: string): PrincipalRecord | undefined;
+  upsertPrincipal(record: PrincipalRecord): PrincipalRecord;
+}
+
 export interface SessionSummary {
   readonly id: SessionId;
   readonly title?: string;
@@ -426,7 +447,7 @@ export interface ProductizationCapability {
   readonly reason: string;
   readonly auth: {
     readonly status: ProductizationFeatureStatus;
-    readonly mode: "disabled" | "bearer";
+    readonly mode: "disabled" | "bearer" | "jwt";
     readonly required: boolean;
   };
   readonly multiUser: {

@@ -53,13 +53,15 @@ import {
   type WorktreeProjection,
   type WorktreeStatus,
   type SessionOwnership,
+  type PrincipalBackend,
+  type PrincipalRecord,
 } from "@code-review-agent/contracts";
 import { DatabaseSync } from "node:sqlite";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 
-const SCHEMA_VERSION = 6 as const;
+const SCHEMA_VERSION = 7 as const;
 
 export const SQLITE_SCHEMA_VERSION = SCHEMA_VERSION;
 
@@ -742,10 +744,11 @@ function readChildMetadata(row: SqliteRow): ChildSessionMetadata | undefined {
 }
 
 /** Deterministic in-memory store retained for unit tests and local fixtures. */
-export class InMemoryEventStore implements SessionEventStore, ModelRouteBackend, CredentialBackend {
+export class InMemoryEventStore implements SessionEventStore, ModelRouteBackend, CredentialBackend, PrincipalBackend {
   private readonly sessions = new Map<SessionId, MemorySession>();
   private readonly modelRoutes = new Map<string, ModelRouteRecord>();
   private readonly credentials = new Map<string, CredentialRecord>();
+  private readonly principals = new Map<string, PrincipalRecord>();
 
   async createSession(workspaceRoot: string, permissionPreset: PermissionPreset = "ask-on-write", idOrMetadata?: SessionId | ChildSessionMetadata, metadata?: ChildSessionMetadata, ownership?: SessionOwnership): Promise<SessionId> {
     const args = resolveCreateSessionArgs(idOrMetadata, metadata);
@@ -894,6 +897,22 @@ export class InMemoryEventStore implements SessionEventStore, ModelRouteBackend,
   deleteCredential(tenantId: string, id: string): boolean {
     return this.credentials.delete(credentialKey(tenantId, id));
   }
+
+  listPrincipals(tenantId?: string): readonly PrincipalRecord[] {
+    return [...this.principals.values()]
+      .filter((record) => tenantId === undefined || record.tenantId === tenantId)
+      .sort((left, right) => left.subject.localeCompare(right.subject));
+  }
+
+  getPrincipal(subject: string): PrincipalRecord | undefined {
+    return this.principals.get(subject);
+  }
+
+  upsertPrincipal(record: PrincipalRecord): PrincipalRecord {
+    validatePrincipal(record);
+    this.principals.set(record.subject, record);
+    return record;
+  }
 }
 
 interface SqliteRow {
@@ -911,6 +930,7 @@ export interface SqliteDatabaseInspection {
   readonly sessions: number;
   readonly events: number;
   readonly credentials: number;
+  readonly principals: number;
   readonly sha256: string;
 }
 
@@ -935,7 +955,7 @@ export interface SqliteRollbackResult {
 }
 
 /** Durable EventStore using the Node.js built-in SQLite driver. */
-export class SqliteEventStore implements SessionEventStore, McpConfigBackend, ModelRouteBackend, CredentialBackend {
+export class SqliteEventStore implements SessionEventStore, McpConfigBackend, ModelRouteBackend, CredentialBackend, PrincipalBackend {
   readonly databasePath: string;
   private readonly db: DatabaseSync;
   private readonly listeners = new Map<SessionId, Set<EventListener>>();
@@ -1230,6 +1250,37 @@ export class SqliteEventStore implements SessionEventStore, McpConfigBackend, Mo
     return Number(result.changes ?? 0) > 0;
   }
 
+  listPrincipals(tenantId?: string): readonly PrincipalRecord[] {
+    const rows = tenantId === undefined
+      ? this.db.prepare("SELECT id, subject, tenant_id, display_name, roles_json, status, created_at, updated_at FROM principals ORDER BY subject ASC").all()
+      : this.db.prepare("SELECT id, subject, tenant_id, display_name, roles_json, status, created_at, updated_at FROM principals WHERE tenant_id = ? ORDER BY subject ASC").all(tenantId);
+    return (rows as SqliteRow[]).map(readPrincipal);
+  }
+
+  getPrincipal(subject: string): PrincipalRecord | undefined {
+    const row = this.db.prepare("SELECT id, subject, tenant_id, display_name, roles_json, status, created_at, updated_at FROM principals WHERE subject = ?").get(subject) as SqliteRow | undefined;
+    return row === undefined ? undefined : readPrincipal(row);
+  }
+
+  upsertPrincipal(record: PrincipalRecord): PrincipalRecord {
+    validatePrincipal(record);
+    this.withTransaction(() => {
+      this.db.prepare(`
+        INSERT INTO principals (id, subject, tenant_id, display_name, roles_json, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(subject) DO UPDATE SET
+          id = excluded.id,
+          tenant_id = excluded.tenant_id,
+          display_name = excluded.display_name,
+          roles_json = excluded.roles_json,
+          status = excluded.status,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at
+      `).run(record.id, record.subject, record.tenantId, record.displayName ?? null, JSON.stringify(record.roles), record.status, record.createdAt, record.updatedAt);
+    });
+    return record;
+  }
+
   private appendSync(input: AppendEventInput): AgentEvent {
     const session = this.db.prepare("SELECT id, workspace_root, created_at, updated_at, status, last_sequence FROM sessions WHERE id = ?").get(input.sessionId) as SqliteRow | undefined;
     if (session === undefined) throw new Error(`Unknown session: ${input.sessionId}`);
@@ -1380,6 +1431,22 @@ export class SqliteEventStore implements SessionEventStore, McpConfigBackend, Mo
         `);
         this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(6, now());
       }
+      if (currentVersion < 7) {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS principals (
+            id TEXT PRIMARY KEY,
+            subject TEXT NOT NULL UNIQUE,
+            tenant_id TEXT NOT NULL,
+            display_name TEXT,
+            roles_json TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS principals_tenant_status_idx ON principals(tenant_id, status, subject);
+        `);
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(7, now());
+      }
       this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     });
   }
@@ -1529,6 +1596,21 @@ function readCredential(row: SqliteRow): CredentialRecord {
   };
 }
 
+function readPrincipal(row: SqliteRow): PrincipalRecord {
+  const displayName = row["display_name"];
+  const roles = JSON.parse(String(row["roles_json"]));
+  return {
+    id: brand<string, "PrincipalId">(String(row["id"])),
+    subject: String(row["subject"]),
+    tenantId: brand<string, "TenantId">(String(row["tenant_id"])),
+    ...(displayName === null || displayName === undefined ? {} : { displayName: String(displayName) }),
+    roles: Array.isArray(roles) ? roles.filter((role): role is string => typeof role === "string") : [],
+    status: String(row["status"]) as PrincipalRecord["status"],
+    createdAt: String(row["created_at"]),
+    updatedAt: String(row["updated_at"]),
+  };
+}
+
 function credentialKey(tenantId: string, id: string): string {
   return `${tenantId}\u0000${id}`;
 }
@@ -1538,6 +1620,12 @@ function validateCredential(record: CredentialRecord): void {
   if (record.kind !== "header" && record.kind !== "env" && record.kind !== "oauth" && record.kind !== "custom") throw new Error("credential kind is invalid");
   if (record.status !== "active" && record.status !== "revoked") throw new Error("credential status is invalid");
   if (!Number.isInteger(record.version) || record.version < 1) throw new Error("credential version must be a positive integer");
+}
+
+function validatePrincipal(record: PrincipalRecord): void {
+  if (record.id.trim() === "" || record.subject.trim() === "" || record.tenantId.trim() === "") throw new Error("principal id, subject, and tenantId are required");
+  if (record.status !== "active" && record.status !== "disabled") throw new Error("principal status is invalid");
+  if (record.roles.some((role) => role.trim() === "")) throw new Error("principal roles must be non-empty");
 }
 
 function validateModelRoute(record: ModelRouteRecord): void {
@@ -1600,6 +1688,7 @@ export function inspectSqliteDatabase(databasePath: string): SqliteDatabaseInspe
       sessions: countTable(db, "sessions"),
       events: countTable(db, "events"),
       credentials: countTable(db, "credentials"),
+      principals: countTable(db, "principals"),
       sha256: sha256File(normalized),
     };
   } finally {
