@@ -415,7 +415,7 @@ git diff --check
 契约与安全边界：
 
 - Credential metadata 属于 control-plane 配置事实，不新增 Session event type；任何 model-visible route 仍只通过所属 Session 的 `turn/started` 或恢复 `agent/status` 事件记录实际 route metadata；
-- secret material 不进入 EventStore、SQLite metadata、route、MCP config、SSE、diagnostics、Web projection 或错误消息；当前 host-only material 在进程重启后不可恢复，带有 active reference 但 resolver 缺少 material 时必须 fail closed；外部 secret manager 适配保持后续工作；
+- secret material 不进入 EventStore、SQLite metadata、route、MCP config、SSE、diagnostics、Web projection 或错误消息；`SecretProvider` 已区分 host-only 与 external adapter，provider 缺失或取 secret 失败时必须 fail closed；具体 KMS/Vault/Secrets Manager deployment 仍需 host 注入和现场 smoke；
 - credential ID 以 `(tenantId, id)` 为边界，cross-tenant list/get/resolve/mutate 统一隐藏或失败；删除前检查 model route 与 MCP config 引用，吊销优先于删除；
 - 回滚时停用 credential API/resolver 和 tenant route/MCP wiring，保留 schema v6 metadata 与既有 Session/EventStore 历史；未配置 credential backend 时 mutation 返回配置错误，不退化为不受控的 host-wide secret storage。backup/restore 与 migration rollback 已由 9.3 提供第一切片，完整 upgrade/deployment policy 仍保持后续工作。
 
@@ -440,7 +440,7 @@ git diff --check
 - `packages/storage` 暴露 SQLite schema inspection、consistent backup、restore、legacy migration 和 rollback operation；backup 使用 SQLite 快照，不读取或保存 host-owned secret material；
 - restore 先复制到临时库，再运行现有 schema migration、projection rebuild 和 integrity check；覆盖已有目标时保留 rollback database，失败时不替换原目标；
 - `AgentHost.productizationSettings().operations` 和 API capability 显示 backup/migration 已 available，upgrade 继续 deferred；
-- `scripts/phase8-operations-gate.mjs` 覆盖 schema v6 backup、v5 → v6 restore migration、overwrite rollback、event preservation、integrity check 和 credential redaction；
+- `scripts/phase8-operations-gate.mjs` 覆盖 schema v7 backup、v5 → v7 restore migration、upgrade policy、overwrite rollback、event preservation、integrity check 和 credential redaction；
 - 该切片不提供面向普通用户的公开 restore endpoint；运维操作由受控部署命令/Host owner 执行，避免远程请求直接替换事件库。
 
 契约与安全边界：
@@ -486,6 +486,37 @@ pnpm typecheck
 pnpm --filter @code-review-agent/storage test
 pnpm --filter @code-review-agent/api test -- --run src/auth.test.ts src/jwt-server.test.ts
 pnpm test:phase8:operations
+git diff --check
+```
+
+### 9.5 当前执行切片：external secret manager adapter 与 upgrade/deployment policy
+
+该切片补齐 credential lifecycle 与真实生产运维之间的边界。DSH 只作为 host-owned configuration/deployment boundary 行为参考，采用 `docs/config-catalog.zh.md` 和 `packages/host/webserver/README.md` 的安全绑定语义；本项目不复制 DSH 代码，也不把一个内存 fake 声称为云端 secret manager。
+
+交付物：
+
+- `apps/api/src/credentials.ts` 提供 `SecretProvider`、host-only provider 和 external provider adapter；CredentialVault 的 metadata、route、MCP config、event、SSE、diagnostics 永不保存 secret material；
+- external provider 负责按 `(tenant, credential, version)` 保存、读取、轮换删除 material；credential revoke/remove 会删除对应版本，provider failure 返回明确错误并 fail closed；
+- `docs/phase8-deployment-policy.json` 固定 schema supported range、upgrade-before-backup、migration lock、health/integrity/SSE readiness、retained rollback 和 runtime hardening；
+- `packages/storage` 提供 `assessSqliteUpgrade` / `SQLITE_UPGRADE_POLICY`，`phase8-operations-gate` 将 policy 与 v5 → v7 restore/rollback 联合验证；
+- `scripts/phase8-upgrade-policy-gate.mjs` 与 `pnpm test:phase8:upgrade-policy` 审计 Docker non-root/read-only/no-new-privileges/cap-drop、bounded workspace 和 upgrade capability deferred 状态；
+- 公开 `productization.operations.upgrade` 在真实 deployment smoke 前继续 `deferred`，避免把 schema migration/rollback 误报为已完成的 rolling upgrade。
+
+契约与安全边界：
+
+- SecretProvider 和 upgrade policy 属于 host/deployment contract，不新增 Session event type；EventStore 仍是 Session/Turn/Task 状态唯一事实来源；
+- external adapter 的网络、租户授权、版本和审计由 host 提供；未配置 provider、stale version、读取失败或 rotation failure 不回退到 host-wide secret storage；
+- upgrade 必须先备份并持有 migration lock，完成 health、SQLite integrity 和 SSE replay readiness 后才可标记部署 ready；失败保留 displaced rollback artifact；
+- 回滚时停用 external provider wiring 或 upgrade command，保留 metadata schema、principal/session history 和原始数据库文件。
+
+验收命令：
+
+```powershell
+pnpm typecheck
+pnpm --filter @code-review-agent/api test -- --run src/credentials.test.ts
+pnpm test:phase8:operations
+pnpm test:phase8:upgrade-policy
+pnpm test:phase8:productization
 git diff --check
 ```
 

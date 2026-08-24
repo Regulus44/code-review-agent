@@ -8,6 +8,7 @@ import {
   rollbackSqliteRestore,
   SqliteEventStore,
   inspectSqliteDatabase,
+  assessSqliteUpgrade,
 } from "../packages/storage/dist/index.js";
 
 const root = mkdtempSync(join(tmpdir(), "code-review-agent-phase8-operations-"));
@@ -33,6 +34,8 @@ try {
   legacy.close();
   const legacyInspection = inspectSqliteDatabase(legacyPath);
   assert(legacyInspection.schemaVersion === 5 && legacyInspection.integrity === "ok", "legacy v5 fixture is not a valid migration input");
+  const upgradeAssessment = assessSqliteUpgrade(legacyPath);
+  assert(upgradeAssessment.allowed && upgradeAssessment.requiresBackup && upgradeAssessment.requiresMigrationLock && upgradeAssessment.rollback === "retained-displaced-database", "upgrade policy did not require backup, lock, readiness, and retained rollback");
 
   const restored = restoreSqliteDatabase(legacyPath, restoredPath);
   assert(restored.migrated === true && restored.sourceSchemaVersion === 5 && restored.restoredSchemaVersion === 7, "restore did not migrate the legacy snapshot to schema v7");
@@ -53,7 +56,7 @@ try {
   rolledStore.close();
   assert(existsSync(rolledBack.destinationPath) && rolledBack.displacedPath !== undefined && existsSync(rolledBack.displacedPath), "rollback did not retain the displaced restore target");
 
-  console.log(JSON.stringify({ phase: "8.5", gate: "sqlite-backup-restore-migration-rollback", passed: true, backupSchema: backup.schemaVersion, legacySchema: legacyInspection.schemaVersion, restoredSchema: restored.restoredSchemaVersion, rollback: true, secretRedaction: true }));
+  console.log(JSON.stringify({ phase: "8.5", gate: "sqlite-backup-restore-migration-rollback", passed: true, backupSchema: backup.schemaVersion, legacySchema: legacyInspection.schemaVersion, restoredSchema: restored.restoredSchemaVersion, rollback: true, upgradePolicy: upgradeAssessment.allowed, secretRedaction: true }));
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

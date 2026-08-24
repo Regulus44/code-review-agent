@@ -1,5 +1,31 @@
 # Phase 8 开发日志
 
+## 2026-08-24：8.5 external secret manager adapter 与 upgrade/deployment policy
+
+本次继续属于 Phase 8.5，补齐 credential metadata/reference 与生产 secret/deployment 边界；DSH 仅作为 host-owned configuration/deployment 行为参考，没有复制 DSH 代码或把 fake provider 宣称为云端服务。
+
+### 已完成
+
+- `CredentialVault` 从固定进程 Map 抽象为 `SecretProvider`，提供 host-only 与 external adapter；material 按 tenant/credential/version 存取，rotation、revoke、remove 和 stale reference 均遵循版本边界。
+- API 支持注入 `secretProvider`，external provider 的 capability 显示 `credentials.secretStore=external`；provider 取值或写入失败返回明确错误并 fail closed，公开 metadata、route、MCP config、EventStore、SSE 和 diagnostics 不含 secret material。
+- `packages/storage` 新增 `SQLITE_UPGRADE_POLICY` / `assessSqliteUpgrade`，schema v5–v7 migration range 与 backup、lock、readiness、rollback 要求可执行审计。
+- 新增 `docs/phase8-deployment-policy.json` 和 `scripts/phase8-upgrade-policy-gate.mjs`；升级能力明确保持 `deferred-until-deployment-smoke`，避免将 SQLite migration/rollback 误报为 rolling upgrade 已完成。
+
+### 验证
+
+```text
+pnpm typecheck                         ✓
+pnpm --filter @code-review-agent/api test -- --run src/credentials.test.ts  ✓（3 tests）
+pnpm test:phase8:operations             ✓（schema v7 / upgrade policy）
+pnpm test:phase8:upgrade-policy         ✓
+pnpm test:phase8:productization         ✓
+git diff --check                        ✓
+```
+
+### 边界与剩余工作
+
+external provider 是 host 注入边界，当前 fixture 不连接具体 KMS/Vault/Secrets Manager；真实部署仍需 provider integration、rotation/revoke smoke，以及 IdP/Docker deployment evidence。公开 upgrade capability 继续 deferred。
+
 ## 2026-08-24：8.5 外部 IdP/JWT 与 durable principal catalog
 
 本次继续属于 Phase 8.5，依据计划中的 DSH connection identity boundary 与 host-owned guard policy 行为参考，补齐静态 bearer fixture 与外部身份接入之间的缺口；没有复制 DSH 代码、内部类型或品牌资产。

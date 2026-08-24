@@ -949,6 +949,50 @@ export interface SqliteRestoreResult {
   readonly migrated: boolean;
 }
 
+export interface SqliteUpgradePolicy {
+  readonly minimumSupportedSchema: number;
+  readonly targetSchema: number;
+  readonly backupBeforeUpgrade: true;
+  readonly migrationLock: "required";
+  readonly readiness: "health-and-integrity";
+  readonly rollback: "retained-displaced-database";
+}
+
+export interface SqliteUpgradeAssessment {
+  readonly databasePath: string;
+  readonly sourceSchemaVersion: number;
+  readonly targetSchemaVersion: number;
+  readonly allowed: boolean;
+  readonly requiresBackup: true;
+  readonly requiresMigrationLock: true;
+  readonly rollback: "retained-displaced-database";
+  readonly reason: string;
+}
+
+export const SQLITE_UPGRADE_POLICY: SqliteUpgradePolicy = {
+  minimumSupportedSchema: 5,
+  targetSchema: SCHEMA_VERSION,
+  backupBeforeUpgrade: true,
+  migrationLock: "required",
+  readiness: "health-and-integrity",
+  rollback: "retained-displaced-database",
+};
+
+export function assessSqliteUpgrade(databasePath: string): SqliteUpgradeAssessment {
+  const inspection = inspectSqliteDatabase(databasePath);
+  const allowed = inspection.schemaVersion >= SQLITE_UPGRADE_POLICY.minimumSupportedSchema && inspection.schemaVersion <= SQLITE_UPGRADE_POLICY.targetSchema;
+  return {
+    databasePath: inspection.databasePath,
+    sourceSchemaVersion: inspection.schemaVersion,
+    targetSchemaVersion: SQLITE_UPGRADE_POLICY.targetSchema,
+    allowed,
+    requiresBackup: true,
+    requiresMigrationLock: true,
+    rollback: "retained-displaced-database",
+    reason: allowed ? "Schema is within the supported migration range; backup, migration lock, readiness, and retained rollback are required." : `Schema ${inspection.schemaVersion} is outside the supported migration range ${SQLITE_UPGRADE_POLICY.minimumSupportedSchema}-${SQLITE_UPGRADE_POLICY.targetSchema}.`,
+  };
+}
+
 export interface SqliteRollbackResult {
   readonly destinationPath: string;
   readonly displacedPath?: string;

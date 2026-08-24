@@ -89,6 +89,14 @@
 - `apps/api/src/auth.test.ts`、`jwt-server.test.ts`、Storage principal/reopen test 和 operations gate 已覆盖签名失败、时间窗、JWKS rotation、unknown/disabled principal、tenant mismatch、API 401、catalog filter 和 schema v7 recovery。
 - 本 slice 未改变 Session/Event/Tool/Permission/Workspace event contract；剩余 8.5 缺口为 external secret manager、upgrade/deployment policy，以及将 JWT/JWKS 在真实 IdP/Docker deployment 中做现场 smoke。
 
+## Phase 8.5 external secret manager 与 upgrade/deployment policy slice（implemented，真实部署 smoke 仍 deferred）
+
+- `apps/api/src/credentials.ts` 新增 `SecretProvider`、`HostOwnedSecretProvider` 和 `ExternalSecretProvider`；CredentialVault 通过 `(tenant, credential, version)` 管理 material，rotation/revoke/remove 只操作对应版本，provider failure 明确 fail closed。
+- API `ApiServerOptions.secretProvider` 支持 host 注入 external secret-manager adapter；capability 在 external provider 下报告 `credentials.secretStore=external`，未注入时保持 host-only；现有 API/route/MCP/SSE/redaction contract 不保存 secret material。
+- `packages/storage` 新增 `SQLITE_UPGRADE_POLICY` 与 `assessSqliteUpgrade`，固定 schema v5–v7 支持范围、升级前备份、migration lock、health/integrity/SSE readiness 和 retained rollback artifact。
+- `docs/phase8-deployment-policy.json` 与 `scripts/phase8-upgrade-policy-gate.mjs` 审计 Docker non-root/read-only/no-new-privileges/cap-drop、bounded workspace 和 `upgrade=deferred-until-deployment-smoke`；`phase8-operations-gate` 已将 policy 与 v5 → v7 restore/rollback 联合验证。
+- credential unit、operations、upgrade-policy 和 productization gates 已通过；真实云端 secret manager、IdP/Docker deployment smoke 仍需在目标部署环境执行，因此公开 upgrade capability 继续 `deferred`。
+
 ## Phase 8.3 OS/container isolation 与 deployment evidence slice（implemented，宿主能力依赖）
 
 - `packages/tools/src/code-mode.ts` 新增 `CodeModeIsolationAdapter`，将真正的 OS/container network boundary 与现有 process-policy 分开；`os-required` 在 adapter 缺失或探测失败时保持 `CODE_MODE_OS_ISOLATION_UNAVAILABLE`。

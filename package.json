@@ -28,6 +28,7 @@
     "test:phase8:job-recovery": "pnpm typecheck && pnpm build:web && node scripts/phase8-job-recovery-gate.mjs",
     "test:phase8:job-recovery:matrix": "pnpm typecheck && pnpm build:web && node scripts/phase8-job-recovery-matrix-gate.mjs",
     "test:phase8:operations": "pnpm typecheck && node scripts/phase8-operations-gate.mjs",
+    "test:phase8:upgrade-policy": "pnpm typecheck && pnpm build && node scripts/phase8-upgrade-policy-gate.mjs",
     "test:phase8:productization": "pnpm typecheck && pnpm build:web && node scripts/phase8-productization-gate.mjs",
     "typecheck": "tsc -b",
     "test": "pnpm -r --workspace-concurrency=1 --if-present test",

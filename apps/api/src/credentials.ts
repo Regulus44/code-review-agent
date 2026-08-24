@@ -12,8 +12,51 @@ export interface CredentialInput {
   readonly material: CredentialMaterial;
 }
 
+export interface SecretReference {
+  readonly tenantId: string;
+  readonly credentialId: string;
+  readonly version: number;
+}
+
+export interface SecretProvider {
+  readonly kind: "host-only" | "external";
+  put(reference: SecretReference, material: CredentialMaterial): void;
+  get(reference: SecretReference): CredentialMaterial | undefined;
+  delete(reference: SecretReference): void;
+}
+
+export interface ExternalSecretManager {
+  put(reference: SecretReference, material: CredentialMaterial): void;
+  get(reference: SecretReference): CredentialMaterial | undefined;
+  delete(reference: SecretReference): void;
+}
+
+export class HostOwnedSecretProvider implements SecretProvider {
+  readonly kind = "host-only" as const;
+  private readonly material = new Map<string, CredentialMaterial>();
+
+  put(reference: SecretReference, material: CredentialMaterial): void { this.material.set(secretKey(reference), cloneMaterial(material)); }
+  get(reference: SecretReference): CredentialMaterial | undefined {
+    const material = this.material.get(secretKey(reference));
+    return material === undefined ? undefined : cloneMaterial(material);
+  }
+  delete(reference: SecretReference): void { this.material.delete(secretKey(reference)); }
+}
+
+/** Adapter boundary for a vault such as KMS/Vault/Secrets Manager. */
+export class ExternalSecretProvider implements SecretProvider {
+  readonly kind = "external" as const;
+  constructor(private readonly manager: ExternalSecretManager) {}
+  put(reference: SecretReference, material: CredentialMaterial): void { this.manager.put(reference, cloneMaterial(material)); }
+  get(reference: SecretReference): CredentialMaterial | undefined {
+    const material = this.manager.get(reference);
+    return material === undefined ? undefined : cloneMaterial(material);
+  }
+  delete(reference: SecretReference): void { this.manager.delete(reference); }
+}
+
 export class CredentialLifecycleError extends Error {
-  constructor(readonly code: "CREDENTIAL_BACKEND_NOT_CONFIGURED" | "CREDENTIAL_NOT_FOUND" | "CREDENTIAL_REFERENCE_INVALID" | "CREDENTIAL_IN_USE", message: string) {
+  constructor(readonly code: "CREDENTIAL_BACKEND_NOT_CONFIGURED" | "CREDENTIAL_NOT_FOUND" | "CREDENTIAL_REFERENCE_INVALID" | "CREDENTIAL_IN_USE" | "CREDENTIAL_SECRET_PROVIDER_UNAVAILABLE", message: string) {
     super(message);
     this.name = "CredentialLifecycleError";
   }
@@ -24,9 +67,9 @@ export class CredentialLifecycleError extends Error {
  * material is process-local and missing material always resolves fail-closed.
  */
 export class CredentialVault {
-  private readonly material = new Map<string, CredentialMaterial>();
+  constructor(private readonly backend?: CredentialBackend, private readonly secretProvider: SecretProvider = new HostOwnedSecretProvider()) {}
 
-  constructor(private readonly backend?: CredentialBackend) {}
+  secretStoreKind(): SecretProvider["kind"] { return this.secretProvider.kind; }
 
   list(tenantId: string): readonly CredentialRecord[] {
     return this.requireBackend().listCredentials(tenantId);
@@ -44,8 +87,14 @@ export class CredentialVault {
       createdAt: now,
       updatedAt: now,
     };
-    this.requireBackend().upsertCredential(record);
-    this.material.set(key(tenantId, record.id), cloneMaterial(input.material));
+    const backend = this.requireBackend();
+    try {
+      backend.upsertCredential(record);
+      this.secretProvider.put({ tenantId, credentialId: record.id, version: record.version }, input.material);
+    } catch (error) {
+      backend.deleteCredential(tenantId, record.id);
+      throw new CredentialLifecycleError("CREDENTIAL_SECRET_PROVIDER_UNAVAILABLE", error instanceof Error ? error.message : "Secret provider rejected credential material");
+    }
     return record;
   }
 
@@ -62,8 +111,14 @@ export class CredentialVault {
       version: current.version + 1,
       updatedAt: new Date().toISOString(),
     };
-    const persisted = withoutUndefinedRevokedAt(backend.upsertCredential(next));
-    this.material.set(key(tenantId, id), cloneMaterial(input.material));
+    let persisted: CredentialRecord;
+    try {
+      persisted = withoutUndefinedRevokedAt(backend.upsertCredential(next));
+      this.secretProvider.put({ tenantId, credentialId: id, version: next.version }, input.material);
+      this.secretProvider.delete({ tenantId, credentialId: id, version: current.version });
+    } catch (error) {
+      throw new CredentialLifecycleError("CREDENTIAL_SECRET_PROVIDER_UNAVAILABLE", error instanceof Error ? error.message : "Secret provider rejected credential material");
+    }
     return persisted;
   }
 
@@ -73,14 +128,15 @@ export class CredentialVault {
     if (current === undefined) throw new CredentialLifecycleError("CREDENTIAL_NOT_FOUND", "Credential not found");
     if (current.status === "revoked") return current;
     const persisted = backend.upsertCredential({ ...current, status: "revoked", updatedAt: new Date().toISOString(), revokedAt: new Date().toISOString() });
-    this.material.delete(key(tenantId, id));
+    this.secretProvider.delete({ tenantId, credentialId: id, version: current.version });
     return persisted;
   }
 
   remove(tenantId: string, id: string, referenced: boolean): boolean {
     if (referenced) throw new CredentialLifecycleError("CREDENTIAL_IN_USE", "Credential is still referenced by a model route or MCP server");
+    const current = this.requireBackend().getCredential(tenantId, id);
+    if (current !== undefined) this.secretProvider.delete({ tenantId, credentialId: id, version: current.version });
     const removed = this.requireBackend().deleteCredential(tenantId, id);
-    this.material.delete(key(tenantId, id));
     return removed;
   }
 
@@ -89,8 +145,7 @@ export class CredentialVault {
     const record = this.requireBackend().getCredential(tenantId, reference.id);
     if (record === undefined || record.status !== "active" || record.kind !== reference.kind) return undefined;
     if (reference.version !== undefined && reference.version !== record.version) return undefined;
-    const material = this.material.get(key(tenantId, reference.id));
-    return material === undefined ? undefined : cloneMaterial(material);
+    return this.secretProvider.get({ tenantId, credentialId: reference.id, version: record.version });
   }
 
   reference(record: CredentialRecord): McpCredentialReference {
@@ -116,9 +171,7 @@ export class CredentialVault {
   }
 }
 
-function key(tenantId: string, id: string): string {
-  return `${tenantId}\u0000${id}`;
-}
+function secretKey(reference: SecretReference): string { return `${reference.tenantId}\u0000${reference.credentialId}\u0000${reference.version}`; }
 
 function cloneMaterial(material: CredentialMaterial): CredentialMaterial {
   return {

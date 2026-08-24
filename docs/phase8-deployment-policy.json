@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "schema": {
+    "minimumSupported": 5,
+    "target": 7,
+    "backupBeforeUpgrade": true,
+    "migrationLock": "required",
+    "readiness": ["health", "sqlite-integrity", "sse-replay"],
+    "rollback": "retained-displaced-database"
+  },
+  "runtimeSecurity": {
+    "nonRoot": true,
+    "readOnlyRootFilesystem": true,
+    "noNewPrivileges": true,
+    "dropAllCapabilities": true,
+    "boundedWorkspace": true,
+    "codeModeNetwork": "none-or-unavailable"
+  },
+  "upgradeCapability": "deferred-until-deployment-smoke"
+}

@@ -13,7 +13,7 @@ import { McpConnectionManager, type McpServerConfig } from "@code-review-agent/m
 import type { CodeModeSandbox, PermissionPreset } from "@code-review-agent/tools";
 import { artifactAccessResponse, inspectArtifact, isAvailableArtifact, type ArtifactAccess } from "./artifacts.js";
 import { attachmentCapability, AttachmentInputError, stageAttachment, type AttachmentPolicy } from "./attachments.js";
-import { CredentialLifecycleError, CredentialVault, type CredentialInput, type CredentialMaterial } from "./credentials.js";
+import { CredentialLifecycleError, CredentialVault, type CredentialInput, type CredentialMaterial, type SecretProvider } from "./credentials.js";
 import { verifyProductizationJwt, type ProductizationJwtOptions } from "./auth.js";
 
 export interface ModelSelection {
@@ -58,6 +58,8 @@ export interface ApiServerOptions {
   readonly principalBackend?: PrincipalBackend;
   /** Test/deployment hook for a host-owned credential vault. */
   readonly credentials?: CredentialVault;
+  /** Explicit external secret-manager adapter; absent means host-only memory. */
+  readonly secretProvider?: SecretProvider;
   /** Test/deployment hook for bounded provider catalog recovery fixtures. */
   readonly modelCatalogFailures?: number;
   readonly permissionPreset?: PermissionPreset;
@@ -78,7 +80,7 @@ export interface ApiServerOptions {
 export function createApiServer(options: ApiServerOptions = {}): Server {
   const ownsStore = options.store === undefined && options.host === undefined;
   const store = options.store ?? (options.host === undefined ? new SqliteEventStore({ databasePath: options.databasePath ?? defaultDatabasePath() }) : undefined);
-  const credentials = options.credentials ?? new CredentialVault(options.credentialBackend ?? credentialBackendFrom(store));
+  const credentials = options.credentials ?? new CredentialVault(options.credentialBackend ?? credentialBackendFrom(store), options.secretProvider);
   const principals = options.principalBackend ?? principalBackendFrom(store);
   const subagentRuntime = options.subagentRuntime ?? new SubagentRuntime({ store: store as SessionEventStore });
   const host = options.host ?? new AgentHost({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), ...(options.fallbackModels === undefined ? {} : { fallbackModels: options.fallbackModels }), ...(options.permissionPreset === undefined ? {} : { permissionPreset: options.permissionPreset }), ...(options.contextBudget === undefined ? {} : { contextBudget: options.contextBudget }), ...(options.codeMode === undefined ? {} : { codeMode: options.codeMode }), ...(options.productization?.quota === undefined ? {} : { quota: options.productization.quota }), ...(store instanceof SqliteEventStore ? { operations: { backup: "available", migration: "available", upgrade: "deferred" } } : {}), subagentRuntime });
@@ -386,7 +388,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/capabilities") {
-      sendJson(response, 200, { attachments: currentAttachmentCapability(attachmentPolicy, modelRuntime, identity?.tenantId), context: host.contextSettings(), codeMode: host.codeModeSettings(), lsp: host.lspSettings(), plugins: host.pluginsSettings(), productization: productizationCapability(host.productizationSettings(identity?.tenantId), productization, principals) });
+        sendJson(response, 200, { attachments: currentAttachmentCapability(attachmentPolicy, modelRuntime, identity?.tenantId), context: host.contextSettings(), codeMode: host.codeModeSettings(), lsp: host.lspSettings(), plugins: host.pluginsSettings(), productization: productizationCapability(host.productizationSettings(identity?.tenantId), productization, principals, credentials) });
       return;
     }
     if (request.method === "GET" && (url.pathname === "/v1/principals" || url.pathname.startsWith("/v1/principals/"))) {
@@ -879,7 +881,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     throw new HttpError(404, "not found");
   } catch (error) {
     const code = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : "";
-    const status = error instanceof HttpError ? error.status : code === "INVALID_TOOL_INPUT" ? 400 : code === "TOOL_NOT_FOUND" || code === "WORKSPACE_NOT_FOUND" || code === "MCP_SERVER_NOT_FOUND" || code === "CREDENTIAL_NOT_FOUND" ? 404 : code === "TOOL_DISABLED" ? 409 : code === "MODEL_CONFIGURATION_ERROR" || code === "CREDENTIAL_REFERENCE_INVALID" ? 400 : code === "SESSION_QUOTA_EXCEEDED" || code === "TURN_QUOTA_EXCEEDED" ? 429 : code === "WORKSPACE_ORDER_INVALID" ? 400 : code === "MCP_TENANT_SCOPE_CONFLICT" || code === "COMMAND_CONFLICT" || code === "WORKTREE_DIRTY" || code === "WORKTREE_INVALID" || code === "WORKTREE_EXISTS" || code === "CREDENTIAL_BACKEND_NOT_CONFIGURED" || code === "CREDENTIAL_IN_USE" ? 409 : 500;
+    const status = error instanceof HttpError ? error.status : code === "INVALID_TOOL_INPUT" ? 400 : code === "TOOL_NOT_FOUND" || code === "WORKSPACE_NOT_FOUND" || code === "MCP_SERVER_NOT_FOUND" || code === "CREDENTIAL_NOT_FOUND" ? 404 : code === "TOOL_DISABLED" ? 409 : code === "MODEL_CONFIGURATION_ERROR" || code === "CREDENTIAL_REFERENCE_INVALID" ? 400 : code === "SESSION_QUOTA_EXCEEDED" || code === "TURN_QUOTA_EXCEEDED" ? 429 : code === "WORKSPACE_ORDER_INVALID" ? 400 : code === "MCP_TENANT_SCOPE_CONFLICT" || code === "COMMAND_CONFLICT" || code === "WORKTREE_DIRTY" || code === "WORKTREE_INVALID" || code === "WORKTREE_EXISTS" || code === "CREDENTIAL_BACKEND_NOT_CONFIGURED" || code === "CREDENTIAL_IN_USE" ? 409 : code === "CREDENTIAL_SECRET_PROVIDER_UNAVAILABLE" ? 503 : 500;
     const message = error instanceof Error ? error.message : String(error);
     if (!response.headersSent) {
       if (status === 401) response.setHeader("www-authenticate", "Bearer");
@@ -1006,9 +1008,9 @@ async function assertSessionAccess(host: AgentHost, id: ReturnType<typeof sessio
   if (projection === undefined || projection.ownership?.tenantId !== identity.tenantId) throw new HttpError(404, "session not found");
 }
 
-function productizationCapability(base: ProductizationCapability, policy: ProductizationServerOptions | undefined, principals: PrincipalBackend | undefined): ProductizationCapability {
+function productizationCapability(base: ProductizationCapability, policy: ProductizationServerOptions | undefined, principals: PrincipalBackend | undefined, credentials: CredentialVault): ProductizationCapability {
   const auth = policy?.auth;
-  if (auth === undefined && policy?.quota === undefined) return base;
+  if (auth === undefined && policy?.quota === undefined && credentials.secretStoreKind() === "host-only") return base;
   const jwtConfigured = auth?.jwt !== undefined && principals !== undefined && auth.jwt.keys.length > 0;
   const authStatus = auth === undefined ? base.auth.status : jwtConfigured || auth.tokens.length > 0 ? "configured" : auth.required === true ? "unavailable" : base.auth.status;
   const authEnabled = auth?.required === true && (auth.tokens.length > 0 || jwtConfigured);
@@ -1020,6 +1022,7 @@ function productizationCapability(base: ProductizationCapability, policy: Produc
     reason: authEnabled ? "Bearer authentication and durable tenant-scoped Session ownership are enabled for this host." : base.reason,
     auth: { status: authStatus, mode: auth?.jwt === undefined ? (auth === undefined || auth.tokens.length === 0 ? "disabled" : "bearer") : "jwt", required: auth?.required === true },
     multiUser: auth?.jwt === undefined ? base.multiUser : { status: principals === undefined ? "unavailable" : "configured", principalCatalog: "external" },
+    credentials: { ...base.credentials, status: credentials.secretStoreKind() === "external" ? "configured" : base.credentials.status, secretStore: credentials.secretStoreKind(), redaction: "required" },
     tenantIsolation: authEnabled ? { status: "configured", sessionOwnership: "durable" } : base.tenantIsolation,
     quota: quotaEnabled ? base.quota : policy?.quota === undefined ? base.quota : { status: "deferred", enforcement: "disabled" },
   };
