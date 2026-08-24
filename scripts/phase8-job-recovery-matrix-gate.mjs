@@ -48,6 +48,17 @@ async function request(baseUrl, pathname, init = {}, expected = 200) {
   return body;
 }
 
+async function waitFor(label, read, predicate, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  let last;
+  while (Date.now() < deadline) {
+    last = await read();
+    if (predicate(last)) return last;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for ${label}: ${JSON.stringify(last)}`);
+}
+
 async function readSse(baseUrl, pathname, stopWhen) {
   const controller = new AbortController();
   const response = await fetch(`${baseUrl}${pathname}`, { headers: { accept: "text/event-stream", "last-event-id": "0" }, signal: controller.signal });
@@ -67,6 +78,21 @@ async function readSse(baseUrl, pathname, stopWhen) {
     await reader.cancel().catch(() => undefined);
   }
   return text;
+}
+
+function parseSse(text) {
+  return text.split(/\n\n/gu).flatMap((block) => {
+    const id = block.match(/^id: (\d+)$/mu)?.[1];
+    const type = block.match(/^event: ([^\n]+)$/mu)?.[1];
+    const data = block.match(/^data: (.+)$/mu)?.[1];
+    if (id === undefined || type === undefined || data === undefined) return [];
+    try {
+      const event = JSON.parse(data);
+      return [{ id: Number(id), type, event }];
+    } catch {
+      return [];
+    }
+  });
 }
 
 let seed;
@@ -113,7 +139,59 @@ try {
   assert(secondProjection.status === "interrupted", "second reopen changed interrupted session status");
   assert(secondEvents.length === reopenedEvents.length && secondEvents.at(-1)?.sequence === lastSequence, "second reopen changed event sequence");
   assert(secondJobs.jobs.filter((job) => job.status === "orphaned").length === 1, "second reopen duplicated orphaned job projection");
-  console.log(JSON.stringify({ phase: "8.4", gate: "job-recovery-restart-matrix", passed: true, scenarios: ["seed", "reopen", "reopen-again", "sse-replay", "tail-cursor", "export-diagnostics"], events: secondEvents.length, jobs: secondJobs.jobs.length }));
+  await stopFixture(reopenAgain);
+  reopenAgain = undefined;
+
+  let live;
+  try {
+    live = await startFixture({ PHASE8_JOB_RECOVERY_MODE: "live" });
+    const liveSessionPath = `/v1/sessions/${encodeURIComponent(live.sessionId)}`;
+    const liveJobIds = Array.isArray(live.liveJobIds) ? live.liveJobIds : [];
+    assert(liveJobIds.length === 3, "live fixture did not start three concurrent jobs");
+    const liveShell = await request(live.baseUrl, "/");
+    const liveBrowser = await request(live.baseUrl, "/web/browser.js");
+    assert(liveShell.includes("Terminal & long-running jobs") && liveBrowser.includes("presentRuntimeDiagnostics") && liveBrowser.includes("cancelJob"), "live recovery fixture is missing the Web Job Center surface");
+
+    const initial = await waitFor("concurrent live jobs", () => request(live.baseUrl, `${liveSessionPath}/jobs`), (body) => liveJobIds.every((jobId) => body.jobs.some((job) => job.jobId === jobId && job.status === "running")));
+    assert(initial.jobs.filter((job) => liveJobIds.includes(job.jobId) && job.status === "running").length === 3, "live fixture did not expose all concurrent jobs as running");
+
+    const firstSseText = await readSse(live.baseUrl, `${liveSessionPath}/events?after_sequence=0`, (text) => {
+      const events = parseSse(text);
+      return liveJobIds.every((jobId) => events.some((item) => item.type === "job/started" && item.event.payload?.jobId === jobId))
+        && liveJobIds.every((jobId) => events.some((item) => item.type === "job/output" && item.event.payload?.jobId === jobId));
+    });
+    const firstSseEvents = parseSse(firstSseText);
+    assert(new Set(firstSseEvents.map((item) => item.id)).size === firstSseEvents.length, "initial live SSE replay duplicated event sequences");
+    const firstEndedId = firstSseEvents.find((item) => item.type === "job/ended")?.id ?? Number.MAX_SAFE_INTEGER;
+    const startedBeforeFirstEnd = new Set(firstSseEvents.filter((item) => item.type === "job/started" && item.id < firstEndedId).map((item) => item.event.payload?.jobId)).size;
+    assert(startedBeforeFirstEnd === 3, "live SSE did not prove concurrent job starts before the first terminal event");
+    const firstTail = Math.max(...firstSseEvents.map((item) => item.id));
+    assert(Number.isInteger(firstTail) && firstTail > 0, "live SSE disconnect did not produce a usable tail cursor");
+
+    const cancelled = await request(live.baseUrl, `${liveSessionPath}/jobs/${encodeURIComponent(liveJobIds[0])}/cancel`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "phase8-live-cancel" }, body: "{}" });
+    assert(cancelled.ok === true, "live concurrent cancel action failed");
+
+    const secondSseText = await readSse(live.baseUrl, `${liveSessionPath}/events?after_sequence=${firstTail}`, (text) => {
+      const events = parseSse(text);
+      return liveJobIds.every((jobId) => events.some((item) => item.type === "job/ended" && item.event.payload?.jobId === jobId));
+    });
+    const secondSseEvents = parseSse(secondSseText);
+    assert(secondSseEvents.length > 0 && secondSseEvents.every((item) => item.id > firstTail), "reconnected SSE replayed an old event at or before the tail cursor");
+    assert(new Set(secondSseEvents.map((item) => item.id)).size === secondSseEvents.length, "reconnected SSE duplicated event sequences");
+
+    const finalLiveJobs = await waitFor("concurrent live job settlement", () => request(live.baseUrl, `${liveSessionPath}/jobs`), (body) => liveJobIds.every((jobId) => body.jobs.some((job) => job.jobId === jobId && job.status !== "running")));
+    const finalById = new Map(finalLiveJobs.jobs.filter((job) => liveJobIds.includes(job.jobId)).map((job) => [job.jobId, job]));
+    assert(finalById.get(liveJobIds[0])?.status === "cancelled", "cancelled live job did not settle as cancelled");
+    assert(liveJobIds.slice(1).every((jobId) => finalById.get(jobId)?.status === "completed"), "non-cancelled concurrent jobs did not complete");
+    const liveEvents = await request(live.baseUrl, `${liveSessionPath}/events?format=json`);
+    assert(liveEvents.length === new Set(liveEvents.map((event) => event.sequence)).size, "live recovery event store contains duplicate sequences");
+    await stopFixture(live);
+    live = undefined;
+  } finally {
+    if (live !== undefined) await stopFixture(live);
+  }
+
+  console.log(JSON.stringify({ phase: "8.4", gate: "job-recovery-restart-and-live-concurrency-matrix", passed: true, scenarios: ["seed", "reopen", "reopen-again", "sse-replay", "tail-cursor", "export-diagnostics", "live-concurrency", "live-cancel", "live-sse-reconnect"], events: secondEvents.length, jobs: secondJobs.jobs.length }));
 } finally {
   for (const child of [...children]) await stopFixture({ child });
 }

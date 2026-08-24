@@ -249,6 +249,30 @@ git diff --check
 
 验收：重试、取消、幂等、进程重启、断线、deadline、fork/export 和敏感信息审计通过。
 
+### 8.4.1 当前执行切片：长任务与并发 Web recovery matrix
+
+该切片补齐已有 Job Center recovery slice 与完整 8.4 退出条件之间的 browser evidence gap。DSH 对照采用 `packages/client/connection/src/client/connection.ts` 的 generation/reconnect 语义、`packages/client/runtime/src/client/sessions/session.ts` 的 history-baseline + live-frame stitching，以及 `packages/client/ui-jobs/src/client/JobListAction.tsx` 的 job action/replay 边界。本项目继续使用 REST + SSE 和本地 typed Web bundle，不复制 DSH 代码或内部类型。
+
+交付物：
+
+- recovery fixture 增加真实并发长任务场景，使用现有 AgentHost/JobManager/SQLite/API 路径启动三个 live jobs，并保留每个 job 的 durable ID；
+- matrix gate 同时验证 Job Center shell/browser surface、多个 job 的交错 started/output、取消一个 job 与其余 job 正常完成；
+- 首次 SSE 连接中断后，以实际 tail sequence 重新连接，验证只接收后续 `job/ended` 事件、没有重复 sequence，并通过公开 `/jobs` 与 EventStore replay 校验最终状态；
+- 既有 seed → reopen → reopen-again、orphaned/completed、export/diagnostics 和 tail cursor 断言继续作为同一矩阵的基础场景。
+
+契约与安全边界：
+
+- 不新增事件类型、API endpoint 或 Web 事实来源；fixture 只消费现有 Job/SSE/Session projection contract，gate 失败不能被解释为运行时成功；
+- job output 仍受现有 bounded event/spill/redaction 规则约束，断线恢复只允许按 sequence 重放，不重新执行 job；
+- 回滚时移除 live matrix fixture/gate 扩展即可，既有 Job recovery gate 和运行时持久化保持不变。
+
+验收命令：
+
+```powershell
+pnpm test:phase8:job-recovery:matrix
+git diff --check
+```
+
 ## 9. Phase 8.5：产品化
 
 交付物：

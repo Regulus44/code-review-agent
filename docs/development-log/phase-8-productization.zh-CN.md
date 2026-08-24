@@ -1,5 +1,39 @@
 # Phase 8 开发日志
 
+## 2026-08-24：8.4 长任务与并发 Web recovery matrix
+
+本次工作继续属于 Phase 8.4，补齐已有 Job Center restart/replay slice 与更完整 Web recovery matrix 之间的证据缺口。DSH 参考 `packages/client/connection/src/client/connection.ts` 的 generation/reconnect、`packages/client/runtime/src/client/sessions/session.ts` 的 history-baseline + live-frame stitching，以及 `packages/client/ui-jobs/src/client/JobListAction.tsx` 的 job action 边界；本项目没有复制 DSH 代码、内部类型或品牌资产，A2A 保持 `deferred`。
+
+### 已完成
+
+- `scripts/phase8-job-recovery-fixture-server.mjs` 增加 `live` 模式，使用真实 AgentHost/JobManager/SQLite 路径启动三个并发长任务，并向 gate 暴露稳定的 job IDs。
+- `scripts/phase8-job-recovery-matrix-gate.mjs` 保留 seed → reopen → reopen-again 基线，同时增加 live concurrency、交错 job output、单 job cancel、其余 job completion 和 SSE tail reconnect 场景。
+- 首次 SSE 连接以实际 sequence 断开，重连后只消费 `after_sequence` 之后的 terminal events；gate 验证重复 sequence、跨 job 状态泄露和最终 `/jobs` projection 均不存在。
+- Web shell 与 typed browser bundle 继续从真实 fixture 校验 Job Center recovery surface；没有为“浏览器成功”伪造未落盘的 UI 状态。
+
+### 契约与回滚边界
+
+- 本次没有新增 Event、Tool、Task、Permission 或 HTTP contract；只增加使用现有公开 contract 的真实 recovery fixture 与 gate。
+- Job output 继续经过现有 bounded event/spill/redaction 管线；SSE 断线只按 sequence replay，不重新执行 job。
+- 回滚时删除 `live` fixture 分支和 matrix 扩展即可，既有 API restart、orphaned recovery 和 Job Center action gate 保持有效。
+
+### 验证
+
+```text
+pnpm test:phase8:job-recovery             ✓
+pnpm test:phase8:jobs                     ✓
+pnpm test:phase8:job-recovery:matrix      ✓
+pnpm test:phase8:reliability               ✓
+pnpm test:phase8:parity                    ✓
+pnpm test:phase8:productization            ✓
+pnpm test                                  ✓ (all workspace tests)
+git diff --check                           ✓
+```
+
+### 尚未关闭
+
+8.4 仍需更广泛的真实 graphical browser matrix；8.3 OS-level isolation/deployment evidence、外部 IdP/JWT、完整 principal catalog、外部 secret manager、backup/restore、migration rollback 和 upgrade/deployment policy 继续延期。
+
 ## 2026-08-24：8.5 tenant-scoped credential reference lifecycle
 
 本次工作继续属于 Phase 8.5，承接 provider/model routing，补齐 credential reference 的 host-owned 生命周期。DSH 只作为职责和行为参考：`packages/client/ui-model-selection` 的 Host-owned model selection、selection failure 语义，以及 `packages/sdk/client` 的 provider/model handshake/retry 边界；没有复制 DSH 代码、内部类型或品牌资产。A2A 保持 `deferred`。

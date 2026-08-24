@@ -22,6 +22,7 @@ await mkdir(workspaceRoot, { recursive: true });
 const store = new SqliteEventStore({ databasePath });
 const host = new AgentHost({ store });
 let sessionId = process.env.PHASE8_JOB_RECOVERY_SESSION;
+let liveJobIds = [];
 if (mode === "seed") {
   const session = await host.createSession(workspaceRoot, "danger-full-access");
   sessionId = session.id;
@@ -36,6 +37,31 @@ if (mode === "seed") {
   await store.append({ sessionId: session.id, type: "job/ended", payload: { jobId: "job_completed_fixture", status: "completed", command: "phase8 completed job", cwd: workspaceRoot, workspaceRoot, endedAt, exitCode: 0, totalBytes: 2, attempt: 1, maxAttempts: 1, retryable: false, spillPath: ".agent-artifacts/jobs/job_completed_fixture.log" } });
   await store.append({ sessionId: session.id, type: "terminal/session", payload: { terminalId: "terminal_interrupted_fixture", status: "interrupted", action: "host_restart", command: "phase8 terminal", cwd: workspaceRoot, workspaceRoot, bufferedBytes: 18 } });
 }
+if (mode === "live") {
+  const session = await host.createSession(workspaceRoot, "danger-full-access");
+  sessionId = session.id;
+  await store.append({ sessionId: session.id, type: "user/message", payload: { content: "Phase 8 concurrent live recovery fixture" } });
+  const commands = [
+    "$items=1..36; foreach ($item in $items) { Write-Output ('matrix-alpha-' + $item); Start-Sleep -Milliseconds 120 }",
+    "$items=1..36; foreach ($item in $items) { Write-Output ('matrix-beta-' + $item); Start-Sleep -Milliseconds 120 }",
+    "$items=1..36; foreach ($item in $items) { Write-Output ('matrix-gamma-' + $item); Start-Sleep -Milliseconds 120 }",
+  ];
+  const started = await Promise.all(commands.map((command, index) => host.executeTool(
+    session.id,
+    "pwsh",
+    { command, description: `Phase 8 concurrent live job ${index + 1}`, run_in_background: true },
+    undefined,
+    `phase8-live-job-${index + 1}`,
+    undefined,
+    "system",
+  )));
+  liveJobIds = started.map((result, index) => {
+    const output = result.result?.output;
+    const jobId = typeof output === "object" && output !== null && typeof output.jobId === "string" ? output.jobId : undefined;
+    if (jobId === undefined) throw new Error(`Live recovery fixture job ${index + 1} did not return a durable job id: ${JSON.stringify(result)}`);
+    return jobId;
+  });
+}
 if (typeof sessionId !== "string" || sessionId.length === 0) throw new Error("Phase 8 job recovery fixture is missing a session id");
 
 const webRoot = process.env.PHASE8_WEB_ROOT;
@@ -44,13 +70,13 @@ await new Promise((resolve) => server.listen(Number(process.env.PHASE8_JOB_RECOV
 const address = server.address();
 if (address === null || typeof address === "string") throw new Error("Phase 8 job recovery fixture server did not bind");
 const baseUrl = `http://127.0.0.1:${address.port}`;
-console.log(JSON.stringify({ mode, baseUrl, root, databasePath, workspaceRoot, sessionId }));
+console.log(JSON.stringify({ mode, baseUrl, root, databasePath, workspaceRoot, sessionId, liveJobIds }));
 
 async function cleanup() {
   await new Promise((resolve) => server.close(() => resolve()));
   await host.shutdown().catch(() => undefined);
   store.close();
-  if (mode === "reopen") await rm(root, { recursive: true, force: true }).catch(() => undefined);
+  if (mode === "reopen" || mode === "live") await rm(root, { recursive: true, force: true }).catch(() => undefined);
 }
 process.once("SIGINT", () => { void cleanup().finally(() => process.exit(0)); });
 process.once("SIGTERM", () => { void cleanup().finally(() => process.exit(0)); });
