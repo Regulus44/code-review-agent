@@ -278,7 +278,7 @@ git diff --check
 
 - 不新增独立 model route event type；ModelRouteBackend 是配置事实来源，实际使用的 route 必须进入所属 Session 的 `turn/started` 或恢复 `agent/status` 事件；
 - route mutation 先 durable upsert，再更新 Runtime 内存选择；没有 durable backend 或 selector 时 fail closed；
-- credential reference 生命周期、外部 IdP/JWT、完整 principal catalog、backup/restore、migration rollback 和 upgrade/deployment policy 保持后续工作；
+- credential reference 生命周期已由后续 9.2 切片补齐；外部 IdP/JWT、完整 principal catalog、backup/restore、migration rollback 和 upgrade/deployment policy 保持后续工作；
 - 回滚时删除 tenant routing backend/selector 配置即可回到 host-local `/v1/models`，schema v5 保留向后兼容迁移，不删除既有 Session/EventStore 历史。
 
 验收命令：
@@ -288,6 +288,38 @@ pnpm typecheck
 pnpm --filter @code-review-agent/runtime test
 pnpm --filter @code-review-agent/storage test
 pnpm --filter @code-review-agent/api test
+pnpm test:phase8:productization
+git diff --check
+```
+
+### 9.2 当前执行切片：tenant-scoped credential reference lifecycle
+
+该切片继续属于 Phase 8.5，补齐 provider/model route 与 MCP config 已经依赖的 credential reference 生命周期。DSH 没有被复制为凭据实现；行为参考采用 `packages/client/ui-model-selection` 的 Host-owned selection、选择失败保留可解释状态，以及 `packages/sdk/client` 的 provider handshake/retry 生命周期。本项目的 secret material 仍由 API host-owned resolver 管理。
+
+交付物：
+
+- `packages/contracts` 提供 `CredentialRecord` / `CredentialBackend`，`McpCredentialReference.version` 用于轮换后的 stale reference 检测；记录只保存 tenant、kind、状态、版本和时间，不保存 secret material；
+- SQLite schema v6 增加 tenant-scoped `credentials` metadata table，旧数据库可迁移、reopen 和跨租户查询隔离；InMemory fixture 与 SQLite 共享同一 metadata contract；
+- API 提供认证 tenant-scoped 的 `GET/POST /v1/credentials`、`POST /:id/rotate`、`POST /:id/revoke`、`DELETE /:id`；响应只返回 metadata，删除仍被 route/MCP 引用阻止；
+- host-owned `CredentialVault` 只在进程内保存 material，创建、轮换、吊销、删除、引用校验和 resolver 均 fail closed；轮换递增 version，旧 reference 不再解析；
+- model route 在轮换时重绑到新 reference，吊销时清除 tenant model route 并回退 host-local；MCP live connection 在轮换/吊销前停止，轮换后用新 reference reconnect，缺少 resolver、租户不匹配、吊销或 stale reference 显示 `needs_auth`；
+- Web typed client 增加 credential catalog/mutation 和带 credential reference 的 model selection 方法；productization gate 覆盖 create、redaction、in-use deletion、rotation、revoke、route invalidation 和 cross-tenant scope。
+
+契约与安全边界：
+
+- Credential metadata 属于 control-plane 配置事实，不新增 Session event type；任何 model-visible route 仍只通过所属 Session 的 `turn/started` 或恢复 `agent/status` 事件记录实际 route metadata；
+- secret material 不进入 EventStore、SQLite metadata、route、MCP config、SSE、diagnostics、Web projection 或错误消息；当前 host-only material 在进程重启后不可恢复，带有 active reference 但 resolver 缺少 material 时必须 fail closed；外部 secret manager 适配保持后续工作；
+- credential ID 以 `(tenantId, id)` 为边界，cross-tenant list/get/resolve/mutate 统一隐藏或失败；删除前检查 model route 与 MCP config 引用，吊销优先于删除；
+- 回滚时停用 credential API/resolver 和 tenant route/MCP wiring，保留 schema v6 metadata 与既有 Session/EventStore 历史；未配置 credential backend 时 mutation 返回配置错误，不退化为不受控的 host-wide secret storage。
+
+验收命令：
+
+```powershell
+pnpm typecheck
+pnpm --filter @code-review-agent/storage test
+pnpm --filter @code-review-agent/mcp-client test
+pnpm --filter @code-review-agent/api test
+pnpm --filter @code-review-agent/web test -- --run src/client/api.test.ts
 pnpm test:phase8:productization
 git diff --check
 ```

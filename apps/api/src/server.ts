@@ -6,20 +6,21 @@ import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { createInProcessSubagentProvider, sessionId, AgentHost, turnId, type TenantModelRoute } from "@code-review-agent/runtime";
 import { SqliteEventStore } from "@code-review-agent/storage";
-import { brand, type AgentEvent, type ChatModel, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem, type ProductizationCapability, type SessionOwnership, type ModelRouteBackend, type ModelRouteRecord } from "@code-review-agent/contracts";
+import { brand, type AgentEvent, type ChatModel, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem, type ProductizationCapability, type SessionOwnership, type ModelRouteBackend, type ModelRouteRecord, type CredentialBackend, type McpCredentialReference } from "@code-review-agent/contracts";
 import { SubagentRuntime } from "@code-review-agent/subagent";
 import { createConfiguredChatModel, DEEPSEEK_MODELS, type ModelConfigView } from "@code-review-agent/llm";
 import { McpConnectionManager, type McpServerConfig } from "@code-review-agent/mcp-client";
 import type { CodeModeSandbox, PermissionPreset } from "@code-review-agent/tools";
 import { artifactAccessResponse, inspectArtifact, isAvailableArtifact, type ArtifactAccess } from "./artifacts.js";
 import { attachmentCapability, AttachmentInputError, stageAttachment, type AttachmentPolicy } from "./attachments.js";
+import { CredentialLifecycleError, CredentialVault, type CredentialInput, type CredentialMaterial } from "./credentials.js";
 
 export interface ModelSelection {
   readonly model: ChatModel;
   readonly config: ModelConfigView;
 }
 
-export type ModelSelector = (model: string, tenantId?: string) => ModelSelection;
+export type ModelSelector = (model: string, tenantId?: string, credential?: CredentialMaterial) => ModelSelection;
 
 export interface ProductizationToken {
   readonly token: string;
@@ -49,6 +50,10 @@ export interface ApiServerOptions {
   readonly modelSelector?: ModelSelector;
   /** Optional durable tenant-scoped routing backend; SQLite stores implement it directly. */
   readonly modelRouting?: ModelRouteBackend;
+  /** Optional durable credential metadata backend; SQLite stores implement it directly. */
+  readonly credentialBackend?: CredentialBackend;
+  /** Test/deployment hook for a host-owned credential vault. */
+  readonly credentials?: CredentialVault;
   /** Test/deployment hook for bounded provider catalog recovery fixtures. */
   readonly modelCatalogFailures?: number;
   readonly permissionPreset?: PermissionPreset;
@@ -69,6 +74,7 @@ export interface ApiServerOptions {
 export function createApiServer(options: ApiServerOptions = {}): Server {
   const ownsStore = options.store === undefined && options.host === undefined;
   const store = options.store ?? (options.host === undefined ? new SqliteEventStore({ databasePath: options.databasePath ?? defaultDatabasePath() }) : undefined);
+  const credentials = options.credentials ?? new CredentialVault(options.credentialBackend ?? credentialBackendFrom(store));
   const subagentRuntime = options.subagentRuntime ?? new SubagentRuntime({ store: store as SessionEventStore });
   const host = options.host ?? new AgentHost({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), ...(options.fallbackModels === undefined ? {} : { fallbackModels: options.fallbackModels }), ...(options.permissionPreset === undefined ? {} : { permissionPreset: options.permissionPreset }), ...(options.contextBudget === undefined ? {} : { contextBudget: options.contextBudget }), ...(options.codeMode === undefined ? {} : { codeMode: options.codeMode }), ...(options.productization?.quota === undefined ? {} : { quota: options.productization.quota }), subagentRuntime });
   if (!subagentRuntime.providerCatalog().some((provider) => provider.name === "in-process")) subagentRuntime.registerProvider(createInProcessSubagentProvider({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), baseToolDefinitions: host.toolRegistry().listAll(), subagentRuntime }));
@@ -78,12 +84,15 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
     ...(options.modelInfo === undefined ? {} : { info: options.modelInfo }),
     ...(options.modelSelector === undefined ? {} : { selector: options.modelSelector }),
     routes: new Map(),
+    credentials,
     ...(options.modelRouting === undefined && (store === undefined || typeof (store as Partial<ModelRouteBackend>).listModelRoutes !== "function") ? {} : { routeBackend: options.modelRouting ?? store as unknown as ModelRouteBackend }),
   };
   for (const route of modelRuntime.routeBackend?.listModelRoutes() ?? []) {
     modelRuntime.routes.set(route.tenantId, route);
     if (modelRuntime.selector === undefined) throw new Error("tenant model routing requires a model selector during restore");
-    const selected = modelRuntime.selector(route.model, route.tenantId);
+    const material = route.credentialRef === undefined ? undefined : credentials.resolve(route.credentialRef, route.tenantId);
+    if (route.credentialRef !== undefined && material === undefined) throw new Error(`credential reference ${route.credentialRef.id} is unavailable during restore`);
+    const selected = modelRuntime.selector(route.model, route.tenantId, material);
     host.setTenantModel(route.tenantId, selected.model, routeSelection(route));
   }
   const ownsMcp = options.mcp === undefined;
@@ -91,12 +100,13 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
     registry: host.toolRegistry(),
     ...(store === undefined ? {} : { store }),
     ...(store instanceof SqliteEventStore ? { configBackend: store } : {}),
+    credentialResolver: (reference, tenantId) => credentials.resolve(reference, tenantId),
   });
   void mcp.startConfigured();
   const persistence = store instanceof SqliteEventStore ? "sqlite" : "custom";
   const webRoot = options.webRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web");
   const server = createServer((request, response) => {
-    void handleRequest(request, response, host, mcp, subagentRuntime, webRoot, persistence, modelRuntime, options.attachmentPolicy, options.productization);
+    void handleRequest(request, response, host, mcp, subagentRuntime, webRoot, persistence, modelRuntime, credentials, options.attachmentPolicy, options.productization);
   });
   server.on("close", () => { void host.shutdown(); });
   if (ownsStore && store instanceof SqliteEventStore) server.on("close", () => store.close());
@@ -117,8 +127,8 @@ export function createConfiguredApiServer(options: ApiServerOptions = {}): Serve
   const switchOptions: ApiServerOptions = configured.config.provider === "deepseek" ? {
     ...(options.availableModels === undefined ? { availableModels: DEEPSEEK_MODELS } : { availableModels: options.availableModels }),
     ...(options.modelSelector === undefined ? {
-      modelSelector: (model: string) => {
-        const selected = createConfiguredChatModel({ ...process.env, MODEL_PROVIDER: "deepseek", DEEPSEEK_MODEL: model });
+      modelSelector: (model: string, _tenantId: string | undefined, credential: CredentialMaterial | undefined) => {
+        const selected = createConfiguredChatModel({ ...process.env, ...(credential?.env ?? {}), MODEL_PROVIDER: "deepseek", DEEPSEEK_MODEL: model });
         return { model: selected.model, config: selected.config };
       },
     } : { modelSelector: options.modelSelector }),
@@ -138,6 +148,7 @@ interface ModelRuntimeState {
   readonly availableModels: readonly string[];
   readonly selector?: ModelSelector;
   readonly routeBackend?: ModelRouteBackend;
+  readonly credentials: CredentialVault;
   readonly routes: Map<string, ModelRouteRecord>;
   remainingCatalogFailures: number;
 }
@@ -146,7 +157,108 @@ function currentAttachmentCapability(policy: AttachmentPolicy | undefined, model
   return attachmentCapability(policy, (modelRuntime.routes.get(tenantId ?? "")?.model ?? modelRuntime.info?.model)?.includes("vision") === true);
 }
 
-async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, mcp: McpConnectionManager, subagents: SubagentRuntime, webRoot: string, persistence: string, modelRuntime: ModelRuntimeState, attachmentPolicy: AttachmentPolicy | undefined, productization: ProductizationServerOptions | undefined): Promise<void> {
+function credentialBackendFrom(store: SessionEventStore | undefined): CredentialBackend | undefined {
+  if (store === undefined) return undefined;
+  const candidate = store as Partial<CredentialBackend>;
+  return typeof candidate.listCredentials === "function" && typeof candidate.getCredential === "function" && typeof candidate.upsertCredential === "function" && typeof candidate.deleteCredential === "function"
+    ? store as unknown as CredentialBackend
+    : undefined;
+}
+
+function requireTenantIdentity(identity: SessionOwnership | undefined): SessionOwnership {
+  if (identity === undefined) throw new HttpError(401, "tenant authentication is required for credential management");
+  return identity;
+}
+
+function publicCredential(record: import("@code-review-agent/contracts").CredentialRecord): Record<string, unknown> {
+  return {
+    id: record.id,
+    tenantId: record.tenantId,
+    kind: record.kind,
+    ...(record.label === undefined ? {} : { label: record.label }),
+    status: record.status,
+    version: record.version,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    ...(record.revokedAt === undefined ? {} : { revokedAt: record.revokedAt }),
+  };
+}
+
+function parseCredentialInput(body: Readonly<Record<string, unknown>>): CredentialInput {
+  const kind = body.kind;
+  if (kind !== "header" && kind !== "env" && kind !== "oauth" && kind !== "custom") throw new HttpError(400, "credential kind must be header, env, oauth, or custom");
+  const label = body.label === undefined ? undefined : requireString(body.label, "label");
+  if (label !== undefined && (label.trim().length === 0 || label.length > 120)) throw new HttpError(400, "label must be between 1 and 120 characters");
+  const material = requireRecord(body.material, "material");
+  const env = parseCredentialMap(material.env, "material.env");
+  const headers = parseCredentialMap(material.headers, "material.headers");
+  if (env === undefined && headers === undefined) throw new HttpError(400, "material must contain env or headers");
+  return { kind, ...(label === undefined ? {} : { label }), material: { ...(env === undefined ? {} : { env }), ...(headers === undefined ? {} : { headers }) } };
+}
+
+function parseCredentialMap(value: unknown, field: string): Readonly<Record<string, string>> | undefined {
+  if (value === undefined) return undefined;
+  const record = requireRecord(value, field);
+  const entries = Object.entries(record);
+  if (entries.length === 0 || entries.length > 32) throw new HttpError(400, `${field} must contain between 1 and 32 entries`);
+  for (const [key, item] of entries) {
+    if (!/^[A-Za-z0-9_.-]{1,128}$/u.test(key) || typeof item !== "string" || item.length === 0 || item.length > 16_384) throw new HttpError(400, `${field} contains an invalid entry`);
+  }
+  return Object.fromEntries(entries) as Record<string, string>;
+}
+
+function parseCredentialReference(value: unknown): McpCredentialReference {
+  const record = requireRecord(value, "credentialRef");
+  const id = requireString(record.id, "credentialRef.id");
+  const kind = record.kind;
+  if (kind !== "header" && kind !== "env" && kind !== "oauth" && kind !== "custom") throw new HttpError(400, "credentialRef.kind is invalid");
+  const version = record.version;
+  if (version !== undefined && (typeof version !== "number" || !Number.isInteger(version) || version < 1)) throw new HttpError(400, "credentialRef.version must be a positive integer");
+  return { id, kind, ...(typeof record.label === "string" ? { label: record.label } : {}), ...(version === undefined ? {} : { version }) };
+}
+
+function isCredentialReferenced(tenantId: string, credentialId: string, modelRuntime: ModelRuntimeState, mcp: McpConnectionManager): boolean {
+  if ([...modelRuntime.routes.values()].some((route) => route.tenantId === tenantId && route.credentialRef?.id === credentialId)) return true;
+  return mcp.configs.list(undefined, tenantId, true).some((config) => config.credentialRef?.id === credentialId);
+}
+
+function rebindModelCredential(tenantId: string, credentialId: string, record: import("@code-review-agent/contracts").CredentialRecord, host: AgentHost, modelRuntime: ModelRuntimeState, credentials: CredentialVault): void {
+  const reference = credentials.reference(record);
+  const material = credentials.resolve(reference, tenantId);
+  for (const route of [...modelRuntime.routes.values()]) {
+    if (route.tenantId !== tenantId || route.credentialRef?.id !== credentialId) continue;
+    if (modelRuntime.routeBackend === undefined || modelRuntime.selector === undefined || material === undefined) {
+      clearModelCredential(tenantId, credentialId, host, modelRuntime);
+      continue;
+    }
+    try {
+      const selected = modelRuntime.selector(route.model, tenantId, material);
+      const next: ModelRouteRecord = {
+        ...route,
+        provider: selected.config.provider,
+        model: selected.config.model,
+        ...(selected.config.baseUrl === undefined ? {} : { baseUrl: selected.config.baseUrl }),
+        credentialRef: reference,
+        updatedAt: new Date().toISOString(),
+      };
+      const persisted = modelRuntime.routeBackend.upsertModelRoute(next);
+      modelRuntime.routes.set(tenantId, persisted);
+      host.setTenantModel(tenantId, selected.model, routeSelection(persisted));
+    } catch {
+      clearModelCredential(tenantId, credentialId, host, modelRuntime);
+    }
+  }
+}
+
+function clearModelCredential(tenantId: string, credentialId: string, host: AgentHost, modelRuntime: ModelRuntimeState): void {
+  const route = modelRuntime.routes.get(tenantId);
+  if (route?.credentialRef?.id !== credentialId) return;
+  modelRuntime.routeBackend?.deleteModelRoute(tenantId);
+  modelRuntime.routes.delete(tenantId);
+  host.clearTenantModel(tenantId);
+}
+
+async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, mcp: McpConnectionManager, subagents: SubagentRuntime, webRoot: string, persistence: string, modelRuntime: ModelRuntimeState, credentials: CredentialVault, attachmentPolicy: AttachmentPolicy | undefined, productization: ProductizationServerOptions | undefined): Promise<void> {
   response.setHeader("access-control-allow-origin", "*");
   response.setHeader("access-control-allow-headers", "content-type, idempotency-key, last-event-id");
   response.setHeader("access-control-allow-methods", "GET,POST,DELETE,OPTIONS");
@@ -175,6 +287,43 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       sendJson(response, 200, { runtime: "typescript", generatedAt: new Date().toISOString(), metrics: host.metrics() });
       return;
     }
+    if (url.pathname === "/v1/credentials" || url.pathname.startsWith("/v1/credentials/")) {
+      const tenant = requireTenantIdentity(identity);
+      if (request.method === "GET" && url.pathname === "/v1/credentials") {
+        sendJson(response, 200, { credentials: credentials.list(tenant.tenantId).map(publicCredential) });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/v1/credentials") {
+        const body = await readJson(request);
+        sendJson(response, 201, { credential: publicCredential(credentials.create(tenant.tenantId, parseCredentialInput(body))) });
+        return;
+      }
+      const credentialMatch = url.pathname.match(/^\/v1\/credentials\/([^/]+)(?:\/(rotate|revoke))?$/u);
+      if (credentialMatch?.[1] !== undefined) {
+        const id = decodeURIComponent(credentialMatch[1]);
+        if (request.method === "POST" && credentialMatch[2] === "rotate") {
+          const body = await readJson(request);
+          const rotated = credentials.rotate(tenant.tenantId, id, parseCredentialInput(body));
+          await mcp.invalidateCredential(tenant.tenantId, id);
+          rebindModelCredential(tenant.tenantId, id, rotated, host, modelRuntime, credentials);
+          await mcp.refreshCredential(tenant.tenantId, id, credentials.reference(rotated));
+          sendJson(response, 200, { credential: publicCredential(rotated) });
+          return;
+        }
+        if (request.method === "POST" && credentialMatch[2] === "revoke") {
+          const revoked = credentials.revoke(tenant.tenantId, id);
+          await mcp.invalidateCredential(tenant.tenantId, id);
+          clearModelCredential(tenant.tenantId, id, host, modelRuntime);
+          sendJson(response, 200, { credential: publicCredential(revoked) });
+          return;
+        }
+        if (request.method === "DELETE" && credentialMatch[2] === undefined) {
+          sendJson(response, 200, { removed: credentials.remove(tenant.tenantId, id, isCredentialReferenced(tenant.tenantId, id, modelRuntime, mcp)) });
+          return;
+        }
+      }
+      throw new HttpError(404, "credential endpoint not found");
+    }
     if (request.method === "GET" && url.pathname === "/v1/models") {
       if (modelRuntime.remainingCatalogFailures > 0) {
         modelRuntime.remainingCatalogFailures -= 1;
@@ -195,7 +344,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const body = await readJson(request);
       if (typeof body.model !== "string" || body.model.length === 0) throw new HttpError(400, "model is required");
       if (!modelRuntime.availableModels.includes(body.model)) throw new HttpError(400, "unsupported model");
-      const selected = modelRuntime.selector(body.model, identity?.tenantId);
+      const requestedCredential = identity === undefined || body.credentialRef === undefined ? undefined : parseCredentialReference(body.credentialRef);
+      const material = requestedCredential === undefined ? undefined : credentials.resolve(requestedCredential, identity?.tenantId);
+      if (requestedCredential !== undefined && material === undefined) throw new CredentialLifecycleError("CREDENTIAL_REFERENCE_INVALID", "Credential reference is missing, revoked, or stale");
+      const selected = modelRuntime.selector(body.model, identity?.tenantId, material);
       if (identity === undefined) {
         host.setModel(selected.model);
         modelRuntime.info = selected.config;
@@ -207,6 +359,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         provider: selected.config.provider,
         model: selected.config.model,
         ...(selected.config.baseUrl === undefined ? {} : { baseUrl: selected.config.baseUrl }),
+        ...(requestedCredential === undefined ? {} : { credentialRef: credentials.reference(credentials.requireReference(identity.tenantId, requestedCredential)) }),
         updatedAt: new Date().toISOString(),
       };
       if (modelRuntime.routeBackend === undefined) throw new HttpError(409, "tenant model routing persistence is not configured");
@@ -261,6 +414,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "POST" && url.pathname === "/v1/mcp/servers") {
       const body = await readJson(request);
       const { start, tenantId: _requestedTenantId, ...configBody } = body;
+      if (configBody.credentialRef !== undefined && identity !== undefined) {
+        credentials.requireReference(identity.tenantId, parseCredentialReference(configBody.credentialRef));
+      }
       const existing = typeof configBody.name === "string" ? mcp.get(configBody.name, identity?.tenantId) : undefined;
       if (typeof body.expectedRevision === "number" && existing?.revision !== body.expectedRevision) throw new HttpError(409, "MCP config revision conflict");
       const scopedConfig = identity === undefined ? configBody : { ...configBody, tenantId: identity.tenantId };
@@ -702,7 +858,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     throw new HttpError(404, "not found");
   } catch (error) {
     const code = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : "";
-    const status = error instanceof HttpError ? error.status : code === "INVALID_TOOL_INPUT" ? 400 : code === "TOOL_NOT_FOUND" || code === "WORKSPACE_NOT_FOUND" || code === "MCP_SERVER_NOT_FOUND" ? 404 : code === "TOOL_DISABLED" ? 409 : code === "MODEL_CONFIGURATION_ERROR" ? 400 : code === "SESSION_QUOTA_EXCEEDED" || code === "TURN_QUOTA_EXCEEDED" ? 429 : code === "WORKSPACE_ORDER_INVALID" ? 400 : code === "MCP_TENANT_SCOPE_CONFLICT" || code === "COMMAND_CONFLICT" || code === "WORKTREE_DIRTY" || code === "WORKTREE_INVALID" || code === "WORKTREE_EXISTS" ? 409 : 500;
+    const status = error instanceof HttpError ? error.status : code === "INVALID_TOOL_INPUT" ? 400 : code === "TOOL_NOT_FOUND" || code === "WORKSPACE_NOT_FOUND" || code === "MCP_SERVER_NOT_FOUND" || code === "CREDENTIAL_NOT_FOUND" ? 404 : code === "TOOL_DISABLED" ? 409 : code === "MODEL_CONFIGURATION_ERROR" || code === "CREDENTIAL_REFERENCE_INVALID" ? 400 : code === "SESSION_QUOTA_EXCEEDED" || code === "TURN_QUOTA_EXCEEDED" ? 429 : code === "WORKSPACE_ORDER_INVALID" ? 400 : code === "MCP_TENANT_SCOPE_CONFLICT" || code === "COMMAND_CONFLICT" || code === "WORKTREE_DIRTY" || code === "WORKTREE_INVALID" || code === "WORKTREE_EXISTS" || code === "CREDENTIAL_BACKEND_NOT_CONFIGURED" || code === "CREDENTIAL_IN_USE" ? 409 : 500;
     const message = error instanceof Error ? error.message : String(error);
     if (!response.headersSent) {
       if (status === 401) response.setHeader("www-authenticate", "Bearer");

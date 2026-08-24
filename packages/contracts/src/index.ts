@@ -389,6 +389,31 @@ export interface McpCredentialReference {
   readonly id: string;
   readonly kind: "header" | "env" | "oauth" | "custom";
   readonly label?: string;
+  /** Optional material version; stale references fail closed after rotation. */
+  readonly version?: number;
+}
+
+export type CredentialStatus = "active" | "revoked";
+
+/** Durable credential metadata. Secret material is deliberately absent from this record. */
+export interface CredentialRecord {
+  readonly id: string;
+  readonly tenantId: string;
+  readonly kind: McpCredentialReference["kind"];
+  readonly label?: string;
+  readonly status: CredentialStatus;
+  readonly version: number;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly revokedAt?: string;
+}
+
+/** Host-owned credential metadata backend; implementations must never persist secret material here. */
+export interface CredentialBackend {
+  listCredentials(tenantId?: string): readonly CredentialRecord[];
+  getCredential(tenantId: string, id: string): CredentialRecord | undefined;
+  upsertCredential(record: CredentialRecord): CredentialRecord;
+  deleteCredential(tenantId: string, id: string): boolean;
 }
 
 /** Productization readiness is host fact, not a promise that a UI may infer. */

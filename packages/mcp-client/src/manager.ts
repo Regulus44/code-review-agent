@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
-import type { McpConfigBackend, SessionEventStore } from "@code-review-agent/contracts";
+import type { McpConfigBackend, McpCredentialReference, SessionEventStore } from "@code-review-agent/contracts";
 import { ToolRegistry } from "@code-review-agent/tools";
 import { McpConfigStore, type McpServerConfig, type McpServerRecord, type McpServerStatus, type McpToolCatalogEntry } from "./config.js";
 import { createMcpToolRegistrations, replaceMcpTools, unregisterMcpTools } from "./bridge.js";
@@ -160,6 +160,28 @@ export class McpConnectionManager {
     return this.toRecord(state);
   }
 
+  /** Stop live connections before a referenced credential is revoked or rotated. */
+  async invalidateCredential(tenantId: string, credentialId: string): Promise<void> {
+    for (const config of this.configs.list(undefined, tenantId, true)) {
+      if (config.credentialRef?.id !== credentialId) continue;
+      const state = this.ensureState(config);
+      await this.stopRuntime(state, true);
+      state.status = "needs_auth";
+      state.lastError = "MCP credential reference is revoked or stale";
+      await this.emitServer(state, "needs_auth", state.lastError);
+    }
+  }
+
+  /** Move tenant-owned MCP configs to a newly rotated reference and reconnect them. */
+  async refreshCredential(tenantId: string, credentialId: string, reference: McpCredentialReference): Promise<void> {
+    for (const config of this.configs.list(undefined, tenantId, true)) {
+      if (config.credentialRef?.id !== credentialId) continue;
+      const revision = (config.revision ?? 0) + 1;
+      this.configs.upsert({ ...config, credentialRef: reference, revision });
+      await this.reconnect(config.name, tenantId);
+    }
+  }
+
   async remove(name: string, tenantId?: string): Promise<boolean> {
     const config = this.requireScopedConfig(name, tenantId, false);
     if (config === undefined) return false;
@@ -225,9 +247,13 @@ export class McpConnectionManager {
 
   private async connectGeneration(state: RuntimeState, config: McpServerConfig, generation: number): Promise<void> {
     const client = new Client({ name: this.clientName, version: this.clientVersion }, { capabilities: {} });
-    const transportConfig = config.credentialRef === undefined || this.options.credentialResolver === undefined
-      ? config
-      : mergeCredential(config, await this.options.credentialResolver(config.credentialRef));
+    let transportConfig = config;
+    if (config.credentialRef !== undefined) {
+      if (this.options.credentialResolver === undefined) throw credentialUnavailable("MCP credential resolver is not configured");
+      const material = await this.options.credentialResolver(config.credentialRef, config.tenantId);
+      if (material === undefined) throw credentialUnavailable("MCP credential reference is unavailable or stale");
+      transportConfig = mergeCredential(config, material);
+    }
     const transport = await this.transportFactory(transportConfig);
     state.client = client;
     state.transport = transport;
@@ -401,7 +427,14 @@ function mergeCredential(config: McpServerConfig, material: { readonly env?: Rea
   };
 }
 
+function credentialUnavailable(message: string): Error & { readonly code: string } {
+  const error = new Error(message) as Error & { readonly code: string };
+  Object.defineProperty(error, "code", { value: "MCP_CREDENTIAL_UNAVAILABLE", enumerable: true });
+  return error;
+}
+
 function classifyStatus(error: unknown): McpServerStatus {
+  if (typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "MCP_CREDENTIAL_UNAVAILABLE") return "needs_auth";
   const message = safeMessage(error);
   return /401|403|unauthorized|forbidden|authentication|auth/iu.test(message) ? "needs_auth" : "failed";
 }

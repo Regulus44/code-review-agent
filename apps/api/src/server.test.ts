@@ -795,6 +795,63 @@ describe("Phase 2 API", () => {
     }
   });
 
+  it("manages tenant credential references without exposing material and invalidates consumers on rotation or revoke", async () => {
+    const scopedStore = new InMemoryEventStore();
+    let lastMaterial: Record<string, unknown> | undefined;
+    const makeModel = (text: string) => ({
+      async *stream() {
+        yield { type: "text_delta" as const, text };
+        yield { type: "done" as const };
+      },
+    });
+    const scoped = createApiServer({
+      store: scopedStore,
+      model: makeModel("host-model"),
+      modelInfo: { provider: "deepseek", model: "host-model", baseUrl: "https://host.example.test", configured: true },
+      availableModels: ["tenant-model"],
+      modelSelector: (model, tenantId, credential) => {
+        lastMaterial = credential?.headers as Record<string, unknown> | undefined;
+        return { model: makeModel(`${tenantId ?? "local"}:${model}`), config: { provider: "deepseek", model, baseUrl: "https://tenant.example.test", configured: true } };
+      },
+      productization: { auth: { required: true, tokens: [{ token: "tenant-a-token", principalId: "user-a", tenantId: "tenant-a" }] } },
+    });
+    await new Promise<void>((resolve) => scoped.listen(0, "127.0.0.1", resolve));
+    const address = scoped.address();
+    if (address === null || typeof address === "string") throw new Error("Credential API did not bind");
+    const url = `http://127.0.0.1:${address.port}`;
+    const auth = { authorization: "Bearer tenant-a-token", "content-type": "application/json" };
+    try {
+      const createdResponse = await fetch(`${url}/v1/credentials`, { method: "POST", headers: auth, body: JSON.stringify({ kind: "header", label: "Provider", material: { headers: { authorization: "Bearer secret-value" } } }) });
+      expect(createdResponse.status).toBe(201);
+      const created = await createdResponse.json() as { credential: { id: string; kind: string; version: number } };
+      expect(JSON.stringify(created)).not.toContain("secret-value");
+      const listed = await (await fetch(`${url}/v1/credentials`, { headers: { authorization: auth.authorization } })).json() as { credentials: Record<string, unknown>[] };
+      expect(JSON.stringify(listed)).not.toContain("secret-value");
+
+      const selected = await fetch(`${url}/v1/models`, { method: "POST", headers: auth, body: JSON.stringify({ model: "tenant-model", credentialRef: { id: created.credential.id, kind: "header", version: created.credential.version } }) });
+      expect(selected.status).toBe(200);
+      expect(await selected.json()).toMatchObject({ route: { model: "tenant-model", credentialRef: { id: created.credential.id, version: 1 } } });
+      expect(lastMaterial).toEqual({ authorization: "Bearer secret-value" });
+      expect((await fetch(`${url}/v1/credentials/${encodeURIComponent(created.credential.id)}`, { method: "DELETE", headers: { authorization: auth.authorization } })).status).toBe(409);
+
+      const rotatedResponse = await fetch(`${url}/v1/credentials/${encodeURIComponent(created.credential.id)}/rotate`, { method: "POST", headers: auth, body: JSON.stringify({ kind: "header", material: { headers: { authorization: "Bearer rotated-value" } } }) });
+      expect(rotatedResponse.status).toBe(200);
+      expect((await rotatedResponse.json() as { credential: { version: number } }).credential.version).toBe(2);
+      const afterRotate = await (await fetch(`${url}/v1/models`, { headers: { authorization: auth.authorization } })).json() as { route?: { credentialRef?: { version?: number } } };
+      expect(afterRotate.route?.credentialRef?.version).toBe(2);
+      expect(lastMaterial).toEqual({ authorization: "Bearer rotated-value" });
+
+      const revokedResponse = await fetch(`${url}/v1/credentials/${encodeURIComponent(created.credential.id)}/revoke`, { method: "POST", headers: auth });
+      expect(revokedResponse.status).toBe(200);
+      const afterRevoke = await (await fetch(`${url}/v1/models`, { headers: { authorization: auth.authorization } })).json() as { current: string; route?: unknown };
+      expect(afterRevoke).toMatchObject({ current: "host-model" });
+      expect(afterRevoke.route).toBeUndefined();
+      expect((await fetch(`${url}/v1/credentials/${encodeURIComponent(created.credential.id)}`, { method: "DELETE", headers: { authorization: auth.authorization } })).status).toBe(200);
+    } finally {
+      await new Promise<void>((resolve, reject) => scoped.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
   it("enforces bearer auth, durable tenant isolation, quota, and restart replay", async () => {
     const scopedStore = new InMemoryEventStore();
     const scoped = createApiServer({

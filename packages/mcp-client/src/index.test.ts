@@ -156,6 +156,39 @@ describe("MCP client bridge", () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
+  it("requires an active credential resolver, scopes it by tenant, and stops live use on invalidation", async () => {
+    const fixture = createFixtureTransport();
+    let resolvedTenant: string | undefined;
+    let seenHeaders: Record<string, string> | undefined;
+    const manager = new McpConnectionManager({
+      registry: new ToolRegistry(),
+      configStore: new McpConfigStore([{ name: "secured", scope: "user", tenantId: "tenant-a", transport: "stdio", command: "fixture", credentialRef: { id: "cred-a", kind: "header", version: 1 }, reconnect: { enabled: false } }]),
+      credentialResolver: (reference, tenantId) => {
+        expect(reference.version).toBe(1);
+        resolvedTenant = tenantId;
+        return { headers: { authorization: "Bearer secret-value" } };
+      },
+      transportFactory: (config) => {
+        seenHeaders = config.headers;
+        return fixture.client;
+      },
+    });
+    expect((await manager.start("secured", "tenant-a")).status).toBe("connected");
+    expect(resolvedTenant).toBe("tenant-a");
+    expect(seenHeaders).toEqual({ authorization: "Bearer secret-value" });
+    await manager.invalidateCredential("tenant-a", "cred-a");
+    expect(manager.get("secured", "tenant-a")?.status).toBe("needs_auth");
+    await manager.close();
+
+    const missing = new McpConnectionManager({
+      registry: new ToolRegistry(),
+      configStore: new McpConfigStore([{ name: "missing", scope: "user", tenantId: "tenant-a", transport: "stdio", command: "fixture", credentialRef: { id: "missing", kind: "header" }, reconnect: { enabled: false } }]),
+      transportFactory: () => fixture.client,
+    });
+    expect((await missing.start("missing", "tenant-a")).status).toBe("needs_auth");
+    await missing.close();
+  });
+
   it("keeps tenant-scoped MCP config catalog and lifecycle access isolated", async () => {
     const tenantA = { name: "tenant-a-server", scope: "user" as const, tenantId: "tenant-a", transport: "stdio" as const, command: "fixture", enabled: false };
     const manager = new McpConnectionManager({ registry: new ToolRegistry(), configStore: new McpConfigStore([tenantA]) });

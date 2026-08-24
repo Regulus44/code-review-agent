@@ -180,4 +180,31 @@ describe("WebApiClient", () => {
     expect(new Headers(calls[4]?.init?.headers).get("idempotency-key")).toBe("wt-clean");
     expect(calls[4]?.init?.body).toBe(JSON.stringify({ force: true }));
   });
+
+  it("builds typed credential lifecycle and model reference commands", async () => {
+    const calls: { url: string; init?: RequestInit | undefined }[] = [];
+    const client = new WebApiClient({
+      baseUrl: "http://localhost:4317",
+      fetcher: async (input, init) => {
+        calls.push({ url: String(input), init });
+        return new Response(JSON.stringify({ credentials: [], credential: { id: "cred_1", tenantId: "tenant-a", kind: "header", status: "active", version: 1, createdAt: "now", updatedAt: "now" }, route: { credentialRef: { id: "cred_1", kind: "header", version: 1 } } }), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+    await client.listCredentials();
+    await client.createCredential({ kind: "header", material: { headers: { authorization: "Bearer secret-value" } } });
+    await client.rotateCredential("cred/1", { kind: "header", material: { headers: { authorization: "Bearer rotated" } } });
+    await client.revokeCredential("cred/1");
+    await client.deleteCredential("cred/1");
+    await client.selectModel("tenant-model", "model-select", { id: "cred_1", kind: "header", version: 1 });
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://localhost:4317/v1/credentials",
+      "http://localhost:4317/v1/credentials",
+      "http://localhost:4317/v1/credentials/cred%2F1/rotate",
+      "http://localhost:4317/v1/credentials/cred%2F1/revoke",
+      "http://localhost:4317/v1/credentials/cred%2F1",
+      "http://localhost:4317/v1/models",
+    ]);
+    expect(calls[5]?.init?.body).toBe(JSON.stringify({ model: "tenant-model", credentialRef: { id: "cred_1", kind: "header", version: 1 } }));
+    expect(new Headers(calls[5]?.init?.headers).get("idempotency-key")).toBe("model-select");
+  });
 });

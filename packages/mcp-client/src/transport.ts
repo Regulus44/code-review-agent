@@ -10,7 +10,7 @@ export interface McpCredentialMaterial {
   readonly headers?: Readonly<Record<string, string>>;
 }
 
-export type McpCredentialResolver = (reference: McpCredentialReference) => McpCredentialMaterial | Promise<McpCredentialMaterial | undefined> | undefined;
+export type McpCredentialResolver = (reference: McpCredentialReference, tenantId?: string) => McpCredentialMaterial | Promise<McpCredentialMaterial | undefined> | undefined;
 
 export type McpTransportFactory = (config: McpServerConfig) => Transport | Promise<Transport>;
 

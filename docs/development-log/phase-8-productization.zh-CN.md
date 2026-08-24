@@ -1,5 +1,44 @@
 # Phase 8 开发日志
 
+## 2026-08-24：8.5 tenant-scoped credential reference lifecycle
+
+本次工作继续属于 Phase 8.5，承接 provider/model routing，补齐 credential reference 的 host-owned 生命周期。DSH 只作为职责和行为参考：`packages/client/ui-model-selection` 的 Host-owned model selection、selection failure 语义，以及 `packages/sdk/client` 的 provider/model handshake/retry 边界；没有复制 DSH 代码、内部类型或品牌资产。A2A 保持 `deferred`。
+
+### 已完成
+
+- `packages/contracts` 新增 `CredentialRecord` / `CredentialBackend`；`McpCredentialReference.version` 固化轮换后的 stale reference 检查。Credential metadata 只包含 tenant、kind、状态、版本和时间，不包含 secret material。
+- `packages/storage` 升级 SQLite schema v6，新增 tenant-scoped `credentials` metadata table；旧数据库迁移、reopen、InMemory fixture、跨租户查询和无 secret material 持久化测试已覆盖。
+- `apps/api/src/credentials.ts` 新增 host-owned `CredentialVault`，支持 create、rotate、revoke、delete、reference validation 和 resolver。material 只保留在进程内；未配置 backend、跨租户、revoked 或 stale reference 均 fail closed。
+- API 增加 `GET/POST /v1/credentials`、`POST /v1/credentials/:id/rotate`、`POST /v1/credentials/:id/revoke` 和 `DELETE /v1/credentials/:id`。公开响应只返回 metadata，route/MCP 引用存在时删除返回冲突。
+- model route 在 rotate 后重绑新 credential version，在 revoke 后清除 tenant route 并回退 host-local；MCP resolver 按 tenant 解析，live connection 在 rotate/revoke 时停止，缺少或失效 reference 映射为 `needs_auth`。
+- Web typed client 增加 credential catalog/mutation 和带 `credentialRef` 的 model selection；productization gate 增加 credential create、rotation、revoke、in-use deletion、route invalidation 和 redaction 检查。
+
+### 契约与安全边界
+
+- Credential metadata 是 control-plane 配置事实，不新增 Session event type；实际使用的 model route 仍只在所属 Session 的 `turn/started` 或恢复 `agent/status` 中记录 bounded route metadata。
+- secret material 不进入 EventStore、SQLite、route、MCP config、SSE、diagnostics、Web projection 或错误消息。当前 host-only material 在进程重启后不可恢复，active reference 缺少 resolver material 时 fail closed；外部 secret manager 适配继续延期。
+- 生命周期以 `(tenantId, credentialId)` 隔离；删除前检查 model route/MCP config 引用，吊销优先于删除，rotation 通过 version 使旧引用失效。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/storage test       ✓ (15 tests)
+pnpm --filter @code-review-agent/mcp-client test   ✓ (11 tests)
+pnpm --filter @code-review-agent/api test             ✓ (37 tests)
+pnpm --filter @code-review-agent/web test -- --run src/client/api.test.ts ✓ (12 tests)
+pnpm test:phase8:productization                       ✓
+pnpm test:phase8:parity                              ✓
+pnpm test                                             ✓ (all workspace tests)
+git diff --check                                      ✓
+```
+
+### 尚未关闭
+
+本切片不实现外部 secret manager、外部 IdP/JWT、完整 principal catalog、8.3 OS-level isolation/deployment evidence、8.4 更完整的跨场景 browser recovery matrix、backup/restore、migration rollback 或 upgrade/deployment policy；Phase 8.5 与 Phase 8 仍保持 `in_progress`。
+
+本切片已建立独立 Phase 8 Git checkpoint；后续工作从该 checkpoint 继续推进，不能据此将 Phase 8.5 或 Phase 8 标记为完成。
+
 ## 2026-08-24：8.5 tenant-scoped provider/model routing
 
 本次恢复工作继续属于 Phase 8.5，完成 provider/model routing 的第一可用切片。DSH 参考 `packages/client/ui-model-selection`、`packages/client/runtime` 的 `modelSelection` 和 `packages/sdk/client` 的 provider/model handshake；本项目没有复制 DSH 代码、内部类型或品牌资产。A2A 保持 `deferred`。

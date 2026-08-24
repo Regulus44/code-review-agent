@@ -227,4 +227,31 @@ describe("InMemoryEventStore", () => {
     second.close();
     rmSync(directory, { recursive: true, force: true });
   });
+
+  it("persists tenant credential metadata and lifecycle versions without secret material", () => {
+    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-credentials-"));
+    const databasePath = join(directory, "agent.sqlite");
+    const first = new SqliteEventStore({ databasePath });
+    const created = first.upsertCredential({
+      id: "cred-tenant-a",
+      tenantId: "tenant-a",
+      kind: "header",
+      label: "Tenant A provider",
+      status: "active",
+      version: 1,
+      createdAt: "2026-08-24T00:00:00.000Z",
+      updatedAt: "2026-08-24T00:00:00.000Z",
+    });
+    expect(first.getCredential("tenant-a", "cred-tenant-a")).toEqual(created);
+    expect(first.getCredential("tenant-b", "cred-tenant-a")).toBeUndefined();
+    first.upsertCredential({ ...created, status: "revoked", version: 2, updatedAt: "2026-08-24T00:00:01.000Z", revokedAt: "2026-08-24T00:00:01.000Z" });
+    first.close();
+
+    const second = new SqliteEventStore({ databasePath });
+    const restored = second.getCredential("tenant-a", "cred-tenant-a");
+    expect(restored).toMatchObject({ status: "revoked", version: 2, revokedAt: "2026-08-24T00:00:01.000Z" });
+    expect(JSON.stringify(restored)).not.toContain("secret");
+    second.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
 });

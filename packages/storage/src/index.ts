@@ -45,6 +45,8 @@ import {
   type McpConfigBackend,
   type McpConfigRecord,
   type McpCredentialReference,
+  type CredentialBackend,
+  type CredentialRecord,
   type ModelRouteBackend,
   type ModelRouteRecord,
   type ContextCompactionProjection,
@@ -57,7 +59,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
-const SCHEMA_VERSION = 5 as const;
+const SCHEMA_VERSION = 6 as const;
 
 function isPermissionPreset(value: unknown): value is PermissionPreset {
   return value === "read-only" || value === "workspace-write" || value === "ask-on-write" || value === "ask-on-execute" || value === "danger-full-access";
@@ -738,9 +740,10 @@ function readChildMetadata(row: SqliteRow): ChildSessionMetadata | undefined {
 }
 
 /** Deterministic in-memory store retained for unit tests and local fixtures. */
-export class InMemoryEventStore implements SessionEventStore, ModelRouteBackend {
+export class InMemoryEventStore implements SessionEventStore, ModelRouteBackend, CredentialBackend {
   private readonly sessions = new Map<SessionId, MemorySession>();
   private readonly modelRoutes = new Map<string, ModelRouteRecord>();
+  private readonly credentials = new Map<string, CredentialRecord>();
 
   async createSession(workspaceRoot: string, permissionPreset: PermissionPreset = "ask-on-write", idOrMetadata?: SessionId | ChildSessionMetadata, metadata?: ChildSessionMetadata, ownership?: SessionOwnership): Promise<SessionId> {
     const args = resolveCreateSessionArgs(idOrMetadata, metadata);
@@ -869,6 +872,26 @@ export class InMemoryEventStore implements SessionEventStore, ModelRouteBackend 
   deleteModelRoute(tenantId: string): boolean {
     return this.modelRoutes.delete(tenantId);
   }
+
+  listCredentials(tenantId?: string): readonly CredentialRecord[] {
+    return [...this.credentials.values()]
+      .filter((record) => tenantId === undefined || record.tenantId === tenantId)
+      .sort((left, right) => `${left.tenantId}:${left.id}`.localeCompare(`${right.tenantId}:${right.id}`));
+  }
+
+  getCredential(tenantId: string, id: string): CredentialRecord | undefined {
+    return this.credentials.get(credentialKey(tenantId, id));
+  }
+
+  upsertCredential(record: CredentialRecord): CredentialRecord {
+    validateCredential(record);
+    this.credentials.set(credentialKey(record.tenantId, record.id), record);
+    return record;
+  }
+
+  deleteCredential(tenantId: string, id: string): boolean {
+    return this.credentials.delete(credentialKey(tenantId, id));
+  }
 }
 
 interface SqliteRow {
@@ -880,7 +903,7 @@ export interface SqliteEventStoreOptions {
 }
 
 /** Durable EventStore using the Node.js built-in SQLite driver. */
-export class SqliteEventStore implements SessionEventStore, McpConfigBackend, ModelRouteBackend {
+export class SqliteEventStore implements SessionEventStore, McpConfigBackend, ModelRouteBackend, CredentialBackend {
   readonly databasePath: string;
   private readonly db: DatabaseSync;
   private readonly listeners = new Map<SessionId, Set<EventListener>>();
@@ -1117,6 +1140,52 @@ export class SqliteEventStore implements SessionEventStore, McpConfigBackend, Mo
     return Number(result.changes ?? 0) > 0;
   }
 
+  listCredentials(tenantId?: string): readonly CredentialRecord[] {
+    const rows = tenantId === undefined
+      ? this.db.prepare("SELECT id, tenant_id, kind, label, status, version, created_at, updated_at, revoked_at FROM credentials ORDER BY tenant_id ASC, id ASC").all()
+      : this.db.prepare("SELECT id, tenant_id, kind, label, status, version, created_at, updated_at, revoked_at FROM credentials WHERE tenant_id = ? ORDER BY id ASC").all(tenantId);
+    return (rows as SqliteRow[]).map(readCredential);
+  }
+
+  getCredential(tenantId: string, id: string): CredentialRecord | undefined {
+    const row = this.db.prepare("SELECT id, tenant_id, kind, label, status, version, created_at, updated_at, revoked_at FROM credentials WHERE tenant_id = ? AND id = ?").get(tenantId, id) as SqliteRow | undefined;
+    return row === undefined ? undefined : readCredential(row);
+  }
+
+  upsertCredential(record: CredentialRecord): CredentialRecord {
+    validateCredential(record);
+    this.withTransaction(() => {
+      this.db.prepare(`
+        INSERT INTO credentials (id, tenant_id, kind, label, status, version, created_at, updated_at, revoked_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(tenant_id, id) DO UPDATE SET
+          kind = excluded.kind,
+          label = excluded.label,
+          status = excluded.status,
+          version = excluded.version,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at,
+          revoked_at = excluded.revoked_at
+      `).run(
+        record.id,
+        record.tenantId,
+        record.kind,
+        record.label ?? null,
+        record.status,
+        record.version,
+        record.createdAt,
+        record.updatedAt,
+        record.revokedAt ?? null,
+      );
+    });
+    return record;
+  }
+
+  deleteCredential(tenantId: string, id: string): boolean {
+    const result = this.db.prepare("DELETE FROM credentials WHERE tenant_id = ? AND id = ?").run(tenantId, id) as { changes?: number };
+    return Number(result.changes ?? 0) > 0;
+  }
+
   private appendSync(input: AppendEventInput): AgentEvent {
     const session = this.db.prepare("SELECT id, workspace_root, created_at, updated_at, status, last_sequence FROM sessions WHERE id = ?").get(input.sessionId) as SqliteRow | undefined;
     if (session === undefined) throw new Error(`Unknown session: ${input.sessionId}`);
@@ -1247,6 +1316,24 @@ export class SqliteEventStore implements SessionEventStore, McpConfigBackend, Mo
           CREATE INDEX IF NOT EXISTS model_routes_provider_idx ON model_routes(provider, model);
         `);
         this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(5, now());
+      }
+      if (currentVersion < 6) {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS credentials (
+            id TEXT NOT NULL,
+            tenant_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            label TEXT,
+            status TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            revoked_at TEXT,
+            PRIMARY KEY (tenant_id, id)
+          );
+          CREATE INDEX IF NOT EXISTS credentials_tenant_status_idx ON credentials(tenant_id, status, updated_at);
+        `);
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(6, now());
       }
       this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     });
@@ -1379,6 +1466,33 @@ function readModelRoute(row: SqliteRow): ModelRouteRecord {
     ...(credentialRef === null || credentialRef === undefined ? {} : { credentialRef: JSON.parse(String(credentialRef)) as McpCredentialReference }),
     updatedAt: String(row["updated_at"]),
   };
+}
+
+function readCredential(row: SqliteRow): CredentialRecord {
+  const label = row["label"];
+  const revokedAt = row["revoked_at"];
+  return {
+    id: String(row["id"]),
+    tenantId: String(row["tenant_id"]),
+    kind: String(row["kind"]) as CredentialRecord["kind"],
+    ...(label === null || label === undefined ? {} : { label: String(label) }),
+    status: String(row["status"]) as CredentialRecord["status"],
+    version: Number(row["version"]),
+    createdAt: String(row["created_at"]),
+    updatedAt: String(row["updated_at"]),
+    ...(revokedAt === null || revokedAt === undefined ? {} : { revokedAt: String(revokedAt) }),
+  };
+}
+
+function credentialKey(tenantId: string, id: string): string {
+  return `${tenantId}\u0000${id}`;
+}
+
+function validateCredential(record: CredentialRecord): void {
+  if (record.id.trim() === "" || record.tenantId.trim() === "") throw new Error("credential id and tenantId are required");
+  if (record.kind !== "header" && record.kind !== "env" && record.kind !== "oauth" && record.kind !== "custom") throw new Error("credential kind is invalid");
+  if (record.status !== "active" && record.status !== "revoked") throw new Error("credential status is invalid");
+  if (!Number.isInteger(record.version) || record.version < 1) throw new Error("credential version must be a positive integer");
 }
 
 function validateModelRoute(record: ModelRouteRecord): void {

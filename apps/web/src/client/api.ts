@@ -20,6 +20,7 @@ import type {
   WorktreeProjection,
   ProductizationCapability,
   McpCredentialReference,
+  CredentialRecord,
 } from "@code-review-agent/contracts";
 
 export interface ToolCatalogEntry {
@@ -45,6 +46,21 @@ export interface ModelCatalogResponse {
     readonly credentialRef?: McpCredentialReference;
     readonly updatedAt: string;
   };
+}
+
+export interface CredentialMaterialInput {
+  readonly env?: Readonly<Record<string, string>>;
+  readonly headers?: Readonly<Record<string, string>>;
+}
+
+export interface CredentialMutationInput {
+  readonly kind: McpCredentialReference["kind"];
+  readonly label?: string;
+  readonly material: CredentialMaterialInput;
+}
+
+export interface CredentialListResponse {
+  readonly credentials: readonly CredentialRecord[];
 }
 
 export interface AttachmentCapability {
@@ -453,8 +469,28 @@ export class WebApiClient {
     return this.request("/v1/models");
   }
 
-  selectModel(model: string, commandId?: string): Promise<{ readonly model: Readonly<Record<string, unknown>> }> {
-    return this.request("/v1/models", { method: "POST", commandId, body: { model } });
+  selectModel(model: string, commandId?: string, credentialRef?: McpCredentialReference): Promise<{ readonly model: Readonly<Record<string, unknown>>; readonly route?: ModelCatalogResponse["route"] }> {
+    return this.request("/v1/models", { method: "POST", commandId, body: { model, ...(credentialRef === undefined ? {} : { credentialRef }) } });
+  }
+
+  listCredentials(): Promise<CredentialListResponse> {
+    return this.request("/v1/credentials");
+  }
+
+  createCredential(input: CredentialMutationInput): Promise<{ readonly credential: CredentialRecord }> {
+    return this.request("/v1/credentials", { method: "POST", body: input });
+  }
+
+  rotateCredential(id: string, input: CredentialMutationInput): Promise<{ readonly credential: CredentialRecord }> {
+    return this.request(`/v1/credentials/${encodeURIComponent(id)}/rotate`, { method: "POST", body: input });
+  }
+
+  revokeCredential(id: string): Promise<{ readonly credential: CredentialRecord }> {
+    return this.request(`/v1/credentials/${encodeURIComponent(id)}/revoke`, { method: "POST" });
+  }
+
+  deleteCredential(id: string): Promise<{ readonly removed: boolean }> {
+    return this.request(`/v1/credentials/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
 
   listMcpServers(): Promise<{ readonly servers: readonly McpServerView[] }> {

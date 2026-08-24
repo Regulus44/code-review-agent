@@ -75,6 +75,8 @@ mcp/prompt
 
 `step/started` / `step/ended` 标记一个 turn 内的模型请求和工具执行边界。`assistant/message` 的 payload 可以包含 `toolCalls`，每个元素至少包含 `id`、`name` 和 JSON `arguments`；后续 `tool/result` 通过 `toolCallId` 关联到该调用。`plan/updated` 是当前实施计划的全量替换事件，`todo/updated` 是当前待办列表的全量替换事件。`interaction/requested` / `interaction/resolved` 表示 `ask_user` 暂停和恢复，不等同于工具权限审批。工具、权限、交互和 queue 事件都必须经过同一事件存储和 SSE 回放管线。
 
+Credential metadata 是 Phase 8.5 的 control-plane 配置事实，不属于 Session event 集合。`CredentialRecord` 只保存 tenant、kind、状态、版本和时间；secret material 只能存在 host-owned resolver 中，不能写入 EventStore、SQLite metadata、route、MCP config、SSE、diagnostics 或 Web projection。model route 的实际使用仍通过所属 Session 的 `turn/started` 或恢复 `agent/status` bounded metadata 记录；credential create/rotate/revoke/delete 本身不伪造一条 Session event。rotation 递增 credential version，旧 reference 必须 fail closed；revocation 要先停止可控的 live consumer，随后清除或标记不可用的 route。
+
 `queue/changed` 的 payload 是当前 Session 尚未启动的队列快照：
 
 ```ts
