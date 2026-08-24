@@ -1,5 +1,35 @@
 # Phase 8 开发日志
 
+## 2026-08-25：8.0 Web parity browser matrix 收口
+
+本次继续属于 Phase 8.0 Web 对齐，依据 DSH `ui-goal/GoalBar.tsx`、`ui-conversation/skeleton/InputBar.tsx`、`ui-user-questions/QuestionComposer.tsx`、`ui-jobs/JobListAction.tsx`、`ui-trajectory/TrajectoryView.tsx` 和 `ui-layout` 的行为边界补齐最后一组真实浏览器证据；没有复制 DSH 代码或内部类型，Web 仍只消费本项目 projection、REST/SSE 和 typed bridge。
+
+### 已完成
+
+- 扩展 `scripts/phase8-web-fixture-server.mjs` 的可选 live-control fixture，使用受范围约束的 `PHASE8_WEB_LIVE_DELAY_MS=2000` 暴露真实 running turn；普通 fixture 默认行为保持兼容。
+- 在真实 Codex In-app Browser 中验证 Steer 按钮在 running turn 中启用，Steer guidance 与 queued follow-up 形成 durable event/receipt，reload 后恢复 `Agent is working`、Steer 文本和 queue 事件。
+- 将 8.0.7 的 9 组行为场景写入 `docs/phase8-browser-evidence.json`，并由 `scripts/phase8-browser-evidence-gate.mjs` 逐项审计；证据同时保留 visual/accessibility、Settings failure/retry/selection 和 reconnect/replay/API restart 边界。
+
+### 验证
+
+```text
+pnpm typecheck                         ✓
+pnpm test                              ✓
+pnpm build:web                         ✓
+pnpm test:phase7:browser               ✓
+pnpm test:phase8:web                   ✓
+pnpm test:phase8:settings              ✓
+pnpm test:phase8:visual                ✓
+pnpm test:phase8:parity                ✓
+pnpm test:phase8:browser:evidence      ✓（9 个 Web parity 场景）
+git diff --check                       ✓
+真实 in-app browser: running → steer + queue → reload replay ✓
+```
+
+### 阶段边界
+
+Phase 8.0 已完成并建立独立 Git checkpoint；Phase 8 整体仍为 `in_progress`。8.3/8.5 的 OS/container、外部 IdP/secret manager 和 upgrade/deployment smoke 依赖目标部署环境，继续保持 partial/deferred，不影响 8.0 关闭。
+
 ## 2026-08-24：8.5 external secret manager adapter 与 upgrade/deployment policy
 
 本次继续属于 Phase 8.5，补齐 credential metadata/reference 与生产 secret/deployment 边界；DSH 仅作为 host-owned configuration/deployment 行为参考，没有复制 DSH 代码或把 fake provider 宣称为云端服务。

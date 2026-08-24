@@ -32,5 +32,62 @@
     "failure": { "catalogStatus": "error", "retryAction": "Retry model catalog", "errorContains": "temporarily unavailable" },
     "recovery": { "catalogStatus": "ready", "provider": "echo", "model": "fixture-model" },
     "selection": { "model": "fixture-model", "receipt": "Selected fixture-model" }
+  },
+  "webParity": {
+    "fixtureEnv": { "PHASE8_WEB_LIVE_TURN": 1, "PHASE8_WEB_LIVE_DELAY_MS": 2000 },
+    "scenarios": {
+      "goalPlanQuestion": {
+        "goalPauseResume": true,
+        "planReviewApprove": true,
+        "questionBatchAnswered": true,
+        "reloadReplay": true
+      },
+      "queueSteerAttachment": {
+        "queue": true,
+        "steer": true,
+        "attachmentAccepted": true,
+        "attachmentRejected": true,
+        "reloadReplay": true,
+        "observed": "live running turn retained steer guidance and queued follow-up across reload"
+      },
+      "workspaceLifecycle": {
+        "treeFlat": true,
+        "sortingSearchArchive": true,
+        "renameArchiveRestoreDelete": true,
+        "reloadReplay": true
+      },
+      "toolPermissionDiffJob": {
+        "permissionRecovery": true,
+        "editDiffPreview": true,
+        "readOnlyReplay": true,
+        "jobCancelReplay": true
+      },
+      "trajectory": {
+        "boundedRecords": 200,
+        "search": true,
+        "runningOnly": true,
+        "tailFollow": true,
+        "olderHistoryAvailable": true
+      },
+      "producedFiles": {
+        "workspaceArtifact": true,
+        "externalArtifactBlocked": true,
+        "outsideWorkspaceArtifactBlocked": true
+      },
+      "subagentInterruptHistory": {
+        "completedCatalog": true,
+        "cancellableCatalog": true,
+        "cancelReplay": true
+      },
+      "settingsModelFailure": {
+        "failureRetrySelection": true,
+        "selectionReceipt": true
+      },
+      "reconnectReplayApiRestart": {
+        "connectedAfterReload": true,
+        "sseReplay": true,
+        "apiRestartRecovery": true
+      }
+    }
   }
 }

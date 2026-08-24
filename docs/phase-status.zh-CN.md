@@ -16,13 +16,21 @@
 | Phase 5：内部 Subagent / 多 Agent | completed（2026-08-23） | 5.0–5.4：Task/Descriptor durable projection、one-shot/continuable child、FIFO/authority/cold resume、report/MCP scope、API/SSE/Web catalog；定向 typecheck、storage/subagent/runtime/API 测试和 API/Web smoke 通过 |
 | Phase 6：A2A | deferred（暂不作为 Phase 7 前置） | [ADR：Phase 7 Web 收敛不等待 A2A](adr/phase-7-web-with-a2a-deferred.zh-CN.md)；等待明确的外部 Agent 互操作需求 |
 | Phase 7：DSH Web 前端收敛 | completed | 7.1–7.10 Web shell、连接与回放、Workspace/Session navigation、Conversation/Tool/Permission/Interaction、Trajectory、Task/Subagent/MCP、Settings/Deliverables、响应式与可访问性、五场景 browser/replay gate、Workspace reorder 与 Workspace rename/archive/delete lifecycle 已完成；`pnpm typecheck`、`pnpm test`、`pnpm test:phase7:browser` 和 `git diff --check` 通过；browser gate 总耗时 2.14s、trajectory full replay 19.03ms；独立 checkpoint `82326d6` |
-| Phase 8：高级能力与产品化 | in_progress（2026-08-24 恢复） | 8.0.6 响应式/可访问性 browser evidence 与 Settings model recovery 已收口；8.1/8.2 已完成，8.0/8.3/8.4/8.5 仍未整体完成 |
+| Phase 8：高级能力与产品化 | in_progress（8.0/8.1/8.2/8.4 已完成，8.3/8.5 partial） | Phase 8.0 的 600/900/1024 visual/accessibility matrix、9 个 Web parity browser 场景和独立 checkpoint 已完成；8.3/8.5 仍等待目标部署环境 smoke，不影响 8.0 关闭 |
 
 ## Phase 8 计划范围（accepted）
 
 - [Phase 8：高级能力、DSH Web 对齐与产品化](phase-plans/phase-8-productization.zh-CN.md) 已扩展为 8.0 Web 对齐、8.1 Context Compaction、8.2 Worktree、8.3 LSP/Code Mode、8.4 后台任务与可靠性、8.5 产品化；
 - [ADR：Phase 8 Web 与 DSH 前端行为对齐](adr/phase-8-web-dsh-alignment.zh-CN.md) 已接受，记录行为参考、REST/SSE 边界、typed Web 拆分、契约变更和回滚规则；
-- Phase 8 曾于 2026-08-24 暂存归档在 checkpoint `c1aae6c`，随后持续恢复推进。8.0 的 aggregate Web parity contract gate、六个 600/900/1024 Shell/Settings 视觉基线和真实 in-app browser accessibility/recovery evidence 已通过；8.4 已补齐长任务与并发 Web recovery matrix，并新增真实 graphical browser recovery 第一批证据，8.5 已建立产品化边界、tenant-scoped Workspace/MCP/provider routing、credential reference lifecycle 和 SQLite backup/restore/migration rollback 第一切片，但 8.0 其余 DSH 行为场景的完整真实 browser matrix、8.3 完整退出审计、外部 IdP/JWT、完整 principal catalog、upgrade/deployment policy 和外部 secret manager 仍未完成。
+- Phase 8 曾于 2026-08-24 暂存归档在 checkpoint `c1aae6c`，随后持续恢复推进。8.0 的 aggregate Web parity contract、六个 600/900/1024 Shell/Settings 视觉基线、真实 in-app browser visual/accessibility evidence 和 9 个 DSH 对齐行为场景已在 `2026-08-25` 独立 checkpoint 中闭合；8.4 已补齐长任务与并发 Web recovery matrix，并新增真实 graphical browser recovery 第一批证据，8.5 已建立产品化边界、tenant-scoped Workspace/MCP/provider routing、credential reference lifecycle、JWT/principal catalog、external secret adapter 和 SQLite backup/restore/migration rollback 第一切片。当前剩余的是 8.3/8.5 的目标部署环境 OS/IdP/secret-manager/upgrade smoke，不再包含 8.0 browser parity 缺口。
+
+## Phase 8.0 Web parity（completed，2026-08-25）
+
+- 8.0.0–8.0.6 的 typed Web projection、Shell/Workspace/Conversation/Details/Settings、六个 600/900/1024 × 800 JPEG 基线、ARIA/focus/recovery 证据均已通过；Plugins 继续明确显示为 `deferred`。
+- `docs/phase8-browser-evidence.json` 新增 8.0.7 真实浏览器场景证据：Goal/Plan/Question、Queue/Steer/Attachment、Workspace lifecycle、Tool/Permission/Diff/Job、Trajectory、Produced Files、Subagent interrupt/history、Settings/model failure、reconnect/replay/API restart，共 9 组场景。
+- 使用 `PHASE8_WEB_LIVE_TURN=1`、`PHASE8_WEB_LIVE_DELAY_MS=2000` 的 SQLite/API/AgentHost fixture，在真实 Codex In-app Browser 中验证 running turn 的 Steer、queued follow-up、durable receipt 和 reload replay；没有把静态 DOM marker 当作交互成功。
+- `pnpm typecheck`、`pnpm test`、`pnpm build:web`、`pnpm test:phase7:browser`、`pnpm test:phase8:web`、`pnpm test:phase8:settings`、`pnpm test:phase8:visual`、`pnpm test:phase8:parity`、`pnpm test:phase8:browser:evidence` 和 `git diff --check` 通过；8.0 独立 checkpoint 在本次提交建立。
+- 8.0 回滚边界：只回滚本次 browser evidence JSON/gate、fixture live-control 开关和阶段文档；生产 Event/Tool/Task/Permission/Workspace contract 不变。
 
 ## Phase 8 暂存归档（2026-08-24）
 

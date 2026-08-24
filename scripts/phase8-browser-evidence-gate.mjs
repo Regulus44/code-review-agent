@@ -32,9 +32,23 @@ assert(evidence.settingsRecovery.failure?.catalogStatus === "error" && evidence.
 assert(evidence.settingsRecovery.recovery?.catalogStatus === "ready" && evidence.settingsRecovery.recovery?.model === "fixture-model", "settings recovery evidence is incomplete");
 assert(evidence.settingsRecovery.selection?.receipt === "Selected fixture-model", "selection receipt evidence is missing");
 
+assert(evidence.webParity?.fixtureEnv?.PHASE8_WEB_LIVE_TURN === 1, "Web parity evidence must include the live-turn fixture");
+assert(evidence.webParity?.fixtureEnv?.PHASE8_WEB_LIVE_DELAY_MS === 2000, "live-turn fixture delay must remain bounded at 2000ms");
+const scenarios = evidence.webParity?.scenarios;
+assert(scenarios !== undefined, "Web parity scenario evidence is missing");
+assert(scenarios.goalPlanQuestion?.goalPauseResume === true && scenarios.goalPlanQuestion?.planReviewApprove === true && scenarios.goalPlanQuestion?.questionBatchAnswered === true && scenarios.goalPlanQuestion?.reloadReplay === true, "Goal/Plan/Question browser evidence is incomplete");
+assert(scenarios.queueSteerAttachment?.queue === true && scenarios.queueSteerAttachment?.steer === true && scenarios.queueSteerAttachment?.attachmentAccepted === true && scenarios.queueSteerAttachment?.attachmentRejected === true && scenarios.queueSteerAttachment?.reloadReplay === true, "Queue/steer/attachment browser evidence is incomplete");
+assert(scenarios.workspaceLifecycle?.treeFlat === true && scenarios.workspaceLifecycle?.sortingSearchArchive === true && scenarios.workspaceLifecycle?.renameArchiveRestoreDelete === true && scenarios.workspaceLifecycle?.reloadReplay === true, "Workspace lifecycle browser evidence is incomplete");
+assert(scenarios.toolPermissionDiffJob?.permissionRecovery === true && scenarios.toolPermissionDiffJob?.editDiffPreview === true && scenarios.toolPermissionDiffJob?.readOnlyReplay === true && scenarios.toolPermissionDiffJob?.jobCancelReplay === true, "Tool/permission/diff/job browser evidence is incomplete");
+assert(scenarios.trajectory?.boundedRecords === 200 && scenarios.trajectory?.search === true && scenarios.trajectory?.runningOnly === true && scenarios.trajectory?.tailFollow === true && scenarios.trajectory?.olderHistoryAvailable === true, "Trajectory browser evidence is incomplete");
+assert(scenarios.producedFiles?.workspaceArtifact === true && scenarios.producedFiles?.externalArtifactBlocked === true && scenarios.producedFiles?.outsideWorkspaceArtifactBlocked === true, "Produced files browser evidence is incomplete");
+assert(scenarios.subagentInterruptHistory?.completedCatalog === true && scenarios.subagentInterruptHistory?.cancellableCatalog === true && scenarios.subagentInterruptHistory?.cancelReplay === true, "Subagent interrupt/history browser evidence is incomplete");
+assert(scenarios.settingsModelFailure?.failureRetrySelection === true && scenarios.settingsModelFailure?.selectionReceipt === true, "Settings/model failure browser evidence is incomplete");
+assert(scenarios.reconnectReplayApiRestart?.connectedAfterReload === true && scenarios.reconnectReplayApiRestart?.sseReplay === true && scenarios.reconnectReplayApiRestart?.apiRestartRecovery === true, "reconnect/replay/API restart evidence is incomplete");
+
 assert(manifest.baselines?.length === 6, "visual manifest must retain six Shell/Settings baselines");
 for (const marker of ["role=\"dialog\"", "aria-modal", "aria-labelledby", "createFocusTrap", "Retry model catalog", "settings-receipt"]) {
   assert(shell.includes(marker), `Web shell is missing ${marker}`);
 }
 
-console.log(JSON.stringify({ phase: "8.0", gate: "browser-accessibility-evidence", passed: true, viewports: widths, baselines: manifest.baselines.length, settingsRecovery: true }));
+console.log(JSON.stringify({ phase: "8.0", gate: "browser-accessibility-evidence", passed: true, viewports: widths, baselines: manifest.baselines.length, settingsRecovery: true, webParityScenarios: Object.keys(scenarios).length }));

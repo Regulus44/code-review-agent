@@ -1,6 +1,6 @@
 # Phase 8：高级能力、DSH Web 对齐与产品化
 
-状态：`in_progress`（2026-08-24 从暂存 checkpoint `c1aae6c` 恢复）。Phase 7 已完成并保留独立 checkpoint；Phase 8 后续工作继续按 8.0–8.5 工作流推进。
+状态：`in_progress`（8.0/8.1/8.2/8.4 已完成；8.3/8.5 partial，2026-08-25）。Phase 7 已完成并保留独立 checkpoint；Phase 8 后续工作继续按 8.3/8.5 的部署环境 smoke 边界推进。
 
 ## 1. 阶段目标
 
@@ -176,6 +176,8 @@ Phase 8.0 默认只增加 Web projection/query DTO。若必须新增 Event、Tas
 - `scripts/phase8-settings-gate.mjs` 现在同时覆盖 provider failure → Retry → model selection → durable current model，标准 fixture 为选择器提供可回放的 `fixture-model`；
 - 真实浏览器已验证 Settings failure → `Retry model catalog` → `ready` → `Selected fixture-model`，不把错误态误报为连接失败。
 
+8.0.6 状态：`completed`（2026-08-25）。
+
 ### 8.0.7 Web parity gate
 
 将 DSH 行为场景转为本项目自己的 fixture，不复制 DSH 测试代码：
@@ -208,6 +210,8 @@ git diff --check
 ```
 
 退出条件：所有已承诺能力有 unit、contract、recovery、security 和 browser 证据；未实现能力不会显示为可用。
+
+8.0.7 状态：`completed`（2026-08-25）。真实 Codex In-app Browser evidence 已覆盖计划列出的 9 组行为场景；`docs/phase8-browser-evidence.json` 和 `scripts/phase8-browser-evidence-gate.mjs` 对场景、fixture 参数、视口、ARIA/focus、Settings recovery 和六个视觉基线做可重复审计。8.0 关闭后，Phase 8 继续保留 8.3/8.5 的目标部署环境 smoke 作为 partial 边界。
 
 ## 5. Phase 8.1：Context Compaction
 

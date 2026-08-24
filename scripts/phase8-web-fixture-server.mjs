@@ -18,6 +18,9 @@ const root = await mkdtemp(join(tmpdir(), "code-review-agent-phase8-web-"));
 const databasePath = join(root, "events.sqlite");
 const webRoot = process.env.PHASE8_WEB_ROOT;
 const productizationEnabled = process.env.PHASE8_PRODUCTIZATION === "1";
+const interactionTtlMs = boundedInteger(process.env.PHASE8_INTERACTION_TTL_MS ?? "600000", 120_000, 900_000, "PHASE8_INTERACTION_TTL_MS");
+const liveControlEnabled = process.env.PHASE8_WEB_LIVE_TURN === "1";
+const liveControlDelayMs = boundedInteger(process.env.PHASE8_WEB_LIVE_DELAY_MS ?? "300", 100, 2_000, "PHASE8_WEB_LIVE_DELAY_MS");
 const store = new SqliteEventStore({ databasePath });
 const ownership = productizationEnabled ? { principalId: brand("fixture-user-a", "PrincipalId"), tenantId: brand("fixture-tenant-a", "TenantId") } : undefined;
 const productizationHostOptions = productizationEnabled ? {
@@ -62,7 +65,7 @@ await store.append({ sessionId: session.id, turnId, type: "interaction/requested
   allowFreeform: true,
   caller: "agent",
   createdAt: new Date().toISOString(),
-  expiresAt: new Date(Date.now() + 120_000).toISOString(),
+  expiresAt: new Date(Date.now() + interactionTtlMs).toISOString(),
 } });
 await store.append({ sessionId: session.id, turnId, type: "interaction/requested", payload: {
   interactionId: interactionTwo,
@@ -72,11 +75,9 @@ await store.append({ sessionId: session.id, turnId, type: "interaction/requested
   allowFreeform: false,
   caller: "agent",
   createdAt: new Date().toISOString(),
-  expiresAt: new Date(Date.now() + 120_000).toISOString(),
+  expiresAt: new Date(Date.now() + interactionTtlMs).toISOString(),
 } });
 await store.append({ sessionId: session.id, turnId, type: "assistant/message", payload: { content: "The release plan is ready for your answers." } });
-
-const host = new AgentHost({ store, ...productizationHostOptions });
 
 const fixtureModel = (text) => ({
   async *stream() {
@@ -84,6 +85,24 @@ const fixtureModel = (text) => ({
     yield { type: "done" };
   },
 });
+const liveControlModel = {
+  async *stream(_messages, signal) {
+    for (const text of ["Live control turn started. ", "Steer and queue are durable. ", "Live control turn completed."]) {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, liveControlDelayMs);
+        signal?.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason ?? new Error("aborted")); }, { once: true });
+      });
+      yield { type: "text_delta", text };
+    }
+    yield { type: "done" };
+  },
+};
+const host = new AgentHost({ store, ...productizationHostOptions, ...(liveControlEnabled ? { model: liveControlModel } : {}) });
+let liveControlSession;
+if (liveControlEnabled) {
+  liveControlSession = await host.createSession(join(root, "live-control"), "ask-on-write");
+  await host.sendMessage(liveControlSession.id, "Phase 8 live control fixture", "phase8-live-control");
+}
 const settingsModelOptions = process.env.PHASE8_MODEL_FAILURES === undefined ? {} : {
   modelSelector: (model) => ({
     model: fixtureModel(`selected:${model}`),
@@ -123,6 +142,7 @@ console.log(JSON.stringify({
   turnId,
   goalId: "goal_phase8_web",
   interactions: { first: interactionOne, second: interactionTwo },
+  ...(liveControlSession === undefined ? {} : { liveControlSessionId: liveControlSession.id, liveControlDelayMs }),
 }));
 
 async function cleanup() {
@@ -134,3 +154,9 @@ async function cleanup() {
 process.once("SIGINT", () => { void cleanup().finally(() => process.exit(0)); });
 process.once("SIGTERM", () => { void cleanup().finally(() => process.exit(0)); });
 await new Promise(() => undefined);
+
+function boundedInteger(value, minimum, maximum, label) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) throw new Error(`${label} must be an integer between ${minimum} and ${maximum}`);
+  return parsed;
+}
