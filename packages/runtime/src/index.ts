@@ -29,6 +29,7 @@ import {
   type TodoItem,
   type WorktreeProjection,
   type ProductizationCapability,
+  type SessionOwnership,
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { compactMessages, type ContextBudget } from "@code-review-agent/compaction";
@@ -55,6 +56,12 @@ export interface AgentHostOptions {
   readonly subagentRuntime?: SubagentRuntime;
   readonly compactionEnabled?: boolean;
   readonly contextBudget?: Partial<ContextBudget>;
+  readonly quota?: ProductizationQuotaPolicy;
+}
+
+export interface ProductizationQuotaPolicy {
+  readonly maxSessionsPerTenant?: number;
+  readonly maxTurnsPerTenant?: number;
 }
 
 export interface ContextSettings {
@@ -148,6 +155,8 @@ export class AgentHost {
   private readonly toolPromptRegistry: ToolPromptRegistry;
   private readonly compactionEnabled: boolean;
   private readonly contextBudget: Partial<ContextBudget> | undefined;
+  private readonly quota: ProductizationQuotaPolicy | undefined;
+  private readonly quotaTails = new Map<string, Promise<void>>();
   private readonly worktreeOperations = new Map<SessionId, Promise<void>>();
   private readonly metricCounters = { turnsStarted: 0, turnsCompleted: 0, turnsFailed: 0, turnsStopped: 0, modelFallbacks: 0, toolCalls: 0, toolFailures: 0 };
 
@@ -156,6 +165,7 @@ export class AgentHost {
     this.fallbackModels = options.fallbackModels ?? [];
     this.compactionEnabled = options.compactionEnabled !== false;
     this.contextBudget = options.contextBudget;
+    this.quota = options.quota;
     this.customSystemPrompt = options.systemPrompt;
     this.maxSteps = options.maxSteps ?? 12;
     if (!Number.isInteger(this.maxSteps) || this.maxSteps < 1 || this.maxSteps > 100) throw new Error("maxSteps must be an integer between 1 and 100");
@@ -216,6 +226,7 @@ export class AgentHost {
    * disabled until their durable contracts and recovery gates are accepted.
    */
   productizationSettings(): ProductizationSettings {
+    const quotaConfigured = this.quota?.maxSessionsPerTenant !== undefined || this.quota?.maxTurnsPerTenant !== undefined;
     return {
       version: 1,
       enabled: false,
@@ -224,26 +235,66 @@ export class AgentHost {
       auth: { status: "deferred", mode: "disabled", required: false },
       multiUser: { status: "deferred", principalCatalog: "disabled" },
       tenantIsolation: { status: "deferred", sessionOwnership: "disabled" },
-      quota: { status: "disabled", enforcement: "disabled" },
+      quota: quotaConfigured ? { status: "configured", enforcement: "hard" } : { status: "disabled", enforcement: "disabled" },
       routing: { status: "available", providerCount: this.fallbackModels.length + 1, modelSelector: "host-local" },
       credentials: { status: "configured", secretStore: "host-only", redaction: "required" },
       operations: { status: "deferred", backup: "deferred", migration: "deferred", upgrade: "deferred" },
     };
   }
 
-  async createSession(workspaceRoot: string, permissionPreset?: PermissionPreset, metadata?: ChildSessionMetadata): Promise<SessionProjection> {
+  async createSession(workspaceRoot: string, permissionPreset?: PermissionPreset, metadata?: ChildSessionMetadata, ownership?: SessionOwnership): Promise<SessionProjection> {
     await this.ready;
     const preset = permissionPreset ?? this.permissionPreset ?? "ask-on-write";
-    const id = await this.options.store.createSession(workspaceRoot, preset, metadata);
-    this.toolRuntime.setSessionPermissionPreset(id, preset);
-    const projection = await this.options.store.project(id);
-    if (projection === undefined) throw new Error("Session projection was not created");
-    return projection;
+    const effectiveOwnership = ownership ?? metadata?.ownership;
+    return this.withQuotaLock(effectiveOwnership?.tenantId, async () => {
+      await this.enforceSessionQuota(effectiveOwnership);
+      const id = await this.options.store.createSession(workspaceRoot, preset, metadata, undefined, effectiveOwnership);
+      this.toolRuntime.setSessionPermissionPreset(id, preset);
+      const projection = await this.options.store.project(id);
+      if (projection === undefined) throw new Error("Session projection was not created");
+      return projection;
+    });
   }
 
   async listSessions(includeArchived = false): Promise<readonly SessionSummary[]> {
     await this.ready;
     return this.options.store.listSessions(includeArchived);
+  }
+
+  private async enforceSessionQuota(ownership: SessionOwnership | undefined): Promise<void> {
+    const limit = this.quota?.maxSessionsPerTenant;
+    if (ownership === undefined || limit === undefined) return;
+    const sessions = await this.options.store.listSessions(true);
+    const count = sessions.filter((session) => session.ownership?.tenantId === ownership.tenantId && !session.deleted).length;
+    if (count >= limit) throw quotaExceeded("SESSION_QUOTA_EXCEEDED", `Tenant ${ownership.tenantId} has reached the session quota (${limit}).`);
+  }
+
+  private async enforceTurnQuota(projection: SessionProjection): Promise<void> {
+    const limit = this.quota?.maxTurnsPerTenant;
+    const tenantId = projection.ownership?.tenantId;
+    if (tenantId === undefined || limit === undefined) return;
+    const sessions = await this.options.store.listSessions(true);
+    let count = 0;
+    for (const session of sessions) {
+      if (session.ownership?.tenantId !== tenantId) continue;
+      const current = await this.options.store.project(session.id);
+      count += current?.turns.length ?? 0;
+    }
+    if (count >= limit) throw quotaExceeded("TURN_QUOTA_EXCEEDED", `Tenant ${tenantId} has reached the turn quota (${limit}).`);
+  }
+
+  private async withQuotaLock<T>(tenantId: string | undefined, operation: () => Promise<T>): Promise<T> {
+    if (tenantId === undefined) return operation();
+    const previous = this.quotaTails.get(tenantId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    const tail = previous.then(() => current);
+    this.quotaTails.set(tenantId, tail);
+    await previous;
+    try { return await operation(); } finally {
+      release();
+      if (this.quotaTails.get(tenantId) === tail) this.quotaTails.delete(tenantId);
+    }
   }
 
   async listJobs(sessionId: SessionId): Promise<readonly JobSummary[]> {
@@ -943,6 +994,16 @@ export class AgentHost {
   }
 
   async sendMessage(sessionId: SessionId, content: string, commandId?: string): Promise<TurnId> {
+    await this.ready;
+    const projection = await this.options.store.project(sessionId);
+    if (projection === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    return this.withQuotaLock(projection.ownership?.tenantId, async () => {
+      await this.enforceTurnQuota(projection);
+      return this.sendMessageInternal(sessionId, content, commandId);
+    });
+  }
+
+  private async sendMessageInternal(sessionId: SessionId, content: string, commandId?: string): Promise<TurnId> {
     await this.ready;
     const projection = await this.options.store.project(sessionId);
     if (projection === undefined) throw new Error(`Unknown session: ${sessionId}`);
@@ -1769,4 +1830,8 @@ function replayJobCommand(jobId: string, result: unknown): ToolResult {
     output: { jobId, status: "idempotent_replay" },
     presentation: { kind: "terminal", title: `Job command already applied for ${jobId}`, data: { jobId, status: "idempotent_replay" } },
   };
+}
+
+function quotaExceeded(code: "SESSION_QUOTA_EXCEEDED" | "TURN_QUOTA_EXCEEDED", message: string): Error & { readonly code: string } {
+  return Object.assign(new Error(message), { code });
 }

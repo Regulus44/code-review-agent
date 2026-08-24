@@ -1,5 +1,32 @@
 # Phase 8 开发日志
 
+## 2026-08-24：8.5 opt-in bearer auth、tenant ownership 与 quota slice
+
+本次 checkpoint 继续 Phase 8.5，落实上一 checkpoint 已接受的产品化边界。默认本地 Host 行为保持兼容；认证与 quota 只有显式配置时才启用。A2A 保持 `deferred`。
+
+### 已完成
+
+- `SessionOwnership` contract 进入 SessionProjection/Summary；`session/created` 事件携带 principal/tenant identity，SQLite replay、fork 和 child Subagent 创建会保留或继承 ownership；
+- `AgentHost` 支持按 tenant 的 bounded `maxSessionsPerTenant` 与 `maxTurnsPerTenant` hard quota，并使用租户锁避免同一 Host 的并发创建/发送绕过计量；未归属的本地 Session 保持旧行为；
+- API 增加显式静态 bearer token adapter：认证请求按 tenant 过滤 Session catalog，跨租户 Session 返回 404，缺少/错误 token 返回 401；全局 diagnostics、MCP config 和 Workspace mutation 在缺少 tenant-scoped adapter 时 fail closed；
+- Productization capability 在配置认证和 quota 时报告 `configured`/`hard`，未配置时继续显示 `deferred`/`disabled`，不把受控静态 token adapter 宣称为外部 IdP；
+- 新增真实 Web/SQLite fixture 的认证、tenant catalog、cross-tenant denial、turn quota 和 credential redaction gate。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/storage test       ✓ (13 tests)
+pnpm --filter @code-review-agent/runtime test -- --run src/index.test.ts ✓ (29 tests)
+pnpm --filter @code-review-agent/api test -- --run src/server.test.ts ✓ (29 tests)
+pnpm test:phase8:productization                     ✓
+git diff --check                                     ✓
+```
+
+### 尚未关闭
+
+该切片不实现外部 IdP/JWT、完整 principal catalog、tenant-scoped Workspace mutation、MCP config 隔离、tenant-scoped provider routing 或 backup/migration/upgrade policy；8.5 与 Phase 8 仍保持 `in_progress`。
+
 ## 2026-08-24：8.5 产品化边界与 capability 第一切片
 
 本次 checkpoint 属于 Phase 8.5 产品化，先建立可回滚的契约边界和默认禁用态。A2A 保持 `deferred`，未引入认证或租户推断。

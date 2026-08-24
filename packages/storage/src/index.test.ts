@@ -112,6 +112,23 @@ describe("InMemoryEventStore", () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
+  it("replays durable tenant ownership across SQLite reopen", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-ownership-"));
+    const databasePath = join(directory, "agent.sqlite");
+    const first = new SqliteEventStore({ databasePath });
+    const ownership = { principalId: brand<string, "PrincipalId">("user-a"), tenantId: brand<string, "TenantId">("tenant-a") };
+    const sessionId = await first.createSession("D:/tenant-a", "ask-on-write", undefined, undefined, ownership);
+    expect((await first.project(sessionId))?.ownership).toEqual(ownership);
+    first.close();
+    const second = new SqliteEventStore({ databasePath });
+    expect((await second.project(sessionId))?.ownership).toEqual(ownership);
+    expect((await second.listSessions(true))[0]?.ownership).toEqual(ownership);
+    const forked = await second.forkSession(sessionId, "D:/tenant-a-fork");
+    expect((await second.project(forked))?.ownership).toEqual(ownership);
+    second.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
   it("marks an in-flight session interrupted after reopening", async () => {
     const directory = mkdtempSync(join(tmpdir(), "code-review-agent-recovery-"));
     const databasePath = join(directory, "agent.sqlite");

@@ -27,10 +27,10 @@
 ## Phase 8.5 产品化第一切片（partial）
 
 - 新增 [ADR：Phase 8.5 产品化边界与渐进式启用](adr/phase-8-5-productization-boundary.zh-CN.md)，明确 remote auth、multi-user/tenant、quota、provider/model routing、credentials 和运维能力的状态语义、默认禁用态与回滚边界；
-- `packages/contracts` 新增 `ProductizationCapability`，逐项表达 auth、multi-user、tenant isolation、quota、routing、credentials 和 operations 状态；
-- Runtime `AgentHost.productizationSettings()` 和 API `/v1/capabilities.productization` 返回真实 host-backed readiness；默认本地 Host 保持 auth/tenant/quota/运维能力 `deferred` 或 `disabled`，不会宣称已启用；
-- Web Settings 和 typed browser bundle 展示 Productization 状态；新增 `scripts/phase8-productization-gate.mjs` 与 `pnpm test:phase8:productization`；
-- 当前仍未实现 bearer auth、durable Session ownership、tenant isolation、quota enforcement、tenant-scoped routing 或 backup/migration/upgrade policy，不能将 8.5 或 Phase 8 标记为完成。
+- `packages/contracts` 新增 `ProductizationCapability` 和 `SessionOwnership`；Session/SessionProjection 的 ownership 通过 `session/created` 事件持久化，并在 SQLite 重启、fork 和子 Agent 创建时回放/继承；
+- Runtime `AgentHost.productizationSettings()` 和 API `/v1/capabilities.productization` 返回真实 host-backed readiness；显式配置时支持静态 bearer token、tenant-scoped Session catalog、跨租户 404 隔离和 hard Session/Turn quota；默认本地 Host 保持 auth/tenant/quota/运维能力 `deferred` 或 `disabled`；
+- Web Settings 和 typed browser bundle 展示 Productization 状态；`scripts/phase8-productization-gate.mjs` 与 `pnpm test:phase8:productization` 已覆盖认证、租户目录、跨租户拒绝、turn quota 和凭据脱敏边界；
+- 当前仍未实现外部 IdP/JWT、完整 principal catalog、tenant-scoped Workspace mutation、MCP config 隔离、tenant-scoped provider routing 或 backup/migration/upgrade policy，不能将 8.5 或 Phase 8 标记为完成。
 
 ## Phase 6 A2A 暂缓决策
 

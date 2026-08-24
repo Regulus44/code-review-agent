@@ -1,12 +1,12 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { createInProcessSubagentProvider, sessionId, AgentHost, turnId } from "@code-review-agent/runtime";
 import { SqliteEventStore } from "@code-review-agent/storage";
-import { brand, type AgentEvent, type ChatModel, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem } from "@code-review-agent/contracts";
+import { brand, type AgentEvent, type ChatModel, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem, type ProductizationCapability, type SessionOwnership } from "@code-review-agent/contracts";
 import { SubagentRuntime } from "@code-review-agent/subagent";
 import { createConfiguredChatModel, DEEPSEEK_MODELS, type ModelConfigView } from "@code-review-agent/llm";
 import { McpConnectionManager, type McpServerConfig } from "@code-review-agent/mcp-client";
@@ -17,6 +17,23 @@ import { attachmentCapability, AttachmentInputError, stageAttachment, type Attac
 export interface ModelSelection {
   readonly model: ChatModel;
   readonly config: ModelConfigView;
+}
+
+export interface ProductizationToken {
+  readonly token: string;
+  readonly principalId: string;
+  readonly tenantId: string;
+}
+
+export interface ProductizationServerOptions {
+  readonly auth?: {
+    readonly required?: boolean;
+    readonly tokens: readonly ProductizationToken[];
+  };
+  readonly quota?: {
+    readonly maxSessionsPerTenant?: number;
+    readonly maxTurnsPerTenant?: number;
+  };
 }
 
 export interface ApiServerOptions {
@@ -41,6 +58,7 @@ export interface ApiServerOptions {
     readonly maxSummaryChars?: number;
   };
   readonly codeMode?: CodeModeSandbox;
+  readonly productization?: ProductizationServerOptions;
   readonly webRoot?: string;
 }
 
@@ -48,7 +66,7 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
   const ownsStore = options.store === undefined && options.host === undefined;
   const store = options.store ?? (options.host === undefined ? new SqliteEventStore({ databasePath: options.databasePath ?? defaultDatabasePath() }) : undefined);
   const subagentRuntime = options.subagentRuntime ?? new SubagentRuntime({ store: store as SessionEventStore });
-  const host = options.host ?? new AgentHost({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), ...(options.fallbackModels === undefined ? {} : { fallbackModels: options.fallbackModels }), ...(options.permissionPreset === undefined ? {} : { permissionPreset: options.permissionPreset }), ...(options.contextBudget === undefined ? {} : { contextBudget: options.contextBudget }), ...(options.codeMode === undefined ? {} : { codeMode: options.codeMode }), subagentRuntime });
+  const host = options.host ?? new AgentHost({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), ...(options.fallbackModels === undefined ? {} : { fallbackModels: options.fallbackModels }), ...(options.permissionPreset === undefined ? {} : { permissionPreset: options.permissionPreset }), ...(options.contextBudget === undefined ? {} : { contextBudget: options.contextBudget }), ...(options.codeMode === undefined ? {} : { codeMode: options.codeMode }), ...(options.productization?.quota === undefined ? {} : { quota: options.productization.quota }), subagentRuntime });
   if (!subagentRuntime.providerCatalog().some((provider) => provider.name === "in-process")) subagentRuntime.registerProvider(createInProcessSubagentProvider({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), baseToolDefinitions: host.toolRegistry().listAll(), subagentRuntime }));
   const modelRuntime: ModelRuntimeState = {
     availableModels: options.availableModels ?? [],
@@ -66,7 +84,7 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
   const persistence = store instanceof SqliteEventStore ? "sqlite" : "custom";
   const webRoot = options.webRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web");
   const server = createServer((request, response) => {
-    void handleRequest(request, response, host, mcp, subagentRuntime, webRoot, persistence, modelRuntime, options.attachmentPolicy);
+    void handleRequest(request, response, host, mcp, subagentRuntime, webRoot, persistence, modelRuntime, options.attachmentPolicy, options.productization);
   });
   server.on("close", () => { void host.shutdown(); });
   if (ownsStore && store instanceof SqliteEventStore) server.on("close", () => store.close());
@@ -114,7 +132,7 @@ function currentAttachmentCapability(policy: AttachmentPolicy | undefined, model
   return attachmentCapability(policy, modelRuntime.info?.model.includes("vision") === true);
 }
 
-async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, mcp: McpConnectionManager, subagents: SubagentRuntime, webRoot: string, persistence: string, modelRuntime: ModelRuntimeState, attachmentPolicy: AttachmentPolicy | undefined): Promise<void> {
+async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, mcp: McpConnectionManager, subagents: SubagentRuntime, webRoot: string, persistence: string, modelRuntime: ModelRuntimeState, attachmentPolicy: AttachmentPolicy | undefined, productization: ProductizationServerOptions | undefined): Promise<void> {
   response.setHeader("access-control-allow-origin", "*");
   response.setHeader("access-control-allow-headers", "content-type, idempotency-key, last-event-id");
   response.setHeader("access-control-allow-methods", "GET,POST,DELETE,OPTIONS");
@@ -124,6 +142,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   }
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
   try {
+    const identity = authenticateRequest(request, url.pathname, productization);
+    const sessionResource = url.pathname.match(/^\/v1\/sessions\/([^/]+)/u);
+    if (identity !== undefined && sessionResource?.[1] !== undefined) {
+      await assertSessionAccess(host, sessionId(decodeURIComponent(sessionResource[1])), identity);
+    }
+    if (identity !== undefined && url.pathname.startsWith("/v1/mcp/")) throw new HttpError(403, "MCP tenant scope is not configured for authenticated requests");
+    if (identity !== undefined && (url.pathname === "/v1/metrics" || url.pathname === "/v1/diagnostics")) throw new HttpError(403, "Global diagnostics are not exposed across tenant scope");
     if (request.method === "GET" && url.pathname === "/health") {
       sendJson(response, 200, { ok: true, service: "code-review-agent", runtime: "typescript", persistence, ...(modelRuntime.info === undefined ? {} : { model: modelRuntime.info }) });
       return;
@@ -166,14 +191,21 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/capabilities") {
-      sendJson(response, 200, { attachments: currentAttachmentCapability(attachmentPolicy, modelRuntime), context: host.contextSettings(), codeMode: host.codeModeSettings(), lsp: host.lspSettings(), plugins: host.pluginsSettings(), productization: host.productizationSettings() });
+      sendJson(response, 200, { attachments: currentAttachmentCapability(attachmentPolicy, modelRuntime), context: host.contextSettings(), codeMode: host.codeModeSettings(), lsp: host.lspSettings(), plugins: host.pluginsSettings(), productization: productizationCapability(host.productizationSettings(), productization) });
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/workspaces") {
-      sendJson(response, 200, await host.listWorkspaces(url.searchParams.get("include_archived") === "true"));
+      const catalog = await host.listWorkspaces(url.searchParams.get("include_archived") === "true");
+      if (identity === undefined) sendJson(response, 200, catalog);
+      else {
+        const sessions = await host.listSessions(true);
+        const roots = new Set(sessions.filter((session) => session.ownership?.tenantId === identity.tenantId).map((session) => session.workspaceRoot.toLowerCase()));
+        sendJson(response, 200, { workspaces: catalog.workspaces.filter((workspace) => roots.has(workspace.root.toLowerCase())) });
+      }
       return;
     }
     if (request.method === "POST" && url.pathname === "/v1/workspaces/reorder") {
+      if (identity !== undefined) throw new HttpError(403, "Workspace reorder requires a tenant-scoped catalog adapter");
       const body = await readJson(request);
       if (!Array.isArray(body.order) || body.order.some((value: unknown) => typeof value !== "string")) throw new HttpError(400, "order must be an array of workspace keys");
       sendJson(response, 200, await host.reorderWorkspaces(body.order as string[], commandId(request, body)));
@@ -181,6 +213,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     }
     const workspaceRenameMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/label$/u);
     if (request.method === "POST" && workspaceRenameMatch?.[1] !== undefined) {
+      if (identity !== undefined) throw new HttpError(403, "Workspace mutation requires a tenant-scoped catalog adapter");
       const body = await readJson(request);
       if (typeof body.label !== "string") throw new HttpError(400, "label is required");
       sendJson(response, 200, await host.renameWorkspace(decodeURIComponent(workspaceRenameMatch[1]), body.label, commandId(request, body)));
@@ -188,6 +221,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     }
     const workspaceArchiveMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/archive$/u);
     if (request.method === "POST" && workspaceArchiveMatch?.[1] !== undefined) {
+      if (identity !== undefined) throw new HttpError(403, "Workspace mutation requires a tenant-scoped catalog adapter");
       const body = await readJson(request);
       const archived = body.archived === undefined ? true : body.archived;
       if (typeof archived !== "boolean") throw new HttpError(400, "archived must be a boolean");
@@ -196,6 +230,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     }
     const workspaceDeleteMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)$/u);
     if (request.method === "DELETE" && workspaceDeleteMatch?.[1] !== undefined) {
+      if (identity !== undefined) throw new HttpError(403, "Workspace mutation requires a tenant-scoped catalog adapter");
       sendJson(response, 200, await host.deleteWorkspace(decodeURIComponent(workspaceDeleteMatch[1]), commandId(request)));
       return;
     }
@@ -273,11 +308,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const body = await readJson(request);
       const workspaceRoot = typeof body.workspaceRoot === "string" && body.workspaceRoot.length > 0 ? body.workspaceRoot : process.cwd();
       const permissionPreset = body.permissionPreset === undefined ? undefined : parsePermissionPreset(body.permissionPreset);
-      sendJson(response, 201, await host.createSession(workspaceRoot, permissionPreset));
+      sendJson(response, 201, await host.createSession(workspaceRoot, permissionPreset, undefined, identity));
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/sessions") {
-      sendJson(response, 200, { sessions: await host.listSessions(url.searchParams.get("include_archived") === "true") });
+      const sessions = await host.listSessions(url.searchParams.get("include_archived") === "true");
+      sendJson(response, 200, { sessions: identity === undefined ? sessions : sessions.filter((session) => session.ownership?.tenantId === identity.tenantId) });
       return;
     }
     const attachmentMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/attachments$/u);
@@ -532,6 +568,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           ...(typeof body.model === "string" ? { model: body.model } : {}),
           ...(typeof body.delegationDepth === "number" ? { delegationDepth: body.delegationDepth } : {}),
           ...(typeof body.commandId === "string" ? { commandId: body.commandId } : {}),
+          ...(parent.ownership === undefined ? {} : { ownership: parent.ownership }),
         });
         sendJson(response, receipt.report === undefined ? 202 : 200, receipt);
         return;
@@ -642,9 +679,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     throw new HttpError(404, "not found");
   } catch (error) {
     const code = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : "";
-    const status = error instanceof HttpError ? error.status : code === "INVALID_TOOL_INPUT" ? 400 : code === "TOOL_NOT_FOUND" ? 404 : code === "TOOL_DISABLED" ? 409 : code === "MODEL_CONFIGURATION_ERROR" ? 400 : code === "COMMAND_CONFLICT" || code === "WORKTREE_DIRTY" || code === "WORKTREE_INVALID" || code === "WORKTREE_EXISTS" ? 409 : 500;
+    const status = error instanceof HttpError ? error.status : code === "INVALID_TOOL_INPUT" ? 400 : code === "TOOL_NOT_FOUND" ? 404 : code === "TOOL_DISABLED" ? 409 : code === "MODEL_CONFIGURATION_ERROR" ? 400 : code === "SESSION_QUOTA_EXCEEDED" || code === "TURN_QUOTA_EXCEEDED" ? 429 : code === "COMMAND_CONFLICT" || code === "WORKTREE_DIRTY" || code === "WORKTREE_INVALID" || code === "WORKTREE_EXISTS" ? 409 : 500;
     const message = error instanceof Error ? error.message : String(error);
-    if (!response.headersSent) sendJson(response, status, { error: message });
+    if (!response.headersSent) {
+      if (status === 401) response.setHeader("www-authenticate", "Bearer");
+      sendJson(response, status, { error: message });
+    }
     else response.end();
   }
 }
@@ -732,6 +772,48 @@ function commandId(request: IncomingMessage, body: Record<string, unknown> = {})
   const header = request.headers["idempotency-key"];
   if (typeof header === "string" && header.length > 0) return header;
   return typeof body.commandId === "string" && body.commandId.length > 0 ? body.commandId : undefined;
+}
+
+function authenticateRequest(request: IncomingMessage, pathname: string, productization: ProductizationServerOptions | undefined): SessionOwnership | undefined {
+  const auth = productization?.auth;
+  if (auth === undefined) return undefined;
+  const publicPath = pathname === "/health" || pathname === "/" || pathname === "/index.html" || pathname.startsWith("/web/");
+  const header = request.headers.authorization;
+  const presented = typeof header === "string" && header.startsWith("Bearer ") ? header.slice("Bearer ".length) : undefined;
+  if (presented === undefined || presented.length === 0) {
+    if (auth.required === true && !publicPath) throw new HttpError(401, "Bearer authentication is required");
+    return undefined;
+  }
+  for (const candidate of auth.tokens) {
+    const left = Buffer.from(presented);
+    const right = Buffer.from(candidate.token);
+    if (left.length !== right.length) continue;
+    if (!timingSafeEqual(left, right)) continue;
+    return { principalId: brand<string, "PrincipalId">(candidate.principalId), tenantId: brand<string, "TenantId">(candidate.tenantId) };
+  }
+  throw new HttpError(401, "Invalid bearer token");
+}
+
+async function assertSessionAccess(host: AgentHost, id: ReturnType<typeof sessionId>, identity: SessionOwnership): Promise<void> {
+  const projection = await host.getSession(id);
+  if (projection === undefined || projection.ownership?.tenantId !== identity.tenantId) throw new HttpError(404, "session not found");
+}
+
+function productizationCapability(base: ProductizationCapability, policy: ProductizationServerOptions | undefined): ProductizationCapability {
+  const auth = policy?.auth;
+  if (auth === undefined && policy?.quota === undefined) return base;
+  const authStatus = auth === undefined ? base.auth.status : auth.tokens.length === 0 && auth.required === true ? "unavailable" : "configured";
+  const authEnabled = auth?.required === true && auth.tokens.length > 0;
+  const quotaEnabled = authEnabled && base.quota.status === "configured";
+  return {
+    ...base,
+    enabled: authEnabled || quotaEnabled,
+    status: authEnabled ? "configured" : base.status,
+    reason: authEnabled ? "Bearer authentication and durable tenant-scoped Session ownership are enabled for this host." : base.reason,
+    auth: { status: authStatus, mode: auth === undefined || auth.tokens.length === 0 ? "disabled" : "bearer", required: auth?.required === true },
+    tenantIsolation: authEnabled ? { status: "configured", sessionOwnership: "durable" } : base.tenantIsolation,
+    quota: quotaEnabled ? base.quota : policy?.quota === undefined ? base.quota : { status: "deferred", enforcement: "disabled" },
+  };
 }
 
 function serveIndex(response: ServerResponse, webRoot: string): void {

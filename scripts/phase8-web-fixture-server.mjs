@@ -17,9 +17,11 @@ import { brand } from "../packages/contracts/dist/index.js";
 const root = await mkdtemp(join(tmpdir(), "code-review-agent-phase8-web-"));
 const databasePath = join(root, "events.sqlite");
 const webRoot = process.env.PHASE8_WEB_ROOT;
+const productizationEnabled = process.env.PHASE8_PRODUCTIZATION === "1";
 const store = new SqliteEventStore({ databasePath });
-const bootstrapHost = new AgentHost({ store });
-const session = await bootstrapHost.createSession(root, "ask-on-write");
+const ownership = productizationEnabled ? { principalId: brand("fixture-user-a", "PrincipalId"), tenantId: brand("fixture-tenant-a", "TenantId") } : undefined;
+const bootstrapHost = new AgentHost({ store, ...(productizationEnabled ? { quota: { maxSessionsPerTenant: 2, maxTurnsPerTenant: 2 } } : {}) });
+const session = await bootstrapHost.createSession(root, "ask-on-write", undefined, ownership);
 const turnId = brand("turn_phase8_web", "TurnId");
 const toolCallId = brand("call_phase8_web", "ToolCallId");
 const interactionOne = brand("interaction_phase8_one", "InteractionId");
@@ -70,7 +72,7 @@ await store.append({ sessionId: session.id, turnId, type: "interaction/requested
 } });
 await store.append({ sessionId: session.id, turnId, type: "assistant/message", payload: { content: "The release plan is ready for your answers." } });
 
-const host = new AgentHost({ store });
+const host = new AgentHost({ store, ...(productizationEnabled ? { quota: { maxSessionsPerTenant: 2, maxTurnsPerTenant: 2 } } : {}) });
 
 const server = createApiServer({
   store,
@@ -79,6 +81,7 @@ const server = createApiServer({
   ...(process.env.PHASE8_MODEL_FAILURES === undefined ? {} : { modelCatalogFailures: Number(process.env.PHASE8_MODEL_FAILURES) }),
   ...(process.env.PHASE8_MODEL_FAILURES === undefined ? {} : { availableModels: ["fixture-model"] }),
   ...(process.env.PHASE8_MODEL_FAILURES === undefined ? {} : { modelInfo: { provider: "echo", model: "fixture-model", configured: false } }),
+  ...(productizationEnabled ? { productization: { auth: { required: true, tokens: [{ token: "fixture-tenant-a-token", principalId: "fixture-user-a", tenantId: "fixture-tenant-a" }, { token: "fixture-tenant-b-token", principalId: "fixture-user-b", tenantId: "fixture-tenant-b" }] }, quota: { maxSessionsPerTenant: 2, maxTurnsPerTenant: 2 } } } : {}),
 });
 await new Promise((resolve) => server.listen(Number(process.env.PHASE8_WEB_PORT ?? 0), "127.0.0.1", resolve));
 const address = server.address();

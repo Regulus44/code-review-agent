@@ -708,6 +708,69 @@ describe("Phase 2 API", () => {
     }
   });
 
+  it("enforces bearer auth, durable tenant isolation, quota, and restart replay", async () => {
+    const scopedStore = new InMemoryEventStore();
+    const scoped = createApiServer({
+      store: scopedStore,
+      productization: {
+        auth: {
+          required: true,
+          tokens: [
+            { token: "tenant-a-token", principalId: "user-a", tenantId: "tenant-a" },
+            { token: "tenant-b-token", principalId: "user-b", tenantId: "tenant-b" },
+          ],
+        },
+        quota: { maxSessionsPerTenant: 1, maxTurnsPerTenant: 1 },
+      },
+    });
+    await new Promise<void>((resolve) => scoped.listen(0, "127.0.0.1", resolve));
+    const address = scoped.address();
+    if (address === null || typeof address === "string") throw new Error("Scoped API did not bind");
+    const url = `http://127.0.0.1:${address.port}`;
+    const auth = (token: string) => ({ "content-type": "application/json", authorization: `Bearer ${token}` });
+    try {
+      const unauthenticated = await fetch(`${url}/v1/sessions`);
+      expect(unauthenticated.status).toBe(401);
+      expect(unauthenticated.headers.get("www-authenticate")).toBe("Bearer");
+      const capabilities = await (await fetch(`${url}/v1/capabilities`, { headers: { authorization: "Bearer tenant-a-token" } })).json() as { productization: { enabled: boolean; auth: { mode: string }; tenantIsolation: { sessionOwnership: string }; quota: { status: string; enforcement: string } } };
+      expect(capabilities.productization).toMatchObject({ enabled: true, auth: { mode: "bearer" }, tenantIsolation: { sessionOwnership: "durable" }, quota: { status: "configured", enforcement: "hard" } });
+
+      const first = await fetch(`${url}/v1/sessions`, { method: "POST", headers: auth("tenant-a-token"), body: JSON.stringify({ workspaceRoot: "D:/tenant-a" }) });
+      expect(first.status).toBe(201);
+      const firstSession = await first.json() as { id: string; ownership: { principalId: string; tenantId: string } };
+      expect(firstSession.ownership).toEqual({ principalId: "user-a", tenantId: "tenant-a" });
+      const deniedByQuota = await fetch(`${url}/v1/sessions`, { method: "POST", headers: auth("tenant-a-token"), body: JSON.stringify({ workspaceRoot: "D:/tenant-a-two" }) });
+      expect(deniedByQuota.status).toBe(429);
+
+      const second = await fetch(`${url}/v1/sessions`, { method: "POST", headers: auth("tenant-b-token"), body: JSON.stringify({ workspaceRoot: "D:/tenant-b" }) });
+      expect(second.status).toBe(201);
+      const secondSession = await second.json() as { id: string };
+      const visibleToA = await (await fetch(`${url}/v1/sessions`, { headers: { authorization: "Bearer tenant-a-token" } })).json() as { sessions: { id: string }[] };
+      expect(visibleToA.sessions.map((session) => session.id)).toEqual([firstSession.id]);
+      expect((await fetch(`${url}/v1/sessions/${secondSession.id}`, { headers: { authorization: "Bearer tenant-a-token" } })).status).toBe(404);
+
+      expect((await fetch(`${url}/v1/sessions/${firstSession.id}`, { method: "POST", headers: auth("tenant-a-token"), body: JSON.stringify({ content: "one turn" }) })).status).toBe(202);
+      expect((await fetch(`${url}/v1/sessions/${firstSession.id}`, { method: "POST", headers: auth("tenant-a-token"), body: JSON.stringify({ content: "second turn" }) })).status).toBe(429);
+    } finally {
+      await new Promise<void>((resolve, reject) => scoped.close((error) => error ? reject(error) : resolve()));
+    }
+
+    const reopened = createApiServer({
+      store: scopedStore,
+      productization: { auth: { required: true, tokens: [{ token: "tenant-a-token", principalId: "user-a", tenantId: "tenant-a" }, { token: "tenant-b-token", principalId: "user-b", tenantId: "tenant-b" }] }, quota: { maxSessionsPerTenant: 1, maxTurnsPerTenant: 1 } },
+    });
+    await new Promise<void>((resolve) => reopened.listen(0, "127.0.0.1", resolve));
+    const reopenedAddress = reopened.address();
+    if (reopenedAddress === null || typeof reopenedAddress === "string") throw new Error("Reopened scoped API did not bind");
+    try {
+      const replayed = await (await fetch(`http://127.0.0.1:${reopenedAddress.port}/v1/sessions`, { headers: { authorization: "Bearer tenant-a-token" } })).json() as { sessions: { ownership?: { tenantId?: string } }[] };
+      expect(replayed.sessions).toHaveLength(1);
+      expect(replayed.sessions[0]?.ownership?.tenantId).toBe("tenant-a");
+    } finally {
+      await new Promise<void>((resolve, reject) => reopened.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
   it("supports idempotent commands and session lifecycle endpoints", async () => {
     const created = await fetch(`${baseUrl}/v1/sessions`, {
       method: "POST",

@@ -15,6 +15,7 @@ import {
   type ReportDeliveryPolicy,
   type TaskStopReason,
   type ToolError,
+  type SessionOwnership,
 } from "@code-review-agent/contracts";
 import { randomUUID } from "node:crypto";
 import { foldSubagentDescriptor, snapshotDescriptor } from "./descriptor.js";
@@ -47,6 +48,7 @@ export interface SpawnSubagentRequest {
   readonly taskId?: TaskId;
   readonly commandId?: string;
   readonly signal?: AbortSignal;
+  readonly ownership?: SessionOwnership;
 }
 
 export interface ProviderRunContext {
@@ -184,6 +186,7 @@ export class SubagentRuntime {
       workspaceRoot: request.workspaceRoot,
       permissionPreset: request.permissionPreset,
       metadata: childMetadata(descriptor),
+      ...(request.ownership === undefined ? {} : { ownership: request.ownership }),
     });
     await this.options.store.append({ sessionId: childSessionId, type: "subagent/descriptor", payload: { descriptor } });
     const controller = new AbortController();

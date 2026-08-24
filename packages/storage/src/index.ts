@@ -48,6 +48,7 @@ import {
   type ContextCompactionProjection,
   type WorktreeProjection,
   type WorktreeStatus,
+  type SessionOwnership,
 } from "@code-review-agent/contracts";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
@@ -108,7 +109,7 @@ function isSubagentMode(value: unknown): value is SubagentMode {
   return value === "one-shot" || value === "continuable";
 }
 
-function baseProjection(id: SessionId, workspaceRoot: string, permissionPreset: PermissionPreset = "ask-on-write", timestamp = now(), metadata?: ChildSessionMetadata): SessionProjection {
+function baseProjection(id: SessionId, workspaceRoot: string, permissionPreset: PermissionPreset = "ask-on-write", timestamp = now(), metadata?: ChildSessionMetadata, ownership?: SessionOwnership): SessionProjection {
   return {
     id,
     workspaceRoot,
@@ -134,7 +135,9 @@ function baseProjection(id: SessionId, workspaceRoot: string, permissionPreset: 
       childMode: metadata.childMode,
       childProvider: metadata.childProvider,
       delegationDepth: metadata.delegationDepth,
+      ...(metadata.ownership === undefined ? {} : { ownership: metadata.ownership }),
     }),
+    ...(ownership === undefined ? {} : { ownership }),
   };
 }
 
@@ -281,6 +284,11 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
     if (isSubagentMode(event.payload["childMode"])) next = { ...next, childMode: event.payload["childMode"] };
     if (typeof event.payload["childProvider"] === "string") next = { ...next, childProvider: event.payload["childProvider"] };
     if (typeof event.payload["delegationDepth"] === "number") next = { ...next, delegationDepth: event.payload["delegationDepth"] };
+    const principalId = event.payload["principalId"];
+    const tenantId = event.payload["tenantId"];
+    if (typeof principalId === "string" && typeof tenantId === "string") {
+      next = { ...next, ownership: { principalId: brand<string, "PrincipalId">(principalId), tenantId: brand<string, "TenantId">(tenantId) } };
+    }
     if (typeof event.payload["archived"] === "boolean") next = { ...next, archived: event.payload["archived"] };
     if (event.type === "session/deleted" || event.payload["deleted"] === true) next = { ...next, deleted: true };
   }
@@ -701,6 +709,7 @@ function metadataPayload(metadata: ChildSessionMetadata): Record<string, unknown
     childProvider: metadata.childProvider,
     delegationDepth: metadata.delegationDepth,
     ...(metadata.descriptor === undefined ? {} : { descriptor: metadata.descriptor }),
+    ...(metadata.ownership === undefined ? {} : { principalId: metadata.ownership.principalId, tenantId: metadata.ownership.tenantId }),
   };
 }
 
@@ -730,18 +739,19 @@ function readChildMetadata(row: SqliteRow): ChildSessionMetadata | undefined {
 export class InMemoryEventStore implements SessionEventStore {
   private readonly sessions = new Map<SessionId, MemorySession>();
 
-  async createSession(workspaceRoot: string, permissionPreset: PermissionPreset = "ask-on-write", idOrMetadata?: SessionId | ChildSessionMetadata, metadata?: ChildSessionMetadata): Promise<SessionId> {
+  async createSession(workspaceRoot: string, permissionPreset: PermissionPreset = "ask-on-write", idOrMetadata?: SessionId | ChildSessionMetadata, metadata?: ChildSessionMetadata, ownership?: SessionOwnership): Promise<SessionId> {
     const args = resolveCreateSessionArgs(idOrMetadata, metadata);
     const id = args.id;
     if (this.sessions.has(id)) throw new Error(`Session already exists: ${id}`);
-    const projection = baseProjection(id, workspaceRoot, permissionPreset, now(), args.metadata);
+    const effectiveOwnership = ownership ?? args.metadata?.ownership;
+    const projection = baseProjection(id, workspaceRoot, permissionPreset, now(), args.metadata, effectiveOwnership);
     this.sessions.set(id, { events: [], listeners: new Set(), projection, commands: new Map() });
-    await this.append({ sessionId: id, type: "session/created", payload: { workspaceRoot, permissionPreset, ...(args.metadata === undefined ? {} : metadataPayload(args.metadata)) } });
+    await this.append({ sessionId: id, type: "session/created", payload: { workspaceRoot, permissionPreset, ...(args.metadata === undefined ? {} : metadataPayload(args.metadata)), ...(effectiveOwnership === undefined ? {} : { principalId: effectiveOwnership.principalId, tenantId: effectiveOwnership.tenantId }) } });
     return id;
   }
 
-  async createChildSession(input: { readonly id?: SessionId; readonly workspaceRoot: string; readonly permissionPreset: PermissionPreset; readonly metadata: ChildSessionMetadata }): Promise<SessionId> {
-    return this.createSession(input.workspaceRoot, input.permissionPreset, input.id ?? input.metadata, input.id === undefined ? undefined : input.metadata);
+  async createChildSession(input: { readonly id?: SessionId; readonly workspaceRoot: string; readonly permissionPreset: PermissionPreset; readonly metadata: ChildSessionMetadata; readonly ownership?: SessionOwnership }): Promise<SessionId> {
+    return this.createSession(input.workspaceRoot, input.permissionPreset, input.id ?? input.metadata, input.id === undefined ? undefined : input.metadata, input.ownership ?? input.metadata.ownership);
   }
 
   async append(input: AppendEventInput): Promise<AgentEvent> {
@@ -828,7 +838,7 @@ export class InMemoryEventStore implements SessionEventStore {
   async forkSession(sessionId: SessionId, workspaceRoot?: string, id?: SessionId, permissionPreset?: PermissionPreset): Promise<SessionId> {
     const source = await this.project(sessionId);
     if (source === undefined) throw new Error(`Unknown session: ${sessionId}`);
-    const forked = await this.createSession(workspaceRoot ?? source.workspaceRoot, permissionPreset ?? source.permissionPreset, id);
+    const forked = await this.createSession(workspaceRoot ?? source.workspaceRoot, permissionPreset ?? source.permissionPreset, id, undefined, source.ownership);
     for (const message of source.messages) {
       await this.append({
         sessionId: forked,
@@ -874,21 +884,22 @@ export class SqliteEventStore implements SessionEventStore, McpConfigBackend {
     this.db.close();
   }
 
-  async createSession(workspaceRoot: string, permissionPreset: PermissionPreset = "ask-on-write", idOrMetadata?: SessionId | ChildSessionMetadata, metadata?: ChildSessionMetadata): Promise<SessionId> {
+  async createSession(workspaceRoot: string, permissionPreset: PermissionPreset = "ask-on-write", idOrMetadata?: SessionId | ChildSessionMetadata, metadata?: ChildSessionMetadata, ownership?: SessionOwnership): Promise<SessionId> {
     const args = resolveCreateSessionArgs(idOrMetadata, metadata);
     const id = args.id;
-    const projection = baseProjection(id, workspaceRoot, permissionPreset, now(), args.metadata);
+    const effectiveOwnership = ownership ?? args.metadata?.ownership;
+    const projection = baseProjection(id, workspaceRoot, permissionPreset, now(), args.metadata, effectiveOwnership);
     this.withTransaction(() => {
       const child = args.metadata;
       this.db.prepare("INSERT INTO sessions (id, workspace_root, parent_session_id, parent_task_id, child_mode, child_provider, delegation_depth, descriptor_json, created_at, updated_at, status, last_sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, workspaceRoot, child?.parentSessionId ?? null, child?.parentTaskId ?? null, child?.childMode ?? null, child?.childProvider ?? null, child?.delegationDepth ?? null, child?.descriptor === undefined ? null : JSON.stringify(child.descriptor), projection.createdAt, projection.updatedAt, projection.status, 0);
       this.db.prepare("INSERT INTO projections (session_id, schema_version, projection_json) VALUES (?, ?, ?)").run(id, SCHEMA_VERSION, JSON.stringify(projection));
-      this.appendSync({ sessionId: id, type: "session/created", payload: { workspaceRoot, permissionPreset, ...(child === undefined ? {} : metadataPayload(child)) } });
+      this.appendSync({ sessionId: id, type: "session/created", payload: { workspaceRoot, permissionPreset, ...(child === undefined ? {} : metadataPayload(child)), ...(effectiveOwnership === undefined ? {} : { principalId: effectiveOwnership.principalId, tenantId: effectiveOwnership.tenantId }) } });
     });
     return id;
   }
 
-  async createChildSession(input: { readonly id?: SessionId; readonly workspaceRoot: string; readonly permissionPreset: PermissionPreset; readonly metadata: ChildSessionMetadata }): Promise<SessionId> {
-    return this.createSession(input.workspaceRoot, input.permissionPreset, input.id ?? input.metadata, input.id === undefined ? undefined : input.metadata);
+  async createChildSession(input: { readonly id?: SessionId; readonly workspaceRoot: string; readonly permissionPreset: PermissionPreset; readonly metadata: ChildSessionMetadata; readonly ownership?: SessionOwnership }): Promise<SessionId> {
+    return this.createSession(input.workspaceRoot, input.permissionPreset, input.id ?? input.metadata, input.id === undefined ? undefined : input.metadata, input.ownership ?? input.metadata.ownership);
   }
 
   async append(input: AppendEventInput): Promise<AgentEvent> {
@@ -996,7 +1007,7 @@ export class SqliteEventStore implements SessionEventStore, McpConfigBackend {
   async forkSession(sessionId: SessionId, workspaceRoot?: string, id?: SessionId, permissionPreset?: PermissionPreset): Promise<SessionId> {
     const source = await this.project(sessionId);
     if (source === undefined) throw new Error(`Unknown session: ${sessionId}`);
-    const forked = await this.createSession(workspaceRoot ?? source.workspaceRoot, permissionPreset ?? source.permissionPreset, id);
+    const forked = await this.createSession(workspaceRoot ?? source.workspaceRoot, permissionPreset ?? source.permissionPreset, id, undefined, source.ownership);
     for (const message of source.messages) {
       await this.append({
         sessionId: forked,
@@ -1215,6 +1226,7 @@ function toSummary(projection: SessionProjection): SessionSummary {
     ...(projection.delegationDepth === undefined ? {} : { delegationDepth: projection.delegationDepth }),
     ...(projection.activeWorktreeId === undefined ? {} : { activeWorktreeId: projection.activeWorktreeId }),
     ...(projection.activeWorkspaceRoot === undefined ? {} : { activeWorkspaceRoot: projection.activeWorkspaceRoot }),
+    ...(projection.ownership === undefined ? {} : { ownership: projection.ownership }),
   };
 }
 
@@ -1243,6 +1255,7 @@ function readSummary(row: SqliteRow): SessionSummary {
     ...(projection?.delegationDepth === undefined ? {} : { delegationDepth: projection.delegationDepth }),
     ...(projection?.activeWorktreeId === undefined ? {} : { activeWorktreeId: projection.activeWorktreeId }),
     ...(projection?.activeWorkspaceRoot === undefined ? {} : { activeWorkspaceRoot: projection.activeWorkspaceRoot }),
+    ...(projection?.ownership === undefined ? {} : { ownership: projection.ownership }),
   };
 }
 

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { AttachmentReceipt, ChatModel, InteractionId, ModelRequest, ModelStreamPart, PermissionId, ToolDefinition } from "@code-review-agent/contracts";
+import { brand, type AttachmentReceipt, type ChatModel, type InteractionId, type ModelRequest, type ModelStreamPart, type PermissionId, type ToolDefinition } from "@code-review-agent/contracts";
 import { InMemoryEventStore } from "@code-review-agent/storage";
 import { createBuiltinTools, DefaultPermissionPolicy, ToolRegistry, ToolRuntime } from "@code-review-agent/tools";
 import { GitWorktreeManager } from "@code-review-agent/workspace";
@@ -13,6 +13,18 @@ import { AgentHost } from "./index.js";
 const execFileAsync = promisify(execFile);
 
 describe("AgentHost", () => {
+  it("enforces tenant session and turn quotas without affecting unowned local sessions", async () => {
+    const store = new InMemoryEventStore();
+    const host = new AgentHost({ store, quota: { maxSessionsPerTenant: 1, maxTurnsPerTenant: 1 } });
+    const ownership = { principalId: brand<string, "PrincipalId">("user-a"), tenantId: brand<string, "TenantId">("tenant-a") };
+    const first = await host.createSession("D:/tenant-a", undefined, undefined, ownership);
+    await expect(host.createSession("D:/tenant-a-two", undefined, undefined, ownership)).rejects.toMatchObject({ code: "SESSION_QUOTA_EXCEEDED" });
+    const turn = await host.sendMessage(first.id, "one");
+    expect(turn).toMatch(/^turn_/u);
+    await expect(host.sendMessage(first.id, "two")).rejects.toMatchObject({ code: "TURN_QUOTA_EXCEEDED" });
+    await expect(host.createSession("D:/local")).resolves.toMatchObject({ workspaceRoot: "D:/local" });
+  });
+
   it("exposes an explicit deferred productization boundary", () => {
     const host = new AgentHost({ store: new InMemoryEventStore() });
     expect(host.productizationSettings()).toMatchObject({

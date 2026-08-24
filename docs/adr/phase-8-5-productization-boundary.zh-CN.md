@@ -27,7 +27,7 @@ API `/v1/capabilities` 返回 `productization` 元数据。该元数据必须区
 
 ### 2. Phase 8.5 第一实现切片采用显式配置，不改变默认本地行为
 
-第一切片只增加能力元数据和禁用态。不会在没有独立 principal/tenant contract、持久化 ownership、权限审计和恢复测试前引入 bearer token 或自动租户推断。
+第一切片先增加能力元数据和禁用态；在 principal/tenant contract、持久化 ownership、权限审计和恢复测试具备后，允许显式配置的静态 bearer token adapter。默认本地 Host 仍不要求认证，也不自动推断租户。
 
 后续实现认证时，必须明确：
 
@@ -36,6 +36,8 @@ API `/v1/capabilities` 返回 `productization` 元数据。该元数据必须区
 - 未认证请求的公开端点；
 - quota 的计量、拒绝和恢复语义；
 - 凭据只使用 host-owned reference，日志和事件中不得出现 secret value。
+
+当前已接受的第一可用切片是：静态 bearer token → principal/tenant identity → durable Session ownership → tenant-scoped Session catalog → hard Session/Turn quota。该 adapter 只适用于受控部署和测试 fixture，不代表外部 IdP、JWT 验签或完整用户目录已经实现。Workspace mutation、MCP config 和 global diagnostics 在认证请求下保持 fail closed，直到具备 tenant-scoped adapter。
 
 ### 3. Provider/model routing 与 secrets 分开演进
 

@@ -2,6 +2,8 @@
 export type Brand<Value, Name extends string> = Value & { readonly __brand: Name };
 
 export type SessionId = Brand<string, "SessionId">;
+export type PrincipalId = Brand<string, "PrincipalId">;
+export type TenantId = Brand<string, "TenantId">;
 export type TurnId = Brand<string, "TurnId">;
 export type TaskId = Brand<string, "TaskId">;
 export type RunId = Brand<string, "RunId">;
@@ -179,6 +181,13 @@ export interface ChildSessionMetadata {
   readonly childProvider: string;
   readonly delegationDepth: number;
   readonly descriptor?: SubagentDescriptor;
+  readonly ownership?: SessionOwnership;
+}
+
+/** Durable ownership attached to a Session and inherited by child Sessions. */
+export interface SessionOwnership {
+  readonly principalId: PrincipalId;
+  readonly tenantId: TenantId;
 }
 
 export interface SessionSummary {
@@ -200,6 +209,7 @@ export interface SessionSummary {
   /** Worktree selected for tool execution, when the session has one. */
   readonly activeWorktreeId?: string;
   readonly activeWorkspaceRoot?: string;
+  readonly ownership?: SessionOwnership;
 }
 
 export interface WorkspaceSummary {
@@ -599,6 +609,7 @@ export interface CreateSessionInput {
   readonly workspaceRoot: string;
   readonly permissionPreset?: PermissionPreset;
   readonly metadata?: ChildSessionMetadata;
+  readonly ownership?: SessionOwnership;
 }
 
 export interface SendMessageInput {
@@ -686,11 +697,11 @@ export interface EventPage {
 }
 
 export interface SessionEventStore extends EventStore {
-  createSession(workspaceRoot: string, permissionPreset?: PermissionPreset, idOrMetadata?: SessionId | ChildSessionMetadata, metadata?: ChildSessionMetadata): Promise<SessionId>;
+  createSession(workspaceRoot: string, permissionPreset?: PermissionPreset, idOrMetadata?: SessionId | ChildSessionMetadata, metadata?: ChildSessionMetadata, ownership?: SessionOwnership): Promise<SessionId>;
   listSessions(includeArchived?: boolean): Promise<readonly SessionSummary[]>;
   listTasks(sessionId?: SessionId): Promise<readonly TaskProjection[]>;
   listChildSessions(parentSessionId: SessionId): Promise<readonly SessionSummary[]>;
-  createChildSession(input: { readonly id?: SessionId; readonly workspaceRoot: string; readonly permissionPreset: PermissionPreset; readonly metadata: ChildSessionMetadata }): Promise<SessionId>;
+  createChildSession(input: { readonly id?: SessionId; readonly workspaceRoot: string; readonly permissionPreset: PermissionPreset; readonly metadata: ChildSessionMetadata; readonly ownership?: SessionOwnership }): Promise<SessionId>;
   claimCommand(input: ClaimCommandInput): Promise<CommandClaim>;
   getCommand(sessionId: SessionId, commandId: string): Promise<CommandRecord | undefined>;
   forkSession(sessionId: SessionId, workspaceRoot?: string, id?: SessionId, permissionPreset?: PermissionPreset): Promise<SessionId>;
