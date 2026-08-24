@@ -16,13 +16,13 @@
 | Phase 5：内部 Subagent / 多 Agent | completed（2026-08-23） | 5.0–5.4：Task/Descriptor durable projection、one-shot/continuable child、FIFO/authority/cold resume、report/MCP scope、API/SSE/Web catalog；定向 typecheck、storage/subagent/runtime/API 测试和 API/Web smoke 通过 |
 | Phase 6：A2A | deferred（暂不作为 Phase 7 前置） | [ADR：Phase 7 Web 收敛不等待 A2A](adr/phase-7-web-with-a2a-deferred.zh-CN.md)；等待明确的外部 Agent 互操作需求 |
 | Phase 7：DSH Web 前端收敛 | completed | 7.1–7.10 Web shell、连接与回放、Workspace/Session navigation、Conversation/Tool/Permission/Interaction、Trajectory、Task/Subagent/MCP、Settings/Deliverables、响应式与可访问性、五场景 browser/replay gate、Workspace reorder 与 Workspace rename/archive/delete lifecycle 已完成；`pnpm typecheck`、`pnpm test`、`pnpm test:phase7:browser` 和 `git diff --check` 通过；browser gate 总耗时 2.14s、trajectory full replay 19.03ms；独立 checkpoint `82326d6` |
-| Phase 8：高级能力与产品化 | in_progress | 从归档 checkpoint `c1aae6c` 恢复；8.1/8.2 已完成，8.0 aggregate Web parity gate 已通过；8.5 tenant-scoped Workspace catalog/mutation 已实现，8.3/8.4/8.5 仍未整体完成 |
+| Phase 8：高级能力与产品化 | paused（2026-08-24） | 当前暂停 checkpoint `61cd9ca`（tenant-scoped MCP config）；8.1/8.2 已完成，8.0 aggregate Web parity gate 已通过；8.3/8.4/8.5 仍未整体完成 |
 
 ## Phase 8 计划范围（accepted）
 
 - [Phase 8：高级能力、DSH Web 对齐与产品化](phase-plans/phase-8-productization.zh-CN.md) 已扩展为 8.0 Web 对齐、8.1 Context Compaction、8.2 Worktree、8.3 LSP/Code Mode、8.4 后台任务与可靠性、8.5 产品化；
 - [ADR：Phase 8 Web 与 DSH 前端行为对齐](adr/phase-8-web-dsh-alignment.zh-CN.md) 已接受，记录行为参考、REST/SSE 边界、typed Web 拆分、契约变更和回滚规则；
-- Phase 8 曾于 2026-08-24 暂存归档在 checkpoint `c1aae6c`，随后恢复推进。8.0 的 aggregate Web parity contract gate 与真实 600/900/1024 Shell/Settings 视觉基线 gate 已通过；8.5 已建立产品化边界 ADR、host-backed capability 第一切片和 tenant-scoped Workspace catalog/mutation，但完整响应式/可访问性 browser 矩阵、真实 Job 跨场景恢复矩阵、8.3 完整退出审计、MCP tenant 隔离和 8.5 运维/凭据生命周期仍未完成。
+- Phase 8 曾于 2026-08-24 暂存归档在 checkpoint `c1aae6c`，随后恢复推进，并在 checkpoint `61cd9ca` 暂停。8.0 的 aggregate Web parity contract gate 与真实 600/900/1024 Shell/Settings 视觉基线 gate 已通过；8.5 已建立产品化边界 ADR、host-backed capability 第一切片、tenant-scoped Workspace catalog/mutation 和 tenant-scoped MCP config，但完整响应式/可访问性 browser 矩阵、真实 Job 跨场景恢复矩阵、8.3 完整退出审计、provider/model routing、credentials 生命周期和运维策略仍未完成。
 
 ## Phase 8 暂存归档（2026-08-24）
 
@@ -53,6 +53,13 @@
 - `McpConfigStore`、`McpConnectionManager`、`ToolRuntime` 和 API MCP routes 按 tenant 过滤 config/list/catalog/resource/prompt/lifecycle；未认证本地只显示 legacy unscoped configs，跨租户访问统一 404。
 - MCP tool discovery/model-visible list/execute 三层均检查 tenant；持久化只保留 scrubbed config 与 credential reference，secret material 不进入 SQLite、事件或公开 API。
 - 已覆盖 MCP client tenant catalog/lifecycle conflict、Storage schema v4 persistence/reopen、API tenant catalog/404、产品化 gate；本切片完成后仍需 provider/model routing、credentials 生命周期和运维策略。
+
+## Phase 8 当前暂停归档（2026-08-24）
+
+- 本次收尾 checkpoint：`61cd9ca`（`feat(phase-8.5): add tenant-scoped mcp config`）。工作树已在提交后确认干净。
+- 收尾验证：`pnpm typecheck`、`pnpm test:phase8:parity`、`pnpm test:phase8:productization` 和 `git diff --check` 均通过；产品化 gate 覆盖 auth、tenant Session/Workspace/MCP catalog、跨租户拒绝、turn quota 和 credential redaction。
+- 暂停边界：8.1、8.2 和已实现的 8.0/8.3/8.4/8.5 切片保留；Phase 8 与 Phase 8.5 均未达到整体退出条件，不得标记为 completed。
+- 恢复入口：从 `61cd9ca` 继续，优先推进 tenant-scoped provider/model routing、credential reference 生命周期、8.3 OS-level isolation/deployment evidence、8.4 跨场景 browser recovery matrix，以及 backup/restore、migration rollback 和 upgrade/deployment policy。
 
 ## Phase 6 A2A 暂缓决策
 

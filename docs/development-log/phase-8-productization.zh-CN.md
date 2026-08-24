@@ -429,4 +429,23 @@ git diff --check                                     ✓
 
 ### 尚未关闭
 
-外部 IdP/JWT、完整 principal catalog、tenant-scoped provider/model routing、credentials 生命周期、backup/restore、migration rollback 和 upgrade/deployment policy 仍未实现；Phase 8.5 与 Phase 8 继续保持 `in_progress`。
+外部 IdP/JWT、完整 principal catalog、tenant-scoped provider/model routing、credentials 生命周期、backup/restore、migration rollback 和 upgrade/deployment policy 仍未实现；在本次收尾前，Phase 8.5 与 Phase 8 保持 `in_progress`。
+
+## 2026-08-24：Phase 8 当前暂停归档
+
+本次动作负责停止当前阶段并保留可回滚 checkpoint，不宣告 Phase 8 或 Phase 8.5 完成。收尾 checkpoint 为 `61cd9ca`（`feat(phase-8.5): add tenant-scoped mcp config`），提交后工作树已确认干净。
+
+### 收尾证据
+
+```text
+pnpm typecheck                         ✓
+pnpm test:phase8:parity                ✓
+pnpm test:phase8:productization        ✓
+git diff --check                        ✓
+```
+
+产品化 gate 已覆盖 auth、tenant Session/Workspace/MCP catalog、跨租户拒绝、turn quota 和 credential redaction。当前状态写回 `docs/phase-status.zh-CN.md`：Phase 8 为 `paused`，8.5 仍为 partial。
+
+### 恢复入口
+
+从 `61cd9ca` 继续，优先推进 tenant-scoped provider/model routing、credential reference 生命周期、8.3 OS-level isolation/deployment evidence、8.4 跨场景 browser recovery matrix，以及 backup/restore、migration rollback 和 upgrade/deployment policy。外部 IdP/JWT 和完整 principal catalog 仍未实现。
