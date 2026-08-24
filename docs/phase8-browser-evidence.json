@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "phase": "8.0",
+  "browser": "Codex In-app Browser",
+  "fixture": "scripts/phase8-web-fixture-server.mjs",
+  "capturedAt": "2026-08-24",
+  "matrix": [
+    {
+      "viewport": { "width": 600, "height": 800 },
+      "horizontalOverflow": false,
+      "mobileSidebar": { "open": true, "closed": true },
+      "settingsDialog": { "ariaModal": "true", "labelledBy": "settings-title", "escapeCloses": true, "openerFocusRestored": true, "focusRemainsInside": true },
+      "aria": { "unnamedVisibleControls": 0 }
+    },
+    {
+      "viewport": { "width": 900, "height": 800 },
+      "horizontalOverflow": false,
+      "mobileSidebar": { "open": true, "closed": true },
+      "settingsDialog": { "ariaModal": "true", "labelledBy": "settings-title", "escapeCloses": true, "openerFocusRestored": true, "focusRemainsInside": true },
+      "aria": { "unnamedVisibleControls": 0 }
+    },
+    {
+      "viewport": { "width": 1024, "height": 800 },
+      "horizontalOverflow": false,
+      "detailsPanel": { "open": true, "closed": true, "reopened": true },
+      "settingsDialog": { "ariaModal": "true", "labelledBy": "settings-title", "escapeCloses": true, "openerFocusRestored": true, "focusRemainsInside": true },
+      "aria": { "unnamedVisibleControls": 0 }
+    }
+  ],
+  "settingsRecovery": {
+    "fixtureEnv": { "PHASE8_MODEL_FAILURES": 1 },
+    "failure": { "catalogStatus": "error", "retryAction": "Retry model catalog", "errorContains": "temporarily unavailable" },
+    "recovery": { "catalogStatus": "ready", "provider": "echo", "model": "fixture-model" },
+    "selection": { "model": "fixture-model", "receipt": "Selected fixture-model" }
+  }
+}

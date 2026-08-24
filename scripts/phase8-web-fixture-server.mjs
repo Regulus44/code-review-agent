@@ -84,6 +84,12 @@ const fixtureModel = (text) => ({
     yield { type: "done" };
   },
 });
+const settingsModelOptions = process.env.PHASE8_MODEL_FAILURES === undefined ? {} : {
+  modelSelector: (model) => ({
+    model: fixtureModel(`selected:${model}`),
+    config: { provider: "echo", model, configured: false },
+  }),
+};
 const productizationModelOptions = productizationEnabled ? {
   availableModels: ["fixture-tenant-model-a", "fixture-tenant-model-b"],
   modelInfo: { provider: "deepseek", model: "fixture-host-model", baseUrl: "https://fixture-host.example.test", configured: true },
@@ -100,6 +106,7 @@ const server = createApiServer({
   ...(process.env.PHASE8_MODEL_FAILURES === undefined ? {} : { modelCatalogFailures: Number(process.env.PHASE8_MODEL_FAILURES) }),
   ...(process.env.PHASE8_MODEL_FAILURES === undefined ? {} : { availableModels: ["fixture-model"] }),
   ...(process.env.PHASE8_MODEL_FAILURES === undefined ? {} : { modelInfo: { provider: "echo", model: "fixture-model", configured: false } }),
+  ...settingsModelOptions,
   ...productizationModelOptions,
   ...(productizationEnabled ? { productization: { auth: { required: true, tokens: [{ token: "fixture-tenant-a-token", principalId: "fixture-user-a", tenantId: "fixture-tenant-a" }, { token: "fixture-tenant-b-token", principalId: "fixture-user-b", tenantId: "fixture-tenant-b" }] }, quota: { maxSessionsPerTenant: 2, maxTurnsPerTenant: 2 } } } : {}),
 });

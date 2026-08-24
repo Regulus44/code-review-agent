@@ -169,6 +169,13 @@ Phase 8.0 默认只增加 Web projection/query DTO。若必须新增 Event、Tas
 
 验收：keyboard smoke、focus restore、axe-like aria 检查、600/900/1024 视觉基线和错误/空态/加载态通过。
 
+当前执行证据（2026-08-24）：
+
+- `docs/phase8-browser-evidence.json` 记录真实 Codex In-app Browser 的 600/900/1024 视口结果：无横向溢出、移动侧栏抽屉、Details 开关、Settings `aria-modal`/标题关联、Escape、focus restore 和可访问名称检查；
+- `scripts/phase8-browser-evidence-gate.mjs` 与 `pnpm test:phase8:browser:evidence` 对证据结构、六个视觉基线、Shell markers 和 fixture 来源做可重复审计；
+- `scripts/phase8-settings-gate.mjs` 现在同时覆盖 provider failure → Retry → model selection → durable current model，标准 fixture 为选择器提供可回放的 `fixture-model`；
+- 真实浏览器已验证 Settings failure → `Retry model catalog` → `ready` → `Selected fixture-model`，不把错误态误报为连接失败。
+
 ### 8.0.7 Web parity gate
 
 将 DSH 行为场景转为本项目自己的 fixture，不复制 DSH 测试代码：
@@ -193,6 +200,10 @@ pnpm test
 pnpm build:web
 pnpm test:phase7:browser
 pnpm test:phase8:web
+pnpm test:phase8:settings
+pnpm test:phase8:visual
+pnpm test:phase8:parity
+pnpm test:phase8:browser:evidence
 git diff --check
 ```
 

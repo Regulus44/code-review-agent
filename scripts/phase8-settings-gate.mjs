@@ -42,10 +42,18 @@ try {
   assert(failed.response.status === 503 && String(failed.body?.error).includes("temporarily unavailable"), "provider failure fixture did not fail explicitly");
   const recovered = await request("/v1/models");
   assert(recovered.response.status === 200 && recovered.body?.models?.[0] === "fixture-model", "model catalog did not recover on retry");
+  const selected = await request("/v1/models", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: "fixture-model" }),
+  });
+  assert(selected.response.status === 200 && selected.body?.model?.model === "fixture-model", "recovered model catalog did not accept a model selection");
+  const selectedCatalog = await request("/v1/models");
+  assert(selectedCatalog.response.status === 200 && selectedCatalog.body?.current === "fixture-model", "model selection receipt was not reflected in the catalog");
 
   const sessions = await request("/v1/sessions");
   assert(sessions.response.status === 200 && sessions.body?.sessions?.length === 1, "model failure affected unrelated Session boot data");
-  console.log(JSON.stringify({ phase: "8.0", gate: "settings-provider-failure-retry", passed: true, firstStatus: failed.response.status, recoveredStatus: recovered.response.status }));
+  console.log(JSON.stringify({ phase: "8.0", gate: "settings-provider-failure-retry", passed: true, firstStatus: failed.response.status, recoveredStatus: recovered.response.status, selectedModel: selected.body.model.model }));
 } finally {
   child.kill("SIGTERM");
   await new Promise((resolve) => child.once("exit", resolve));

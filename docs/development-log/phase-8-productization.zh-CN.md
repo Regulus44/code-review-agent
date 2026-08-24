@@ -1,5 +1,32 @@
 # Phase 8 开发日志
 
+## 2026-08-24：8.0 visual/accessibility browser matrix 与 Settings recovery 收口
+
+本次继续属于 Phase 8.0 Web 对齐，依据 DSH `ui-layout/AppFrame.tsx`、`ui-sidebar/SidebarRoot.tsx`、`ui-settings-general`、`ui-settings-models` 和 `ui-primitives` 的布局、抽屉、Settings 与 focus 行为完成真实浏览器证据收口；没有复制 DSH 代码、内部类型或品牌资产，Web 仍只消费本项目 API projection、SSE 和 typed browser bridge。
+
+### 已完成
+
+- 使用真实 Codex In-app Browser 打开 `scripts/phase8-web-fixture-server.mjs` 的 SQLite/API/AgentHost fixture，验证 600/900/1024 × 800 无横向溢出；600/900 的移动侧栏可打开/收起，1024 的 Details 可关闭/重新打开。
+- 三个视口均验证 Settings dialog 的 `aria-modal="true"`、`aria-labelledby="settings-title"`、Escape 关闭、opener focus restore 和 dialog 内 focus trap；可见交互控件的 accessible name 检查通过。
+- 使用 `PHASE8_MODEL_FAILURES=1` 真实验证 Settings 的 provider/model catalog error → `Retry model catalog` → ready；补齐标准 failure fixture 的 `modelSelector` 后，真实点击 `fixture-model` 返回并显示 `Selected fixture-model` selection receipt。
+- 新增 `docs/phase8-browser-evidence.json` 和 `scripts/phase8-browser-evidence-gate.mjs`，把真实浏览器观察结果固定成可审计 artifact；视觉 manifest 继续校验六个 Shell/Settings JPEG 基线，Web shell marker 只作为一致性辅助检查。
+
+### 验证
+
+```text
+pnpm typecheck                         ✓
+pnpm build:web                         ✓
+pnpm test:phase8:settings              ✓
+pnpm test:phase8:visual                ✓
+pnpm test:phase8:parity                ✓
+pnpm test:phase8:browser:evidence      ✓
+真实 in-app browser: 600/900/1024、drawer/details、Settings focus/ARIA/recovery ✓
+```
+
+### 边界与剩余工作
+
+本次只关闭 8.0.6 的真实 visual/accessibility 与 Settings recovery 证据，不宣告 Phase 8 完成；8.0 其余 DSH 行为场景的完整真实 browser matrix、8.3 OS-level isolation/deployment evidence，以及 8.5 外部 IdP/JWT、principal catalog、secret manager 和 upgrade/deployment policy 仍保持未完成。
+
 ## 2026-08-24：8.4 Reliability 退出审计与 graphical recovery matrix 收口
 
 本次继续属于 Phase 8.4，依据 Phase 8 计划并对照 DSH 的 generation/reconnect、history-baseline + live-frame stitching 和 Job action/replay 边界，完成最后一批可靠性证据收口；没有复制 DSH 代码、内部类型或品牌资产，A2A 保持 `deferred`。
