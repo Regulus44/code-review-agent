@@ -39,6 +39,21 @@ try {
   assert(productization.tenantIsolation?.status === "configured" && productization.tenantIsolation?.sessionOwnership === "durable", "tenant isolation metadata is missing");
   assert(productization.quota?.status === "configured" && productization.quota?.enforcement === "hard", "quota metadata is missing");
   assert(productization.credentials?.redaction === "required", "credential redaction must remain required");
+  const modelHeaders = { authorization: "Bearer fixture-tenant-a-token" };
+  const initialModels = await (await fetch(`${fixture.baseUrl}/v1/models`, { headers: modelHeaders })).json();
+  assert(initialModels.current === "fixture-host-model" && initialModels.route === undefined, "tenant model catalog must start from the host route without a tenant override");
+  const selectedModel = await fetch(`${fixture.baseUrl}/v1/models`, { method: "POST", headers: { ...modelHeaders, "content-type": "application/json" }, body: JSON.stringify({ model: "fixture-tenant-model-a" }) });
+  assert(selectedModel.status === 200, "tenant model selection should be accepted");
+  const selectedModelBody = await selectedModel.json();
+  assert(selectedModelBody.route?.model === "fixture-tenant-model-a" && selectedModelBody.route?.provider === "deepseek", "tenant model route receipt is missing provider/model metadata");
+  const tenantModels = await (await fetch(`${fixture.baseUrl}/v1/models`, { headers: modelHeaders })).json();
+  const foreignModels = await (await fetch(`${fixture.baseUrl}/v1/models`, { headers: { authorization: "Bearer fixture-tenant-b-token" } })).json();
+  assert(tenantModels.route?.model === "fixture-tenant-model-a", "tenant model catalog did not retain the selected route");
+  assert(foreignModels.route === undefined && foreignModels.current === "fixture-host-model", "tenant model route leaked across tenants");
+  const tenantCapabilities = await (await fetch(`${fixture.baseUrl}/v1/capabilities`, { headers: modelHeaders })).json();
+  const foreignCapabilities = await (await fetch(`${fixture.baseUrl}/v1/capabilities`, { headers: { authorization: "Bearer fixture-tenant-b-token" } })).json();
+  assert(tenantCapabilities.productization?.routing?.status === "configured" && tenantCapabilities.productization?.routing?.modelSelector === "tenant-scoped", "tenant routing readiness is missing from capabilities");
+  assert(foreignCapabilities.productization?.routing?.status === "available" && foreignCapabilities.productization?.routing?.modelSelector === "host-local", "routing readiness leaked across tenants");
   const sessions = await (await fetch(`${fixture.baseUrl}/v1/sessions`, { headers: { authorization: "Bearer fixture-tenant-a-token" } })).json();
   assert(sessions.sessions?.length === 1 && sessions.sessions[0]?.ownership?.tenantId === "fixture-tenant-a", "tenant session catalog did not filter by ownership");
   const workspaces = await (await fetch(`${fixture.baseUrl}/v1/workspaces`, { headers: { authorization: "Bearer fixture-tenant-a-token" } })).json();
@@ -65,7 +80,7 @@ try {
   assert(secondTurn.status === 429, "second tenant turn should be rejected by quota");
   const browserBundle = await readFile(join(root, "apps", "web", "dist", "browser.js"), "utf8");
   assert(browserBundle.includes("productization"), "typed browser bundle must carry productization capability state");
-  console.log(JSON.stringify({ phase: "8.5", gate: "productization-capability-boundary", passed: true, status: productization.status, auth: productization.auth.status, tenantIsolation: productization.tenantIsolation.status, quota: productization.quota.status, checks: ["auth", "tenant-session-catalog", "tenant-workspace-catalog", "tenant-workspace-mutation", "tenant-mcp-catalog", "tenant-mcp-denial", "cross-tenant-denial", "turn-quota", "credential-redaction"] }));
+  console.log(JSON.stringify({ phase: "8.5", gate: "productization-capability-boundary", passed: true, status: productization.status, auth: productization.auth.status, tenantIsolation: productization.tenantIsolation.status, quota: productization.quota.status, checks: ["auth", "tenant-session-catalog", "tenant-workspace-catalog", "tenant-workspace-mutation", "tenant-mcp-catalog", "tenant-mcp-denial", "tenant-model-routing", "tenant-model-denial", "cross-tenant-denial", "turn-quota", "credential-redaction"] }));
 } finally {
   child.kill("SIGTERM");
   await new Promise((resolve) => child.once("exit", resolve));

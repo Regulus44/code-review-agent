@@ -261,6 +261,37 @@ git diff --check
 
 验收：认证、租户隔离、quota、凭据脱敏、备份恢复、migration rollback 和部署 smoke 通过。
 
+### 9.1 当前执行切片：tenant-scoped provider/model routing
+
+该切片属于 Phase 8.5，目标是把现有 host-local model selector 收敛为可恢复的 tenant-scoped route。DSH 参考 `packages/client/ui-model-selection`、`packages/client/runtime` 的 `modelSelection` 和 `packages/sdk/client` 的 provider/model handshake；本项目只采用其行为和职责分层，不复制 DSH runtime 或内部类型。
+
+交付物：
+
+- `packages/contracts` 提供 `ModelRouteRecord` / `ModelRouteBackend`，route 只保存 provider/model/baseUrl 和 opaque credential reference；
+- SQLite schema v5 持久化 tenant route，旧数据库可迁移，重启时在 selector 缺失时 fail closed；
+- Runtime 按 Session ownership 选择模型，turn started/recovery event 写入选中的 route metadata；不同 tenant 的 Session 不共享模型实例或 route；
+- API `/v1/models` 支持 tenant-scoped catalog、selection receipt 和 durable update；未认证本地保持 host-local 行为，跨租户 route 不可见；
+- Web typed client 保留 route projection，Settings 继续消费现有 provider/model loading、failure、retry 和 selection receipt；
+- productization gate 覆盖 tenant selection、cross-tenant denial、turn event metadata、SQLite reopen 和 credential redaction。
+
+契约与安全边界：
+
+- 不新增独立 model route event type；ModelRouteBackend 是配置事实来源，实际使用的 route 必须进入所属 Session 的 `turn/started` 或恢复 `agent/status` 事件；
+- route mutation 先 durable upsert，再更新 Runtime 内存选择；没有 durable backend 或 selector 时 fail closed；
+- credential reference 生命周期、外部 IdP/JWT、完整 principal catalog、backup/restore、migration rollback 和 upgrade/deployment policy 保持后续工作；
+- 回滚时删除 tenant routing backend/selector 配置即可回到 host-local `/v1/models`，schema v5 保留向后兼容迁移，不删除既有 Session/EventStore 历史。
+
+验收命令：
+
+```powershell
+pnpm typecheck
+pnpm --filter @code-review-agent/runtime test
+pnpm --filter @code-review-agent/storage test
+pnpm --filter @code-review-agent/api test
+pnpm test:phase8:productization
+git diff --check
+```
+
 ## 10. 阶段依赖与执行顺序
 
 ```text

@@ -4,9 +4,9 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
-import { createInProcessSubagentProvider, sessionId, AgentHost, turnId } from "@code-review-agent/runtime";
+import { createInProcessSubagentProvider, sessionId, AgentHost, turnId, type TenantModelRoute } from "@code-review-agent/runtime";
 import { SqliteEventStore } from "@code-review-agent/storage";
-import { brand, type AgentEvent, type ChatModel, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem, type ProductizationCapability, type SessionOwnership } from "@code-review-agent/contracts";
+import { brand, type AgentEvent, type ChatModel, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem, type ProductizationCapability, type SessionOwnership, type ModelRouteBackend, type ModelRouteRecord } from "@code-review-agent/contracts";
 import { SubagentRuntime } from "@code-review-agent/subagent";
 import { createConfiguredChatModel, DEEPSEEK_MODELS, type ModelConfigView } from "@code-review-agent/llm";
 import { McpConnectionManager, type McpServerConfig } from "@code-review-agent/mcp-client";
@@ -18,6 +18,8 @@ export interface ModelSelection {
   readonly model: ChatModel;
   readonly config: ModelConfigView;
 }
+
+export type ModelSelector = (model: string, tenantId?: string) => ModelSelection;
 
 export interface ProductizationToken {
   readonly token: string;
@@ -44,7 +46,9 @@ export interface ApiServerOptions {
   readonly fallbackModels?: readonly ChatModel[];
   readonly modelInfo?: ModelConfigView;
   readonly availableModels?: readonly string[];
-  readonly modelSelector?: (model: string) => ModelSelection;
+  readonly modelSelector?: ModelSelector;
+  /** Optional durable tenant-scoped routing backend; SQLite stores implement it directly. */
+  readonly modelRouting?: ModelRouteBackend;
   /** Test/deployment hook for bounded provider catalog recovery fixtures. */
   readonly modelCatalogFailures?: number;
   readonly permissionPreset?: PermissionPreset;
@@ -73,7 +77,15 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
     remainingCatalogFailures: Math.max(0, Math.floor(options.modelCatalogFailures ?? 0)),
     ...(options.modelInfo === undefined ? {} : { info: options.modelInfo }),
     ...(options.modelSelector === undefined ? {} : { selector: options.modelSelector }),
+    routes: new Map(),
+    ...(options.modelRouting === undefined && (store === undefined || typeof (store as Partial<ModelRouteBackend>).listModelRoutes !== "function") ? {} : { routeBackend: options.modelRouting ?? store as unknown as ModelRouteBackend }),
   };
+  for (const route of modelRuntime.routeBackend?.listModelRoutes() ?? []) {
+    modelRuntime.routes.set(route.tenantId, route);
+    if (modelRuntime.selector === undefined) throw new Error("tenant model routing requires a model selector during restore");
+    const selected = modelRuntime.selector(route.model, route.tenantId);
+    host.setTenantModel(route.tenantId, selected.model, routeSelection(route));
+  }
   const ownsMcp = options.mcp === undefined;
   const mcp = options.mcp ?? new McpConnectionManager({
     registry: host.toolRegistry(),
@@ -124,12 +136,14 @@ export function createConfiguredApiServer(options: ApiServerOptions = {}): Serve
 interface ModelRuntimeState {
   info?: ModelConfigView;
   readonly availableModels: readonly string[];
-  readonly selector?: (model: string) => ModelSelection;
+  readonly selector?: ModelSelector;
+  readonly routeBackend?: ModelRouteBackend;
+  readonly routes: Map<string, ModelRouteRecord>;
   remainingCatalogFailures: number;
 }
 
-function currentAttachmentCapability(policy: AttachmentPolicy | undefined, modelRuntime: ModelRuntimeState) {
-  return attachmentCapability(policy, modelRuntime.info?.model.includes("vision") === true);
+function currentAttachmentCapability(policy: AttachmentPolicy | undefined, modelRuntime: ModelRuntimeState, tenantId?: string) {
+  return attachmentCapability(policy, (modelRuntime.routes.get(tenantId ?? "")?.model ?? modelRuntime.info?.model)?.includes("vision") === true);
 }
 
 async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, mcp: McpConnectionManager, subagents: SubagentRuntime, webRoot: string, persistence: string, modelRuntime: ModelRuntimeState, attachmentPolicy: AttachmentPolicy | undefined, productization: ProductizationServerOptions | undefined): Promise<void> {
@@ -166,11 +180,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         modelRuntime.remainingCatalogFailures -= 1;
         throw new HttpError(503, "model catalog temporarily unavailable");
       }
+      const route = identity === undefined ? undefined : modelRuntime.routes.get(identity.tenantId);
       sendJson(response, 200, {
-        provider: modelRuntime.info?.provider ?? "custom",
-        current: modelRuntime.info?.model ?? "custom",
-        configured: modelRuntime.info?.configured ?? false,
+        provider: route?.provider ?? modelRuntime.info?.provider ?? "custom",
+        current: route?.model ?? modelRuntime.info?.model ?? "custom",
+        configured: route === undefined ? modelRuntime.info?.configured ?? false : true,
         models: modelRuntime.availableModels,
+        ...(route === undefined ? {} : { route: publicModelRoute(route) }),
       });
       return;
     }
@@ -179,10 +195,25 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const body = await readJson(request);
       if (typeof body.model !== "string" || body.model.length === 0) throw new HttpError(400, "model is required");
       if (!modelRuntime.availableModels.includes(body.model)) throw new HttpError(400, "unsupported model");
-      const selected = modelRuntime.selector(body.model);
-      host.setModel(selected.model);
-      modelRuntime.info = selected.config;
-      sendJson(response, 200, { model: selected.config });
+      const selected = modelRuntime.selector(body.model, identity?.tenantId);
+      if (identity === undefined) {
+        host.setModel(selected.model);
+        modelRuntime.info = selected.config;
+        sendJson(response, 200, { model: selected.config });
+        return;
+      }
+      const route: ModelRouteRecord = {
+        tenantId: identity.tenantId,
+        provider: selected.config.provider,
+        model: selected.config.model,
+        ...(selected.config.baseUrl === undefined ? {} : { baseUrl: selected.config.baseUrl }),
+        updatedAt: new Date().toISOString(),
+      };
+      if (modelRuntime.routeBackend === undefined) throw new HttpError(409, "tenant model routing persistence is not configured");
+      const persisted = modelRuntime.routeBackend.upsertModelRoute(route);
+      host.setTenantModel(identity.tenantId, selected.model, routeSelection(persisted));
+      modelRuntime.routes.set(identity.tenantId, persisted);
+      sendJson(response, 200, { model: selected.config, route: publicModelRoute(persisted) });
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/tools") {
@@ -190,7 +221,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/capabilities") {
-      sendJson(response, 200, { attachments: currentAttachmentCapability(attachmentPolicy, modelRuntime), context: host.contextSettings(), codeMode: host.codeModeSettings(), lsp: host.lspSettings(), plugins: host.pluginsSettings(), productization: productizationCapability(host.productizationSettings(), productization) });
+      sendJson(response, 200, { attachments: currentAttachmentCapability(attachmentPolicy, modelRuntime, identity?.tenantId), context: host.contextSettings(), codeMode: host.codeModeSettings(), lsp: host.lspSettings(), plugins: host.pluginsSettings(), productization: productizationCapability(host.productizationSettings(identity?.tenantId), productization) });
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/workspaces") {
@@ -805,6 +836,25 @@ function productizationCapability(base: ProductizationCapability, policy: Produc
     auth: { status: authStatus, mode: auth === undefined || auth.tokens.length === 0 ? "disabled" : "bearer", required: auth?.required === true },
     tenantIsolation: authEnabled ? { status: "configured", sessionOwnership: "durable" } : base.tenantIsolation,
     quota: quotaEnabled ? base.quota : policy?.quota === undefined ? base.quota : { status: "deferred", enforcement: "disabled" },
+  };
+}
+
+function routeSelection(route: ModelRouteRecord): TenantModelRoute {
+  return {
+    provider: route.provider,
+    model: route.model,
+    ...(route.baseUrl === undefined ? {} : { baseUrl: route.baseUrl }),
+    ...(route.credentialRef === undefined ? {} : { credentialRef: route.credentialRef }),
+  };
+}
+
+function publicModelRoute(route: ModelRouteRecord): Record<string, unknown> {
+  return {
+    provider: route.provider,
+    model: route.model,
+    ...(route.baseUrl === undefined ? {} : { baseUrl: route.baseUrl }),
+    ...(route.credentialRef === undefined ? {} : { credentialRef: route.credentialRef }),
+    updatedAt: route.updatedAt,
   };
 }
 

@@ -457,6 +457,22 @@ export interface McpConfigBackend {
   deleteMcpConfig(name: string): boolean;
 }
 
+/** Durable tenant-scoped provider/model selection; credential values never belong here. */
+export interface ModelRouteRecord {
+  readonly tenantId: string;
+  readonly provider: string;
+  readonly model: string;
+  readonly baseUrl?: string;
+  readonly credentialRef?: McpCredentialReference;
+  readonly updatedAt: string;
+}
+
+export interface ModelRouteBackend {
+  listModelRoutes(): readonly ModelRouteRecord[];
+  upsertModelRoute(record: ModelRouteRecord): ModelRouteRecord;
+  deleteModelRoute(tenantId: string): boolean;
+}
+
 export interface JsonSchema {
   readonly [key: string]: unknown;
   readonly type?: "object" | "array" | "string" | "number" | "integer" | "boolean" | "null";

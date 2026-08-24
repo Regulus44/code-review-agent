@@ -1,5 +1,33 @@
 # Phase 8 开发日志
 
+## 2026-08-24：8.5 tenant-scoped provider/model routing
+
+本次恢复工作继续属于 Phase 8.5，完成 provider/model routing 的第一可用切片。DSH 参考 `packages/client/ui-model-selection`、`packages/client/runtime` 的 `modelSelection` 和 `packages/sdk/client` 的 provider/model handshake；本项目没有复制 DSH 代码、内部类型或品牌资产。A2A 保持 `deferred`。
+
+### 已完成
+
+- `packages/contracts` 新增 `ModelRouteRecord` / `ModelRouteBackend`；route 只保留 provider、model、baseUrl 和 opaque credential reference，credential material 不进入 route、事件、SQLite 或公开 API；
+- `packages/storage` 建立 SQLite schema v5 `model_routes`，支持 tenant route 的 upsert/list/delete、旧数据库迁移和 reopen；非法非 HTTP(S) baseUrl fail closed；
+- `packages/runtime` 按 Session ownership 选择 tenant model；实际 route metadata 写入 `turn/started` 和重启恢复的 `agent/status`，未配置 route 的 Session 保持 host-local model；`productizationSettings(tenantId)` 按调用者 scope 报告 routing readiness；
+- `apps/api` 的 `/v1/models` 支持认证 tenant 的 route catalog、selection receipt 和 durable update；route mutation 先写 backend，再更新 runtime memory；持久 route 在缺少 selector 时恢复失败，缺少 durable backend 时 tenant mutation 返回配置错误；
+- typed Web client 保留 route projection；productization fixture 增加 tenant model selection、cross-tenant denial 和 route receipt；
+- productization gate 已覆盖 tenant selection、tenant route isolation、turn route event metadata、credential redaction 和 SQLite-backed API recovery。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/runtime test       ✓ (32 tests)
+pnpm --filter @code-review-agent/storage test       ✓ (14 tests)
+pnpm --filter @code-review-agent/api test           ✓ (34 tests)
+pnpm test:phase8:productization                     ✓
+git diff --check                                     ✓
+```
+
+### 尚未关闭
+
+该切片不实现 credential reference 生命周期、外部 IdP/JWT、完整 principal catalog、8.3 OS-level isolation/deployment evidence、8.4 更完整的跨场景 browser recovery matrix、backup/restore、migration rollback 或 upgrade/deployment policy；Phase 8.5 与 Phase 8 仍保持 `in_progress`。
+
 ## 2026-08-24：8.5 opt-in bearer auth、tenant ownership 与 quota slice
 
 本次 checkpoint 继续 Phase 8.5，落实上一 checkpoint 已接受的产品化边界。默认本地 Host 行为保持兼容；认证与 quota 只有显式配置时才启用。A2A 保持 `deferred`。

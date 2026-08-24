@@ -45,6 +45,8 @@ import {
   type McpConfigBackend,
   type McpConfigRecord,
   type McpCredentialReference,
+  type ModelRouteBackend,
+  type ModelRouteRecord,
   type ContextCompactionProjection,
   type WorktreeProjection,
   type WorktreeStatus,
@@ -55,7 +57,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
-const SCHEMA_VERSION = 4 as const;
+const SCHEMA_VERSION = 5 as const;
 
 function isPermissionPreset(value: unknown): value is PermissionPreset {
   return value === "read-only" || value === "workspace-write" || value === "ask-on-write" || value === "ask-on-execute" || value === "danger-full-access";
@@ -736,8 +738,9 @@ function readChildMetadata(row: SqliteRow): ChildSessionMetadata | undefined {
 }
 
 /** Deterministic in-memory store retained for unit tests and local fixtures. */
-export class InMemoryEventStore implements SessionEventStore {
+export class InMemoryEventStore implements SessionEventStore, ModelRouteBackend {
   private readonly sessions = new Map<SessionId, MemorySession>();
+  private readonly modelRoutes = new Map<string, ModelRouteRecord>();
 
   async createSession(workspaceRoot: string, permissionPreset: PermissionPreset = "ask-on-write", idOrMetadata?: SessionId | ChildSessionMetadata, metadata?: ChildSessionMetadata, ownership?: SessionOwnership): Promise<SessionId> {
     const args = resolveCreateSessionArgs(idOrMetadata, metadata);
@@ -852,6 +855,20 @@ export class InMemoryEventStore implements SessionEventStore {
     }
     return forked;
   }
+
+  listModelRoutes(): readonly ModelRouteRecord[] {
+    return [...this.modelRoutes.values()].sort((left, right) => left.tenantId.localeCompare(right.tenantId));
+  }
+
+  upsertModelRoute(record: ModelRouteRecord): ModelRouteRecord {
+    validateModelRoute(record);
+    this.modelRoutes.set(record.tenantId, record);
+    return record;
+  }
+
+  deleteModelRoute(tenantId: string): boolean {
+    return this.modelRoutes.delete(tenantId);
+  }
 }
 
 interface SqliteRow {
@@ -863,7 +880,7 @@ export interface SqliteEventStoreOptions {
 }
 
 /** Durable EventStore using the Node.js built-in SQLite driver. */
-export class SqliteEventStore implements SessionEventStore, McpConfigBackend {
+export class SqliteEventStore implements SessionEventStore, McpConfigBackend, ModelRouteBackend {
   readonly databasePath: string;
   private readonly db: DatabaseSync;
   private readonly listeners = new Map<SessionId, Set<EventListener>>();
@@ -1066,6 +1083,40 @@ export class SqliteEventStore implements SessionEventStore, McpConfigBackend {
     return Number(result.changes ?? 0) > 0;
   }
 
+  listModelRoutes(): readonly ModelRouteRecord[] {
+    const rows = this.db.prepare("SELECT tenant_id, provider, model, base_url, credential_ref_json, updated_at FROM model_routes ORDER BY tenant_id ASC").all() as SqliteRow[];
+    return rows.map(readModelRoute);
+  }
+
+  upsertModelRoute(record: ModelRouteRecord): ModelRouteRecord {
+    validateModelRoute(record);
+    this.withTransaction(() => {
+      this.db.prepare(`
+        INSERT INTO model_routes (tenant_id, provider, model, base_url, credential_ref_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(tenant_id) DO UPDATE SET
+          provider = excluded.provider,
+          model = excluded.model,
+          base_url = excluded.base_url,
+          credential_ref_json = excluded.credential_ref_json,
+          updated_at = excluded.updated_at
+      `).run(
+        record.tenantId,
+        record.provider,
+        record.model,
+        record.baseUrl ?? null,
+        record.credentialRef === undefined ? null : JSON.stringify(record.credentialRef),
+        record.updatedAt,
+      );
+    });
+    return record;
+  }
+
+  deleteModelRoute(tenantId: string): boolean {
+    const result = this.db.prepare("DELETE FROM model_routes WHERE tenant_id = ?").run(tenantId) as { changes?: number };
+    return Number(result.changes ?? 0) > 0;
+  }
+
   private appendSync(input: AppendEventInput): AgentEvent {
     const session = this.db.prepare("SELECT id, workspace_root, created_at, updated_at, status, last_sequence FROM sessions WHERE id = ?").get(input.sessionId) as SqliteRow | undefined;
     if (session === undefined) throw new Error(`Unknown session: ${input.sessionId}`);
@@ -1182,6 +1233,20 @@ export class SqliteEventStore implements SessionEventStore, McpConfigBackend {
       if (currentVersion < 4) {
         this.db.exec("ALTER TABLE mcp_server_configs ADD COLUMN tenant_id TEXT; CREATE INDEX IF NOT EXISTS mcp_server_configs_tenant_idx ON mcp_server_configs(tenant_id, name);");
         this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(4, now());
+      }
+      if (currentVersion < 5) {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS model_routes (
+            tenant_id TEXT PRIMARY KEY,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            base_url TEXT,
+            credential_ref_json TEXT,
+            updated_at TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS model_routes_provider_idx ON model_routes(provider, model);
+        `);
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(5, now());
       }
       this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     });
@@ -1301,6 +1366,33 @@ function readMcpConfig(row: SqliteRow): McpConfigRecord {
     createdAt: String(row["created_at"]),
     updatedAt: String(row["updated_at"]),
   };
+}
+
+function readModelRoute(row: SqliteRow): ModelRouteRecord {
+  const baseUrl = row["base_url"];
+  const credentialRef = row["credential_ref_json"];
+  return {
+    tenantId: String(row["tenant_id"]),
+    provider: String(row["provider"]),
+    model: String(row["model"]),
+    ...(baseUrl === null || baseUrl === undefined ? {} : { baseUrl: String(baseUrl) }),
+    ...(credentialRef === null || credentialRef === undefined ? {} : { credentialRef: JSON.parse(String(credentialRef)) as McpCredentialReference }),
+    updatedAt: String(row["updated_at"]),
+  };
+}
+
+function validateModelRoute(record: ModelRouteRecord): void {
+  if (record.tenantId.trim() === "") throw new Error("Model route tenantId is required");
+  if (record.provider.trim() === "") throw new Error("Model route provider is required");
+  if (record.model.trim() === "") throw new Error("Model route model is required");
+  if (record.baseUrl !== undefined) {
+    try {
+      const url = new URL(record.baseUrl);
+      if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("unsupported protocol");
+    } catch {
+      throw new Error("Model route baseUrl must be an http(s) URL");
+    }
+  }
 }
 
 function readCommand(row: SqliteRow): CommandRecord {

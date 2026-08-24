@@ -19,6 +19,7 @@ import type {
   WorkspaceCatalog,
   WorktreeProjection,
   ProductizationCapability,
+  McpCredentialReference,
 } from "@code-review-agent/contracts";
 
 export interface ToolCatalogEntry {
@@ -37,6 +38,13 @@ export interface ModelCatalogResponse {
   readonly current: string;
   readonly configured: boolean;
   readonly models: readonly string[];
+  readonly route?: {
+    readonly provider: string;
+    readonly model: string;
+    readonly baseUrl?: string;
+    readonly credentialRef?: McpCredentialReference;
+    readonly updatedAt: string;
+  };
 }
 
 export interface AttachmentCapability {

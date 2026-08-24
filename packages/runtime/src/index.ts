@@ -30,6 +30,7 @@ import {
   type WorktreeProjection,
   type ProductizationCapability,
   type SessionOwnership,
+  type ModelRouteRecord,
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { compactMessages, type ContextBudget } from "@code-review-agent/compaction";
@@ -131,6 +132,8 @@ interface CollectedModelResponse {
   readonly toolCalls: readonly ModelToolCall[];
 }
 
+export type TenantModelRoute = Pick<ModelRouteRecord, "provider" | "model" | "baseUrl" | "credentialRef">;
+
 /** Coordinates durable sessions, queued turns and model execution behind storage/model interfaces. */
 export class AgentHost {
   private model: ChatModel;
@@ -159,6 +162,8 @@ export class AgentHost {
   private readonly quotaTails = new Map<string, Promise<void>>();
   private readonly worktreeOperations = new Map<SessionId, Promise<void>>();
   private readonly metricCounters = { turnsStarted: 0, turnsCompleted: 0, turnsFailed: 0, turnsStopped: 0, modelFallbacks: 0, toolCalls: 0, toolFailures: 0 };
+  private readonly tenantModels = new Map<string, ChatModel>();
+  private readonly tenantModelRoutes = new Map<string, TenantModelRoute>();
 
   constructor(private readonly options: AgentHostOptions) {
     this.model = options.model ?? new EchoChatModel();
@@ -188,6 +193,19 @@ export class AgentHost {
   /** Replaces the model used for turns that have not started yet. */
   setModel(model: ChatModel): void {
     this.model = model;
+  }
+
+  /** Selects a host-created model for one tenant without changing other tenants or legacy local sessions. */
+  setTenantModel(tenantId: string, model: ChatModel, route?: TenantModelRoute): void {
+    if (tenantId.trim() === "") throw new Error("tenantId is required for tenant model routing");
+    if (route !== undefined && (route.provider.trim() === "" || route.model.trim() === "")) throw new Error("tenant model route provider and model are required");
+    this.tenantModels.set(tenantId, model);
+    this.tenantModelRoutes.set(tenantId, route ?? { provider: "custom", model: "custom" });
+  }
+
+  clearTenantModel(tenantId: string): void {
+    this.tenantModels.delete(tenantId);
+    this.tenantModelRoutes.delete(tenantId);
   }
 
   contextSettings(): ContextSettings {
@@ -225,8 +243,13 @@ export class AgentHost {
    * local runtime intentionally keeps remote auth, tenant isolation and quota
    * disabled until their durable contracts and recovery gates are accepted.
    */
-  productizationSettings(): ProductizationSettings {
+  productizationSettings(tenantId?: string): ProductizationSettings {
     const quotaConfigured = this.quota?.maxSessionsPerTenant !== undefined || this.quota?.maxTurnsPerTenant !== undefined;
+    const tenantRoute = tenantId === undefined ? undefined : this.tenantModelRoutes.get(tenantId);
+    const tenantProviders = tenantId === undefined
+      ? new Set([...this.tenantModelRoutes.values()].map((route) => route.provider))
+      : tenantRoute === undefined ? new Set<string>() : new Set([tenantRoute.provider]);
+    const routingConfigured = tenantId === undefined ? tenantProviders.size > 0 : tenantRoute !== undefined;
     return {
       version: 1,
       enabled: false,
@@ -236,7 +259,7 @@ export class AgentHost {
       multiUser: { status: "deferred", principalCatalog: "disabled" },
       tenantIsolation: { status: "deferred", sessionOwnership: "disabled" },
       quota: quotaConfigured ? { status: "configured", enforcement: "hard" } : { status: "disabled", enforcement: "disabled" },
-      routing: { status: "available", providerCount: this.fallbackModels.length + 1, modelSelector: "host-local" },
+      routing: { status: routingConfigured ? "configured" : "available", providerCount: Math.max(1, tenantProviders.size || this.fallbackModels.length + 1), modelSelector: routingConfigured ? "tenant-scoped" : "host-local" },
       credentials: { status: "configured", secretStore: "host-only", redaction: "required" },
       operations: { status: "deferred", backup: "deferred", migration: "deferred", upgrade: "deferred" },
     };
@@ -1460,7 +1483,9 @@ export class AgentHost {
       this.metricCounters.turnsStarted += 1;
       const traceId = `trace_${randomUUID()}`;
       this.turnTraces.set(turnId, traceId);
-      await this.options.store.append({ sessionId, turnId, type: "turn/started", payload: { traceId } });
+      const projection = await this.options.store.project(sessionId);
+      const route = this.modelRouteForTenant(projection?.ownership?.tenantId);
+      await this.options.store.append({ sessionId, turnId, type: "turn/started", payload: { traceId, ...(route === undefined ? {} : route) } });
       const messages: ChatMessage[] = [
         { role: "system", content: await this.systemMessage(sessionId) },
         ...previousMessages,
@@ -1479,7 +1504,9 @@ export class AgentHost {
       this.metricCounters.turnsStarted += 1;
       const traceId = `trace_${randomUUID()}`;
       this.turnTraces.set(turnId, traceId);
-      await this.options.store.append({ sessionId, turnId, type: "agent/status", payload: { status: "running", reason: "permission_resolved_after_restart", traceId } });
+      const projection = await this.options.store.project(sessionId);
+      const route = this.modelRouteForTenant(projection?.ownership?.tenantId);
+      await this.options.store.append({ sessionId, turnId, type: "agent/status", payload: { status: "running", reason: "permission_resolved_after_restart", traceId, ...(route === undefined ? {} : route) } });
       const messages: ChatMessage[] = [{ role: "system", content: await this.systemMessage(sessionId, true) }, ...(await this.conversationMessages(sessionId))];
       await this.runSteps(sessionId, turnId, controller, messages);
     } catch (error) {
@@ -1610,7 +1637,7 @@ export class AgentHost {
     messages: readonly ChatMessage[],
     tenantId?: string,
   ): Promise<CollectedModelResponse> {
-    const candidates = [this.model, ...this.fallbackModels];
+    const candidates = [this.tenantModels.get(tenantId ?? "") ?? this.model, ...this.fallbackModels];
     let lastError: unknown = new Error("No model configured");
     for (let modelIndex = 0; modelIndex < candidates.length; modelIndex += 1) {
       const model = candidates[modelIndex];
@@ -1647,6 +1674,18 @@ export class AgentHost {
       }
     }
     throw lastError;
+  }
+
+  private modelRouteForTenant(tenantId: string | undefined): TenantModelRoute | undefined {
+    if (tenantId === undefined) return undefined;
+    const route = this.tenantModelRoutes.get(tenantId);
+    if (route === undefined) return undefined;
+    return {
+      provider: route.provider,
+      model: route.model,
+      ...(route.baseUrl === undefined ? {} : { baseUrl: route.baseUrl }),
+      ...(route.credentialRef === undefined ? {} : { credentialRef: route.credentialRef }),
+    };
   }
 
   private async executeModelToolCall(

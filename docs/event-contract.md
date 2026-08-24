@@ -111,6 +111,8 @@ MCP 生命周期事件只携带 `serverName`、状态、动作和脱敏错误；
 
 MCP config 的 durable record 可选包含 `tenantId`；schema v4 的 `mcp_server_configs.tenant_id`、`owner_id`、scope/binding、scrubbed `config` 和 credential reference 共同构成恢复边界。未认证本地 MCP catalog 只显示 legacy unscoped configs；authenticated API 只显示调用者 tenant 的 configs，`get/catalog/resource/prompt/enable/disable/reconnect/delete` 对其他 tenant 统一返回 404。MCP tool definition 的 `source` 带有可选 `tenantId`，ToolRuntime 在发现、model-visible tool list 和 execute 阶段再次检查 tenant，拒绝越权调用并追加 bounded `tool/call`/`tool/result` 审计；credential material 永不进入事件或 SQLite config。
 
+Tenant model route 由 schema v5 的 `model_routes` durable backend 保存，键为 `tenantId`，记录 `provider`、`model`、可选 `baseUrl` 和 opaque `credentialRef`；credential material 不属于该记录。`GET/POST /v1/models` 在认证请求下只读取或更新调用者 tenant 的 route，跨租户 route 不出现在 catalog、capability 或 route receipt 中。route 选中后，`turn/started` 与重启恢复追加的 `agent/status` 会携带 provider/model 以及可选 baseUrl/credentialRef，供 replay、审计和后续诊断使用；payload 不得携带 API key、header、env 或其他 secret value。若持久 route 存在但 host 没有对应 model selector，恢复必须 fail closed；tenant mutation 在没有 durable routing backend 时返回配置错误。
+
 ## 不变量
 
 - 任何到达模型请求的输入，都能从 Session 事件重建；

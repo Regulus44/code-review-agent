@@ -708,6 +708,93 @@ describe("Phase 2 API", () => {
     }
   });
 
+  it("isolates tenant model routes, records route metadata, and restores them from SQLite", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "cra-api-model-routing-"));
+    const databasePath = join(directory, "agent.sqlite");
+    const selectedTenants: string[] = [];
+    const makeModel = (text: string) => ({
+      async *stream() {
+        yield { type: "text_delta" as const, text };
+        yield { type: "done" as const };
+      },
+    });
+    const productization = {
+      auth: {
+        required: true,
+        tokens: [
+          { token: "tenant-a-token", principalId: "user-a", tenantId: "tenant-a" },
+          { token: "tenant-b-token", principalId: "user-b", tenantId: "tenant-b" },
+        ],
+      },
+    };
+    const createRoutingServer = () => createApiServer({
+      databasePath,
+      model: makeModel("host-model"),
+      modelInfo: { provider: "deepseek", model: "host-model", baseUrl: "https://host.example.test", configured: true },
+      availableModels: ["tenant-model-a", "tenant-model-b"],
+      modelSelector: (model, tenantId) => {
+        if (tenantId !== undefined) selectedTenants.push(tenantId);
+        return {
+          model: makeModel(`${tenantId ?? "local"}:${model}`),
+          config: { provider: "deepseek", model, baseUrl: `https://${tenantId ?? "local"}.example.test`, configured: true },
+        };
+      },
+      productization,
+    });
+    const auth = (token: string) => ({ authorization: `Bearer ${token}`, "content-type": "application/json" });
+    let scoped = createRoutingServer();
+    await new Promise<void>((resolve) => scoped.listen(0, "127.0.0.1", resolve));
+    const address = scoped.address();
+    if (address === null || typeof address === "string") throw new Error("Routing API did not bind");
+    const url = `http://127.0.0.1:${address.port}`;
+    try {
+      expect((await fetch(`${url}/v1/models`)).status).toBe(401);
+      const sessionA = await (await fetch(`${url}/v1/sessions`, { method: "POST", headers: auth("tenant-a-token"), body: JSON.stringify({ workspaceRoot: "D:/tenant-a-routing" }) })).json() as { id: string };
+      const sessionB = await (await fetch(`${url}/v1/sessions`, { method: "POST", headers: auth("tenant-b-token"), body: JSON.stringify({ workspaceRoot: "D:/tenant-b-routing" }) })).json() as { id: string };
+      const initialA = await (await fetch(`${url}/v1/models`, { headers: { authorization: "Bearer tenant-a-token" } })).json() as { route?: unknown; current: string };
+      expect(initialA).toMatchObject({ current: "host-model" });
+      expect(initialA.route).toBeUndefined();
+      const selected = await fetch(`${url}/v1/models`, { method: "POST", headers: auth("tenant-a-token"), body: JSON.stringify({ model: "tenant-model-a" }) });
+      expect(selected.status).toBe(200);
+      expect(await selected.json()).toMatchObject({ model: { model: "tenant-model-a" }, route: { provider: "deepseek", model: "tenant-model-a", baseUrl: "https://tenant-a.example.test" } });
+      const visibleA = await (await fetch(`${url}/v1/models`, { headers: { authorization: "Bearer tenant-a-token" } })).json() as { route?: { model: string } };
+      const visibleB = await (await fetch(`${url}/v1/models`, { headers: { authorization: "Bearer tenant-b-token" } })).json() as { route?: unknown; current: string };
+      expect(visibleA.route?.model).toBe("tenant-model-a");
+      expect(visibleB.route).toBeUndefined();
+      expect(visibleB.current).toBe("host-model");
+
+      await fetch(`${url}/v1/sessions/${sessionA.id}`, { method: "POST", headers: auth("tenant-a-token"), body: JSON.stringify({ content: "tenant A turn" }) });
+      await fetch(`${url}/v1/sessions/${sessionB.id}`, { method: "POST", headers: auth("tenant-b-token"), body: JSON.stringify({ content: "tenant B turn" }) });
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        const [projectionA, projectionB] = await Promise.all([
+          fetch(`${url}/v1/sessions/${sessionA.id}`, { headers: { authorization: "Bearer tenant-a-token" } }).then((response) => response.json()) as Promise<{ status: string }>,
+          fetch(`${url}/v1/sessions/${sessionB.id}`, { headers: { authorization: "Bearer tenant-b-token" } }).then((response) => response.json()) as Promise<{ status: string }>,
+        ]);
+        if (projectionA.status === "idle" && projectionB.status === "idle") break;
+        await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      }
+      const eventsA = await (await fetch(`${url}/v1/sessions/${sessionA.id}/events?format=json`, { headers: { authorization: "Bearer tenant-a-token" } })).json() as { type: string; payload: Record<string, unknown> }[];
+      const eventsB = await (await fetch(`${url}/v1/sessions/${sessionB.id}/events?format=json`, { headers: { authorization: "Bearer tenant-b-token" } })).json() as { type: string; payload: Record<string, unknown> }[];
+      expect(eventsA.find((event) => event.type === "turn/started")?.payload).toMatchObject({ provider: "deepseek", model: "tenant-model-a", baseUrl: "https://tenant-a.example.test" });
+      expect(eventsB.find((event) => event.type === "turn/started")?.payload).not.toHaveProperty("provider");
+    } finally {
+      await new Promise<void>((resolve, reject) => scoped.close((error) => error ? reject(error) : resolve()));
+    }
+
+    scoped = createRoutingServer();
+    await new Promise<void>((resolve) => scoped.listen(0, "127.0.0.1", resolve));
+    const reopenedAddress = scoped.address();
+    if (reopenedAddress === null || typeof reopenedAddress === "string") throw new Error("Reopened routing API did not bind");
+    try {
+      const reopened = await (await fetch(`http://127.0.0.1:${reopenedAddress.port}/v1/models`, { headers: { authorization: "Bearer tenant-a-token" } })).json() as { route?: { model: string; baseUrl?: string } };
+      expect(reopened.route).toMatchObject({ model: "tenant-model-a", baseUrl: "https://tenant-a.example.test" });
+      expect(selectedTenants).toContain("tenant-a");
+    } finally {
+      await new Promise<void>((resolve, reject) => scoped.close((error) => error ? reject(error) : resolve()));
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("enforces bearer auth, durable tenant isolation, quota, and restart replay", async () => {
     const scopedStore = new InMemoryEventStore();
     const scoped = createApiServer({

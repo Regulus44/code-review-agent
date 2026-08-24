@@ -41,6 +41,40 @@ describe("AgentHost", () => {
     });
   });
 
+  it("routes turns by tenant ownership and records only the selected route metadata", async () => {
+    const store = new InMemoryEventStore();
+    const makeModel = (text: string): ChatModel => ({
+      async *stream(): AsyncIterable<ModelStreamPart> {
+        yield { type: "text_delta", text };
+        yield { type: "done" };
+      },
+    });
+    const host = new AgentHost({ store, model: makeModel("host-model") });
+    const tenantA = { principalId: brand<string, "PrincipalId">("user-a"), tenantId: brand<string, "TenantId">("tenant-a") };
+    const tenantB = { principalId: brand<string, "PrincipalId">("user-b"), tenantId: brand<string, "TenantId">("tenant-b") };
+    host.setTenantModel("tenant-a", makeModel("tenant-a-model"), {
+      provider: "deepseek",
+      model: "tenant-model-a",
+      baseUrl: "https://tenant-a.example.test",
+      credentialRef: { id: "cred-tenant-a", kind: "header", label: "Tenant A" },
+    });
+    const sessionA = await host.createSession("D:/tenant-a", undefined, undefined, tenantA);
+    const sessionB = await host.createSession("D:/tenant-b", undefined, undefined, tenantB);
+    const turnA = await host.sendMessage(sessionA.id, "route A");
+    const turnB = await host.sendMessage(sessionB.id, "route B");
+    await Promise.all([host.waitForTurn(turnA), host.waitForTurn(turnB)]);
+
+    const eventsA = await host.events(sessionA.id);
+    const eventsB = await host.events(sessionB.id);
+    expect(eventsA.find((event) => event.type === "turn/started")?.payload).toMatchObject({ provider: "deepseek", model: "tenant-model-a", baseUrl: "https://tenant-a.example.test", credentialRef: { id: "cred-tenant-a" } });
+    expect(eventsB.find((event) => event.type === "turn/started")?.payload).not.toHaveProperty("provider");
+    expect((await host.getSession(sessionA.id))?.messages.at(-1)?.content).toBe("tenant-a-model");
+    expect((await host.getSession(sessionB.id))?.messages.at(-1)?.content).toBe("host-model");
+    expect(JSON.stringify(eventsA)).not.toContain("secret");
+    expect(host.productizationSettings("tenant-a").routing).toMatchObject({ status: "configured", modelSelector: "tenant-scoped", providerCount: 1 });
+    expect(host.productizationSettings("tenant-b").routing).toMatchObject({ status: "available", modelSelector: "host-local" });
+  });
+
   it("gives the model an explicit workspace and tool-use contract", async () => {
     const requests: ModelRequest[] = [];
     const model: ChatModel = {

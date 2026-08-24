@@ -204,4 +204,27 @@ describe("InMemoryEventStore", () => {
     second.close();
     rmSync(directory, { recursive: true, force: true });
   });
+
+  it("persists tenant model routes and opaque credential references across SQLite reopen", () => {
+    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-model-route-"));
+    const databasePath = join(directory, "agent.sqlite");
+    const first = new SqliteEventStore({ databasePath });
+    const stored = first.upsertModelRoute({
+      tenantId: "tenant-a",
+      provider: "deepseek",
+      model: "tenant-model-a",
+      baseUrl: "https://tenant-a.example.test/v1",
+      credentialRef: { id: "cred-tenant-a", kind: "header", label: "Tenant A" },
+      updatedAt: "2026-08-24T00:00:01.000Z",
+    });
+    expect(first.listModelRoutes()).toEqual([stored]);
+    first.close();
+
+    const second = new SqliteEventStore({ databasePath });
+    expect(second.listModelRoutes()).toEqual([stored]);
+    expect(JSON.stringify(second.listModelRoutes())).not.toContain("secret");
+    expect(() => second.upsertModelRoute({ ...stored, baseUrl: "file:///private/model" })).toThrow("http(s)");
+    second.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
 });

@@ -74,6 +74,21 @@ await store.append({ sessionId: session.id, turnId, type: "assistant/message", p
 
 const host = new AgentHost({ store, ...(productizationEnabled ? { quota: { maxSessionsPerTenant: 2, maxTurnsPerTenant: 2 } } : {}) });
 
+const fixtureModel = (text) => ({
+  async *stream() {
+    yield { type: "text_delta", text };
+    yield { type: "done" };
+  },
+});
+const productizationModelOptions = productizationEnabled ? {
+  availableModels: ["fixture-tenant-model-a", "fixture-tenant-model-b"],
+  modelInfo: { provider: "deepseek", model: "fixture-host-model", baseUrl: "https://fixture-host.example.test", configured: true },
+  modelSelector: (model, tenantId) => ({
+    model: fixtureModel(`${tenantId ?? "local"}:${model}`),
+    config: { provider: "deepseek", model, baseUrl: `https://${tenantId ?? "local"}.fixture-model.example.test`, configured: true },
+  }),
+} : {};
+
 const server = createApiServer({
   store,
   host,
@@ -81,6 +96,7 @@ const server = createApiServer({
   ...(process.env.PHASE8_MODEL_FAILURES === undefined ? {} : { modelCatalogFailures: Number(process.env.PHASE8_MODEL_FAILURES) }),
   ...(process.env.PHASE8_MODEL_FAILURES === undefined ? {} : { availableModels: ["fixture-model"] }),
   ...(process.env.PHASE8_MODEL_FAILURES === undefined ? {} : { modelInfo: { provider: "echo", model: "fixture-model", configured: false } }),
+  ...productizationModelOptions,
   ...(productizationEnabled ? { productization: { auth: { required: true, tokens: [{ token: "fixture-tenant-a-token", principalId: "fixture-user-a", tenantId: "fixture-tenant-a" }, { token: "fixture-tenant-b-token", principalId: "fixture-user-b", tenantId: "fixture-tenant-b" }] }, quota: { maxSessionsPerTenant: 2, maxTurnsPerTenant: 2 } } } : {}),
 });
 await new Promise((resolve) => server.listen(Number(process.env.PHASE8_WEB_PORT ?? 0), "127.0.0.1", resolve));
