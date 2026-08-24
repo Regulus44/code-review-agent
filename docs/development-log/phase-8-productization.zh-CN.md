@@ -363,3 +363,17 @@ git diff --check                                      ✓
 ```
 
 本记录对应的代码已建立独立 Phase 8.1 Git checkpoint；8.0 Web parity、8.3 LSP/Code Mode、8.4 可靠性和 8.5 产品化仍未完成。
+
+## 2026-08-24：Phase 8 暂存归档
+
+本次动作只负责阶段收尾和可回滚归档，不宣告 Phase 8 完成。当前工作树在 `c1aae6c` checkpoint 后保持干净；最后一轮全量 workspace 测试及本轮 Phase 8 定向门禁均已通过。
+
+### 归档内容
+
+- 8.1 Context Compaction 与 8.2 Worktree 已满足各自退出条件；
+- 8.0 aggregate Web parity 已通过，8.3 LSP/Code Mode、8.4 Reliability 和 8.5 Productization 的已实现切片、合同、恢复与安全证据已保留；
+- 8.5 当前以显式 bearer/tenant/quota adapter 提供受控部署切片，外部 IdP/JWT、完整 principal catalog、tenant-scoped Workspace/MCP/provider routing、credentials 生命周期、backup/restore 和 upgrade policy 仍待实现。
+
+### 恢复入口
+
+恢复 Phase 8 时从 `c1aae6c` 继续，优先选择 tenant-scoped Workspace catalog/mutation 或 provider/model routing 与 credential reference durable contract，并为新切片建立独立 checkpoint 和对应 gate。

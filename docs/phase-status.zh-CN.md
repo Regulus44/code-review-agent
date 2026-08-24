@@ -16,13 +16,21 @@
 | Phase 5：内部 Subagent / 多 Agent | completed（2026-08-23） | 5.0–5.4：Task/Descriptor durable projection、one-shot/continuable child、FIFO/authority/cold resume、report/MCP scope、API/SSE/Web catalog；定向 typecheck、storage/subagent/runtime/API 测试和 API/Web smoke 通过 |
 | Phase 6：A2A | deferred（暂不作为 Phase 7 前置） | [ADR：Phase 7 Web 收敛不等待 A2A](adr/phase-7-web-with-a2a-deferred.zh-CN.md)；等待明确的外部 Agent 互操作需求 |
 | Phase 7：DSH Web 前端收敛 | completed | 7.1–7.10 Web shell、连接与回放、Workspace/Session navigation、Conversation/Tool/Permission/Interaction、Trajectory、Task/Subagent/MCP、Settings/Deliverables、响应式与可访问性、五场景 browser/replay gate、Workspace reorder 与 Workspace rename/archive/delete lifecycle 已完成；`pnpm typecheck`、`pnpm test`、`pnpm test:phase7:browser` 和 `git diff --check` 通过；browser gate 总耗时 2.14s、trajectory full replay 19.03ms；独立 checkpoint `82326d6` |
-| Phase 8：高级能力与产品化 | in_progress | 8.1/8.2 已完成；8.0 aggregate Web parity gate 已通过；8.3/8.4/8.5 仍在推进 |
+| Phase 8：高级能力与产品化 | paused（暂存归档） | 暂停于 `c1aae6c`；8.1/8.2 已完成，8.0 aggregate Web parity gate 已通过；8.3/8.4/8.5 仍未完成 |
 
 ## Phase 8 计划范围（accepted）
 
 - [Phase 8：高级能力、DSH Web 对齐与产品化](phase-plans/phase-8-productization.zh-CN.md) 已扩展为 8.0 Web 对齐、8.1 Context Compaction、8.2 Worktree、8.3 LSP/Code Mode、8.4 后台任务与可靠性、8.5 产品化；
 - [ADR：Phase 8 Web 与 DSH 前端行为对齐](adr/phase-8-web-dsh-alignment.zh-CN.md) 已接受，记录行为参考、REST/SSE 边界、typed Web 拆分、契约变更和回滚规则；
-- Phase 8 已进入 `in_progress`。8.0 的 aggregate Web parity contract gate 与真实 600/900/1024 Shell/Settings 视觉基线 gate 已通过；8.5 已建立产品化边界 ADR 和 host-backed capability 第一切片，但完整响应式/可访问性 browser 矩阵、真实 Job 跨场景恢复矩阵、8.3 完整退出审计和 8.5 认证/租户/quota 等核心能力仍未完成。
+- Phase 8 已于 2026-08-24 暂停并归档在 checkpoint `c1aae6c`。8.0 的 aggregate Web parity contract gate 与真实 600/900/1024 Shell/Settings 视觉基线 gate 已通过；8.5 已建立产品化边界 ADR 和 host-backed capability 第一切片，但完整响应式/可访问性 browser 矩阵、真实 Job 跨场景恢复矩阵、8.3 完整退出审计和 8.5 认证/租户/quota 等核心能力仍未完成。恢复时应从该 checkpoint 继续，不得把本次归档解释为 Phase 8 完成。
+
+## Phase 8 暂存归档（2026-08-24）
+
+- 当前阶段动作：停止继续编码，保留独立可回滚 checkpoint `c1aae6c`（`feat(phase-8): add tenant auth and quota enforcement`）；工作树已确认干净。
+- 最后一轮全量 workspace 测试已结束并通过；本轮重点门禁 `pnpm test:phase8:productization`、`pnpm test:phase8:parity`、`pnpm typecheck`、定向 Runtime/Storage/API 测试和 `git diff --check` 均通过。
+- 已归档的有效交付：8.1 Context Compaction、8.2 Worktree、8.0 aggregate Web parity，以及 8.3/8.4/8.5 的已实现切片和对应安全/恢复证据。
+- 保留的恢复入口：优先补齐 tenant-scoped Workspace catalog/mutation，或建立 provider/model routing 与 credential reference durable contract；随后继续 8.3 OS-level isolation/deployment evidence、8.4 跨场景 recovery matrix 和 8.5 运维/凭据生命周期。
+- 归档边界：Phase 8 状态为 `paused`，未满足退出条件；不得将 `c1aae6c` 作为 Phase 8 完成 checkpoint。
 
 ## Phase 8.5 产品化第一切片（partial）
 
