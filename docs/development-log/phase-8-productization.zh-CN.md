@@ -1,5 +1,33 @@
 # Phase 8 开发日志
 
+## 2026-08-24：8.4 Reliability 退出审计与 graphical recovery matrix 收口
+
+本次继续属于 Phase 8.4，依据 Phase 8 计划并对照 DSH 的 generation/reconnect、history-baseline + live-frame stitching 和 Job action/replay 边界，完成最后一批可靠性证据收口；没有复制 DSH 代码、内部类型或品牌资产，A2A 保持 `deferred`。
+
+### 已完成
+
+- 真实 in-app browser fixture 使用 `PHASE8_JOB_RECOVERY_LIVE_ITEMS=200` 和受范围约束的长任务延迟，确认三个并发 Job 的 running projection、交错 output、Job 详情和 `Cancel job` action。
+- 图形矩阵覆盖 600/900/1024 viewport；页面无横向溢出，移动布局保持 Connected 状态和可用的 sidebar/details 入口。
+- 取消一个 Job 后，Web projection 保留一个 cancelled、两个 running；SSE tail reconnect 和公开 `/jobs`/EventStore replay 继续由自动化 matrix 校验，reload 后状态由事件回放恢复。
+- 8.4 退出审计闭合 retry、cancel、deadline、model fallback、graceful shutdown、API/SQLite restart、SSE replay、tail cursor、fork/export、diagnostics、metrics、幂等和 credential redaction 相关证据。
+
+### DSH 对照与边界
+
+- connection generation/reconnect 对应本项目 REST + SSE reconnect；history baseline + live frames 对应 sequence replay 和 projection reducer；Job action/replay 对应现有 `/jobs/:id/cancel`、`/retry` 与 durable command claim。
+- 不新增 Event、Tool、Task、Permission 或 HTTP contract；fixture 时序参数只接受有限整数，Web 仍不成为事实来源。
+- 8.4 完成后，剩余 Phase 8 缺口转入 8.0 完整 visual/accessibility matrix、8.3 OS-level isolation/deployment evidence 和 8.5 的外部 IdP/JWT、principal catalog、secret manager、upgrade/deployment policy。
+
+### 验证
+
+```text
+pnpm test                                      ✓
+pnpm test:phase8:jobs                          ✓
+pnpm test:phase8:reliability                   ✓
+pnpm test:phase8:job-recovery:matrix           ✓
+git diff --check                                ✓
+graphical browser: 600/900/1024 viewport      ✓
+```
+
 ## 2026-08-24：8.4 graphical browser recovery evidence
 
 本次继续属于 Phase 8.4，补齐长任务并发/重启/SSE 自动化 matrix 与真实图形 Web recovery 之间的证据缺口。DSH 参考 `packages/client/connection/src/client/connection.ts` 的 generation/reconnect、`packages/client/runtime/src/client/sessions/session.ts` 的 history-baseline + live-frame stitching，以及 `packages/client/ui-jobs/src/client/JobListAction.tsx` 的 Job action/replay 边界；没有复制 DSH 代码、内部类型或品牌资产，A2A 保持 `deferred`。

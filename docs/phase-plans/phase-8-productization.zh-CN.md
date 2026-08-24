@@ -300,6 +300,22 @@ git diff --check
 
 图形证据场景：`liveItems=200`、`liveDelayMs=1000`；页面显示 `Running jobs = 3`，展开任一 running Job 执行 `Cancel job` 后显示 `cancelled = 1`、`Running jobs = 2`，刷新后仍保持该 projection 且页面状态为 `Connected`。
 
+### 8.4 退出审计（2026-08-24）
+
+8.4 的退出条件已闭合。自动化 gate 覆盖 retry、cancel、deadline、fallback、graceful shutdown、API/SQLite restart、SSE replay、tail cursor、fork/export、diagnostics、metrics、幂等和敏感信息审计；真实图形浏览器矩阵补充 600/900/1024 viewport、三个并发长任务、交错 output、Job Center action surface、取消后的 projection 和 reload replay。DSH 的 generation/reconnect、history-baseline + live-frame stitching 与 Job action/replay 边界均有本项目 fixture 证据映射。
+
+验收命令：
+
+```powershell
+pnpm test
+pnpm test:phase8:jobs
+pnpm test:phase8:reliability
+pnpm test:phase8:job-recovery:matrix
+git diff --check
+```
+
+8.4 完成后，Phase 8 的剩余工作集中在 8.0 的完整 visual/accessibility matrix、8.3 的 OS-level isolation/deployment evidence，以及 8.5 的外部 IdP/JWT、principal catalog、secret manager 和 upgrade/deployment policy。
+
 ## 9. Phase 8.5：产品化
 
 交付物：

@@ -126,7 +126,7 @@ Phase 7 的 DSH Web 调研与分步计划：
 - 已新增 linked worktree、SQLite reopen/replay、pending side-effect recovery、并发 create 去重、dirty cleanup protection 和 API/Web client tests；
 - `pnpm typecheck`、Workspace 6 项、Runtime 24 项、Storage 12 项、API 26 项、Web 98 项、`pnpm build:web`、`pnpm test:phase7:browser`、`pnpm test:phase8:worktree` 和 `git diff --check` 通过；本组变更建立独立的 Phase 8.2 Git checkpoint。
 
-## Phase 8.0 Web parity、Phase 8.3 LSP/Code Mode 与 Phase 8.4 Reliability（进行中）
+## Phase 8.0 Web parity、Phase 8.3 LSP/Code Mode（进行中）；Phase 8.4 Reliability（completed）
 
 - `c0cf1d3`：新增独立 `scripts/phase8-web-gate.mjs`，使用真实 SQLite/API/AgentHost fixture 验证 Goal/Plan/Todo/Question replay、回答/取消、Plan review、Goal CAS conflict、Todo idempotency 和 browser bundle；Trajectory Inspector 增加 Options、Usage、Diff、Request、Tool catalog、Rendered、Raw、Input、Output、Schema 等 bounded sections；
 - `presentLspTool` 与 Web LSP details surface 已接入，diagnostics、definition、references、source location、restart/crash 和失败状态均保持 host-backed；
@@ -145,9 +145,11 @@ Phase 7 的 DSH Web 调研与分步计划：
 - 新增 `scripts/phase8-job-recovery-fixture-server.mjs` 与 `scripts/phase8-job-recovery-gate.mjs`，通过 seed → API/SQLite shutdown → fresh AgentHost/API reopen 验证 orphaned/completed job、interrupted session、terminal recovery、SSE replay、`after_sequence` tail cursor、diagnostics 和 export；`pnpm test:phase8:job-recovery` 已通过。
 - 8.4 的 API restart、断线 SSE replay、orphaned/interrupted recovery slice 已闭合；`pnpm test:phase8:job-recovery` 已覆盖 fresh AgentHost/API reopen、terminal recovery、tail cursor、diagnostics 和 export；跨场景真实长任务恢复矩阵仍需继续扩展。
 - 新增 `scripts/phase8-job-recovery-matrix-gate.mjs` 与 `pnpm test:phase8:job-recovery:matrix`，重复执行 seed → reopen → reopen-again，覆盖 Job Center Web surface、orphaned/completed 状态、SSE replay、terminal tail cursor、export/diagnostics 和无重复 projection；本次继续扩展真实 live fixture，覆盖三个并发长任务、交错 output、单 job cancel、其余 job completion、断线后的 SSE tail reconnect 和 sequence 去重。
-- 新增 `scripts/phase8-reliability-gate.mjs`，覆盖 retry、deadline、shutdown、session export、diagnostics 和 metrics；`pnpm test:phase8:reliability` 已通过。当前 8.4 仍未整体完成，更完整的 browser recovery matrix 仍是后续工作。
+- 新增 `scripts/phase8-reliability-gate.mjs`，覆盖 retry、deadline、shutdown、session export、diagnostics 和 metrics；`pnpm test:phase8:reliability` 已通过。8.4 的自动化退出条件已完成。
 - Reliability gate 现在额外检查 Web Job Center 的 `Cancel job`、`Retry job` 和 `Terminal & long-running jobs` surface；真实 Job fixture 已由 `pnpm test:phase8:jobs` 覆盖，`pnpm test:phase8:job-recovery:matrix` 现已补充长任务并发、取消/完成和断线 tail reconnect 证据；更广泛的 graphical browser matrix 仍待扩展。
 - `scripts/phase8-job-recovery-fixture-server.mjs` 现在支持 bounded `PHASE8_JOB_RECOVERY_LIVE_ITEMS`/`PHASE8_JOB_RECOVERY_LIVE_DELAY_MS` 时序参数；in-app browser 真实验证了三个 running jobs、展开详情后的 `Cancel job`、取消后一个 cancelled/两个 running，以及刷新后的 `Connected` replay 状态。该证据补齐 graphical recovery 第一批场景，更广泛的多 viewport、断线交错和 Job action 组合矩阵仍待扩展。
+- 8.4 退出审计已完成：`pnpm test`、`pnpm test:phase8:jobs`、`pnpm test:phase8:reliability`、`pnpm test:phase8:job-recovery:matrix` 和 `git diff --check` 均通过；图形浏览器已覆盖 600/900/1024 viewport、三个并发长任务、取消后的 projection 和 reload replay。剩余 Phase 8 缺口为 8.0 完整 visual/accessibility matrix、8.3 OS-level isolation/deployment evidence，以及 8.5 的外部 IdP/JWT、principal catalog、secret manager 和 upgrade/deployment policy。
+- 状态修订：前文“更广泛 graphical browser matrix 仍待扩展”的历史描述由本条和 8.4 退出审计记录 supersede；8.4 graphical recovery evidence 已与 HTTP/SSE matrix 合并收口。
 - 修复 API restart recovery：graceful shutdown 不再取消处于 pending user interaction 的 turn，避免在数据库关闭前追加 `interaction/resolved(cancelled)`；`apps/api` 27 项 server tests 已通过。
 - 当前 Web parity 收口新增 Workspace Browser 的 Tree/Flat 视图与 Recent/Name/Path 确定性排序；搜索、Archived 筛选、父子 Session 展示和 active Session 保持现有回放状态；真实页面切换回归已通过。
 - 本次导航改动验证：`pnpm typecheck`、Web 101 tests、`pnpm build:web`、`pnpm test:phase8:web`、`pnpm test:phase8:reliability` 和 `git diff --check` 均通过；独立 checkpoint 为本次提交。
