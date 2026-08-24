@@ -186,6 +186,7 @@ describe("InMemoryEventStore", () => {
     const stored = first.upsertMcpConfig({
       name: "review-server",
       scope: "project",
+      tenantId: "tenant-a",
       ownerId: "owner-1",
       workspaceRoot: "D:/workspace",
       enabled: true,

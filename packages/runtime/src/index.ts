@@ -890,8 +890,8 @@ export class AgentHost {
     return this.options.store.subscribe(sessionId, listener);
   }
 
-  listTools(sessionId?: SessionId) {
-    return this.toolRuntime.listTools(sessionId).map((tool) => ({
+  listTools(sessionId?: SessionId, tenantId?: string) {
+    return this.toolRuntime.listTools(sessionId, tenantId).map((tool) => ({
       name: tool.name,
       description: tool.description,
       inputSchema: tool.inputSchema,
@@ -928,7 +928,7 @@ export class AgentHost {
       const permission = projection.permissions.find((item) => item.toolCallId === call.id && item.status === "pending");
       return { toolCallId: call.id, status: call.status === "awaiting_permission" ? "awaiting_permission" : call.status === "completed" ? "completed" : call.status === "cancelled" ? "cancelled" : call.status === "denied" ? "denied" : "failed", ...(call.result === undefined ? {} : { result: call.result }), ...(permission === undefined ? {} : { permission: { id: permission.id, sessionId, toolCallId: permission.toolCallId, toolName: permission.toolName, riskLevel: permission.riskLevel, reason: permission.reason, input, caller: permission.caller ?? caller, workspaceRoot: permission.workspaceRoot ?? effectiveWorkspaceRoot(projection), createdAt: permission.createdAt, expiresAt: permission.expiresAt ?? new Date(Date.parse(permission.createdAt) + 15 * 60_000).toISOString() } satisfies PermissionRequest }) };
     }
-    return this.toolRuntime.execute({ sessionId, workspaceRoot: effectiveWorkspaceRoot(projection), name, input, ...(turnId === undefined ? {} : { turnId }), toolCallId, ...(commandId === undefined ? {} : { commandId }), ...(signal === undefined ? {} : { signal }), caller });
+    return this.toolRuntime.execute({ sessionId, ...(projection.ownership?.tenantId === undefined ? {} : { tenantId: projection.ownership.tenantId }), workspaceRoot: effectiveWorkspaceRoot(projection), name, input, ...(turnId === undefined ? {} : { turnId }), toolCallId, ...(commandId === undefined ? {} : { commandId }), ...(signal === undefined ? {} : { signal }), caller });
   }
 
   async resolvePermission(sessionId: SessionId, permissionId: PermissionId, status: "approved" | "denied" | "cancelled", commandId?: string): Promise<ExecuteToolOutput> {
@@ -1392,8 +1392,8 @@ export class AgentHost {
     const workspaceRoot = projection === undefined ? "." : effectiveWorkspaceRoot(projection);
     return buildAgentSystemPrompt({
       workspaceRoot,
-      tools: this.toolRuntime.listTools(sessionId),
-      toolGuidance: this.toolPromptRegistry.assemble(this.toolRuntime.listTools(sessionId)),
+      tools: this.toolRuntime.listTools(sessionId, projection?.ownership?.tenantId),
+      toolGuidance: this.toolPromptRegistry.assemble(this.toolRuntime.listTools(sessionId, projection?.ownership?.tenantId)),
       permissionPreset: projection?.permissionPreset ?? this.permissionPreset ?? "ask-on-write",
       ...(this.customSystemPrompt === undefined ? {} : { customInstructions: this.customSystemPrompt }),
       ...(recovery ? { recovery: true } : {}),
@@ -1495,7 +1495,8 @@ export class AgentHost {
       this.appendSteers(messages, turnId);
       await this.compactTurnContext(sessionId, turnId, messages);
       await this.options.store.append({ sessionId, turnId, type: "step/started", payload: { step } });
-      const response = await this.collectModelResponse(sessionId, turnId, controller, messages);
+      const projection = await this.options.store.project(sessionId);
+      const response = await this.collectModelResponse(sessionId, turnId, controller, messages, projection?.ownership?.tenantId);
       if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
       const assistantPayload = { content: response.text, ...(response.toolCalls.length === 0 ? {} : { toolCalls: response.toolCalls }) };
       await this.options.store.append({ sessionId, turnId, type: "assistant/message", payload: assistantPayload });
@@ -1594,8 +1595,8 @@ export class AgentHost {
     }
   }
 
-  private modelTools(sessionId: SessionId): readonly ModelToolDefinition[] {
-    return this.toolRuntime.listTools(sessionId).map((tool) => ({
+  private modelTools(sessionId: SessionId, tenantId?: string): readonly ModelToolDefinition[] {
+    return this.toolRuntime.listTools(sessionId, tenantId).map((tool) => ({
       name: tool.name,
       description: tool.description,
       parameters: tool.inputSchema,
@@ -1607,6 +1608,7 @@ export class AgentHost {
     turnId: TurnId,
     controller: AbortController,
     messages: readonly ChatMessage[],
+    tenantId?: string,
   ): Promise<CollectedModelResponse> {
     const candidates = [this.model, ...this.fallbackModels];
     let lastError: unknown = new Error("No model configured");
@@ -1616,7 +1618,7 @@ export class AgentHost {
       const textParts: string[] = [];
       const calls = new Map<number, { id?: string; name?: string; arguments: string }>();
       try {
-        for await (const part of model.stream({ messages, tools: this.modelTools(sessionId), toolChoice: "auto", signal: controller.signal })) {
+        for await (const part of model.stream({ messages, tools: this.modelTools(sessionId, tenantId), toolChoice: "auto", signal: controller.signal })) {
           if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
           if (part.type === "text_delta") {
             textParts.push(part.text);
@@ -1664,6 +1666,7 @@ export class AgentHost {
       const projection = await this.options.store.project(sessionId);
       const output = await this.toolRuntime.execute({
         sessionId,
+        ...(projection?.ownership?.tenantId === undefined ? {} : { tenantId: projection.ownership.tenantId }),
         turnId,
         workspaceRoot: projection === undefined ? "." : effectiveWorkspaceRoot(projection),
         name: toolCall.name,

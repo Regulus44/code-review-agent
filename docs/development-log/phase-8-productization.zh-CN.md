@@ -402,3 +402,31 @@ git diff --check                                     ✓
 ### 尚未关闭
 
 外部 IdP/JWT、完整 principal catalog、MCP config tenant 隔离、tenant-scoped provider/model routing、credentials 生命周期、backup/restore、migration rollback 和 upgrade/deployment policy 仍未实现；Phase 8.5 与 Phase 8 继续保持 `in_progress`。
+
+## 2026-08-24：8.5 tenant-scoped MCP config 与 ToolRuntime 隔离
+
+本次恢复工作继续属于 Phase 8.5，补齐 MCP 产品化切片的 tenant boundary。变更影响 MCP config contract、SQLite schema、ConnectionManager、ToolRuntime、API 路由和产品化安全 gate；默认未认证本地行为保持兼容。
+
+### 已完成
+
+- `McpConfigRecord` / `McpServerConfig` 支持可选 `tenantId`；SQLite schema 从 v3 迁移到 v4，增加 `mcp_server_configs.tenant_id` 及索引，旧无租户记录保持可读。
+- `McpConfigStore` 对 tenant ownership 做 fail-closed 冲突检查；`list/get/setEnabled/remove` 支持 tenant scope，未认证本地 catalog 只读取 legacy unscoped configs。
+- `McpConnectionManager` 的 list/get/catalog/resource/prompt/enable/disable/reconnect/delete routes 接受 tenant scope；MCP lifecycle 事件只投影到相同 tenant 的 Session members。
+- MCP ToolSource 携带 tenant identity；ToolRuntime 在 model-visible discovery 与 execute 阶段再次验证 tenant，越权调用返回 bounded `MCP_TENANT_SCOPE_DENIED`，并保留统一 tool audit。
+- API authenticated MCP create 自动绑定 bearer tenant，不接受客户端伪造 tenant；跨租户 catalog/delete/lifecycle 返回 404；scrubbed config 和 credential reference 继续保持不泄露 secret。
+- 产品化 gate 增加 tenant MCP catalog、credential redaction 和 cross-tenant denial 检查。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/mcp-client test -- --run src/index.test.ts ✓ (10 tests)
+pnpm --filter @code-review-agent/storage test -- --run src/index.test.ts ✓ (13 tests)
+pnpm --filter @code-review-agent/api test -- --run src/server.test.ts ✓ (29 tests)
+pnpm test:phase8:productization                     ✓
+git diff --check                                     ✓
+```
+
+### 尚未关闭
+
+外部 IdP/JWT、完整 principal catalog、tenant-scoped provider/model routing、credentials 生命周期、backup/restore、migration rollback 和 upgrade/deployment policy 仍未实现；Phase 8.5 与 Phase 8 继续保持 `in_progress`。

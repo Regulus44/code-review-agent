@@ -55,7 +55,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
-const SCHEMA_VERSION = 3 as const;
+const SCHEMA_VERSION = 4 as const;
 
 function isPermissionPreset(value: unknown): value is PermissionPreset {
   return value === "read-only" || value === "workspace-write" || value === "ask-on-write" || value === "ask-on-execute" || value === "danger-full-access";
@@ -1023,17 +1023,18 @@ export class SqliteEventStore implements SessionEventStore, McpConfigBackend {
   }
 
   listMcpConfigs(): readonly McpConfigRecord[] {
-    const rows = this.db.prepare("SELECT name, scope, owner_id, workspace_root, session_id, enabled, revision, credential_ref_json, config_json, created_at, updated_at FROM mcp_server_configs ORDER BY name ASC").all() as SqliteRow[];
+    const rows = this.db.prepare("SELECT name, scope, tenant_id, owner_id, workspace_root, session_id, enabled, revision, credential_ref_json, config_json, created_at, updated_at FROM mcp_server_configs ORDER BY name ASC").all() as SqliteRow[];
     return rows.map(readMcpConfig);
   }
 
   upsertMcpConfig(record: McpConfigRecord): McpConfigRecord {
     this.withTransaction(() => {
       this.db.prepare(`
-        INSERT INTO mcp_server_configs (name, scope, owner_id, workspace_root, session_id, enabled, revision, credential_ref_json, config_json, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO mcp_server_configs (name, scope, tenant_id, owner_id, workspace_root, session_id, enabled, revision, credential_ref_json, config_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(name) DO UPDATE SET
           scope = excluded.scope,
+          tenant_id = excluded.tenant_id,
           owner_id = excluded.owner_id,
           workspace_root = excluded.workspace_root,
           session_id = excluded.session_id,
@@ -1045,6 +1046,7 @@ export class SqliteEventStore implements SessionEventStore, McpConfigBackend {
       `).run(
         record.name,
         record.scope,
+        record.tenantId ?? null,
         record.ownerId ?? null,
         record.workspaceRoot ?? null,
         record.sessionId ?? null,
@@ -1177,6 +1179,10 @@ export class SqliteEventStore implements SessionEventStore, McpConfigBackend {
         `);
         this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(3, now());
       }
+      if (currentVersion < 4) {
+        this.db.exec("ALTER TABLE mcp_server_configs ADD COLUMN tenant_id TEXT; CREATE INDEX IF NOT EXISTS mcp_server_configs_tenant_idx ON mcp_server_configs(tenant_id, name);");
+        this.db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(4, now());
+      }
       this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     });
   }
@@ -1276,6 +1282,7 @@ function readEvent(row: SqliteRow): AgentEvent {
 }
 
 function readMcpConfig(row: SqliteRow): McpConfigRecord {
+  const tenantId = row["tenant_id"];
   const ownerId = row["owner_id"];
   const workspaceRoot = row["workspace_root"];
   const sessionId = row["session_id"];
@@ -1283,6 +1290,7 @@ function readMcpConfig(row: SqliteRow): McpConfigRecord {
   return {
     name: String(row["name"]),
     scope: String(row["scope"]) as McpConfigRecord["scope"],
+    ...(tenantId === null || tenantId === undefined ? {} : { tenantId: String(tenantId) }),
     ...(ownerId === null || ownerId === undefined ? {} : { ownerId: String(ownerId) }),
     ...(workspaceRoot === null || workspaceRoot === undefined ? {} : { workspaceRoot: String(workspaceRoot) }),
     ...(sessionId === null || sessionId === undefined ? {} : { sessionId: String(sessionId) }),

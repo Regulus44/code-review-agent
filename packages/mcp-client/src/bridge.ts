@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ToolApprovalMode, ToolDefinition, ToolResult, JsonSchema, ToolRiskLevel } from "@code-review-agent/contracts";
+import { brand, type ToolApprovalMode, type ToolDefinition, type ToolResult, type JsonSchema, type ToolRiskLevel } from "@code-review-agent/contracts";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { ToolRegistry } from "@code-review-agent/tools";
@@ -45,7 +45,7 @@ export function createMcpToolRegistrations(
       riskLevel: resolveRisk(config, tool),
       approvalMode: resolveApproval(config, tool),
       interruptBehavior: "cancel",
-      source: { kind: "mcp", serverName, rawName: tool.name },
+      source: { kind: "mcp", serverName, rawName: tool.name, ...(config.tenantId === undefined ? {} : { tenantId: brand<string, "TenantId">(config.tenantId) }) },
       execute: async (input, context) => executeMcpTool(client, tool.name, input, context.signal, context.reportProgress, config.toolCallTimeoutMs ?? 120_000),
     };
     const warning = schemaWarning(tool.inputSchema);

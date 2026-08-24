@@ -8,6 +8,7 @@ import {
   type PermissionRequest,
   type PermissionStatus,
   type SessionId,
+  type TenantId,
   type ToolCallId,
   type ToolCaller,
   type ToolDefinition,
@@ -37,6 +38,8 @@ export interface ToolRuntimeOptions {
 
 export interface ExecuteToolInput {
   readonly sessionId: SessionId;
+  /** Tenant scope used to prevent an MCP tool from crossing ownership boundaries. */
+  readonly tenantId?: TenantId | string;
   readonly workspaceRoot: string;
   readonly name: string;
   readonly input: unknown;
@@ -112,9 +115,11 @@ export class ToolRuntime {
     return this.options.registry;
   }
 
-  listTools(sessionId?: SessionId): readonly ToolDefinition[] {
+  listTools(sessionId?: SessionId, tenantId?: TenantId | string): readonly ToolDefinition[] {
     const policy = sessionId === undefined ? this.policy : new DefaultPermissionPolicy({ preset: this.permissionPresetFor(sessionId) });
-    return this.options.registry.list().filter((definition) => policy.isVisible?.(definition) ?? true);
+    return this.options.registry.list()
+      .filter((definition) => policy.isVisible?.(definition) ?? true)
+      .filter((definition) => definition.source?.kind !== "mcp" || definition.source.tenantId === undefined && tenantId === undefined || definition.source.tenantId === tenantId);
   }
 
   pendingPermissions(): readonly PermissionRequest[] {
@@ -211,6 +216,13 @@ export class ToolRuntime {
 
   async execute(input: ExecuteToolInput): Promise<ExecuteToolOutput> {
     const definition = this.options.registry.validate(input.name, input.input);
+    if (definition.source?.kind === "mcp" && (definition.source.tenantId !== undefined && definition.source.tenantId !== input.tenantId || definition.source.tenantId === undefined && input.tenantId !== undefined && input.name.startsWith("mcp__"))) {
+      const result = this.errorResult("MCP_TENANT_SCOPE_DENIED", "MCP tool is outside the session tenant scope");
+      const toolCallId = input.toolCallId ?? brand<string, "ToolCallId">(`tool_${randomUUID()}`);
+      await this.append(input, "tool/call", { toolCallId, name: definition.name, input: input.input, riskLevel: definition.riskLevel, approvalMode: "deny", caller: input.caller ?? "agent", workspaceRoot: input.workspaceRoot, presentation: definition.presentCall?.(input.input) ?? defaultCallPresentation(definition) });
+      await this.append(input, "tool/result", { toolCallId, status: "denied", result });
+      return { toolCallId, status: "denied", result };
+    }
     const toolCallId = input.toolCallId ?? brand<string, "ToolCallId">(`tool_${randomUUID()}`);
     const caller = input.caller ?? "agent";
     const policy = new DefaultPermissionPolicy({ preset: this.permissionPresetFor(input.sessionId) });

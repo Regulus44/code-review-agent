@@ -109,6 +109,8 @@ MCP 生命周期事件只携带 `serverName`、状态、动作和脱敏错误；
 
 `workspace/updated` 是 host 持久化的 Workspace 生命周期快照，payload 至少包含 `{ key, action, updatedAt }`，可选字段为 `label`、`archived` 和 `deleted`。Workspace 仍以 Session 的 workspace root 为物理边界；更新事件会追加到该 workspace 的非删除 Session，以便任一存活 Session 的历史都能重建 label、归档和软删除状态。启用 tenant scope 时 payload 还包含 `tenantId` 与 `principalId`，更新只追加到该 tenant 的成员 Session，回放不得跨 tenant 合并元数据。删除只隐藏导航元数据，不删除 Session、文件或 EventStore 历史。重复 rename/archive/delete command 必须幂等，Conversation projection 忽略该导航事件。跨租户 Workspace 查询和 mutation 必须返回统一 404，避免泄露 Workspace 存在性。
 
+MCP config 的 durable record 可选包含 `tenantId`；schema v4 的 `mcp_server_configs.tenant_id`、`owner_id`、scope/binding、scrubbed `config` 和 credential reference 共同构成恢复边界。未认证本地 MCP catalog 只显示 legacy unscoped configs；authenticated API 只显示调用者 tenant 的 configs，`get/catalog/resource/prompt/enable/disable/reconnect/delete` 对其他 tenant 统一返回 404。MCP tool definition 的 `source` 带有可选 `tenantId`，ToolRuntime 在发现、model-visible tool list 和 execute 阶段再次检查 tenant，拒绝越权调用并追加 bounded `tool/call`/`tool/result` 审计；credential material 永不进入事件或 SQLite config。
+
 ## 不变量
 
 - 任何到达模型请求的输入，都能从 Session 事件重建；

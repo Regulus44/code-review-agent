@@ -26,11 +26,11 @@
 
 ## Phase 8 暂存归档（2026-08-24）
 
-- 当前阶段动作：停止继续编码，保留独立可回滚 checkpoint `c1aae6c`（`feat(phase-8): add tenant auth and quota enforcement`）；工作树已确认干净。
+- 该节记录历史暂存动作；Phase 8 已从 `c1aae6c` 恢复推进，当前最新代码 checkpoint 为 `afb0387`，后续切片继续建立独立 checkpoint。
 - 最后一轮全量 workspace 测试已结束并通过；本轮重点门禁 `pnpm test:phase8:productization`、`pnpm test:phase8:parity`、`pnpm typecheck`、定向 Runtime/Storage/API 测试和 `git diff --check` 均通过。
 - 已归档的有效交付：8.1 Context Compaction、8.2 Worktree、8.0 aggregate Web parity，以及 8.3/8.4/8.5 的已实现切片和对应安全/恢复证据。
-- 保留的恢复入口：优先补齐 tenant-scoped Workspace catalog/mutation，或建立 provider/model routing 与 credential reference durable contract；随后继续 8.3 OS-level isolation/deployment evidence、8.4 跨场景 recovery matrix 和 8.5 运维/凭据生命周期。
-- 归档边界：Phase 8 状态为 `paused`，未满足退出条件；不得将 `c1aae6c` 作为 Phase 8 完成 checkpoint。
+- 原恢复入口中的 tenant-scoped Workspace catalog/mutation 已由 `afb0387` 完成；当前继续补齐 tenant-scoped MCP config，随后推进 provider/model routing、credentials 生命周期、8.3 OS-level isolation/deployment evidence、8.4 跨场景 recovery matrix 和运维策略。
+- 归档边界：该历史动作不代表 Phase 8 完成；当前阶段状态以本文件顶部 `in_progress` 和最新独立 checkpoint 为准。
 
 ## Phase 8.5 产品化第一切片（partial）
 
@@ -38,7 +38,7 @@
 - `packages/contracts` 新增 `ProductizationCapability` 和 `SessionOwnership`；Session/SessionProjection 的 ownership 通过 `session/created` 事件持久化，并在 SQLite 重启、fork 和子 Agent 创建时回放/继承；
 - Runtime `AgentHost.productizationSettings()` 和 API `/v1/capabilities.productization` 返回真实 host-backed readiness；显式配置时支持静态 bearer token、tenant-scoped Session catalog、跨租户 404 隔离和 hard Session/Turn quota；默认本地 Host 保持 auth/tenant/quota/运维能力 `deferred` 或 `disabled`；
 - Web Settings 和 typed browser bundle 展示 Productization 状态；`scripts/phase8-productization-gate.mjs` 与 `pnpm test:phase8:productization` 已覆盖认证、租户目录、跨租户拒绝、turn quota 和凭据脱敏边界；
-- 当前仍未实现外部 IdP/JWT、完整 principal catalog、MCP config 隔离、tenant-scoped provider routing 或 backup/migration/upgrade policy，不能将 8.5 或 Phase 8 标记为完成。
+- 当前仍未实现外部 IdP/JWT、完整 principal catalog、tenant-scoped provider routing 或 backup/migration/upgrade policy，不能将 8.5 或 Phase 8 标记为完成。
 
 ## Phase 8.5 tenant-scoped Workspace slice（implemented，未完成整体 8.5）
 
@@ -46,6 +46,13 @@
 - `workspace/updated` 与 `workspace/reordered` 的 tenant-scoped 事件携带 `tenantId`/`principalId`，metadata、排序和 mutation 只在同 tenant 回放；未认证本地 catalog 忽略 tenant-scoped metadata，保持旧行为并 fail closed。
 - Authenticated cross-tenant Workspace catalog/mutation 返回隐藏式 404；同 tenant mutation 保留 command idempotency，Workspace delete 仍是软删除，不删除 Session、文件或 EventStore 历史。
 - 已覆盖 Runtime InMemory tenant isolation、SQLite reopen/replay、API cross-tenant 404、产品化 browser fixture gate；`pnpm test:phase8:productization` 已通过。
+
+## Phase 8.5 tenant-scoped MCP config slice（implemented，未完成整体 8.5）
+
+- `packages/contracts` 的 `McpConfigRecord` 与 MCP `ToolSource` 支持可选 tenant ownership；SQLite schema v4 增加 `mcp_server_configs.tenant_id`，旧无租户数据库可迁移并保持兼容。
+- `McpConfigStore`、`McpConnectionManager`、`ToolRuntime` 和 API MCP routes 按 tenant 过滤 config/list/catalog/resource/prompt/lifecycle；未认证本地只显示 legacy unscoped configs，跨租户访问统一 404。
+- MCP tool discovery/model-visible list/execute 三层均检查 tenant；持久化只保留 scrubbed config 与 credential reference，secret material 不进入 SQLite、事件或公开 API。
+- 已覆盖 MCP client tenant catalog/lifecycle conflict、Storage schema v4 persistence/reopen、API tenant catalog/404、产品化 gate；本切片完成后仍需 provider/model routing、credentials 生命周期和运维策略。
 
 ## Phase 6 A2A 暂缓决策
 

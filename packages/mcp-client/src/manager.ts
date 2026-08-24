@@ -61,29 +61,34 @@ export class McpConnectionManager {
     for (const config of this.configs.list()) this.ensureState(config);
   }
 
-  list(): readonly McpServerRecord[] {
-    return this.configs.list().map((config) => this.toRecord(this.ensureState(config)));
+  list(tenantId?: string): readonly McpServerRecord[] {
+    return this.configs.list(undefined, tenantId, tenantId === undefined ? false : true).map((config) => this.toRecord(this.ensureState(config)));
   }
 
-  get(name: string): McpServerRecord | undefined {
-    const config = this.configs.get(name);
+  get(name: string, tenantId?: string): McpServerRecord | undefined {
+    const config = this.configs.get(name, tenantId, tenantId === undefined ? false : true);
     return config === undefined ? undefined : this.toRecord(this.ensureState(config));
   }
 
-  discovery(name: string): McpDiscoverySnapshot | undefined {
+  discovery(name: string, tenantId?: string): McpDiscoverySnapshot | undefined {
+    if (this.get(name, tenantId) === undefined) return undefined;
     return this.states.get(name)?.discovery;
   }
 
-  async readResource(name: string, uri: string, signal?: AbortSignal): Promise<Awaited<ReturnType<Client["readResource"]>>> {
+  async readResource(name: string, uri: string, signal?: AbortSignal, tenantId?: string): Promise<Awaited<ReturnType<Client["readResource"]>>> {
+    const config = this.requireScopedConfig(name, tenantId);
+    if (config === undefined) throw new Error(`Unknown MCP server: ${name}`);
     const client = this.requireClient(name);
-    const result = await new McpResourceAdapter(client).read(uri, this.configs.get(name)?.toolCallTimeoutMs ?? 120_000, signal);
+    const result = await new McpResourceAdapter(client).read(uri, config.toolCallTimeoutMs ?? 120_000, signal);
     await this.emit("mcp/resource", { serverName: name, action: "read", uri, bytes: result.usage.bytes, truncated: result.usage.truncated });
     return result;
   }
 
-  async getPrompt(name: string, promptName: string, args?: Readonly<Record<string, string>>, signal?: AbortSignal): Promise<Awaited<ReturnType<Client["getPrompt"]>>> {
+  async getPrompt(name: string, promptName: string, args?: Readonly<Record<string, string>>, signal?: AbortSignal, tenantId?: string): Promise<Awaited<ReturnType<Client["getPrompt"]>>> {
+    const config = this.requireScopedConfig(name, tenantId);
+    if (config === undefined) throw new Error(`Unknown MCP server: ${name}`);
     const client = this.requireClient(name);
-    const result = await new McpPromptAdapter(client).get(promptName, args, this.configs.get(name)?.toolCallTimeoutMs ?? 120_000, signal);
+    const result = await new McpPromptAdapter(client).get(promptName, args, config.toolCallTimeoutMs ?? 120_000, signal);
     await this.emit("mcp/prompt", { serverName: name, action: "get", promptName, bytes: result.usage.bytes, truncated: result.usage.truncated, trust: result.trust });
     return result;
   }
@@ -92,11 +97,12 @@ export class McpConnectionManager {
     if (this.closed) throw new Error("MCP connection manager is closed");
     this.configs.upsert(config);
     const state = this.ensureState(config);
-    if (start && config.enabled !== false) await this.start(config.name);
+    if (start && config.enabled !== false) await this.startInternal(config.name, true);
     return this.toRecord(state);
   }
 
-  async start(name: string): Promise<McpServerRecord> {
+  async start(name: string, tenantId?: string): Promise<McpServerRecord> {
+    this.requireScopedConfig(name, tenantId);
     return this.startInternal(name, true);
   }
 
@@ -129,8 +135,8 @@ export class McpConnectionManager {
     return this.toRecord(state);
   }
 
-  async stop(name: string): Promise<McpServerRecord> {
-    const config = this.configs.get(name);
+  async stop(name: string, tenantId?: string): Promise<McpServerRecord> {
+    const config = this.requireScopedConfig(name, tenantId);
     if (config === undefined) throw new Error(`Unknown MCP server: ${name}`);
     const state = this.ensureState(config);
     await this.stopRuntime(state, true);
@@ -139,27 +145,28 @@ export class McpConnectionManager {
     return this.toRecord(state);
   }
 
-  async reconnect(name: string): Promise<McpServerRecord> {
-    return this.start(name);
+  async reconnect(name: string, tenantId?: string): Promise<McpServerRecord> {
+    return this.start(name, tenantId);
   }
 
-  async setEnabled(name: string, enabled: boolean): Promise<McpServerRecord> {
-    const config = this.configs.setEnabled(name, enabled);
+  async setEnabled(name: string, enabled: boolean, tenantId?: string): Promise<McpServerRecord> {
+    this.requireScopedConfig(name, tenantId);
+    const config = this.configs.setEnabled(name, enabled, tenantId, tenantId === undefined ? false : true);
     const state = this.ensureState(config);
-    if (enabled) return this.start(name);
+    if (enabled) return this.startInternal(name, true);
     await this.stopRuntime(state, true);
     state.status = "disabled";
     await this.emitServer(state, "disabled");
     return this.toRecord(state);
   }
 
-  async remove(name: string): Promise<boolean> {
-    const config = this.configs.get(name);
+  async remove(name: string, tenantId?: string): Promise<boolean> {
+    const config = this.requireScopedConfig(name, tenantId, false);
     if (config === undefined) return false;
     const state = this.ensureState(config);
     await this.stopRuntime(state, true);
     this.states.delete(name);
-    return this.configs.remove(name);
+    return this.configs.remove(name, tenantId, tenantId === undefined ? false : true);
   }
 
   async startConfigured(): Promise<void> {
@@ -204,6 +211,16 @@ export class McpConnectionManager {
     const state = this.states.get(name);
     if (state?.client === undefined || state.status !== "connected") throw new Error(`MCP server is not connected: ${name}`);
     return state.client;
+  }
+
+  private requireScopedConfig(name: string, tenantId?: string, throwOnMissing = true): McpServerConfig | undefined {
+    const config = this.configs.get(name, tenantId, tenantId === undefined ? false : true);
+    if (config === undefined && throwOnMissing) {
+      const error = new Error(`Unknown MCP server: ${name}`);
+      Object.assign(error, { code: "MCP_SERVER_NOT_FOUND" });
+      throw error;
+    }
+    return config;
   }
 
   private async connectGeneration(state: RuntimeState, config: McpServerConfig, generation: number): Promise<void> {
@@ -368,7 +385,8 @@ export class McpConnectionManager {
   }
 }
 
-function isVisibleToSession(config: McpServerConfig, session: { id: unknown; workspaceRoot: string }): boolean {
+function isVisibleToSession(config: McpServerConfig, session: { id: unknown; workspaceRoot: string; ownership?: { readonly tenantId?: string } }): boolean {
+  if (config.tenantId !== undefined && session.ownership?.tenantId !== config.tenantId) return false;
   if (config.scope === "session") return config.sessionId === undefined || config.sessionId === session.id;
   if (config.scope === "project") return config.workspaceRoot === undefined || config.workspaceRoot === session.workspaceRoot;
   return true;

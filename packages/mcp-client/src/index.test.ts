@@ -156,6 +156,19 @@ describe("MCP client bridge", () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
+  it("keeps tenant-scoped MCP config catalog and lifecycle access isolated", async () => {
+    const tenantA = { name: "tenant-a-server", scope: "user" as const, tenantId: "tenant-a", transport: "stdio" as const, command: "fixture", enabled: false };
+    const manager = new McpConnectionManager({ registry: new ToolRegistry(), configStore: new McpConfigStore([tenantA]) });
+    expect(manager.list("tenant-a").map((record) => record.config.name)).toEqual(["tenant-a-server"]);
+    expect(manager.list("tenant-b")).toEqual([]);
+    expect(manager.get("tenant-a-server", "tenant-b")).toBeUndefined();
+    await expect(manager.setEnabled("tenant-a-server", true, "tenant-b")).rejects.toMatchObject({ code: "MCP_SERVER_NOT_FOUND" });
+    await expect(manager.add({ ...tenantA, tenantId: "tenant-b" }, false)).rejects.toMatchObject({ code: "MCP_TENANT_SCOPE_CONFLICT" });
+    const registration = createMcpToolRegistrations({} as never, "tenant-a-server", { ...tenantA }, [{ name: "read", inputSchema: { type: "object" } }]);
+    expect(registration[0]?.definition.source).toMatchObject({ kind: "mcp", tenantId: "tenant-a" });
+    await manager.close();
+  });
+
   it("keeps the full JSON schema contract and uses a deterministic SHA-256 name", () => {
     const rawName = "very-long-tool-name/with spaces/and a stable suffix";
     expect(publicToolName("fixture", rawName)).toBe(publicToolName("fixture", rawName));

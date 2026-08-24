@@ -380,7 +380,7 @@ export type ToolCallStatus = "pending" | "awaiting_permission" | "running" | "co
 export type PermissionStatus = "pending" | "approved" | "denied" | "cancelled" | "expired";
 export type ToolSource =
   | { readonly kind: "builtin" }
-  | { readonly kind: "mcp"; readonly serverName: string; readonly rawName: string };
+  | { readonly kind: "mcp"; readonly serverName: string; readonly rawName: string; readonly tenantId?: TenantId };
 
 export type McpServerScope = "user" | "project" | "session";
 
@@ -437,6 +437,8 @@ export interface ProductizationCapability {
 export interface McpConfigRecord {
   readonly name: string;
   readonly scope: McpServerScope;
+  /** Optional tenant owner; absent keeps legacy local MCP behavior. */
+  readonly tenantId?: string;
   readonly ownerId?: string;
   readonly workspaceRoot?: string;
   readonly sessionId?: string;

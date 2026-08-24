@@ -759,6 +759,18 @@ describe("Phase 2 API", () => {
       const crossTenantWorkspaceMutation = await fetch(`${url}/v1/workspaces/${encodeURIComponent("D:/tenant-a")}/label`, { method: "POST", headers: { ...auth("tenant-b-token"), "idempotency-key": "tenant-b-cross-tenant-workspace" }, body: JSON.stringify({ label: "Must not leak" }) });
       expect(crossTenantWorkspaceMutation.status).toBe(404);
 
+      const mcpAdded = await fetch(`${url}/v1/mcp/servers`, { method: "POST", headers: { ...auth("tenant-a-token"), "content-type": "application/json" }, body: JSON.stringify({ name: "tenant-a-mcp", scope: "user", transport: "stdio", command: "fixture", enabled: false, start: false, env: { AUTH_TOKEN: "must-not-leak" } }) });
+      expect(mcpAdded.status).toBe(201);
+      const tenantAMcp = await (await fetch(`${url}/v1/mcp/servers`, { headers: { authorization: "Bearer tenant-a-token" } })).json() as { servers: { config: { name: string; tenantId?: string; env?: Record<string, string> } }[] };
+      expect(tenantAMcp.servers).toHaveLength(1);
+      expect(tenantAMcp.servers[0]?.config).toMatchObject({ name: "tenant-a-mcp", tenantId: "tenant-a", env: { AUTH_TOKEN: "[redacted]" } });
+      const tenantBMcp = await (await fetch(`${url}/v1/mcp/servers`, { headers: { authorization: "Bearer tenant-b-token" } })).json() as { servers: unknown[] };
+      expect(tenantBMcp.servers).toEqual([]);
+      const foreignMcpCatalog = await fetch(`${url}/v1/mcp/servers/tenant-a-mcp/catalog`, { headers: { authorization: "Bearer tenant-b-token" } });
+      expect(foreignMcpCatalog.status).toBe(404);
+      const foreignMcpDelete = await fetch(`${url}/v1/mcp/servers/tenant-a-mcp`, { method: "DELETE", headers: { authorization: "Bearer tenant-b-token" } });
+      expect(foreignMcpDelete.status).toBe(404);
+
       expect((await fetch(`${url}/v1/sessions/${firstSession.id}`, { method: "POST", headers: auth("tenant-a-token"), body: JSON.stringify({ content: "one turn" }) })).status).toBe(202);
       expect((await fetch(`${url}/v1/sessions/${firstSession.id}`, { method: "POST", headers: auth("tenant-a-token"), body: JSON.stringify({ content: "second turn" }) })).status).toBe(429);
     } finally {

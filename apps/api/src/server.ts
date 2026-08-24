@@ -147,7 +147,6 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (identity !== undefined && sessionResource?.[1] !== undefined) {
       await assertSessionAccess(host, sessionId(decodeURIComponent(sessionResource[1])), identity);
     }
-    if (identity !== undefined && url.pathname.startsWith("/v1/mcp/")) throw new HttpError(403, "MCP tenant scope is not configured for authenticated requests");
     if (identity !== undefined && (url.pathname === "/v1/metrics" || url.pathname === "/v1/diagnostics")) throw new HttpError(403, "Global diagnostics are not exposed across tenant scope");
     if (request.method === "GET" && url.pathname === "/health") {
       sendJson(response, 200, { ok: true, service: "code-review-agent", runtime: "typescript", persistence, ...(modelRuntime.info === undefined ? {} : { model: modelRuntime.info }) });
@@ -187,7 +186,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/tools") {
-      sendJson(response, 200, { tools: host.listTools() });
+      sendJson(response, 200, { tools: host.listTools(undefined, identity?.tenantId) });
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/capabilities") {
@@ -225,15 +224,16 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/mcp/servers") {
-      sendJson(response, 200, { servers: mcp.list() });
+      sendJson(response, 200, { servers: mcp.list(identity?.tenantId) });
       return;
     }
     if (request.method === "POST" && url.pathname === "/v1/mcp/servers") {
       const body = await readJson(request);
-      const { start, ...configBody } = body;
-      const existing = typeof configBody.name === "string" ? mcp.get(configBody.name) : undefined;
+      const { start, tenantId: _requestedTenantId, ...configBody } = body;
+      const existing = typeof configBody.name === "string" ? mcp.get(configBody.name, identity?.tenantId) : undefined;
       if (typeof body.expectedRevision === "number" && existing?.revision !== body.expectedRevision) throw new HttpError(409, "MCP config revision conflict");
-      sendJson(response, 201, await mcp.add(configBody as unknown as McpServerConfig, start !== false));
+      const scopedConfig = identity === undefined ? configBody : { ...configBody, tenantId: identity.tenantId };
+      sendJson(response, 201, await mcp.add(scopedConfig as unknown as McpServerConfig, start !== false));
       return;
     }
     const mcpMatch = url.pathname.match(/^\/v1\/mcp\/servers\/([^/]+)$/u);
@@ -241,33 +241,35 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     const mcpCatalogMatch = url.pathname.match(/^\/v1\/mcp\/servers\/([^/]+)\/catalog$/u);
     if (mcpCatalogMatch?.[1] !== undefined && request.method === "GET") {
       const name = decodeURIComponent(mcpCatalogMatch[1]);
-      const server = mcp.get(name);
+      const server = mcp.get(name, identity?.tenantId);
       if (server === undefined) throw new HttpError(404, "MCP server not found");
-      sendJson(response, 200, { server, discovery: mcp.discovery(name) ?? { tools: [], resources: [], prompts: [] } });
+      sendJson(response, 200, { server, discovery: mcp.discovery(name, identity?.tenantId) ?? { tools: [], resources: [], prompts: [] } });
       return;
     }
     if (mcpResourceMatch?.[1] !== undefined && request.method === "GET") {
       const uri = url.searchParams.get("uri");
       if (uri === null || uri.length === 0) throw new HttpError(400, "uri is required");
-      sendJson(response, 200, await mcp.readResource(decodeURIComponent(mcpResourceMatch[1]), uri));
+      sendJson(response, 200, await mcp.readResource(decodeURIComponent(mcpResourceMatch[1]), uri, undefined, identity?.tenantId));
       return;
     }
     const mcpPromptMatch = url.pathname.match(/^\/v1\/mcp\/servers\/([^/]+)\/prompts$/u);
     if (mcpPromptMatch?.[1] !== undefined && request.method === "POST") {
       const body = await readJson(request);
       if (typeof body.name !== "string") throw new HttpError(400, "name is required");
-      sendJson(response, 200, await mcp.getPrompt(decodeURIComponent(mcpPromptMatch[1]), body.name, body.arguments as Record<string, string> | undefined));
+      sendJson(response, 200, await mcp.getPrompt(decodeURIComponent(mcpPromptMatch[1]), body.name, body.arguments as Record<string, string> | undefined, undefined, identity?.tenantId));
       return;
     }
     if (mcpMatch?.[1] !== undefined && request.method === "DELETE") {
-      sendJson(response, 200, { removed: await mcp.remove(decodeURIComponent(mcpMatch[1])) });
+      const name = decodeURIComponent(mcpMatch[1]);
+      if (mcp.get(name, identity?.tenantId) === undefined) throw new HttpError(404, "MCP server not found");
+      sendJson(response, 200, { removed: await mcp.remove(name, identity?.tenantId) });
       return;
     }
     const mcpActionMatch = url.pathname.match(/^\/v1\/mcp\/servers\/([^/]+)\/(reconnect|enable|disable)$/u);
     if (mcpActionMatch?.[1] !== undefined && mcpActionMatch[2] !== undefined && request.method === "POST") {
       const name = decodeURIComponent(mcpActionMatch[1]);
       const action = mcpActionMatch[2];
-      const result = action === "reconnect" ? await mcp.reconnect(name) : await mcp.setEnabled(name, action === "enable");
+      const result = action === "reconnect" ? await mcp.reconnect(name, identity?.tenantId) : await mcp.setEnabled(name, action === "enable", identity?.tenantId);
       sendJson(response, 200, result);
       return;
     }
@@ -669,7 +671,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     throw new HttpError(404, "not found");
   } catch (error) {
     const code = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : "";
-    const status = error instanceof HttpError ? error.status : code === "INVALID_TOOL_INPUT" ? 400 : code === "TOOL_NOT_FOUND" || code === "WORKSPACE_NOT_FOUND" ? 404 : code === "TOOL_DISABLED" ? 409 : code === "MODEL_CONFIGURATION_ERROR" ? 400 : code === "SESSION_QUOTA_EXCEEDED" || code === "TURN_QUOTA_EXCEEDED" ? 429 : code === "WORKSPACE_ORDER_INVALID" ? 400 : code === "COMMAND_CONFLICT" || code === "WORKTREE_DIRTY" || code === "WORKTREE_INVALID" || code === "WORKTREE_EXISTS" ? 409 : 500;
+    const status = error instanceof HttpError ? error.status : code === "INVALID_TOOL_INPUT" ? 400 : code === "TOOL_NOT_FOUND" || code === "WORKSPACE_NOT_FOUND" || code === "MCP_SERVER_NOT_FOUND" ? 404 : code === "TOOL_DISABLED" ? 409 : code === "MODEL_CONFIGURATION_ERROR" ? 400 : code === "SESSION_QUOTA_EXCEEDED" || code === "TURN_QUOTA_EXCEEDED" ? 429 : code === "WORKSPACE_ORDER_INVALID" ? 400 : code === "MCP_TENANT_SCOPE_CONFLICT" || code === "COMMAND_CONFLICT" || code === "WORKTREE_DIRTY" || code === "WORKTREE_INVALID" || code === "WORKTREE_EXISTS" ? 409 : 500;
     const message = error instanceof Error ? error.message : String(error);
     if (!response.headersSent) {
       if (status === 401) response.setHeader("www-authenticate", "Bearer");

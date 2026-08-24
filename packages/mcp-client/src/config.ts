@@ -32,6 +32,8 @@ export interface McpToolCatalogEntry {
 export interface McpServerConfig {
   readonly name: string;
   readonly scope: McpServerScope;
+  /** Optional tenant owner; absent keeps legacy local MCP behavior. */
+  readonly tenantId?: string;
   readonly ownerId?: string;
   readonly workspaceRoot?: string;
   readonly sessionId?: string;
@@ -102,6 +104,11 @@ export class McpConfigStore {
     validateName(config.name);
     validateConfig(config);
     const existing = this.configs.get(config.name);
+    if (existing !== undefined && (existing.tenantId ?? undefined) !== (config.tenantId ?? undefined)) {
+      const error = new Error(`MCP server ${config.name} is owned by another tenant`);
+      Object.assign(error, { code: "MCP_TENANT_SCOPE_CONFLICT" });
+      throw error;
+    }
     const normalized: McpServerConfig = {
       ...config,
       enabled: config.enabled ?? true,
@@ -115,24 +122,28 @@ export class McpConfigStore {
     return normalized;
   }
 
-  get(name: string): McpServerConfig | undefined {
-    return this.configs.get(name);
+  get(name: string, tenantId?: string, includeTenantScoped = true): McpServerConfig | undefined {
+    const config = this.configs.get(name);
+    if (config === undefined || (tenantId !== undefined && config.tenantId !== tenantId) || (tenantId === undefined && !includeTenantScoped && config.tenantId !== undefined)) return undefined;
+    return config;
   }
 
-  list(scope?: McpServerScope): readonly McpServerConfig[] {
+  list(scope?: McpServerScope, tenantId?: string, includeTenantScoped = true): readonly McpServerConfig[] {
     return [...this.configs.values()]
       .filter((config) => scope === undefined || config.scope === scope)
+      .filter((config) => tenantId === undefined ? includeTenantScoped || config.tenantId === undefined : config.tenantId === tenantId)
       .sort((left, right) => left.name.localeCompare(right.name));
   }
 
-  remove(name: string): boolean {
+  remove(name: string, tenantId?: string, includeTenantScoped = true): boolean {
+    if (this.get(name, tenantId, includeTenantScoped) === undefined) return false;
     const removed = this.configs.delete(name);
     if (removed) this.backend?.deleteMcpConfig(name);
     return removed;
   }
 
-  setEnabled(name: string, enabled: boolean): McpServerConfig {
-    const existing = this.configs.get(name);
+  setEnabled(name: string, enabled: boolean, tenantId?: string, includeTenantScoped = true): McpServerConfig {
+    const existing = this.get(name, tenantId, includeTenantScoped);
     if (existing === undefined) throw new Error(`Unknown MCP server: ${name}`);
     const revision = existing.revision === undefined ? 1 : existing.enabled === enabled ? existing.revision : existing.revision + 1;
     const next = { ...existing, enabled, revision };
@@ -156,6 +167,7 @@ export class McpConfigStore {
     const record: McpConfigRecord = {
       name: config.name,
       scope: config.scope,
+      ...(config.tenantId === undefined ? {} : { tenantId: config.tenantId }),
       ...(config.ownerId === undefined ? {} : { ownerId: config.ownerId }),
       ...(config.workspaceRoot === undefined ? {} : { workspaceRoot: config.workspaceRoot }),
       ...(config.sessionId === undefined ? {} : { sessionId: config.sessionId }),
@@ -190,6 +202,7 @@ function fromRecord(record: McpConfigRecord): McpServerConfig {
   const config = { ...record.config, name: record.name, scope: record.scope, enabled: record.enabled, revision: record.revision } as unknown as McpServerConfig;
   return {
     ...config,
+    ...(record.tenantId === undefined ? {} : { tenantId: record.tenantId }),
     ...(record.ownerId === undefined ? {} : { ownerId: record.ownerId }),
     ...(record.workspaceRoot === undefined ? {} : { workspaceRoot: record.workspaceRoot }),
     ...(record.sessionId === undefined ? {} : { sessionId: record.sessionId }),
@@ -212,6 +225,7 @@ function stable(value: unknown): unknown {
 }
 
 function validateConfig(config: McpServerConfig): void {
+  if (config.tenantId !== undefined && config.tenantId.trim() === "") throw new Error(`MCP server ${config.name} has an invalid tenant scope`);
   if (config.scope !== "user" && config.scope !== "project" && config.scope !== "session") throw new Error(`MCP server ${config.name} has an invalid scope`);
   if (config.transport !== "stdio" && config.transport !== "sse" && config.transport !== "streamable-http") throw new Error(`MCP server ${config.name} has an invalid transport`);
   if (config.transport === "stdio") {
