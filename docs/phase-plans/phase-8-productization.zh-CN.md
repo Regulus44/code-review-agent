@@ -1,6 +1,6 @@
 # Phase 8：高级能力、DSH Web 对齐与产品化
 
-状态：`paused`（2026-08-24 暂存归档于 `c1aae6c`）。Phase 7 已完成并保留独立 checkpoint；Phase 8 后续工作待恢复后按 8.0–8.5 工作流继续推进。
+状态：`in_progress`（2026-08-24 从暂存 checkpoint `c1aae6c` 恢复）。Phase 7 已完成并保留独立 checkpoint；Phase 8 后续工作继续按 8.0–8.5 工作流推进。
 
 ## 1. 阶段目标
 

@@ -16,13 +16,13 @@
 | Phase 5：内部 Subagent / 多 Agent | completed（2026-08-23） | 5.0–5.4：Task/Descriptor durable projection、one-shot/continuable child、FIFO/authority/cold resume、report/MCP scope、API/SSE/Web catalog；定向 typecheck、storage/subagent/runtime/API 测试和 API/Web smoke 通过 |
 | Phase 6：A2A | deferred（暂不作为 Phase 7 前置） | [ADR：Phase 7 Web 收敛不等待 A2A](adr/phase-7-web-with-a2a-deferred.zh-CN.md)；等待明确的外部 Agent 互操作需求 |
 | Phase 7：DSH Web 前端收敛 | completed | 7.1–7.10 Web shell、连接与回放、Workspace/Session navigation、Conversation/Tool/Permission/Interaction、Trajectory、Task/Subagent/MCP、Settings/Deliverables、响应式与可访问性、五场景 browser/replay gate、Workspace reorder 与 Workspace rename/archive/delete lifecycle 已完成；`pnpm typecheck`、`pnpm test`、`pnpm test:phase7:browser` 和 `git diff --check` 通过；browser gate 总耗时 2.14s、trajectory full replay 19.03ms；独立 checkpoint `82326d6` |
-| Phase 8：高级能力与产品化 | paused（暂存归档） | 暂停于 `c1aae6c`；8.1/8.2 已完成，8.0 aggregate Web parity gate 已通过；8.3/8.4/8.5 仍未完成 |
+| Phase 8：高级能力与产品化 | in_progress | 从归档 checkpoint `c1aae6c` 恢复；8.1/8.2 已完成，8.0 aggregate Web parity gate 已通过；8.5 tenant-scoped Workspace catalog/mutation 已实现，8.3/8.4/8.5 仍未整体完成 |
 
 ## Phase 8 计划范围（accepted）
 
 - [Phase 8：高级能力、DSH Web 对齐与产品化](phase-plans/phase-8-productization.zh-CN.md) 已扩展为 8.0 Web 对齐、8.1 Context Compaction、8.2 Worktree、8.3 LSP/Code Mode、8.4 后台任务与可靠性、8.5 产品化；
 - [ADR：Phase 8 Web 与 DSH 前端行为对齐](adr/phase-8-web-dsh-alignment.zh-CN.md) 已接受，记录行为参考、REST/SSE 边界、typed Web 拆分、契约变更和回滚规则；
-- Phase 8 已于 2026-08-24 暂停并归档在 checkpoint `c1aae6c`。8.0 的 aggregate Web parity contract gate 与真实 600/900/1024 Shell/Settings 视觉基线 gate 已通过；8.5 已建立产品化边界 ADR 和 host-backed capability 第一切片，但完整响应式/可访问性 browser 矩阵、真实 Job 跨场景恢复矩阵、8.3 完整退出审计和 8.5 认证/租户/quota 等核心能力仍未完成。恢复时应从该 checkpoint 继续，不得把本次归档解释为 Phase 8 完成。
+- Phase 8 曾于 2026-08-24 暂存归档在 checkpoint `c1aae6c`，随后恢复推进。8.0 的 aggregate Web parity contract gate 与真实 600/900/1024 Shell/Settings 视觉基线 gate 已通过；8.5 已建立产品化边界 ADR、host-backed capability 第一切片和 tenant-scoped Workspace catalog/mutation，但完整响应式/可访问性 browser 矩阵、真实 Job 跨场景恢复矩阵、8.3 完整退出审计、MCP tenant 隔离和 8.5 运维/凭据生命周期仍未完成。
 
 ## Phase 8 暂存归档（2026-08-24）
 
@@ -38,7 +38,14 @@
 - `packages/contracts` 新增 `ProductizationCapability` 和 `SessionOwnership`；Session/SessionProjection 的 ownership 通过 `session/created` 事件持久化，并在 SQLite 重启、fork 和子 Agent 创建时回放/继承；
 - Runtime `AgentHost.productizationSettings()` 和 API `/v1/capabilities.productization` 返回真实 host-backed readiness；显式配置时支持静态 bearer token、tenant-scoped Session catalog、跨租户 404 隔离和 hard Session/Turn quota；默认本地 Host 保持 auth/tenant/quota/运维能力 `deferred` 或 `disabled`；
 - Web Settings 和 typed browser bundle 展示 Productization 状态；`scripts/phase8-productization-gate.mjs` 与 `pnpm test:phase8:productization` 已覆盖认证、租户目录、跨租户拒绝、turn quota 和凭据脱敏边界；
-- 当前仍未实现外部 IdP/JWT、完整 principal catalog、tenant-scoped Workspace mutation、MCP config 隔离、tenant-scoped provider routing 或 backup/migration/upgrade policy，不能将 8.5 或 Phase 8 标记为完成。
+- 当前仍未实现外部 IdP/JWT、完整 principal catalog、MCP config 隔离、tenant-scoped provider routing 或 backup/migration/upgrade policy，不能将 8.5 或 Phase 8 标记为完成。
+
+## Phase 8.5 tenant-scoped Workspace slice（implemented，未完成整体 8.5）
+
+- `AgentHost` 的 Workspace catalog、reorder、rename、archive/restore 和 soft delete 接受可选 `SessionOwnership` scope；认证 API 仅投影调用者 tenant 的 Session members。
+- `workspace/updated` 与 `workspace/reordered` 的 tenant-scoped 事件携带 `tenantId`/`principalId`，metadata、排序和 mutation 只在同 tenant 回放；未认证本地 catalog 忽略 tenant-scoped metadata，保持旧行为并 fail closed。
+- Authenticated cross-tenant Workspace catalog/mutation 返回隐藏式 404；同 tenant mutation 保留 command idempotency，Workspace delete 仍是软删除，不删除 Session、文件或 EventStore 历史。
+- 已覆盖 Runtime InMemory tenant isolation、SQLite reopen/replay、API cross-tenant 404、产品化 browser fixture gate；`pnpm test:phase8:productization` 已通过。
 
 ## Phase 6 A2A 暂缓决策
 

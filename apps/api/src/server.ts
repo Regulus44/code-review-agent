@@ -195,43 +195,33 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/workspaces") {
-      const catalog = await host.listWorkspaces(url.searchParams.get("include_archived") === "true");
-      if (identity === undefined) sendJson(response, 200, catalog);
-      else {
-        const sessions = await host.listSessions(true);
-        const roots = new Set(sessions.filter((session) => session.ownership?.tenantId === identity.tenantId).map((session) => session.workspaceRoot.toLowerCase()));
-        sendJson(response, 200, { workspaces: catalog.workspaces.filter((workspace) => roots.has(workspace.root.toLowerCase())) });
-      }
+      sendJson(response, 200, await host.listWorkspaces(url.searchParams.get("include_archived") === "true", identity));
       return;
     }
     if (request.method === "POST" && url.pathname === "/v1/workspaces/reorder") {
-      if (identity !== undefined) throw new HttpError(403, "Workspace reorder requires a tenant-scoped catalog adapter");
       const body = await readJson(request);
       if (!Array.isArray(body.order) || body.order.some((value: unknown) => typeof value !== "string")) throw new HttpError(400, "order must be an array of workspace keys");
-      sendJson(response, 200, await host.reorderWorkspaces(body.order as string[], commandId(request, body)));
+      sendJson(response, 200, await host.reorderWorkspaces(body.order as string[], commandId(request, body), identity));
       return;
     }
     const workspaceRenameMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/label$/u);
     if (request.method === "POST" && workspaceRenameMatch?.[1] !== undefined) {
-      if (identity !== undefined) throw new HttpError(403, "Workspace mutation requires a tenant-scoped catalog adapter");
       const body = await readJson(request);
       if (typeof body.label !== "string") throw new HttpError(400, "label is required");
-      sendJson(response, 200, await host.renameWorkspace(decodeURIComponent(workspaceRenameMatch[1]), body.label, commandId(request, body)));
+      sendJson(response, 200, await host.renameWorkspace(decodeURIComponent(workspaceRenameMatch[1]), body.label, commandId(request, body), identity));
       return;
     }
     const workspaceArchiveMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/archive$/u);
     if (request.method === "POST" && workspaceArchiveMatch?.[1] !== undefined) {
-      if (identity !== undefined) throw new HttpError(403, "Workspace mutation requires a tenant-scoped catalog adapter");
       const body = await readJson(request);
       const archived = body.archived === undefined ? true : body.archived;
       if (typeof archived !== "boolean") throw new HttpError(400, "archived must be a boolean");
-      sendJson(response, 200, await host.archiveWorkspace(decodeURIComponent(workspaceArchiveMatch[1]), archived, commandId(request, body)));
+      sendJson(response, 200, await host.archiveWorkspace(decodeURIComponent(workspaceArchiveMatch[1]), archived, commandId(request, body), identity));
       return;
     }
     const workspaceDeleteMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)$/u);
     if (request.method === "DELETE" && workspaceDeleteMatch?.[1] !== undefined) {
-      if (identity !== undefined) throw new HttpError(403, "Workspace mutation requires a tenant-scoped catalog adapter");
-      sendJson(response, 200, await host.deleteWorkspace(decodeURIComponent(workspaceDeleteMatch[1]), commandId(request)));
+      sendJson(response, 200, await host.deleteWorkspace(decodeURIComponent(workspaceDeleteMatch[1]), commandId(request), identity));
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/mcp/servers") {
@@ -679,7 +669,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     throw new HttpError(404, "not found");
   } catch (error) {
     const code = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : "";
-    const status = error instanceof HttpError ? error.status : code === "INVALID_TOOL_INPUT" ? 400 : code === "TOOL_NOT_FOUND" ? 404 : code === "TOOL_DISABLED" ? 409 : code === "MODEL_CONFIGURATION_ERROR" ? 400 : code === "SESSION_QUOTA_EXCEEDED" || code === "TURN_QUOTA_EXCEEDED" ? 429 : code === "COMMAND_CONFLICT" || code === "WORKTREE_DIRTY" || code === "WORKTREE_INVALID" || code === "WORKTREE_EXISTS" ? 409 : 500;
+    const status = error instanceof HttpError ? error.status : code === "INVALID_TOOL_INPUT" ? 400 : code === "TOOL_NOT_FOUND" || code === "WORKSPACE_NOT_FOUND" ? 404 : code === "TOOL_DISABLED" ? 409 : code === "MODEL_CONFIGURATION_ERROR" ? 400 : code === "SESSION_QUOTA_EXCEEDED" || code === "TURN_QUOTA_EXCEEDED" ? 429 : code === "WORKSPACE_ORDER_INVALID" ? 400 : code === "COMMAND_CONFLICT" || code === "WORKTREE_DIRTY" || code === "WORKTREE_INVALID" || code === "WORKTREE_EXISTS" ? 409 : 500;
     const message = error instanceof Error ? error.message : String(error);
     if (!response.headersSent) {
       if (status === 401) response.setHeader("www-authenticate", "Bearer");

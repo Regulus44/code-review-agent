@@ -377,3 +377,28 @@ git diff --check                                      ✓
 ### 恢复入口
 
 恢复 Phase 8 时从 `c1aae6c` 继续，优先选择 tenant-scoped Workspace catalog/mutation 或 provider/model routing 与 credential reference durable contract，并为新切片建立独立 checkpoint 和对应 gate。
+
+## 2026-08-24：8.5 tenant-scoped Workspace catalog/mutation
+
+本次恢复工作属于 Phase 8.5，完成产品化第一切片中 Workspace 的租户边界。变更影响 Workspace contract、事件回放、API 权限和产品化安全 gate；默认未认证本地 Host 保持兼容。
+
+### 已完成
+
+- `AgentHost.listWorkspaces()`、`reorderWorkspaces()`、`renameWorkspace()`、`archiveWorkspace()` 和 `deleteWorkspace()` 支持可选 `SessionOwnership` scope；同一 Workspace root 下的不同 tenant 可以拥有独立 label、archive/delete 状态和排序事件。
+- tenant-scoped `workspace/updated` / `workspace/reordered` 事件携带 `tenantId`、`principalId`，只追加到调用者 tenant 的 Workspace members；回放按 tenant 过滤，未认证 catalog 只消费 legacy unscoped metadata。
+- API `/v1/workspaces` 和 Workspace mutation routes 现在使用 bearer identity 进入 host scope；跨租户查询和 mutation 返回 404，tenant 内 rename/archive/restore/delete/reorder 继续使用 durable command idempotency。
+- 增加 Runtime InMemory isolation、SQLite reopen/replay、API tenant catalog/mutation 和 productization browser fixture gate。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/runtime test -- --run src/index.test.ts ✓ (31 tests)
+pnpm --filter @code-review-agent/api test -- --run src/server.test.ts ✓ (29 tests)
+pnpm test:phase8:productization                     ✓
+git diff --check                                     ✓
+```
+
+### 尚未关闭
+
+外部 IdP/JWT、完整 principal catalog、MCP config tenant 隔离、tenant-scoped provider/model routing、credentials 生命周期、backup/restore、migration rollback 和 upgrade/deployment policy 仍未实现；Phase 8.5 与 Phase 8 继续保持 `in_progress`。

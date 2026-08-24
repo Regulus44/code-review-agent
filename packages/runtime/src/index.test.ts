@@ -5,7 +5,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { brand, type AttachmentReceipt, type ChatModel, type InteractionId, type ModelRequest, type ModelStreamPart, type PermissionId, type ToolDefinition } from "@code-review-agent/contracts";
-import { InMemoryEventStore } from "@code-review-agent/storage";
+import { InMemoryEventStore, SqliteEventStore } from "@code-review-agent/storage";
 import { createBuiltinTools, DefaultPermissionPolicy, ToolRegistry, ToolRuntime } from "@code-review-agent/tools";
 import { GitWorktreeManager } from "@code-review-agent/workspace";
 import { AgentHost } from "./index.js";
@@ -573,6 +573,61 @@ describe("AgentHost", () => {
     expect((await host.listSessions(true)).filter((session) => session.workspaceRoot === "D:/workspace-lifecycle")).toHaveLength(2);
     const events = [...await host.events(first.id), ...await host.events(second.id)].filter((event) => event.type === "workspace/updated");
     expect(events.map((event) => event.payload["action"])).toEqual(expect.arrayContaining(["renamed", "archived", "restored", "deleted"]));
+  });
+
+  it("scopes workspace catalog, metadata, ordering and mutation events by tenant", async () => {
+    const store = new InMemoryEventStore();
+    const host = new AgentHost({ store });
+    const tenantA = { principalId: brand<string, "PrincipalId">("user-a"), tenantId: brand<string, "TenantId">("tenant-a") };
+    const tenantB = { principalId: brand<string, "PrincipalId">("user-b"), tenantId: brand<string, "TenantId">("tenant-b") };
+    const shared = "D:/shared-workspace";
+    const aOnly = "D:/tenant-a-only";
+    const bOnly = "D:/tenant-b-only";
+    const aShared = await host.createSession(shared, undefined, undefined, tenantA);
+    await host.createSession(aOnly, undefined, undefined, tenantA);
+    const bShared = await host.createSession(shared, undefined, undefined, tenantB);
+    await host.createSession(bOnly, undefined, undefined, tenantB);
+
+    expect((await host.listWorkspaces(false, tenantA)).workspaces.map((workspace) => workspace.root).sort()).toEqual([aOnly, shared].sort());
+    expect((await host.listWorkspaces(false, tenantB)).workspaces.map((workspace) => workspace.root).sort()).toEqual([bOnly, shared].sort());
+
+    const renamed = await host.renameWorkspace(shared, "Tenant A label", "tenant-a-rename-1", tenantA);
+    expect(renamed.workspaces.find((workspace) => workspace.key === "d:/shared-workspace")).toMatchObject({ label: "Tenant A label" });
+    expect((await host.listWorkspaces(false, tenantB)).workspaces.find((workspace) => workspace.key === "d:/shared-workspace")).not.toHaveProperty("label");
+    await expect(host.renameWorkspace(aOnly, "Tenant B must not see this", "tenant-b-cross-tenant", tenantB)).rejects.toMatchObject({ code: "WORKSPACE_NOT_FOUND" });
+
+    const aOrder = ["d:/tenant-a-only", "d:/shared-workspace"];
+    const reordered = await host.reorderWorkspaces(aOrder, "tenant-a-reorder-1", tenantA);
+    expect(reordered.workspaces.map((workspace) => workspace.key)).toEqual(aOrder);
+    expect((await host.listWorkspaces(false, tenantB)).workspaces.map((workspace) => workspace.root).sort()).toEqual([bOnly, shared].sort());
+
+    const archived = await host.archiveWorkspace(shared, true, "tenant-a-archive-1", tenantA);
+    expect(archived.workspaces.some((workspace) => workspace.key === "d:/shared-workspace")).toBe(false);
+    expect((await host.listWorkspaces(true, tenantA)).workspaces.find((workspace) => workspace.key === "d:/shared-workspace")).toMatchObject({ archived: true, label: "Tenant A label" });
+    expect((await host.listWorkspaces(true, tenantB)).workspaces.find((workspace) => workspace.key === "d:/shared-workspace")).not.toHaveProperty("archived");
+
+    const aEvents = [...await host.events(aShared.id)].filter((event) => event.type === "workspace/updated" || event.type === "workspace/reordered");
+    const bEvents = [...await host.events(bShared.id)].filter((event) => event.type === "workspace/updated" || event.type === "workspace/reordered");
+    expect(aEvents.some((event) => event.payload["tenantId"] === "tenant-a" && event.payload["principalId"] === "user-a")).toBe(true);
+    expect(bEvents.some((event) => event.payload["tenantId"] === "tenant-a")).toBe(false);
+  });
+
+  it("replays tenant workspace metadata after SQLite reopen", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "code-review-agent-tenant-workspace-"));
+    const databasePath = path.join(directory, "events.sqlite");
+    const ownership = { principalId: brand<string, "PrincipalId">("user-a"), tenantId: brand<string, "TenantId">("tenant-a") };
+    const firstStore = new SqliteEventStore({ databasePath });
+    const firstHost = new AgentHost({ store: firstStore });
+    await firstHost.createSession("D:/tenant-workspace", undefined, undefined, ownership);
+    await firstHost.renameWorkspace("D:/tenant-workspace", "Durable tenant label", "tenant-sqlite-rename-1", ownership);
+    await firstHost.archiveWorkspace("D:/tenant-workspace", true, "tenant-sqlite-archive-1", ownership);
+    firstStore.close();
+
+    const reopenedStore = new SqliteEventStore({ databasePath });
+    const reopenedHost = new AgentHost({ store: reopenedStore });
+    expect((await reopenedHost.listWorkspaces(true, ownership)).workspaces.find((workspace) => workspace.key === "d:/tenant-workspace")).toMatchObject({ label: "Durable tenant label", archived: true });
+    reopenedStore.close();
+    await rm(directory, { recursive: true, force: true });
   });
 
   it("supports resume and fork commands", async () => {

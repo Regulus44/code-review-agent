@@ -749,6 +749,16 @@ describe("Phase 2 API", () => {
       expect(visibleToA.sessions.map((session) => session.id)).toEqual([firstSession.id]);
       expect((await fetch(`${url}/v1/sessions/${secondSession.id}`, { headers: { authorization: "Bearer tenant-a-token" } })).status).toBe(404);
 
+      const workspacesA = await (await fetch(`${url}/v1/workspaces`, { headers: { authorization: "Bearer tenant-a-token" } })).json() as { workspaces: { root: string; label?: string }[] };
+      const workspacesB = await (await fetch(`${url}/v1/workspaces`, { headers: { authorization: "Bearer tenant-b-token" } })).json() as { workspaces: { root: string; label?: string }[] };
+      expect(workspacesA.workspaces.map((workspace) => workspace.root)).toEqual(["D:/tenant-a"]);
+      expect(workspacesB.workspaces.map((workspace) => workspace.root)).toEqual(["D:/tenant-b"]);
+      const renamedWorkspace = await fetch(`${url}/v1/workspaces/${encodeURIComponent("D:/tenant-a")}/label`, { method: "POST", headers: { ...auth("tenant-a-token"), "idempotency-key": "tenant-a-workspace-rename" }, body: JSON.stringify({ label: "Tenant A workspace" }) });
+      expect(renamedWorkspace.status).toBe(200);
+      expect(((await renamedWorkspace.json()) as { workspaces: { root: string; label?: string }[] }).workspaces[0]).toMatchObject({ root: "D:/tenant-a", label: "Tenant A workspace" });
+      const crossTenantWorkspaceMutation = await fetch(`${url}/v1/workspaces/${encodeURIComponent("D:/tenant-a")}/label`, { method: "POST", headers: { ...auth("tenant-b-token"), "idempotency-key": "tenant-b-cross-tenant-workspace" }, body: JSON.stringify({ label: "Must not leak" }) });
+      expect(crossTenantWorkspaceMutation.status).toBe(404);
+
       expect((await fetch(`${url}/v1/sessions/${firstSession.id}`, { method: "POST", headers: auth("tenant-a-token"), body: JSON.stringify({ content: "one turn" }) })).status).toBe(202);
       expect((await fetch(`${url}/v1/sessions/${firstSession.id}`, { method: "POST", headers: auth("tenant-a-token"), body: JSON.stringify({ content: "second turn" }) })).status).toBe(429);
     } finally {

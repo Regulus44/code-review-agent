@@ -105,9 +105,9 @@ MCP 生命周期事件只携带 `serverName`、状态、动作和脱敏错误；
 
 `attachment/received` / `attachment/rejected` 记录浏览器上传的文件 receipt，不记录 base64 或原始内容。payload 是 `AttachmentReceipt`：包含 attachment id、原始文件名、归一化 MIME、字节数、`file`/`image` kind、状态、workspace-relative artifact path 或结构化拒绝 code/reason。上传必须先通过 host capability、大小、类型、workspace 和 symlink 检查，再写入 `.agent-artifacts/attachments/`；重复 command 返回同一 receipt。
 
-`workspace/reordered` 是由 host 持久化的 Workspace → Session 导航顺序快照，payload 为 `{ order: string[] }`，其中每个值是归一化 workspace key。事件挂在 host 选定的 workspace anchor Session 上，API/Web 只能提交包含当前 workspace 集合的完整顺序；重复 command 返回同一 `WorkspaceCatalog`，Session Conversation projection 忽略该导航事件，刷新和重启通过事件重建顺序。
+`workspace/reordered` 是由 host 持久化的 Workspace → Session 导航顺序快照，payload 为 `{ order: string[] }`，其中每个值是归一化 workspace key。事件挂在 host 选定的 workspace anchor Session 上，API/Web 只能提交包含当前 workspace 集合的完整顺序；启用 tenant scope 时 payload 还包含 `tenantId` 与 `principalId`，回放只在相同 tenant 的 Session catalog 中生效。重复 command 返回同一 `WorkspaceCatalog`，Session Conversation projection 忽略该导航事件，刷新和重启通过事件重建顺序。
 
-`workspace/updated` 是 host 持久化的 Workspace 生命周期快照，payload 至少包含 `{ key, action, updatedAt }`，可选字段为 `label`、`archived` 和 `deleted`。Workspace 仍以 Session 的 workspace root 为物理边界；更新事件会追加到该 workspace 的非删除 Session，以便任一存活 Session 的历史都能重建 label、归档和软删除状态。删除只隐藏导航元数据，不删除 Session、文件或 EventStore 历史。重复 rename/archive/delete command 必须幂等，Conversation projection 忽略该导航事件。
+`workspace/updated` 是 host 持久化的 Workspace 生命周期快照，payload 至少包含 `{ key, action, updatedAt }`，可选字段为 `label`、`archived` 和 `deleted`。Workspace 仍以 Session 的 workspace root 为物理边界；更新事件会追加到该 workspace 的非删除 Session，以便任一存活 Session 的历史都能重建 label、归档和软删除状态。启用 tenant scope 时 payload 还包含 `tenantId` 与 `principalId`，更新只追加到该 tenant 的成员 Session，回放不得跨 tenant 合并元数据。删除只隐藏导航元数据，不删除 Session、文件或 EventStore 历史。重复 rename/archive/delete command 必须幂等，Conversation projection 忽略该导航事件。跨租户 Workspace 查询和 mutation 必须返回统一 404，避免泄露 Workspace 存在性。
 
 ## 不变量
 

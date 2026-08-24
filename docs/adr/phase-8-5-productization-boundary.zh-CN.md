@@ -37,7 +37,9 @@ API `/v1/capabilities` 返回 `productization` 元数据。该元数据必须区
 - quota 的计量、拒绝和恢复语义；
 - 凭据只使用 host-owned reference，日志和事件中不得出现 secret value。
 
-当前已接受的第一可用切片是：静态 bearer token → principal/tenant identity → durable Session ownership → tenant-scoped Session catalog → hard Session/Turn quota。该 adapter 只适用于受控部署和测试 fixture，不代表外部 IdP、JWT 验签或完整用户目录已经实现。Workspace mutation、MCP config 和 global diagnostics 在认证请求下保持 fail closed，直到具备 tenant-scoped adapter。
+当前已接受的第一可用切片是：静态 bearer token → principal/tenant identity → durable Session ownership → tenant-scoped Session/Workspace catalog and mutation → hard Session/Turn quota。该 adapter 只适用于受控部署和测试 fixture，不代表外部 IdP、JWT 验签或完整用户目录已经实现。Workspace catalog、rename/archive/restore/delete 和 reorder 只作用于调用者 tenant 的 Session members；跨租户 Workspace 访问统一隐藏为 404。MCP config 和 global diagnostics 在认证请求下继续保持 fail closed，直到具备对应的 tenant-scoped adapter。
+
+Workspace 生命周期事件仍进入统一 EventStore：`workspace/updated` 与 `workspace/reordered` 在显式 tenant scope 下携带 `tenantId` 和 `principalId`，重启回放按 tenant 过滤；未认证的本地 catalog 只消费 legacy unscoped workspace metadata，不把某个 tenant 的标签或顺序投影到其他 tenant。
 
 ### 3. Provider/model routing 与 secrets 分开演进
 
@@ -52,8 +54,8 @@ backup、migration 和 upgrade policy 需要配套 schema version、恢复 fixtu
 - Settings 可以展示真实的产品化 readiness，而不会伪造登录、租户或 quota 能力；
 - 8.5 后续实现拥有明确的 contract 和回滚边界；
 - 默认本地开发和已有 Phase 0–8.4 行为保持兼容；
-- 需要为后续 principal/tenant ownership 迁移增加 durable schema 和 recovery/security 测试。
+- 需要为后续 principal/tenant ownership 迁移增加 durable schema 和 recovery/security 测试；当前 Workspace slice 已具备 InMemory、SQLite reopen 和 API/browser fixture 证据。
 
 ## 验收与回滚
 
-第一切片至少通过 `pnpm typecheck`、相关 Runtime/API/Web tests、产品化 capability gate 和 `git diff --check`。失败时移除 capability 字段并回退到现有 `/v1/capabilities` 结构；不回滚已稳定的 EventStore 或工具权限 contract。
+第一切片至少通过 `pnpm typecheck`、相关 Runtime/API/Web tests、产品化 capability gate 和 `git diff --check`。Workspace tenant slice 还必须验证 catalog 过滤、mutation 事件隔离、重启回放和跨租户 404。失败时移除 capability 字段并回退到现有 `/v1/capabilities` 结构；不回滚已稳定的 EventStore 或工具权限 contract。
