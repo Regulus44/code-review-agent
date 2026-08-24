@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { CodeModeSandbox } from "./code-mode.js";
+import { CodeModeSandbox, LinuxNetworkNamespaceIsolationAdapter, type CodeModeIsolationAdapter } from "./code-mode.js";
 
 describe("CodeModeSandbox", () => {
   it("requires an explicit host enablement and exposes bounded policy metadata", async () => {
@@ -44,6 +44,37 @@ describe("CodeModeSandbox", () => {
       expect(sandbox.snapshot()).toMatchObject({ networkEnforcement: "os-required", osNetworkIsolation: false });
       await expect(sandbox.run({ code: "console.log('must not run')" }, { workspaceRoot: root, signal: new AbortController().signal })).resolves.toMatchObject({ ok: false, error: { code: "CODE_MODE_OS_ISOLATION_UNAVAILABLE" } });
     } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("uses an explicit isolation adapter and records the boundary in progress/output", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-code-mode-isolation-adapter-"));
+    try {
+      const launches: Array<{ command: string; args: readonly string[] }> = [];
+      const adapter: CodeModeIsolationAdapter = {
+        kind: "container-network-none",
+        available: true,
+        reason: "fixture container boundary",
+        evidence: ["fixture=isolated-worker", "network=none"],
+        wrap(command, args) {
+          launches.push({ command, args });
+          return { command, args };
+        },
+      };
+      const progress: Array<Readonly<Record<string, unknown>>> = [];
+      const sandbox = new CodeModeSandbox({ enabled: true, networkEnforcement: "os-required", isolationAdapter: adapter });
+      expect(sandbox.snapshot()).toMatchObject({ osNetworkIsolation: true, isolationKind: "container-network-none", isolationEvidence: ["fixture=isolated-worker", "network=none"] });
+      const result = await sandbox.run({ code: "console.log('isolated')" }, { workspaceRoot: root, signal: new AbortController().signal, reportProgress: async (payload) => { progress.push(payload); } });
+      expect(result).toMatchObject({ ok: true, output: { isolation: "container-network-none", networkEnforcement: "os-required" } });
+      expect(launches).toHaveLength(1);
+      expect(progress).toEqual(expect.arrayContaining([expect.objectContaining({ phase: "started", isolation: "container-network-none" })]));
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("does not claim Linux isolation when the unshare executable is unavailable", () => {
+    const adapter = new LinuxNetworkNamespaceIsolationAdapter(path.join(tmpdir(), "missing-unshare"));
+    expect(adapter.available).toBe(false);
+    expect(adapter.evidence.join(" ")).toContain("unavailable");
+    expect(() => adapter.wrap(process.execPath, ["-e", "console.log(1)"])).toThrow();
   });
 
   it("enforces output, timeout, and cancellation budgets", async () => {

@@ -1,5 +1,30 @@
 # Phase 8 开发日志
 
+## 2026-08-24：8.3 OS/container isolation 与 deployment evidence
+
+本次继续属于 Phase 8.3，依据计划中的 DSH `packages/guard` host-owned boundary 与 `packages/lsp` lifecycle 行为参考，补齐 Code Mode 进程级策略和 OS/container 隔离之间的缺口；没有复制 DSH 代码、内部类型或品牌资产。
+
+### 已完成
+
+- 新增 `CodeModeIsolationAdapter` contract，以及 Linux `unshare` network namespace 和 Docker `--network none` 两个显式 adapter；adapter availability、reason、evidence 和 launch flags 均由 host capability 提供。
+- `CodeModeSandbox` 在 `networkEnforcement: "os-required"` 下要求可用 adapter，缺失时 fail closed；Code Mode progress/result 记录实际 isolation kind，不把 `shell: false`、Node permission flags 或普通 child process 误报为 OS isolation。
+- Docker Compose 增加 read-only rootfs、non-root runtime、no-new-privileges、capability drop 和受限 tmpfs；workspace bind 保持显式且受范围约束。
+- 新增部署审计 `scripts/phase8-deployment-audit.mjs` 和 `pnpm test:phase8:deployment`；现有 8.3 exit gate 增加 adapter/deployment evidence 检查。
+
+### 验证
+
+```text
+pnpm typecheck                    ✓
+pnpm --filter @code-review-agent/tools test  ✓（61 tests）
+pnpm test:phase8:deployment       ✓
+pnpm test:phase8:lsp:exit         ✓（status: partial，宿主能力依赖）
+git diff --check                  ✓
+```
+
+### 边界与剩余工作
+
+本切片证明了仓库级 adapter 和部署策略边界，但不把当前 Windows 开发机或未运行的 Docker daemon 视为 OS isolation 已启用；真实部署仍需在 Linux/Docker 环境运行 adapter smoke 并保留结果。外部 IdP/JWT、principal catalog、external secret manager、upgrade/deployment policy 继续保留为 Phase 8 缺口。
+
 ## 2026-08-24：8.0 visual/accessibility browser matrix 与 Settings recovery 收口
 
 本次继续属于 Phase 8.0 Web 对齐，依据 DSH `ui-layout/AppFrame.tsx`、`ui-sidebar/SidebarRoot.tsx`、`ui-settings-general`、`ui-settings-models` 和 `ui-primitives` 的布局、抽屉、Settings 与 focus 行为完成真实浏览器证据收口；没有复制 DSH 代码、内部类型或品牌资产，Web 仍只消费本项目 API projection、SSE 和 typed browser bridge。

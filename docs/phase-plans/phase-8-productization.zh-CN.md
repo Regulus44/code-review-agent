@@ -247,6 +247,35 @@ git diff --check
 
 验收：LSP 超时、server 崩溃、恶意 executable、路径穿越、网络越权和取消恢复通过。
 
+### 8.3.1 当前执行切片：OS/container isolation 与 deployment evidence
+
+该切片补齐 Code Mode 现有 process-policy 与完整 8.3 退出条件之间的安全边界。DSH 对照采用 `packages/guard` 的 host-owned guard boundary 和 `packages/lsp` 的受控 server lifecycle；本项目不复制 DSH 代码，只把“能力可用性必须由 host 明确声明、缺失时 fail closed”的行为落到 Code Mode adapter contract。
+
+交付物：
+
+- `CodeModeIsolationAdapter` 明确区分 OS/container boundary 与 Node permission/process policy；`os-required` 没有可用 adapter 时拒绝执行；
+- Linux `unshare --user --map-root-user --net --pid --fork --mount-proc` adapter 和 Docker `--network none` ephemeral worker adapter 均保留可审计的 kind、reason、evidence 与 launch flags；
+- Code Mode progress、result 和 Settings capability 只报告 host 提供的真实 isolation metadata，不将普通 child process 或 Node permission flags 误报为 OS isolation；
+- Docker Compose 默认部署增加 non-root、read-only、no-new-privileges、capability drop 和 bounded workspace/tmpfs；
+- `scripts/phase8-deployment-audit.mjs` 固定 source/deployment evidence；`pnpm test:phase8:deployment` 与现有 `pnpm test:phase8:lsp:exit` 共同作为退出审计输入。
+
+契约与安全边界：
+
+- 不新增 Event、Tool、Task、Permission 或 Workspace event；adapter 只影响 Code Mode process launch boundary，模型可见状态仍通过既有 tool result/progress/event pipeline；
+- adapter availability 不能仅由配置字符串推断，Linux/Docker 能力探测失败时必须 `CODE_MODE_OS_ISOLATION_UNAVAILABLE`；
+- Docker audit 证明部署策略，不代表当前开发机拥有 Docker daemon；宿主能力不可用时继续显示 `unavailable`/`partial`，不伪造完整 8.3 完成；
+- 回滚时移除 adapter 注入和 Compose hardening 即可，默认 `process-policy` 与 `os-required` fail-closed 行为保持不变。
+
+验收命令：
+
+```powershell
+pnpm typecheck
+pnpm --filter @code-review-agent/tools test
+pnpm test:phase8:deployment
+pnpm test:phase8:lsp:exit
+git diff --check
+```
+
 ## 8. Phase 8.4：后台任务与可靠性
 
 交付物：

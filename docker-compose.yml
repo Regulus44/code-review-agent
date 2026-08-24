@@ -14,6 +14,14 @@ services:
     volumes:
       - code-review-agent-data:/app/.data
       - ${CODE_REVIEW_WORKSPACE_HOST_ROOT:-.}:/workspaces/project
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /run:rw,noexec,nosuid,size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
 volumes:

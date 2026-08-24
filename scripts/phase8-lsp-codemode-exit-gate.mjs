@@ -10,7 +10,7 @@ import { join } from "node:path";
 
 const root = process.cwd();
 const read = (relative) => readFile(join(root, relative), "utf8");
-const [codeMode, codeModeTests, lsp, lspGate, settingsPresenter, webShell, browser] = await Promise.all([
+const [codeMode, codeModeTests, lsp, lspGate, settingsPresenter, webShell, browser, dockerfile, compose] = await Promise.all([
   read("packages/tools/src/code-mode.ts"),
   read("packages/tools/src/code-mode.test.ts"),
   read("packages/tools/src/lsp.ts"),
@@ -18,6 +18,8 @@ const [codeMode, codeModeTests, lsp, lspGate, settingsPresenter, webShell, brows
   read("apps/web/src/presentation/settings-presenter.ts"),
   read("apps/web/index.html"),
   read("apps/web/dist/browser.js"),
+  read("Dockerfile"),
+  read("docker-compose.yml"),
 ]);
 const assert = (condition, message) => { if (!condition) throw new Error(`Phase 8.3 exit audit: ${message}`); };
 
@@ -25,7 +27,9 @@ const checks = [
   ["workspace-boundary", codeMode.includes("WorkspaceResolver") && codeMode.includes("--allow-fs-read=") && codeMode.includes("--allow-fs-write=") && lsp.includes("resolveExisting")],
   ["process-boundary", codeMode.includes("shell: false") && codeMode.includes("--no-addons") && codeMode.includes("AGENT_CODE_MODE")],
   ["network-deny-by-default", codeMode.includes("NETWORK_IMPORT_PATTERN") && codeMode.includes("CODE_MODE_NETWORK_DENIED") && codeModeTests.includes("globalThis.fetch")],
-  ["os-isolation-fail-closed", codeMode.includes("CODE_MODE_OS_ISOLATION_UNAVAILABLE") && codeMode.includes("osNetworkIsolation: false") && codeModeTests.includes("networkEnforcement: \"os-required\"" )],
+  ["os-isolation-fail-closed", codeMode.includes("CODE_MODE_OS_ISOLATION_UNAVAILABLE") && codeModeTests.includes("osNetworkIsolation: false") && codeModeTests.includes("networkEnforcement: \"os-required\"" )],
+  ["os-isolation-adapters", codeMode.includes("LinuxNetworkNamespaceIsolationAdapter") && codeMode.includes("ContainerNetworkNoneIsolationAdapter") && codeMode.includes("--map-root-user") && codeMode.includes('"--network", "none"')],
+  ["deployment-security-evidence", dockerfile.includes("USER app") && compose.includes("read_only: true") && compose.includes("no-new-privileges:true") && compose.includes("cap_drop:")],
   ["resource-bounds", codeMode.includes("maxCodeBytes") && codeMode.includes("maxRuntimeMs") && codeMode.includes("maxOutputBytes") && codeModeTests.includes("CODE_MODE_OUTPUT_LIMIT")],
   ["lsp-lifecycle-restart", lsp.includes("restart_requested") && lsp.includes("LSP_SERVER_CRASHED") && lspGate.includes("crash-once")],
   ["lsp-timeout-cancel", lsp.includes("LSP_TIMEOUT") && lsp.includes("LSP_CANCELLED") && lspGate.includes("controller.abort()")],

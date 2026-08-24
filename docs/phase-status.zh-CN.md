@@ -80,6 +80,14 @@
 - `scripts/phase8-operations-gate.mjs` 已覆盖 schema v6 backup、v5 → v6 restore、overwrite rollback、event preservation、integrity check 和 secret redaction；`pnpm test:phase8:operations` 已通过。
 - 当前仍需外部 secret manager、外部 IdP/JWT、完整 principal catalog、8.3 OS-level isolation/deployment evidence、graphical browser recovery matrix 和 upgrade/deployment policy。
 
+## Phase 8.3 OS/container isolation 与 deployment evidence slice（implemented，宿主能力依赖）
+
+- `packages/tools/src/code-mode.ts` 新增 `CodeModeIsolationAdapter`，将真正的 OS/container network boundary 与现有 process-policy 分开；`os-required` 在 adapter 缺失或探测失败时保持 `CODE_MODE_OS_ISOLATION_UNAVAILABLE`。
+- Linux adapter 使用 `unshare` network namespace；Docker adapter 使用 ephemeral `--network none`、read-only rootfs、`no-new-privileges`、`cap-drop ALL`、numeric non-root user 和 `/workspace` bind。两者都暴露 kind/reason/evidence，执行结果和 progress 只记录实际 adapter。
+- `docker-compose.yml` 默认 API service 增加 read-only rootfs、tmpfs、no-new-privileges、capability drop，`Dockerfile` 保持 uid 10001 non-root runtime；新增 `scripts/phase8-deployment-audit.mjs` 与 `pnpm test:phase8:deployment`。
+- 工具单测覆盖 explicit adapter launch、unavailable adapter 和默认 fail-closed；`pnpm test:phase8:lsp:exit` 继续报告 `status: partial`，因为具体宿主的 unshare/Docker runtime availability 仍需部署环境现场证明。
+- 本切片没有新增 Event/Tool/Task/Permission/Workspace contract；回滚只需移除 adapter 配置和部署 hardening，保留默认 process-policy 与安全拒绝路径。
+
 ## Phase 8 历史暂停归档（2026-08-24）
 
 - 本次历史收尾 checkpoint：`61cd9ca`（`feat(phase-8.5): add tenant-scoped mcp config`）。
