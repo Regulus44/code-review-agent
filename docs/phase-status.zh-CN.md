@@ -16,13 +16,13 @@
 | Phase 5：内部 Subagent / 多 Agent | completed（2026-08-23） | 5.0–5.4：Task/Descriptor durable projection、one-shot/continuable child、FIFO/authority/cold resume、report/MCP scope、API/SSE/Web catalog；定向 typecheck、storage/subagent/runtime/API 测试和 API/Web smoke 通过 |
 | Phase 6：A2A | deferred（暂不作为 Phase 7 前置） | [ADR：Phase 7 Web 收敛不等待 A2A](adr/phase-7-web-with-a2a-deferred.zh-CN.md)；等待明确的外部 Agent 互操作需求 |
 | Phase 7：DSH Web 前端收敛 | completed | 7.1–7.10 Web shell、连接与回放、Workspace/Session navigation、Conversation/Tool/Permission/Interaction、Trajectory、Task/Subagent/MCP、Settings/Deliverables、响应式与可访问性、五场景 browser/replay gate、Workspace reorder 与 Workspace rename/archive/delete lifecycle 已完成；`pnpm typecheck`、`pnpm test`、`pnpm test:phase7:browser` 和 `git diff --check` 通过；browser gate 总耗时 2.14s、trajectory full replay 19.03ms；独立 checkpoint `82326d6` |
-| Phase 8：高级能力与产品化 | in_progress（2026-08-24 恢复） | 当前恢复切片为 8.5 SQLite backup/restore 与 migration rollback；8.1/8.2 已完成，8.0 aggregate Web parity gate 已通过；8.3/8.4/8.5 仍未整体完成 |
+| Phase 8：高级能力与产品化 | in_progress（2026-08-24 恢复） | 当前恢复切片为 8.4 graphical browser recovery evidence；8.1/8.2 已完成，8.0 aggregate Web parity gate 已通过；8.3/8.4/8.5 仍未整体完成 |
 
 ## Phase 8 计划范围（accepted）
 
 - [Phase 8：高级能力、DSH Web 对齐与产品化](phase-plans/phase-8-productization.zh-CN.md) 已扩展为 8.0 Web 对齐、8.1 Context Compaction、8.2 Worktree、8.3 LSP/Code Mode、8.4 后台任务与可靠性、8.5 产品化；
 - [ADR：Phase 8 Web 与 DSH 前端行为对齐](adr/phase-8-web-dsh-alignment.zh-CN.md) 已接受，记录行为参考、REST/SSE 边界、typed Web 拆分、契约变更和回滚规则；
-- Phase 8 曾于 2026-08-24 暂存归档在 checkpoint `c1aae6c`，随后持续恢复推进。8.0 的 aggregate Web parity contract gate 与真实 600/900/1024 Shell/Settings 视觉基线 gate 已通过；8.4 已补齐长任务与并发 Web recovery matrix 第一批真实证据，8.5 已建立产品化边界、tenant-scoped Workspace/MCP/provider routing、credential reference lifecycle 和 SQLite backup/restore/migration rollback 第一切片，但更广泛的 graphical browser matrix、8.3 完整退出审计、外部 IdP/JWT、完整 principal catalog、upgrade/deployment policy 和外部 secret manager 仍未完成。
+- Phase 8 曾于 2026-08-24 暂存归档在 checkpoint `c1aae6c`，随后持续恢复推进。8.0 的 aggregate Web parity contract gate 与真实 600/900/1024 Shell/Settings 视觉基线 gate 已通过；8.4 已补齐长任务与并发 Web recovery matrix，并新增真实 graphical browser recovery 第一批证据，8.5 已建立产品化边界、tenant-scoped Workspace/MCP/provider routing、credential reference lifecycle 和 SQLite backup/restore/migration rollback 第一切片，但更广泛的 graphical browser matrix、8.3 完整退出审计、外部 IdP/JWT、完整 principal catalog、upgrade/deployment policy 和外部 secret manager 仍未完成。
 
 ## Phase 8 暂存归档（2026-08-24）
 
@@ -147,6 +147,7 @@ Phase 7 的 DSH Web 调研与分步计划：
 - 新增 `scripts/phase8-job-recovery-matrix-gate.mjs` 与 `pnpm test:phase8:job-recovery:matrix`，重复执行 seed → reopen → reopen-again，覆盖 Job Center Web surface、orphaned/completed 状态、SSE replay、terminal tail cursor、export/diagnostics 和无重复 projection；本次继续扩展真实 live fixture，覆盖三个并发长任务、交错 output、单 job cancel、其余 job completion、断线后的 SSE tail reconnect 和 sequence 去重。
 - 新增 `scripts/phase8-reliability-gate.mjs`，覆盖 retry、deadline、shutdown、session export、diagnostics 和 metrics；`pnpm test:phase8:reliability` 已通过。当前 8.4 仍未整体完成，更完整的 browser recovery matrix 仍是后续工作。
 - Reliability gate 现在额外检查 Web Job Center 的 `Cancel job`、`Retry job` 和 `Terminal & long-running jobs` surface；真实 Job fixture 已由 `pnpm test:phase8:jobs` 覆盖，`pnpm test:phase8:job-recovery:matrix` 现已补充长任务并发、取消/完成和断线 tail reconnect 证据；更广泛的 graphical browser matrix 仍待扩展。
+- `scripts/phase8-job-recovery-fixture-server.mjs` 现在支持 bounded `PHASE8_JOB_RECOVERY_LIVE_ITEMS`/`PHASE8_JOB_RECOVERY_LIVE_DELAY_MS` 时序参数；in-app browser 真实验证了三个 running jobs、展开详情后的 `Cancel job`、取消后一个 cancelled/两个 running，以及刷新后的 `Connected` replay 状态。该证据补齐 graphical recovery 第一批场景，更广泛的多 viewport、断线交错和 Job action 组合矩阵仍待扩展。
 - 修复 API restart recovery：graceful shutdown 不再取消处于 pending user interaction 的 turn，避免在数据库关闭前追加 `interaction/resolved(cancelled)`；`apps/api` 27 项 server tests 已通过。
 - 当前 Web parity 收口新增 Workspace Browser 的 Tree/Flat 视图与 Recent/Name/Path 确定性排序；搜索、Archived 筛选、父子 Session 展示和 active Session 保持现有回放状态；真实页面切换回归已通过。
 - 本次导航改动验证：`pnpm typecheck`、Web 101 tests、`pnpm build:web`、`pnpm test:phase8:web`、`pnpm test:phase8:reliability` 和 `git diff --check` 均通过；独立 checkpoint 为本次提交。

@@ -273,6 +273,33 @@ pnpm test:phase8:job-recovery:matrix
 git diff --check
 ```
 
+### 8.4.2 当前执行切片：graphical browser recovery evidence
+
+该切片继续补齐 8.4 的 browser evidence gap，重点验证图形 Web Shell 实际消费恢复后的 Job projection。DSH 对照继续采用 `packages/client/connection/src/client/connection.ts` 的 generation/reconnect、`packages/client/runtime/src/client/sessions/session.ts` 的 history-baseline + live-frame stitching，以及 `packages/client/ui-jobs/src/client/JobListAction.tsx` 的 action/replay 边界；本项目使用 in-app browser 检查真实本地页面，不复制 DSH 代码或内部类型。
+
+交付物：
+
+- live recovery fixture 的任务条数和单步延迟通过受范围约束的环境参数控制：`PHASE8_JOB_RECOVERY_LIVE_ITEMS`（1–200）和 `PHASE8_JOB_RECOVERY_LIVE_DELAY_MS`（0–5000）；默认值保持现有 matrix 行为；
+- 图形浏览器从真实 `/` Shell 加载同一 SQLite/API/AgentHost fixture，确认三个并发 Job 显示为 running，并在展开 Job 详情后显示 `Cancel job` action；
+- 通过页面 action 取消一个 Job，确认 Web projection 显示一个 cancelled、两个仍 running；刷新页面后连接恢复，取消状态仍由事件回放保留；
+- HTTP/SSE matrix 继续作为自动化基础 gate，图形浏览器结果作为真实 UI recovery evidence，不新增 Web 事实来源。
+
+契约与安全边界：
+
+- 不新增 Event、Tool、Task、Permission 或 HTTP contract；只增强 fixture 的可重复时序参数，并验证现有 Job action 与 connection generation 边界；
+- fixture 参数只接受有限整数，避免把未校验字符串拼入 child command；生产 Host 不读取这些测试参数；
+- 回滚时移除 bounded live timing 参数和 graphical evidence 记录即可，现有 `phase8-job-recovery:matrix` 与 Job Center action gate 保持不变。
+
+验收：
+
+```powershell
+node --check scripts/phase8-job-recovery-fixture-server.mjs
+pnpm test:phase8:job-recovery:matrix
+git diff --check
+```
+
+图形证据场景：`liveItems=200`、`liveDelayMs=1000`；页面显示 `Running jobs = 3`，展开任一 running Job 执行 `Cancel job` 后显示 `cancelled = 1`、`Running jobs = 2`，刷新后仍保持该 projection 且页面状态为 `Connected`。
+
 ## 9. Phase 8.5：产品化
 
 交付物：

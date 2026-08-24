@@ -1,5 +1,32 @@
 # Phase 8 开发日志
 
+## 2026-08-24：8.4 graphical browser recovery evidence
+
+本次继续属于 Phase 8.4，补齐长任务并发/重启/SSE 自动化 matrix 与真实图形 Web recovery 之间的证据缺口。DSH 参考 `packages/client/connection/src/client/connection.ts` 的 generation/reconnect、`packages/client/runtime/src/client/sessions/session.ts` 的 history-baseline + live-frame stitching，以及 `packages/client/ui-jobs/src/client/JobListAction.tsx` 的 Job action/replay 边界；没有复制 DSH 代码、内部类型或品牌资产，A2A 保持 `deferred`。
+
+### 已完成
+
+- `scripts/phase8-job-recovery-fixture-server.mjs` 增加受范围约束的 `PHASE8_JOB_RECOVERY_LIVE_ITEMS`（1–200）和 `PHASE8_JOB_RECOVERY_LIVE_DELAY_MS`（0–5000），避免图形浏览器测试因任务结束过快而丢失 running/action 状态；默认值保持自动化 matrix 兼容。
+- 使用 in-app browser 打开真实本地 SQLite/API/AgentHost fixture：页面加载后显示 3 个 running jobs；展开一个 Job 详情后显示 `Cancel job`；执行取消后显示 1 个 cancelled、2 个 running；刷新后仍显示 cancelled/2 running，连接状态为 `Connected`。
+- 该场景与 DSH 的 reconnect generation、历史 baseline/live frame stitching 和 Job action 边界一致，Web 仍只消费既有 EventStore/API projection。
+
+### 契约与回滚边界
+
+- 不新增 Event、Tool、Task、Permission 或 HTTP contract；仅增强测试 fixture 的时序控制，并对环境参数做有限整数校验。
+- 回滚时移除 bounded timing 参数和本节图形证据即可，既有 `pnpm test:phase8:job-recovery:matrix`、Job Center action gate 和运行时恢复语义保持不变。
+
+### 验证
+
+```text
+node --check scripts/phase8-job-recovery-fixture-server.mjs ✓
+pnpm test:phase8:job-recovery:matrix ✓
+graphical browser recovery: 3 running → cancel 1 → 1 cancelled + 2 running → reload replay ✓
+```
+
+### 尚未关闭
+
+该切片只关闭 graphical recovery 的第一批真实场景；多 viewport、浏览器主动断线期间的交错 output、更多 Cancel/Retry 组合和完整 8.4 退出审计仍待扩展。
+
 ## 2026-08-24：8.5 SQLite backup/restore 与 migration rollback
 
 本次工作继续属于 Phase 8.5，补齐当前 Host 可以独立验收的运维能力切片。DSH 只作为 deployment-axis 配置和 Host-owned 安全边界参考：`docs/config-catalog.zh.md` 与 `packages/host/webserver/README.md`；没有复制 DSH 代码或内部类型，A2A 保持 `deferred`。

@@ -23,6 +23,8 @@ const store = new SqliteEventStore({ databasePath });
 const host = new AgentHost({ store });
 let sessionId = process.env.PHASE8_JOB_RECOVERY_SESSION;
 let liveJobIds = [];
+const liveItems = boundedInteger(process.env.PHASE8_JOB_RECOVERY_LIVE_ITEMS ?? "36", 1, 200, "PHASE8_JOB_RECOVERY_LIVE_ITEMS");
+const liveDelayMs = boundedInteger(process.env.PHASE8_JOB_RECOVERY_LIVE_DELAY_MS ?? "120", 0, 5_000, "PHASE8_JOB_RECOVERY_LIVE_DELAY_MS");
 if (mode === "seed") {
   const session = await host.createSession(workspaceRoot, "danger-full-access");
   sessionId = session.id;
@@ -42,9 +44,9 @@ if (mode === "live") {
   sessionId = session.id;
   await store.append({ sessionId: session.id, type: "user/message", payload: { content: "Phase 8 concurrent live recovery fixture" } });
   const commands = [
-    "$items=1..36; foreach ($item in $items) { Write-Output ('matrix-alpha-' + $item); Start-Sleep -Milliseconds 120 }",
-    "$items=1..36; foreach ($item in $items) { Write-Output ('matrix-beta-' + $item); Start-Sleep -Milliseconds 120 }",
-    "$items=1..36; foreach ($item in $items) { Write-Output ('matrix-gamma-' + $item); Start-Sleep -Milliseconds 120 }",
+    `$items=1..${liveItems}; foreach ($item in $items) { Write-Output ('matrix-alpha-' + $item); Start-Sleep -Milliseconds ${liveDelayMs} }`,
+    `$items=1..${liveItems}; foreach ($item in $items) { Write-Output ('matrix-beta-' + $item); Start-Sleep -Milliseconds ${liveDelayMs} }`,
+    `$items=1..${liveItems}; foreach ($item in $items) { Write-Output ('matrix-gamma-' + $item); Start-Sleep -Milliseconds ${liveDelayMs} }`,
   ];
   const started = await Promise.all(commands.map((command, index) => host.executeTool(
     session.id,
@@ -70,7 +72,7 @@ await new Promise((resolve) => server.listen(Number(process.env.PHASE8_JOB_RECOV
 const address = server.address();
 if (address === null || typeof address === "string") throw new Error("Phase 8 job recovery fixture server did not bind");
 const baseUrl = `http://127.0.0.1:${address.port}`;
-console.log(JSON.stringify({ mode, baseUrl, root, databasePath, workspaceRoot, sessionId, liveJobIds }));
+console.log(JSON.stringify({ mode, baseUrl, root, databasePath, workspaceRoot, sessionId, liveJobIds, ...(mode === "live" ? { liveItems, liveDelayMs } : {}) }));
 
 async function cleanup() {
   await new Promise((resolve) => server.close(() => resolve()));
@@ -81,3 +83,9 @@ async function cleanup() {
 process.once("SIGINT", () => { void cleanup().finally(() => process.exit(0)); });
 process.once("SIGTERM", () => { void cleanup().finally(() => process.exit(0)); });
 await new Promise(() => undefined);
+
+function boundedInteger(value, minimum, maximum, label) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) throw new Error(`${label} must be an integer between ${minimum} and ${maximum}`);
+  return parsed;
+}
