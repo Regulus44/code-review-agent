@@ -41,6 +41,11 @@ describe("AgentHost", () => {
     });
   });
 
+  it("exposes configured backup and migration operations without claiming upgrade support", () => {
+    const host = new AgentHost({ store: new InMemoryEventStore(), operations: { backup: "available", migration: "available", upgrade: "deferred" } });
+    expect(host.productizationSettings().operations).toEqual({ status: "configured", backup: "available", migration: "available", upgrade: "deferred" });
+  });
+
   it("routes turns by tenant ownership and records only the selected route metadata", async () => {
     const store = new InMemoryEventStore();
     const makeModel = (text: string): ChatModel => ({

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { InMemoryEventStore, replayProjection, SqliteEventStore } from "./index.js";
+import { InMemoryEventStore, replayProjection, restoreSqliteDatabase, rollbackSqliteRestore, SqliteEventStore } from "./index.js";
 import { brand } from "@code-review-agent/contracts";
 
 describe("InMemoryEventStore", () => {
@@ -252,6 +252,47 @@ describe("InMemoryEventStore", () => {
     expect(restored).toMatchObject({ status: "revoked", version: 2, revokedAt: "2026-08-24T00:00:01.000Z" });
     expect(JSON.stringify(restored)).not.toContain("secret");
     second.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  it("creates consistent backups, migrates legacy snapshots, and preserves rollback targets", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-operations-"));
+    const databasePath = join(directory, "active.sqlite");
+    const backupPath = join(directory, "backup.sqlite");
+    const legacyPath = join(directory, "legacy-v5.sqlite");
+    const restoredPath = join(directory, "restored.sqlite");
+    const first = new SqliteEventStore({ databasePath });
+    const sessionId = await first.createSession("D:/operations");
+    await first.append({ sessionId, type: "user/message", payload: { content: "durable operations fixture" } });
+    first.upsertCredential({ id: "cred_ops", tenantId: "tenant-ops", kind: "header", label: "Operations provider", status: "active", version: 1, createdAt: "2026-08-24T00:00:00.000Z", updatedAt: "2026-08-24T00:00:00.000Z" });
+    const backup = first.backup(backupPath);
+    expect(backup).toMatchObject({ schemaVersion: 6, sessions: 1, events: 2, credentials: 1, backupPath });
+    expect(readFileSync(backupPath).toString("utf8")).not.toContain("backup-secret-material");
+    first.close();
+
+    copyFileSync(backupPath, legacyPath);
+    const legacy = new DatabaseSync(legacyPath);
+    legacy.exec("DROP TABLE credentials; DELETE FROM schema_migrations WHERE version = 6; PRAGMA user_version = 5;");
+    legacy.close();
+
+    const restored = restoreSqliteDatabase(legacyPath, restoredPath);
+    expect(restored).toMatchObject({ sourceSchemaVersion: 5, restoredSchemaVersion: 6, migrated: true });
+    const restoredStore = new SqliteEventStore({ databasePath: restoredPath });
+    expect((await restoredStore.list(sessionId)).map((event) => event.type)).toEqual(["session/created", "user/message"]);
+    expect(restoredStore.getCredential("tenant-ops", "cred_ops")).toBeUndefined();
+    restoredStore.close();
+
+    const active = new SqliteEventStore({ databasePath });
+    const activeSession = await active.createSession("D:/rollback");
+    await active.append({ sessionId: activeSession, type: "user/message", payload: { content: "preserve this active database" } });
+    active.close();
+    const overwritten = restoreSqliteDatabase(legacyPath, databasePath, { overwrite: true });
+    expect(overwritten.rollbackPath).toBeDefined();
+    const rolledBack = rollbackSqliteRestore(overwritten);
+    expect(existsSync(rolledBack.destinationPath)).toBe(true);
+    const rolledStore = new SqliteEventStore({ databasePath });
+    expect((await rolledStore.project(activeSession))?.messages.at(-1)?.content).toBe("preserve this active database");
+    rolledStore.close();
     rmSync(directory, { recursive: true, force: true });
   });
 });

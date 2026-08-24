@@ -16,13 +16,13 @@
 | Phase 5：内部 Subagent / 多 Agent | completed（2026-08-23） | 5.0–5.4：Task/Descriptor durable projection、one-shot/continuable child、FIFO/authority/cold resume、report/MCP scope、API/SSE/Web catalog；定向 typecheck、storage/subagent/runtime/API 测试和 API/Web smoke 通过 |
 | Phase 6：A2A | deferred（暂不作为 Phase 7 前置） | [ADR：Phase 7 Web 收敛不等待 A2A](adr/phase-7-web-with-a2a-deferred.zh-CN.md)；等待明确的外部 Agent 互操作需求 |
 | Phase 7：DSH Web 前端收敛 | completed | 7.1–7.10 Web shell、连接与回放、Workspace/Session navigation、Conversation/Tool/Permission/Interaction、Trajectory、Task/Subagent/MCP、Settings/Deliverables、响应式与可访问性、五场景 browser/replay gate、Workspace reorder 与 Workspace rename/archive/delete lifecycle 已完成；`pnpm typecheck`、`pnpm test`、`pnpm test:phase7:browser` 和 `git diff --check` 通过；browser gate 总耗时 2.14s、trajectory full replay 19.03ms；独立 checkpoint `82326d6` |
-| Phase 8：高级能力与产品化 | in_progress（2026-08-24 恢复） | 当前恢复切片为 8.4 长任务与并发 Web recovery matrix；8.1/8.2 已完成，8.0 aggregate Web parity gate 已通过；8.3/8.4/8.5 仍未整体完成 |
+| Phase 8：高级能力与产品化 | in_progress（2026-08-24 恢复） | 当前恢复切片为 8.5 SQLite backup/restore 与 migration rollback；8.1/8.2 已完成，8.0 aggregate Web parity gate 已通过；8.3/8.4/8.5 仍未整体完成 |
 
 ## Phase 8 计划范围（accepted）
 
 - [Phase 8：高级能力、DSH Web 对齐与产品化](phase-plans/phase-8-productization.zh-CN.md) 已扩展为 8.0 Web 对齐、8.1 Context Compaction、8.2 Worktree、8.3 LSP/Code Mode、8.4 后台任务与可靠性、8.5 产品化；
 - [ADR：Phase 8 Web 与 DSH 前端行为对齐](adr/phase-8-web-dsh-alignment.zh-CN.md) 已接受，记录行为参考、REST/SSE 边界、typed Web 拆分、契约变更和回滚规则；
-- Phase 8 曾于 2026-08-24 暂存归档在 checkpoint `c1aae6c`，随后持续恢复推进。8.0 的 aggregate Web parity contract gate 与真实 600/900/1024 Shell/Settings 视觉基线 gate 已通过；8.4 已补齐长任务与并发 Web recovery matrix 第一批真实证据，8.5 已建立产品化边界、tenant-scoped Workspace/MCP/provider routing 和 credential reference lifecycle 第一切片，但更广泛的 graphical browser matrix、8.3 完整退出审计、外部 IdP/JWT、完整 principal catalog 和运维策略仍未完成。
+- Phase 8 曾于 2026-08-24 暂存归档在 checkpoint `c1aae6c`，随后持续恢复推进。8.0 的 aggregate Web parity contract gate 与真实 600/900/1024 Shell/Settings 视觉基线 gate 已通过；8.4 已补齐长任务与并发 Web recovery matrix 第一批真实证据，8.5 已建立产品化边界、tenant-scoped Workspace/MCP/provider routing、credential reference lifecycle 和 SQLite backup/restore/migration rollback 第一切片，但更广泛的 graphical browser matrix、8.3 完整退出审计、外部 IdP/JWT、完整 principal catalog、upgrade/deployment policy 和外部 secret manager 仍未完成。
 
 ## Phase 8 暂存归档（2026-08-24）
 
@@ -38,7 +38,7 @@
 - `packages/contracts` 新增 `ProductizationCapability` 和 `SessionOwnership`；Session/SessionProjection 的 ownership 通过 `session/created` 事件持久化，并在 SQLite 重启、fork 和子 Agent 创建时回放/继承；
 - Runtime `AgentHost.productizationSettings()` 和 API `/v1/capabilities.productization` 返回真实 host-backed readiness；显式配置时支持静态 bearer token、tenant-scoped Session catalog、跨租户 404 隔离和 hard Session/Turn quota；默认本地 Host 保持 auth/tenant/quota/运维能力 `deferred` 或 `disabled`；
 - Web Settings 和 typed browser bundle 展示 Productization 状态；`scripts/phase8-productization-gate.mjs` 与 `pnpm test:phase8:productization` 已覆盖认证、租户目录、跨租户拒绝、turn quota、credential lifecycle 和凭据脱敏边界；
-- 当前仍未实现外部 IdP/JWT、完整 principal catalog、外部 secret manager、backup/migration/upgrade policy，不能将 8.5 或 Phase 8 标记为完成。
+- 当前仍未实现外部 IdP/JWT、完整 principal catalog、外部 secret manager、upgrade/deployment policy；backup/restore 与 migration rollback 仅完成第一切片，不能将 8.5 或 Phase 8 标记为完成。
 
 ## Phase 8.5 tenant-scoped Workspace slice（implemented，未完成整体 8.5）
 
@@ -71,6 +71,14 @@
 - API 增加认证 tenant-scoped credential catalog/mutation endpoints；删除仍受 model route/MCP reference 阻止，响应、Web typed client 和错误边界均不返回 secret material。
 - model route 在 rotation 时重绑新 version，在 revoke 时清除 tenant route 并回退 host-local；MCP resolver 按 tenant 解析，live connection 在 lifecycle mutation 时停止/重连，不可用 reference 显示 `needs_auth`。
 - 已覆盖 CredentialVault、SQLite v6、MCP resolver/invalidation、API lifecycle、Web typed client 和 productization gate；当前仍需外部 secret manager、外部 IdP/JWT、OS-level isolation/deployment evidence、browser recovery matrix 和运维策略。
+
+## Phase 8.5 SQLite backup/restore 与 migration rollback slice（implemented，未完成整体 8.5）
+
+- `packages/storage` 新增 SQLite inspection、consistent backup、restore migration 和 rollback API；备份只包含事件、projection、配置 metadata 和脱敏 credential metadata，不包含 secret material。
+- restore 通过临时副本运行现有 schema migration、projection rebuild 和 integrity check；legacy schema v5 可恢复到 v6，目标库覆盖前保留 rollback artifact，rollback 后原库事件和 projection 可继续恢复。
+- `AgentHost.productizationSettings().operations` 与 SQLite-backed API capability 报告 `backup: available`、`migration: available`、`upgrade: deferred`；不把 migration rollback 宣称为完整 deployment upgrade policy。
+- `scripts/phase8-operations-gate.mjs` 已覆盖 schema v6 backup、v5 → v6 restore、overwrite rollback、event preservation、integrity check 和 secret redaction；`pnpm test:phase8:operations` 已通过。
+- 当前仍需外部 secret manager、外部 IdP/JWT、完整 principal catalog、8.3 OS-level isolation/deployment evidence、graphical browser recovery matrix 和 upgrade/deployment policy。
 
 ## Phase 8 历史暂停归档（2026-08-24）
 

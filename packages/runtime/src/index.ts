@@ -58,11 +58,18 @@ export interface AgentHostOptions {
   readonly compactionEnabled?: boolean;
   readonly contextBudget?: Partial<ContextBudget>;
   readonly quota?: ProductizationQuotaPolicy;
+  readonly operations?: ProductizationOperationsPolicy;
 }
 
 export interface ProductizationQuotaPolicy {
   readonly maxSessionsPerTenant?: number;
   readonly maxTurnsPerTenant?: number;
+}
+
+export interface ProductizationOperationsPolicy {
+  readonly backup: "deferred" | "available";
+  readonly migration: "deferred" | "available";
+  readonly upgrade: "deferred" | "available";
 }
 
 export interface ContextSettings {
@@ -159,6 +166,7 @@ export class AgentHost {
   private readonly compactionEnabled: boolean;
   private readonly contextBudget: Partial<ContextBudget> | undefined;
   private readonly quota: ProductizationQuotaPolicy | undefined;
+  private readonly operations: ProductizationOperationsPolicy;
   private readonly quotaTails = new Map<string, Promise<void>>();
   private readonly worktreeOperations = new Map<SessionId, Promise<void>>();
   private readonly metricCounters = { turnsStarted: 0, turnsCompleted: 0, turnsFailed: 0, turnsStopped: 0, modelFallbacks: 0, toolCalls: 0, toolFailures: 0 };
@@ -171,6 +179,7 @@ export class AgentHost {
     this.compactionEnabled = options.compactionEnabled !== false;
     this.contextBudget = options.contextBudget;
     this.quota = options.quota;
+    this.operations = options.operations ?? { backup: "deferred", migration: "deferred", upgrade: "deferred" };
     this.customSystemPrompt = options.systemPrompt;
     this.maxSteps = options.maxSteps ?? 12;
     if (!Number.isInteger(this.maxSteps) || this.maxSteps < 1 || this.maxSteps > 100) throw new Error("maxSteps must be an integer between 1 and 100");
@@ -261,7 +270,10 @@ export class AgentHost {
       quota: quotaConfigured ? { status: "configured", enforcement: "hard" } : { status: "disabled", enforcement: "disabled" },
       routing: { status: routingConfigured ? "configured" : "available", providerCount: Math.max(1, tenantProviders.size || this.fallbackModels.length + 1), modelSelector: routingConfigured ? "tenant-scoped" : "host-local" },
       credentials: { status: "configured", secretStore: "host-only", redaction: "required" },
-      operations: { status: "deferred", backup: "deferred", migration: "deferred", upgrade: "deferred" },
+      operations: {
+        status: this.operations.backup === "available" || this.operations.migration === "available" || this.operations.upgrade === "available" ? "configured" : "deferred",
+        ...this.operations,
+      },
     };
   }
 

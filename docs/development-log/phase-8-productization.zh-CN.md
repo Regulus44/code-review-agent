@@ -1,5 +1,32 @@
 # Phase 8 开发日志
 
+## 2026-08-24：8.5 SQLite backup/restore 与 migration rollback
+
+本次工作继续属于 Phase 8.5，补齐当前 Host 可以独立验收的运维能力切片。DSH 只作为 deployment-axis 配置和 Host-owned 安全边界参考：`docs/config-catalog.zh.md` 与 `packages/host/webserver/README.md`；没有复制 DSH 代码或内部类型，A2A 保持 `deferred`。
+
+### 已完成
+
+- `packages/storage` 新增 SQLite schema inspection、consistent backup、restore migration 和 rollback operation；backup 使用 SQLite 快照，restore 先写临时库并运行现有 migration/projection rebuild/integrity check。
+- legacy schema v5 可恢复到 schema v6；覆盖已有数据库时保留 rollback artifact，rollback 后原活动数据库的 Session/event projection 可继续读取。
+- `AgentHost.productizationSettings().operations` 与 SQLite-backed API capability 报告 backup/migration available，upgrade 保持 deferred。
+- 新增 `scripts/phase8-operations-gate.mjs` 与 `pnpm test:phase8:operations`，覆盖 backup metadata、event preservation、v5 → v6 migration、overwrite rollback、integrity 和 secret redaction。
+
+### 契约与回滚边界
+
+- 不新增 Event、Tool、Task、Permission 或公开 restore endpoint；运维操作只由受控 Host owner/deployment command 触发，EventStore 仍是唯一事实来源。
+- 不支持的 future schema、损坏数据库、URI/in-memory path 和缺少 migration ledger 均 fail closed；覆盖恢复必须显式声明 `overwrite`，原目标保留为可回滚 artifact。
+- secret material 不进入 SQLite credential metadata、backup inspection、capability projection 或 gate output。
+- upgrade/deployment policy、外部 secret manager、IdP/JWT、principal catalog 和 OS-level isolation 仍延期。
+
+### 验证
+
+```text
+pnpm test:phase8:operations ✓
+pnpm test:phase8:productization ✓
+pnpm typecheck ✓
+git diff --check ✓
+```
+
 ## 2026-08-24：8.4 长任务与并发 Web recovery matrix
 
 本次工作继续属于 Phase 8.4，补齐已有 Job Center restart/replay slice 与更完整 Web recovery matrix 之间的证据缺口。DSH 参考 `packages/client/connection/src/client/connection.ts` 的 generation/reconnect、`packages/client/runtime/src/client/sessions/session.ts` 的 history-baseline + live-frame stitching，以及 `packages/client/ui-jobs/src/client/JobListAction.tsx` 的 job action 边界；本项目没有复制 DSH 代码、内部类型或品牌资产，A2A 保持 `deferred`。

@@ -39,6 +39,7 @@ try {
   assert(productization.tenantIsolation?.status === "configured" && productization.tenantIsolation?.sessionOwnership === "durable", "tenant isolation metadata is missing");
   assert(productization.quota?.status === "configured" && productization.quota?.enforcement === "hard", "quota metadata is missing");
   assert(productization.credentials?.redaction === "required", "credential redaction must remain required");
+  assert(productization.operations?.status === "configured" && productization.operations?.backup === "available" && productization.operations?.migration === "available" && productization.operations?.upgrade === "deferred", "SQLite backup/migration operations must be available without claiming upgrade support");
   const modelHeaders = { authorization: "Bearer fixture-tenant-a-token" };
   const initialModels = await (await fetch(`${fixture.baseUrl}/v1/models`, { headers: modelHeaders })).json();
   assert(initialModels.current === "fixture-host-model" && initialModels.route === undefined, "tenant model catalog must start from the host route without a tenant override");

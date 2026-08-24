@@ -20,7 +20,11 @@ const webRoot = process.env.PHASE8_WEB_ROOT;
 const productizationEnabled = process.env.PHASE8_PRODUCTIZATION === "1";
 const store = new SqliteEventStore({ databasePath });
 const ownership = productizationEnabled ? { principalId: brand("fixture-user-a", "PrincipalId"), tenantId: brand("fixture-tenant-a", "TenantId") } : undefined;
-const bootstrapHost = new AgentHost({ store, ...(productizationEnabled ? { quota: { maxSessionsPerTenant: 2, maxTurnsPerTenant: 2 } } : {}) });
+const productizationHostOptions = productizationEnabled ? {
+  quota: { maxSessionsPerTenant: 2, maxTurnsPerTenant: 2 },
+  operations: { backup: "available", migration: "available", upgrade: "deferred" },
+} : {};
+const bootstrapHost = new AgentHost({ store, ...productizationHostOptions });
 const session = await bootstrapHost.createSession(root, "ask-on-write", undefined, ownership);
 const turnId = brand("turn_phase8_web", "TurnId");
 const toolCallId = brand("call_phase8_web", "ToolCallId");
@@ -72,7 +76,7 @@ await store.append({ sessionId: session.id, turnId, type: "interaction/requested
 } });
 await store.append({ sessionId: session.id, turnId, type: "assistant/message", payload: { content: "The release plan is ready for your answers." } });
 
-const host = new AgentHost({ store, ...(productizationEnabled ? { quota: { maxSessionsPerTenant: 2, maxTurnsPerTenant: 2 } } : {}) });
+const host = new AgentHost({ store, ...productizationHostOptions });
 
 const fixtureModel = (text) => ({
   async *stream() {

@@ -302,7 +302,7 @@ git diff --check
 
 - 不新增独立 model route event type；ModelRouteBackend 是配置事实来源，实际使用的 route 必须进入所属 Session 的 `turn/started` 或恢复 `agent/status` 事件；
 - route mutation 先 durable upsert，再更新 Runtime 内存选择；没有 durable backend 或 selector 时 fail closed；
-- credential reference 生命周期已由后续 9.2 切片补齐；外部 IdP/JWT、完整 principal catalog、backup/restore、migration rollback 和 upgrade/deployment policy 保持后续工作；
+- credential reference 生命周期已由后续 9.2 切片补齐；外部 IdP/JWT、完整 principal catalog 和 upgrade/deployment policy 保持后续工作，backup/restore 与 migration rollback 由 9.3 继续收口；
 - 回滚时删除 tenant routing backend/selector 配置即可回到 host-local `/v1/models`，schema v5 保留向后兼容迁移，不删除既有 Session/EventStore 历史。
 
 验收命令：
@@ -334,7 +334,7 @@ git diff --check
 - Credential metadata 属于 control-plane 配置事实，不新增 Session event type；任何 model-visible route 仍只通过所属 Session 的 `turn/started` 或恢复 `agent/status` 事件记录实际 route metadata；
 - secret material 不进入 EventStore、SQLite metadata、route、MCP config、SSE、diagnostics、Web projection 或错误消息；当前 host-only material 在进程重启后不可恢复，带有 active reference 但 resolver 缺少 material 时必须 fail closed；外部 secret manager 适配保持后续工作；
 - credential ID 以 `(tenantId, id)` 为边界，cross-tenant list/get/resolve/mutate 统一隐藏或失败；删除前检查 model route 与 MCP config 引用，吊销优先于删除；
-- 回滚时停用 credential API/resolver 和 tenant route/MCP wiring，保留 schema v6 metadata 与既有 Session/EventStore 历史；未配置 credential backend 时 mutation 返回配置错误，不退化为不受控的 host-wide secret storage。
+- 回滚时停用 credential API/resolver 和 tenant route/MCP wiring，保留 schema v6 metadata 与既有 Session/EventStore 历史；未配置 credential backend 时 mutation 返回配置错误，不退化为不受控的 host-wide secret storage。backup/restore 与 migration rollback 已由 9.3 提供第一切片，完整 upgrade/deployment policy 仍保持后续工作。
 
 验收命令：
 
@@ -345,6 +345,34 @@ pnpm --filter @code-review-agent/mcp-client test
 pnpm --filter @code-review-agent/api test
 pnpm --filter @code-review-agent/web test -- --run src/client/api.test.ts
 pnpm test:phase8:productization
+git diff --check
+```
+
+### 9.3 当前执行切片：SQLite backup/restore 与 migration rollback
+
+该切片补齐 Phase 8.5 运维范围中可以由当前 TypeScript/SQLite Host 独立证明的部分。DSH 只作为 Host-owned deployment/configuration 边界参考，采用 `docs/config-catalog.zh.md` 的 deployment-axis 约束和 `packages/host/webserver/README.md` 的默认安全绑定语义；本项目没有复制 DSH 代码。upgrade/deployment policy 仍需后续真实部署环境证据。
+
+交付物：
+
+- `packages/storage` 暴露 SQLite schema inspection、consistent backup、restore、legacy migration 和 rollback operation；backup 使用 SQLite 快照，不读取或保存 host-owned secret material；
+- restore 先复制到临时库，再运行现有 schema migration、projection rebuild 和 integrity check；覆盖已有目标时保留 rollback database，失败时不替换原目标；
+- `AgentHost.productizationSettings().operations` 和 API capability 显示 backup/migration 已 available，upgrade 继续 deferred；
+- `scripts/phase8-operations-gate.mjs` 覆盖 schema v6 backup、v5 → v6 restore migration、overwrite rollback、event preservation、integrity check 和 credential redaction；
+- 该切片不提供面向普通用户的公开 restore endpoint；运维操作由受控部署命令/Host owner 执行，避免远程请求直接替换事件库。
+
+契约与安全边界：
+
+- backup/restore 不新增 Session event type，不改变 EventStore 的事实来源；恢复后的事件和 projection 继续由现有 SQLite/EventStore 回放产生；
+- destination 已存在时必须显式 `overwrite`，旧库保留为 rollback artifact；源库 schema 高于当前支持版本、integrity check 失败、路径为 `:memory:`/URI 或快照缺少 migration ledger 时 fail closed；
+- secret material 不进入 backup metadata、SQLite credential table、公开 capability 或 gate 输出；upgrade 仍为 `deferred`，不能将 schema migration rollback 误称为完整 deployment upgrade policy；
+- 回滚时保留被替换目标和 rollback 后的 displaced artifact，失败恢复不删除原始数据。
+
+验收命令：
+
+```powershell
+pnpm test:phase8:operations
+pnpm test:phase8:productization
+pnpm typecheck
 git diff --check
 ```
 

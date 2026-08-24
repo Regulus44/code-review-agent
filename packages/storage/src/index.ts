@@ -55,11 +55,13 @@ import {
   type SessionOwnership,
 } from "@code-review-agent/contracts";
 import { DatabaseSync } from "node:sqlite";
-import { mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 const SCHEMA_VERSION = 6 as const;
+
+export const SQLITE_SCHEMA_VERSION = SCHEMA_VERSION;
 
 function isPermissionPreset(value: unknown): value is PermissionPreset {
   return value === "read-only" || value === "workspace-write" || value === "ask-on-write" || value === "ask-on-execute" || value === "danger-full-access";
@@ -902,6 +904,36 @@ export interface SqliteEventStoreOptions {
   readonly databasePath?: string;
 }
 
+export interface SqliteDatabaseInspection {
+  readonly databasePath: string;
+  readonly schemaVersion: number;
+  readonly integrity: "ok";
+  readonly sessions: number;
+  readonly events: number;
+  readonly credentials: number;
+  readonly sha256: string;
+}
+
+export interface SqliteBackupMetadata extends SqliteDatabaseInspection {
+  readonly sourcePath: string;
+  readonly backupPath: string;
+  readonly createdAt: string;
+}
+
+export interface SqliteRestoreResult {
+  readonly sourcePath: string;
+  readonly destinationPath: string;
+  readonly rollbackPath?: string;
+  readonly sourceSchemaVersion: number;
+  readonly restoredSchemaVersion: number;
+  readonly migrated: boolean;
+}
+
+export interface SqliteRollbackResult {
+  readonly destinationPath: string;
+  readonly displacedPath?: string;
+}
+
 /** Durable EventStore using the Node.js built-in SQLite driver. */
 export class SqliteEventStore implements SessionEventStore, McpConfigBackend, ModelRouteBackend, CredentialBackend {
   readonly databasePath: string;
@@ -922,6 +954,18 @@ export class SqliteEventStore implements SessionEventStore, McpConfigBackend, Mo
 
   close(): void {
     this.db.close();
+  }
+
+  /** Creates a consistent SQLite snapshot without exposing secret material. */
+  backup(destinationPath: string): SqliteBackupMetadata {
+    const sourcePath = databaseFilePath(this.databasePath, "source");
+    const backupPath = databaseFilePath(destinationPath, "backup");
+    if (sourcePath === backupPath) throw operationError("SQLITE_BACKUP_SAME_PATH", "The backup destination must differ from the live database.");
+    if (existsSync(backupPath)) throw operationError("SQLITE_BACKUP_EXISTS", `Backup destination already exists: ${backupPath}`);
+    mkdirSync(dirname(backupPath), { recursive: true });
+    this.db.exec(`VACUUM INTO '${escapeSqliteString(backupPath)}'`);
+    const inspection = inspectSqliteDatabase(backupPath);
+    return { ...inspection, sourcePath, backupPath, createdAt: new Date().toISOString() };
   }
 
   async createSession(workspaceRoot: string, permissionPreset: PermissionPreset = "ask-on-write", idOrMetadata?: SessionId | ChildSessionMetadata, metadata?: ChildSessionMetadata, ownership?: SessionOwnership): Promise<SessionId> {
@@ -1226,7 +1270,8 @@ export class SqliteEventStore implements SessionEventStore, McpConfigBackend, Mo
     this.db.exec("PRAGMA foreign_keys = ON; CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);");
     const current = this.db.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as SqliteRow;
     const currentVersion = Number(current["version"]);
-    if (currentVersion >= SCHEMA_VERSION) return;
+    if (currentVersion > SCHEMA_VERSION) throw operationError("SQLITE_SCHEMA_UNSUPPORTED", `Database schema ${currentVersion} is newer than the supported schema ${SCHEMA_VERSION}.`);
+    if (currentVersion === SCHEMA_VERSION) return;
     this.withTransaction(() => {
       if (currentVersion < 1) {
       this.db.exec(`
@@ -1530,4 +1575,107 @@ function defaultDatabasePath(): string {
   const configured = process.env["CODE_REVIEW_AGENT_DB_PATH"];
   if (configured !== undefined && configured.length > 0) return configured;
   return isAbsolute(process.cwd()) ? resolve(process.cwd(), ".data", "code-review-agent.sqlite") : ".data/code-review-agent.sqlite";
+}
+
+/** Inspects a closed SQLite database before it is accepted as an operational input. */
+export function inspectSqliteDatabase(databasePath: string): SqliteDatabaseInspection {
+  const normalized = databaseFilePath(databasePath, "database");
+  if (!existsSync(normalized)) throw operationError("SQLITE_DATABASE_MISSING", `SQLite database does not exist: ${normalized}`);
+  const db = new DatabaseSync(normalized);
+  try {
+    const integrity = String((db.prepare("PRAGMA integrity_check").get() as SqliteRow | undefined)?.["integrity_check"] ?? "");
+    if (integrity !== "ok") throw operationError("SQLITE_INTEGRITY_FAILED", `SQLite integrity check failed for ${normalized}: ${integrity}`);
+    const migrationTable = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'").get();
+    if (migrationTable === undefined) throw operationError("SQLITE_SCHEMA_UNSUPPORTED", `SQLite database has no schema migration ledger: ${normalized}`);
+    const migrationRow = db.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as SqliteRow;
+    const userVersionRow = db.prepare("PRAGMA user_version").get() as SqliteRow;
+    const migrationVersion = Number(migrationRow["version"] ?? 0);
+    const userVersion = Number(userVersionRow["user_version"] ?? 0);
+    const schemaVersion = Math.max(migrationVersion, userVersion);
+    if (schemaVersion > SQLITE_SCHEMA_VERSION) throw operationError("SQLITE_SCHEMA_UNSUPPORTED", `Database schema ${schemaVersion} is newer than the supported schema ${SQLITE_SCHEMA_VERSION}.`);
+    return {
+      databasePath: normalized,
+      schemaVersion,
+      integrity: "ok",
+      sessions: countTable(db, "sessions"),
+      events: countTable(db, "events"),
+      credentials: countTable(db, "credentials"),
+      sha256: sha256File(normalized),
+    };
+  } finally {
+    db.close();
+  }
+}
+
+/** Restores a snapshot through a temporary migrated copy and preserves the old target for rollback. */
+export function restoreSqliteDatabase(sourcePath: string, destinationPath: string, options: { readonly overwrite?: boolean } = {}): SqliteRestoreResult {
+  const source = inspectSqliteDatabase(sourcePath);
+  const destination = databaseFilePath(destinationPath, "destination");
+  if (source.databasePath === destination) throw operationError("SQLITE_RESTORE_SAME_PATH", "The restore source and destination must differ.");
+  if (existsSync(destination) && options.overwrite !== true) throw operationError("SQLITE_RESTORE_DESTINATION_EXISTS", `Restore destination already exists: ${destination}`);
+  mkdirSync(dirname(destination), { recursive: true });
+  const temporary = `${destination}.restore-${randomUUID()}.sqlite`;
+  const rollbackPath = existsSync(destination) ? `${destination}.rollback-${randomUUID()}.sqlite` : undefined;
+  try {
+    copyFileSync(source.databasePath, temporary);
+    const migrated = new SqliteEventStore({ databasePath: temporary });
+    migrated.close();
+    const restored = inspectSqliteDatabase(temporary);
+    if (rollbackPath !== undefined) renameSync(destination, rollbackPath);
+    try {
+      renameSync(temporary, destination);
+    } catch (error) {
+      if (rollbackPath !== undefined && existsSync(rollbackPath)) renameSync(rollbackPath, destination);
+      throw error;
+    }
+    return {
+      sourcePath: source.databasePath,
+      destinationPath: destination,
+      ...(rollbackPath === undefined ? {} : { rollbackPath }),
+      sourceSchemaVersion: source.schemaVersion,
+      restoredSchemaVersion: restored.schemaVersion,
+      migrated: source.schemaVersion !== restored.schemaVersion,
+    };
+  } finally {
+    if (existsSync(temporary)) rmSync(temporary, { force: true });
+  }
+}
+
+/** Rolls back a previous overwrite restore while retaining the displaced current target. */
+export function rollbackSqliteRestore(result: SqliteRestoreResult): SqliteRollbackResult {
+  if (result.rollbackPath === undefined || !existsSync(result.rollbackPath)) throw operationError("SQLITE_ROLLBACK_UNAVAILABLE", "The restore result has no retained rollback database.");
+  const destination = databaseFilePath(result.destinationPath, "destination");
+  const displacedPath = `${destination}.rollback-current-${randomUUID()}.sqlite`;
+  if (existsSync(destination)) renameSync(destination, displacedPath);
+  try {
+    renameSync(result.rollbackPath, destination);
+    inspectSqliteDatabase(destination);
+    return { destinationPath: destination, displacedPath };
+  } catch (error) {
+    if (existsSync(destination)) rmSync(destination, { force: true });
+    if (existsSync(displacedPath)) renameSync(displacedPath, destination);
+    throw error;
+  }
+}
+
+function databaseFilePath(value: string, label: string): string {
+  if (value === ":memory:" || value.startsWith("file:")) throw operationError("SQLITE_OPERATION_PATH_UNSUPPORTED", `${label} must be a filesystem-backed SQLite path.`);
+  return resolve(value);
+}
+
+function escapeSqliteString(value: string): string { return value.replaceAll("'", "''"); }
+
+function countTable(db: DatabaseSync, table: string): number {
+  const exists = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+  if (exists === undefined) return 0;
+  const row = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as SqliteRow;
+  return Number(row["count"] ?? 0);
+}
+
+function sha256File(databasePath: string): string { return createHash("sha256").update(readFileSync(databasePath)).digest("hex"); }
+
+function operationError(code: string, message: string): Error {
+  const error = new Error(`${code}: ${message}`);
+  Object.assign(error, { code });
+  return error;
 }
