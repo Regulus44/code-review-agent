@@ -316,6 +316,12 @@ Model and reasoning effort
 
 点击后在当前行下方展开 bounded detail；原始事件、source、request、response、schema 等放到轨迹抽屉。错误行提供 `重试`、`停止`、`技术详情` 三个动作，但动作可用性必须由 host capability 和当前状态决定。
 
+当前实现已将这一条提升为最高优先级的交互约束：同一轮中的工具、Job、Terminal、LSP、MCP 以及权限/交互请求统一进入一个 `Agent activity` 活动组。活动组使用原生 `<details>`，默认折叠，摘要只显示项目数量、运行中数量和待处理审批数量；存在待处理审批或交互时自动展开，用户仍可手动收起。折叠后明细不占用对话尾部空间，操作按钮保持可见，命令、workspace、expiresAt、输入 JSON 等技术信息只有在点击 `Details` 后才显示。
+
+兼容旧事件回放的 fallback renderer 也遵循同一规则：工具生命周期、Job/Terminal、LSP/MCP 和 patch 预览不再逐条追加到主对话，而是进入活动组；主对话仅保留用户、助手、错误、附件、计划、任务和目标等结果导向摘要。`context/compacted`、`queue/changed` 等内部事件继续保留在轨迹/详情视图，不污染 Conversation。
+
+当前“轨迹”Tab 是轻量诊断雏形，用于承载原始事件和 bounded inspector；后续可在不改变 Conversation 规则的前提下扩展筛选、时间线和事件详情。
+
 ### 5.6 对话 / 轨迹 Tab
 
 - `对话`：面向工作结果，显示 user/assistant、工具摘要、权限请求、任务折叠条；

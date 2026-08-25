@@ -165,6 +165,24 @@
       .connection-banner.warning { color: #8f5c13; background: #fff8e8; }
       .connection-banner.error { color: #a13c3c; background: #fff0f0; }
       .connection-banner-message { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .session-view-tabs { display: flex; align-items: center; gap: 3px; min-height: 37px; padding: 0 22px; border-bottom: 1px solid var(--border); background: var(--surface); }
+      .session-view-tab { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 9px; border-radius: 7px; color: var(--text-tertiary); background: transparent; font-size: 11px; font-weight: 600; }
+      .session-view-tab:hover { color: var(--text); background: var(--surface-hover); }
+      .session-view-tab[aria-selected="true"] { color: var(--blue); background: var(--blue-soft); }
+      .session-view-tab-count { color: var(--text-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+      .session-view-tab[aria-selected="true"] .session-view-tab-count { color: var(--blue); }
+      .main-trajectory { width: min(860px, calc(100% - 40px)); margin: 0 auto; padding: 22px 0 28px; }
+      .main-trajectory-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+      .main-trajectory-title { color: var(--text); font-size: 14px; font-weight: 650; }
+      .main-trajectory-meta { color: var(--text-tertiary); font-size: 10px; }
+      .main-trajectory-controls { display: flex; align-items: center; gap: 7px; margin-bottom: 12px; }
+      .main-trajectory-controls .trajectory-search { flex: 1; }
+      .main-trajectory-open-details { flex: 0 0 auto; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-secondary); background: var(--surface); font-size: 10px; }
+      .main-trajectory-open-details:hover { color: var(--blue); border-color: rgba(65,118,230,.35); background: var(--blue-soft); }
+      .main-trajectory-timeline { display: grid; gap: 5px; padding: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+      .main-trajectory-inspector { margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+      .main-trajectory-inspector .trajectory-inspector-section:nth-child(n+4) { display: none; }
+      .main-trajectory-empty { padding: 36px 12px; color: var(--text-tertiary); text-align: center; font-size: 12px; }
       .connection-retry { flex: 0 0 auto; height: 26px; padding: 0 9px; border: 1px solid currentColor; border-radius: 7px; color: inherit; background: transparent; font-size: 10px; font-weight: 650; }
       .connection-retry:hover { background: rgba(255,255,255,.72); }
       .queue-dock { display: grid; gap: 7px; padding: 8px 22px; border-bottom: 1px solid var(--border); color: var(--text-secondary); background: rgba(255,255,255,.74); font-size: 11px; }
@@ -244,6 +262,33 @@
       .tool-details { display: none; padding: 0 12px 12px 43px; }
       .tool-row.open .tool-details { display: block; }
       .tool-details pre { margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary); font: 11px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
+      .tool-activity { margin: 12px 0 16px 40px; border: 1px solid var(--border); border-radius: 12px; background: rgba(255,255,255,.62); overflow: hidden; }
+      .tool-activity-summary { display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 9px 12px; color: var(--text-secondary); cursor: pointer; list-style: none; }
+      .tool-activity-summary::-webkit-details-marker { display: none; }
+      .tool-activity-summary::before { content: "⌘"; display: grid; place-items: center; flex: 0 0 22px; width: 22px; height: 22px; border-radius: 7px; color: var(--blue); background: var(--blue-soft); font-size: 11px; }
+      .tool-activity-summary:hover { background: var(--surface-hover); }
+      .tool-activity-title { min-width: 0; flex: 1; color: var(--text); font-size: 12px; font-weight: 650; }
+      .tool-activity-meta { color: var(--text-tertiary); font-size: 11px; }
+      .tool-activity-chevron { color: var(--text-tertiary); transition: transform .15s var(--ease); }
+      .tool-activity[open] .tool-activity-chevron { transform: rotate(180deg); }
+      .tool-activity-items { display: grid; gap: 8px; padding: 0 10px 10px; }
+      .tool-activity:not([open]) .tool-activity-items { display: none; }
+      .tool-activity-items .tool-row { margin: 0; border-radius: 9px; background: var(--surface); }
+      .tool-activity-items .permission-card, .tool-activity-items .interaction-card { margin: 0; }
+      .tool-activity[data-state="running"] .tool-activity-title { color: var(--blue); }
+      .tool-activity[data-state="attention"] .tool-activity-title { color: #8f5c13; }
+      .permission-card { position: relative; }
+      .permission-summary-row, .interaction-summary-row { display: flex; align-items: center; gap: 9px; min-height: 28px; cursor: pointer; list-style: none; }
+      .permission-summary-row::-webkit-details-marker, .interaction-summary-row::-webkit-details-marker { display: none; }
+      .permission-summary-row::after, .interaction-summary-row::after { content: "Details"; flex: 0 0 auto; padding: 3px 6px; color: var(--text-tertiary); font-size: 11px; }
+      .permission-card[open] .permission-summary-row::after, .interaction-card[open] .interaction-summary-row::after { content: "Hide details"; }
+      .permission-summary-row strong, .interaction-summary-row strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .permission-toggle, .interaction-toggle { flex: 0 0 auto; padding: 3px 6px; color: var(--text-tertiary); background: transparent; font-size: 11px; }
+      .permission-toggle:hover, .interaction-toggle:hover { color: var(--text); background: rgba(31,35,41,.06); }
+      .permission-detail, .interaction-detail { display: none; margin-top: 8px; }
+      .permission-card[open] .permission-detail, .interaction-card[open] .interaction-detail { display: block; }
+      .permission-card .permission-detail pre, .interaction-card .interaction-detail pre { margin-top: 0; }
+      .permission-card .permission-actions, .interaction-card .permission-actions { margin-top: 10px; }
       .permission-card { margin: 12px 0 16px 40px; padding: 13px; border: 1px solid rgba(199,131,39,.28); border-radius: 13px; background: #fffaf0; }
       .permission-card.resolved, .interaction-card.resolved { opacity: .76; }
       .permission-card.expired, .interaction-card.expired { border-color: rgba(179,72,72,.28); background: #fff5f5; }
@@ -326,6 +371,7 @@
       .planning-list { display: grid; gap: 4px; margin: 4px 0 8px; padding-left: 16px; color: var(--text-secondary); font-size: 11px; }
       .planning-actions { display: flex; gap: 6px; margin: 6px 0 8px; }
       .goal-bar { display: flex; align-items: center; gap: 12px; margin: 12px auto 0; padding: 9px 12px; width: min(100% - 40px, 748px); border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+      .goal-bar[hidden] { display: none; }
       .goal-bar-copy { min-width: 0; flex: 1; }
       .goal-bar-title { display: block; overflow: hidden; color: var(--text); font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
       .goal-bar-meta { display: block; margin-top: 3px; overflow: hidden; color: var(--text-secondary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
@@ -534,6 +580,7 @@
         .app-shell.sidebar-collapsed.details-collapsed { grid-template-columns: 1fr 0 0; }
         .sidebar, .details-panel { display: none; }
         .workspace-header { height: 54px; }
+        .session-view-tabs { padding-inline: 12px; }
         .conversation-body { width: min(100% - 24px, 748px); padding-top: 20px; }
         .hero { padding: 5vh 0 28vh; }
         .composer-shell { padding: 0 10px 10px; }
@@ -541,6 +588,8 @@
         .context-meter { display: none; }
         .model-trigger { max-width: 150px; }
         .model-popover { right: 43px; bottom: 74px; }
+        .main-trajectory { width: min(100% - 24px, 860px); padding-top: 16px; }
+        .main-trajectory-header { align-items: flex-start; flex-direction: column; gap: 3px; }
         .app-shell.mobile-sidebar-open { grid-template-columns: minmax(250px, 86vw) 4px minmax(0, 1fr); }
         .app-shell.mobile-sidebar-open .sidebar { display: flex; }
         .app-shell.mobile-sidebar-open .workspace { visibility: hidden; }
@@ -580,6 +629,10 @@
           <span id="status" class="connection-state disconnected" role="status" aria-live="polite">Connecting…</span>
           <button id="details-toggle" class="icon-button details-toggle" type="button" aria-label="Open details panel" aria-controls="details-panel" aria-expanded="false">☷</button>
         </header>
+        <nav id="session-view-tabs" class="session-view-tabs" aria-label="Session view">
+          <button id="conversation-view-tab" class="session-view-tab" type="button" role="tab" aria-selected="true" aria-controls="conversation" tabindex="0">Conversation</button>
+          <button id="trajectory-view-tab" class="session-view-tab" type="button" role="tab" aria-selected="false" aria-controls="conversation" tabindex="-1">Trajectory <span id="trajectory-view-count" class="session-view-tab-count">0</span></button>
+        </nav>
         <div id="connection-banner" class="connection-banner" role="status" aria-live="polite" hidden><span id="connection-banner-message" class="connection-banner-message"></span><button id="connection-retry" class="connection-retry" type="button" hidden>Retry</button></div>
         <section id="queue-dock" class="queue-dock" aria-label="Queued messages" hidden></section>
         <section id="goal-bar" class="goal-bar" aria-label="Current goal" hidden></section>
@@ -656,7 +709,7 @@
       (() => {
         const typedRuntime = window.CodeReviewAgentWeb;
         const typedConnection = typedRuntime?.connection || null;
-        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, reasoningEffort: 'default', stoppingTurnId: null, workspaces: null, lastWorkspaceOrderSequence: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 252, details: 'closed', mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', workspaceViewMode: 'tree', workspaceSort: 'recent', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
+        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, reasoningEffort: 'default', stoppingTurnId: null, workspaces: null, lastWorkspaceOrderSequence: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 252, details: 'closed', mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', workspaceViewMode: 'tree', workspaceSort: 'recent', sidebarSessions: [], sessionView: 'conversation', trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
         let usageDrawerOpen = false;
         let modelMenuPane = 'root';
         const app = document.querySelector('#app');
@@ -690,6 +743,9 @@
         const usageMeter = document.querySelector('#usage-meter');
         const usageDrawer = document.querySelector('#usage-drawer');
         const sidebarResizer = document.querySelector('#sidebar-resizer');
+        const conversationViewTab = document.querySelector('#conversation-view-tab');
+        const trajectoryViewTab = document.querySelector('#trajectory-view-tab');
+        const trajectoryViewCount = document.querySelector('#trajectory-view-count');
          const renameTitle = document.querySelector('#rename-title');
          const renameDescription = document.querySelector('#rename-description');
          const renameLabel = document.querySelector('label[for="rename-input"]');
@@ -973,18 +1029,43 @@
         };
         const setMessageContent = (body, content) => { const value = String(content ?? ''); body.dataset.rawContent = value; if (body.classList.contains('markdown')) body.innerHTML = renderMarkdown(value); else body.textContent = value; };
         const appendMessage = (parent, role, content) => { const row = document.createElement('div'); row.className = `message ${role}`; const avatar = document.createElement('div'); avatar.className = 'avatar'; avatar.textContent = role === 'user' ? 'You' : 'AI'; const body = document.createElement('div'); body.className = `message-body ${role === 'assistant' ? 'markdown' : ''}`; setMessageContent(body, content); row.append(avatar, body); parent.append(row); return body; };
+        const createToolActivity = (parent) => {
+          const group = document.createElement('details'); group.className = 'tool-activity'; group.dataset.state = 'completed';
+          const summary = document.createElement('summary'); summary.className = 'tool-activity-summary';
+          const title = document.createElement('span'); title.className = 'tool-activity-title';
+          const meta = document.createElement('span'); meta.className = 'tool-activity-meta';
+          const chevron = document.createElement('span'); chevron.className = 'tool-activity-chevron'; chevron.textContent = '⌄';
+          summary.append(title, meta, chevron);
+          const items = document.createElement('div'); items.className = 'tool-activity-items';
+          group.append(summary, items); parent.append(group);
+          const update = () => {
+            const rows = [...items.querySelectorAll('.tool-row')];
+            const permissions = [...items.querySelectorAll('.permission-card, .interaction-card')];
+            const running = rows.filter((row) => /running|pending|awaiting/i.test(row.querySelector('.tool-status')?.textContent || '')).length;
+            const attention = permissions.filter((row) => !row.classList.contains('resolved') && !row.classList.contains('expired')).length;
+            const total = rows.length + permissions.length;
+            group.dataset.state = attention ? 'attention' : running ? 'running' : 'completed';
+            title.textContent = attention ? 'Agent activity · approval required' : 'Agent activity';
+            meta.textContent = `${total} item${total === 1 ? '' : 's'}${running ? ` · ${running} running` : ''}${attention ? ` · ${attention} needs review` : ''}`;
+          };
+          update();
+          return { group, items, update };
+        };
         const appendTool = (parent, name, text, statusText = 'Completed') => { const row = document.createElement('div'); row.className = 'tool-row'; const summary = document.createElement('button'); summary.className = 'tool-summary'; summary.type = 'button'; const icon = document.createElement('span'); icon.className = 'tool-icon'; icon.textContent = '⌘'; const heading = document.createElement('span'); heading.className = 'tool-title'; const source = state.tools.get(name)?.source; heading.textContent = source?.kind === 'mcp' ? `MCP · ${source.serverName} · ${source.rawName}` : `Tool · ${name}`; const toolStatus = document.createElement('span'); toolStatus.className = 'tool-status'; toolStatus.textContent = statusText; const chevron = document.createElement('span'); chevron.className = 'tool-chevron'; chevron.textContent = '⌄'; const details = document.createElement('div'); details.className = 'tool-details'; const pre = document.createElement('pre'); pre.textContent = text; details.append(pre); summary.append(icon, heading, toolStatus, chevron); summary.onclick = () => row.classList.toggle('open'); row.append(summary, details); parent.append(row); return { row, heading, toolStatus, pre }; };
         const appendPermission = (parent, payload) => {
           const status = payload.displayStatus || payload.status || 'pending';
           const interactive = payload.interactive === undefined ? status === 'pending' : payload.interactive === true;
           const recovery = payload.recovery || 'none';
-          const row = document.createElement('div');
+          const row = document.createElement('details');
           row.className = `permission-card ${status !== 'pending' ? 'resolved' : ''} ${status === 'expired' ? 'expired' : ''} ${recovery === 'restored' ? 'recovery' : ''}`;
+          const summaryRow = document.createElement('summary'); summaryRow.className = 'permission-summary-row';
           const heading = document.createElement('strong');
           heading.textContent = payload.summary || `${status !== 'pending' ? `Permission ${status}` : 'Approval required'} · ${payload.toolName || 'tool'}`;
+          summaryRow.append(heading);
+          const detail = document.createElement('div'); detail.className = 'permission-detail';
           const body = document.createElement('pre');
           body.textContent = payload.details || `${payload.reason || 'This tool needs permission'}\ncaller: ${payload.caller || 'agent'}\nworkspace: ${payload.workspaceRoot || state.session?.workspaceRoot || '.'}\nexpires: ${payload.expiresAt || 'unknown'}\n${JSON.stringify(payload.input || {}, null, 2)}`;
-          row.append(heading, body);
+          detail.append(body); row.append(summaryRow, detail);
           if (payload.recoveryLabel) { const note = document.createElement('span'); note.className = 'request-recovery'; note.textContent = payload.recoveryLabel; row.append(note); }
           const actions = document.createElement('div'); actions.className = 'permission-actions';
           if (interactive) {
@@ -1000,11 +1081,14 @@
           const status = payload.displayStatus || payload.status || 'pending';
           const interactive = payload.interactive === undefined ? status === 'pending' : payload.interactive === true;
           const recovery = payload.recovery || 'none';
-          const row = document.createElement('div');
+          const row = document.createElement('details');
           row.className = `interaction-card ${status !== 'pending' ? 'resolved' : ''} ${status === 'expired' ? 'expired' : ''} ${recovery === 'restored' ? 'recovery' : ''}`;
+          const summaryRow = document.createElement('summary'); summaryRow.className = 'interaction-summary-row';
           const heading = document.createElement('strong'); heading.textContent = payload.summary || `${status !== 'pending' ? `Interaction ${status}` : 'Agent needs your input'}`;
+          summaryRow.append(heading);
+          const detail = document.createElement('div'); detail.className = 'interaction-detail';
           const body = document.createElement('pre'); body.textContent = payload.details || `${payload.question || 'Question'}\ncaller: ${payload.caller || 'agent'}\nexpires: ${payload.expiresAt || 'unknown'}${payload.answer ? `\nanswer: ${payload.answer}` : ''}`;
-          row.append(heading, body);
+          detail.append(body); row.append(summaryRow, detail);
           if (payload.recoveryLabel) { const note = document.createElement('span'); note.className = 'request-recovery'; note.textContent = payload.recoveryLabel; row.append(note); }
           const actions = document.createElement('div'); actions.className = 'permission-actions';
           if (interactive) {
@@ -1018,9 +1102,9 @@
           if (!projection || !Array.isArray(projection.nodes) || projection.nodes.length === 0) return false;
           const assistant = new Map();
           const toolRows = new Map();
+          let toolActivity = null;
+          const ensureToolActivity = () => { if (!toolActivity) toolActivity = createToolActivity(body); return toolActivity; };
           const toolTreeNodes = new Map((snapshot?.toolCallTree?.nodes || []).map((node) => [node.call.id, node]));
-          const trajectory = snapshot?.trajectory;
-          if (trajectory?.records?.length) { const row = document.createElement('div'); row.className = 'event-row trajectory-summary'; const running = trajectory.records.filter((record) => record.running).length; row.textContent = `Trajectory · ${trajectory.records.length} records · ${running} running · seq ${trajectory.lastSequence}`; body.append(row); }
           const upsertTool = (tool) => {
             const key = tool.id || `tool-${toolRows.size}`;
             const payload = { input: tool.input, result: tool.result, progress: tool.progress };
@@ -1028,11 +1112,12 @@
             let card = toolRows.get(key);
             const text = intent?.details || JSON.stringify(payload, null, 2);
             const statusText = intent?.summary || tool.status || 'unknown';
-            if (!card) { card = appendTool(body, tool.name || 'tool', text, statusText); toolRows.set(key, card); }
+            if (!card) { card = appendTool(ensureToolActivity().items, tool.name || 'tool', text, statusText); toolRows.set(key, card); }
             else { card.toolStatus.textContent = statusText; card.pre.textContent = text; }
             if (intent) card.heading.textContent = `${intent.sourceLabel} · ${intent.title}`;
             const treeNode = toolTreeNodes.get(tool.id);
-            if (treeNode) { card.row.style.marginLeft = `${40 + treeNode.depth * 18}px`; if (treeNode.warning) card.toolStatus.textContent = `${statusText} · ${treeNode.warning}`; }
+            if (treeNode) { card.row.style.marginLeft = `${treeNode.depth * 18}px`; if (treeNode.warning) card.toolStatus.textContent = `${statusText} · ${treeNode.warning}`; }
+            toolActivity?.update();
           };
           for (const node of projection.nodes) {
             if (node.kind === 'user') appendMessage(body, 'user', node.content || '');
@@ -1047,14 +1132,25 @@
             } else if (node.kind === 'tool') upsertTool(node.tool);
             else if (node.kind === 'permission') {
               const intent = typedRuntime?.presentPermission ? typedRuntime.presentPermission(node, { sessionStatus: snapshot?.session?.status, connection: snapshot?.connection }) : null;
-              appendPermission(body, { permissionId: node.permissionId, toolCallId: node.toolCallId, toolName: node.toolName, status: node.status, displayStatus: intent?.status, summary: intent?.summary, recovery: intent?.recovery, recoveryLabel: intent?.recoveryLabel, interactive: intent?.interactive, details: intent?.details?.text, reason: node.reason, caller: node.caller, workspaceRoot: node.workspaceRoot, expiresAt: node.expiresAt, input: node.input });
+              const permissionActivity = ensureToolActivity();
+              appendPermission(permissionActivity.items, { permissionId: node.permissionId, toolCallId: node.toolCallId, toolName: node.toolName, status: node.status, displayStatus: intent?.status, summary: intent?.summary, recovery: intent?.recovery, recoveryLabel: intent?.recoveryLabel, interactive: intent?.interactive, details: intent?.details?.text, reason: node.reason, caller: node.caller, workspaceRoot: node.workspaceRoot, expiresAt: node.expiresAt, input: node.input });
+              if (node.status === 'pending' || intent?.status === 'pending') permissionActivity.group.open = true;
+              permissionActivity.update();
             }
             else if (node.kind === 'interaction') {
               const intent = typedRuntime?.presentInteraction ? typedRuntime.presentInteraction(node, { sessionStatus: snapshot?.session?.status, connection: snapshot?.connection }) : null;
-              appendInteraction(body, { interactionId: node.interactionId, toolCallId: node.toolCallId, question: node.question, options: node.options, status: node.status, displayStatus: intent?.status, summary: intent?.summary, recovery: intent?.recovery, recoveryLabel: intent?.recoveryLabel, interactive: intent?.interactive, details: intent?.details?.text, caller: node.caller, expiresAt: node.expiresAt, allowFreeform: node.allowFreeform, answer: node.answer });
+              const interactionActivity = ensureToolActivity();
+              appendInteraction(interactionActivity.items, { interactionId: node.interactionId, toolCallId: node.toolCallId, question: node.question, options: node.options, status: node.status, displayStatus: intent?.status, summary: intent?.summary, recovery: intent?.recovery, recoveryLabel: intent?.recoveryLabel, interactive: intent?.interactive, details: intent?.details?.text, caller: node.caller, expiresAt: node.expiresAt, allowFreeform: node.allowFreeform, answer: node.answer });
+              if (node.status === 'pending' || intent?.status === 'pending') interactionActivity.group.open = true;
+              interactionActivity.update();
             }
             else if (node.kind === 'task') addEventRow(body, `Task · ${node.title || node.taskId} · ${node.status}${node.summary ? ` · ${node.summary}` : ''}`);
-            else if (node.kind === 'event' && node.eventType !== 'session/created') { const payload = node.payload || {}; const attachment = node.eventType === 'attachment/received' || node.eventType === 'attachment/rejected'; addEventRow(body, attachment ? `Attachment · ${payload.fileName || 'file'} · ${payload.status || 'unknown'}${payload.reason ? ` · ${payload.reason}` : ''}` : `${node.eventType} · ${node.key}`); }
+            else if (node.kind === 'event') {
+              const visible = new Set(['attachment/received', 'attachment/rejected', 'plan/updated', 'todo/updated', 'goal/created', 'goal/updated', 'goal/ended', 'patch/applied', 'patch/rejected', 'patch/rolled_back', 'agent/error']);
+              if (!visible.has(node.eventType)) continue;
+              const payload = node.payload || {}; const attachment = node.eventType === 'attachment/received' || node.eventType === 'attachment/rejected';
+              addEventRow(body, attachment ? `Attachment · ${payload.fileName || 'file'} · ${payload.status || 'unknown'}${payload.reason ? ` · ${payload.reason}` : ''}` : `${node.eventType} · ${node.key}`);
+            }
           }
           return body.childNodes.length > 0;
         };
@@ -1167,6 +1263,58 @@
               row.append(entryLabel, entryValue); sectionView.append(row);
             }
             inspector.append(sectionView);
+          }
+        };
+        const renderMainTrajectory = (projection, body, snapshot) => {
+          body.className = 'main-trajectory';
+          body.innerHTML = '';
+          const header = document.createElement('div'); header.className = 'main-trajectory-header';
+          const heading = document.createElement('strong'); heading.className = 'main-trajectory-title'; heading.textContent = 'Execution trajectory';
+          const meta = document.createElement('span'); meta.className = 'main-trajectory-meta'; header.append(heading, meta); body.append(header);
+          const controls = document.createElement('div'); controls.className = 'main-trajectory-controls';
+          const search = document.createElement('input'); search.className = 'trajectory-search'; search.type = 'search'; search.placeholder = 'Filter records'; search.setAttribute('aria-label', 'Filter trajectory records'); search.value = state.trajectoryQuery || '';
+          const running = document.createElement('label'); running.className = 'trajectory-running'; const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.checked = state.trajectoryRunningOnly === true; checkbox.setAttribute('aria-label', 'Show running records only'); running.append(checkbox, document.createTextNode('Running'));
+          const openDetails = document.createElement('button'); openDetails.type = 'button'; openDetails.className = 'main-trajectory-open-details'; openDetails.textContent = 'Open details'; openDetails.onclick = () => { dispatchShellLayout({ type: 'open-details' }); renderTrajectoryPanel(typedConnection?.store.getSnapshot()?.trajectory); details.querySelector('#trajectory-inspector-panel')?.scrollIntoView({ block: 'start' }); };
+          controls.append(search, running, openDetails); body.append(controls);
+          if (!projection || !typedRuntime?.queryTrajectory) { meta.textContent = 'Projection unavailable'; const empty = document.createElement('div'); empty.className = 'main-trajectory-empty'; empty.textContent = 'Trajectory data will appear after the session receives events.'; body.append(empty); return; }
+          const view = typedRuntime.queryTrajectory(projection, { query: state.trajectoryQuery || '', runningOnly: state.trajectoryRunningOnly === true, limit: 200 });
+          meta.textContent = `${view.matchedRecords} matched · ${view.records.length} shown · sequence ${view.lastSequence}${view.truncated ? ' · more available' : ''}`;
+          search.addEventListener('input', () => { state.trajectoryQuery = search.value; render(); });
+          checkbox.addEventListener('change', () => { state.trajectoryRunningOnly = checkbox.checked; render(); });
+          if (!view.records.length) { const empty = document.createElement('div'); empty.className = 'main-trajectory-empty'; empty.textContent = state.trajectoryQuery || state.trajectoryRunningOnly ? 'No trajectory records match this filter.' : 'No trajectory records yet.'; body.append(empty); return; }
+          const selected = view.records.find((record) => record.key === state.trajectorySelectedKey) || view.records[0];
+          state.trajectorySelectedKey = selected.key;
+          const timeline = document.createElement('div'); timeline.className = 'main-trajectory-timeline'; body.append(timeline);
+          const timelineView = typedRuntime.buildTrajectoryTimeline?.(view.records, 200);
+          if (timelineView) {
+            const timelineHeader = document.createElement('div'); timelineHeader.className = 'trajectory-timeline-header'; const timelineLabel = document.createElement('span'); timelineLabel.textContent = 'Timeline'; const timelineMeta = document.createElement('span'); timelineMeta.textContent = timelineView.spanMs === undefined ? 'recorded time unavailable' : `${timelineView.spanMs}ms span`; timelineHeader.append(timelineLabel, timelineMeta); timeline.append(timelineHeader);
+            for (const row of timelineView.rows) {
+              const item = document.createElement('details'); item.className = `trajectory-timeline-row ${row.running ? 'running' : ''}`; item.style.setProperty('--timeline-depth', String(row.depth)); item.open = !state.trajectoryCollapsedRecords.has(row.key);
+              item.addEventListener('toggle', () => { if (item.open) state.trajectoryCollapsedRecords.delete(row.key); else state.trajectoryCollapsedRecords.add(row.key); });
+              const summary = document.createElement('summary'); summary.className = 'trajectory-timeline-summary'; summary.onclick = () => { state.trajectorySelectedKey = row.key; render(); };
+              const kind = document.createElement('span'); kind.className = 'trajectory-timeline-kind'; kind.textContent = row.kind; const label = document.createElement('span'); label.className = 'trajectory-timeline-label'; label.textContent = row.label; const status = document.createElement('span'); status.className = 'trajectory-timeline-status'; status.textContent = `${row.status} · seq ${row.sourceSeq}`; summary.append(kind, label, status);
+              const bar = document.createElement('div'); bar.className = 'trajectory-timeline-bar'; const fill = document.createElement('span'); fill.style.width = `${row.widthPercent ?? (row.running ? 24 : 3)}%`; bar.append(fill);
+              const detail = document.createElement('div'); detail.className = 'trajectory-timeline-detail'; detail.textContent = `${row.timing} · ${row.durationMs === undefined ? 'duration unknown' : `${row.durationMs}ms`} · last seq ${row.lastSeq}`; item.append(summary, bar, detail); timeline.append(item);
+            }
+          }
+          const inspector = document.createElement('div'); inspector.className = 'main-trajectory-inspector';
+          if (typedRuntime.inspectTrajectory) {
+            const inspectorView = typedRuntime.inspectTrajectory(selected); const inspectorTitle = document.createElement('div'); inspectorTitle.className = 'trajectory-inspector-title'; inspectorTitle.textContent = inspectorView.title; inspector.append(inspectorTitle);
+            for (const sectionData of inspectorView.sections.slice(0, 3)) {
+              const section = document.createElement('div'); section.className = 'trajectory-inspector-section'; const sectionTitle = document.createElement('div'); sectionTitle.className = 'trajectory-inspector-section-title'; sectionTitle.textContent = sectionData.title; section.append(sectionTitle);
+              for (const entry of sectionData.entries) { const row = document.createElement('div'); row.className = 'trajectory-inspector-entry'; const label = document.createElement('span'); label.className = 'trajectory-inspector-entry-label'; label.textContent = entry.label; const value = document.createElement('span'); value.className = 'trajectory-inspector-entry-value'; value.textContent = entry.value; row.append(label, value); section.append(row); }
+              inspector.append(section);
+            }
+          }
+          body.append(inspector);
+        };
+        const renderViewTabs = (snapshot) => {
+          const trajectoryCount = snapshot?.trajectory?.records?.length || 0;
+          if (trajectoryViewCount) trajectoryViewCount.textContent = String(trajectoryCount);
+          for (const [button, active] of [[conversationViewTab, state.sessionView === 'conversation'], [trajectoryViewTab, state.sessionView === 'trajectory']]) {
+            if (!button) continue;
+            button.setAttribute('aria-selected', String(active));
+            button.tabIndex = active ? 0 : -1;
           }
         };
         const renderGoalBar = (snapshot) => {
@@ -1628,6 +1776,23 @@
           renderGoalBar(typedSnapshot || { session: state.session });
           renderContextMeter(typedSnapshot || { session: state.session });
           renderUsageMeter(typedSnapshot || { session: state.session });
+          renderViewTabs(typedSnapshot);
+          if (state.sessionView === 'trajectory') {
+            const trajectoryBody = document.createElement('div');
+            conversation.append(trajectoryBody);
+            renderMainTrajectory(typedSnapshot?.trajectory, trajectoryBody, typedSnapshot);
+            renderDetails();
+            renderTrajectoryPanel(typedSnapshot?.trajectory);
+            renderTaskPanel(typedSnapshot);
+            renderDeliverablesPanel(typedSnapshot);
+            renderMcpDetailsPanel();
+            renderRequestRecoveryPanel(typedSnapshot);
+            renderRuntimeDiagnosticsPanel(typedSnapshot);
+            renderWorktreePanel(typedSnapshot);
+            renderPlanningPanel(typedSnapshot);
+            requestAnimationFrame(() => { if (shouldFollowTail) conversation.scrollTop = conversation.scrollHeight; });
+            return;
+          }
           const typedProjection = typedSnapshot?.conversation;
           if (typedProjection && typedProjection.nodes.length > 0) {
             const typedBody = document.createElement('div');
@@ -1654,7 +1819,9 @@
           if (!hasMessage && !hasActivity) { const hero = document.createElement('div'); hero.className = 'hero'; hero.innerHTML = `<div class="hero-inner"><div class="hero-mark">⌁</div><h1>Ready to review your code</h1><p>Ask the agent to inspect a repository, explain a file, or plan the next change.</p><span class="workspace-chip">${esc(state.session?.workspaceRoot || '.')}</span></div>`; conversation.append(hero); }
           else {
             const body = document.createElement('div'); body.className = 'conversation-body'; conversation.append(body); const assistant = new Map(); const permissions = new Map(); const interactions = new Map(); const toolRows = new Map();
-            const upsertTool = (id, name, text, statusText) => { const key = id || `${name}-${toolRows.size}`; let card = toolRows.get(key); if (!card) { card = appendTool(body, name || 'tool', text, statusText); toolRows.set(key, card); } else { card.toolStatus.textContent = statusText; card.pre.textContent = text; } return card; };
+            let toolActivity = null;
+            const ensureToolActivity = () => { if (!toolActivity) toolActivity = createToolActivity(body); return toolActivity; };
+            const upsertTool = (id, name, text, statusText) => { const key = id || `${name}-${toolRows.size}`; let card = toolRows.get(key); if (!card) { card = appendTool(ensureToolActivity().items, name || 'tool', text, statusText); toolRows.set(key, card); } else { card.toolStatus.textContent = statusText; card.pre.textContent = text; } toolActivity?.update(); return card; };
             for (const event of ordered) {
               if (event.type === 'user/message' || event.type === 'turn/steered') appendMessage(body, 'user', event.payload?.content || '');
               else if (event.type === 'attachment/received' || event.type === 'attachment/rejected') addEventRow(body, `Attachment · ${event.payload?.fileName || 'file'} · ${event.payload?.status || 'unknown'}${event.payload?.reason ? ` · ${event.payload.reason}` : ''}`);
@@ -1672,21 +1839,16 @@
               else if (event.type === 'plan/updated') addEventRow(body, `Plan · ${event.payload?.status || 'updated'}${event.payload?.content ? ` · ${event.payload.content}` : ''}`);
               else if (event.type === 'todo/updated') addEventRow(body, `Todo list · ${Array.isArray(event.payload?.todos) ? event.payload.todos.length : 0} item(s)`);
               else if (event.type === 'goal/created' || event.type === 'goal/updated' || event.type === 'goal/ended') addEventRow(body, `Goal · ${event.payload?.title || event.payload?.goalId || 'goal'} · ${event.payload?.status || event.type}`);
-              else if (event.type === 'job/started' || event.type === 'job/output' || event.type === 'job/ended') addEventRow(body, `Job · ${event.payload?.jobId || 'job'} · ${event.payload?.status || event.payload?.stream || event.type}`);
-              else if (event.type === 'terminal/session') addEventRow(body, `Terminal · ${event.payload?.terminalId || 'terminal'} · ${event.payload?.status || event.payload?.action || 'updated'}`);
+              else if (event.type === 'job/started' || event.type === 'job/output' || event.type === 'job/ended') { const payload = event.payload || {}; upsertTool(`job-${payload.jobId || event.sequence}`, 'job', `${payload.command || payload.stream || 'job'}${payload.text ? `\n${payload.text}` : ''}`, payload.status || (event.type === 'job/started' ? 'Running' : event.type === 'job/ended' ? 'Completed' : 'Output')); }
+              else if (event.type === 'terminal/session') { const payload = event.payload || {}; upsertTool(`terminal-${payload.terminalId || event.sequence}`, 'terminal', JSON.stringify(payload, null, 2), payload.status || payload.action || 'Updated'); }
               else if (event.type === 'diff/preview') upsertTool(`diff-${event.sequence}`, 'diff', JSON.stringify(event.payload?.diff || {}, null, 2), 'Preview');
               else if (event.type === 'patch/preview') { const payload = event.payload || {}; upsertTool(`patch-${payload.patchId || event.sequence}`, 'apply_patch', JSON.stringify({ patchId: payload.patchId, dryRun: payload.dryRun, files: payload.files || [] }, null, 2), payload.dryRun ? 'Preview' : 'Prepared'); }
               else if (event.type === 'patch/applied' || event.type === 'patch/rejected' || event.type === 'patch/rolled_back') { const payload = event.payload || {}; addEventRow(body, `Patch · ${payload.patchId || 'patch'} · ${event.type.split('/')[1]}`); }
-              else if (event.type === 'lsp/server') addEventRow(body, `LSP server · ${event.payload?.serverId || 'server'} · ${event.payload?.action || 'updated'}`);
-              else if (event.type === 'lsp/request') addEventRow(body, `LSP request · ${event.payload?.method || 'request'} · ${event.payload?.action || 'updated'}`);
-              else if (event.type === 'mcp/server') addEventRow(body, `MCP ${event.payload?.serverName || 'server'} · ${event.payload?.status || 'updated'}`);
-              else if (event.type === 'mcp/tool') addEventRow(body, `MCP tool · ${event.payload?.serverName || 'server'} · ${event.payload?.action || 'updated'}`);
-              else if (event.type === 'mcp/resource') addEventRow(body, `MCP resource · ${event.payload?.serverName || 'server'} · ${event.payload?.action || 'read'} · ${event.payload?.bytes || 0} bytes`);
-              else if (event.type === 'mcp/prompt') addEventRow(body, `MCP prompt · ${event.payload?.serverName || 'server'} · ${event.payload?.action || 'get'} · untrusted context`);
+              else if (event.type === 'lsp/server' || event.type === 'lsp/request' || event.type === 'mcp/server' || event.type === 'mcp/tool' || event.type === 'mcp/resource' || event.type === 'mcp/prompt') { const payload = event.payload || {}; const label = event.type.split('/')[0].toUpperCase(); const kind = event.type.split('/')[1]; upsertTool(`${event.type}-${payload.serverName || payload.serverId || payload.toolCallId || event.sequence}`, `${label} · ${kind}`, JSON.stringify(payload, null, 2), payload.status || payload.action || 'Updated'); }
               else if (event.type === 'agent/error') addEventRow(body, `Agent error · ${event.payload?.message || event.payload?.error || 'The agent reported an error.'}`);
             }
-            for (const permission of permissions.values()) appendPermission(body, permission);
-            for (const interaction of interactions.values()) appendInteraction(body, interaction);
+            for (const permission of permissions.values()) { const activity = ensureToolActivity(); appendPermission(activity.items, permission); if ((permission.displayStatus || permission.status) === 'pending') activity.group.open = true; activity.update(); }
+            for (const interaction of interactions.values()) { const activity = ensureToolActivity(); appendInteraction(activity.items, interaction); if ((interaction.displayStatus || interaction.status) === 'pending') activity.group.open = true; activity.update(); }
           }
           renderDetails();
           renderTrajectoryPanel(typedSnapshot?.trajectory);
@@ -1984,6 +2146,7 @@
         const openSession = async (id) => {
            dispatchShellLayout({ type: 'close-mobile-sidebar' });
           usageDrawerOpen = false;
+          state.sessionView = 'conversation';
           state.trajectoryQuery = ''; state.trajectoryRunningOnly = false; state.trajectorySelectedKey = null; state.trajectoryFollow = true; state.trajectoryCollapsedLanes.clear(); state.trajectoryCollapsedRecords.clear(); state.taskSelectedId = null;
           state.lastWorkspaceOrderSequence = 0;
           if (state.storeUnsubscribe) { state.storeUnsubscribe(); state.storeUnsubscribe = null; }
@@ -2062,6 +2225,16 @@
         workspaceModal.addEventListener('click', (event) => { if (event.target === workspaceModal) closeWorkspacePicker(); });
         workspaceForm.addEventListener('submit', async (event) => { event.preventDefault(); const workspaceRoot = workspaceInput.value.trim(); if (!workspaceRoot) { workspaceError.textContent = 'Enter a local folder path.'; return; } workspaceCreate.disabled = true; workspaceError.textContent = ''; try { await createSession(workspaceRoot); closeWorkspacePicker(); } catch (error) { workspaceError.textContent = error.message; } finally { workspaceCreate.disabled = false; } });
         mobileMenu.onclick = () => { const viewport = typedRuntime?.shellViewport ? typedRuntime.shellViewport(window.innerWidth) : window.innerWidth <= 900 ? 'tablet' : 'desktop'; dispatchShellLayout({ type: viewport === 'desktop' ? 'toggle-sidebar' : state.layout.mobileSidebarOpen ? 'close-mobile-sidebar' : 'open-mobile-sidebar' }); };
+        conversationViewTab.onclick = () => { state.sessionView = 'conversation'; render(); conversationViewTab.focus(); };
+        trajectoryViewTab.onclick = () => { state.sessionView = 'trajectory'; render(); trajectoryViewTab.focus(); };
+        document.querySelector('#session-view-tabs')?.addEventListener('keydown', (event) => {
+          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+          event.preventDefault();
+          const next = event.key === 'ArrowLeft' ? 'conversation' : 'trajectory';
+          state.sessionView = next;
+          render();
+          (next === 'conversation' ? conversationViewTab : trajectoryViewTab)?.focus();
+        });
         modelTrigger.onclick = () => {
           if (state.modelStatus === 'loading') return;
           modelMenuPane = 'root';
@@ -2073,7 +2246,15 @@
         usageMeter.onclick = () => { if (usageMeter.hidden) return; usageDrawerOpen = !usageDrawerOpen; renderUsageMeter(typedConnection?.store.getSnapshot() || { session: state.session }); };
         usageMeter.addEventListener('keydown', (event) => { if (event.key === 'Escape' && usageDrawerOpen) { event.preventDefault(); usageDrawerOpen = false; renderUsageMeter(typedConnection?.store.getSnapshot() || { session: state.session }); } });
         if (planToggle) planToggle.onclick = () => { if (state.layout.details === 'closed') dispatchShellLayout({ type: 'toggle-details' }); renderPlanningPanel(typedConnection?.store.getSnapshot() || { session: state.session }); };
-        document.addEventListener('click', (event) => { if (!modelPopover.hidden && !modelPopover.contains(event.target) && event.target !== modelTrigger) dispatchOverlay({ type: 'close', overlay: 'model-popover' }); if (!modePopover.hidden && !modePopover.contains(event.target) && event.target !== modeTrigger) dispatchOverlay({ type: 'close', overlay: 'mode-popover' }); if (!reasoningPopover.hidden && !reasoningPopover.contains(event.target) && event.target !== reasoningTrigger) dispatchOverlay({ type: 'close', overlay: 'reasoning-popover' }); if (!sessionMenu.hidden && !sessionMenu.contains(event.target)) closeSessionMenu(); });
+        document.addEventListener('click', (event) => {
+          const target = event.target?.closest?.('#trajectory-view-tab, #conversation-view-tab') || null;
+          if (target?.id === 'trajectory-view-tab') { state.sessionView = 'trajectory'; render(); trajectoryViewTab.focus(); return; }
+          if (target?.id === 'conversation-view-tab') { state.sessionView = 'conversation'; render(); conversationViewTab.focus(); return; }
+          if (!modelPopover.hidden && !modelPopover.contains(event.target) && event.target !== modelTrigger) dispatchOverlay({ type: 'close', overlay: 'model-popover' });
+          if (!modePopover.hidden && !modePopover.contains(event.target) && event.target !== modeTrigger) dispatchOverlay({ type: 'close', overlay: 'mode-popover' });
+          if (!reasoningPopover.hidden && !reasoningPopover.contains(event.target) && event.target !== reasoningTrigger) dispatchOverlay({ type: 'close', overlay: 'reasoning-popover' });
+          if (!sessionMenu.hidden && !sessionMenu.contains(event.target)) closeSessionMenu();
+        });
         input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 220)}px`; const snapshot = typedConnection?.store.getSnapshot(); const runningTurn = snapshot?.session?.turns.find((turn) => turn.status === 'running'); steer.hidden = runningTurn === undefined; steer.disabled = runningTurn === undefined || !input.value.trim(); renderComposerState(snapshot || { session: state.session }); });
         steer.addEventListener('click', async () => {
           const snapshot = typedConnection?.store.getSnapshot();
