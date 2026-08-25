@@ -154,6 +154,20 @@ M03 不实现 API round、message normalize、tool pairing、tool-result microco
 
 回滚策略：删除 M03 assembler 接入并回退到 M02 checkpoint；新增 section 类型和 `contextAssembly` 诊断字段均保持附加兼容，不要求旧事件迁移。
 
+## ADR-016：模型请求统一经过 API Round 与 Tool Pairing Gate
+
+状态：accepted（2026-08-26，M04）
+
+所有发送给 provider 的 model-visible messages 必须经过统一的 normalize → pairing → round grouping gate。API round 按 assistant `responseId` 分组，不按 user turn 切分；同一 response 的 streaming assistant chunks、tool calls 和 tool results 保持同一 round。旧事件没有 responseId 时继续兼容，并归入无 ID round。
+
+消息合法性提供 `repair` 与 `strict` 两种模式。Runtime 默认 `repair`：合并同 response 的 assistant chunks，规范化 tool id/name/arguments，移除 duplicate/orphan result，并为 missing result 插入有界 synthetic error result。`strict` 模式发现任何问题即拒绝本次模型请求，避免在安全敏感或调试场景下静默修复。
+
+repair 只改变 model-visible view，不删除或修改 EventStore transcript、工具审计结果或用户可见历史。实际修复追加 `context/messages_normalized` 和 `context/tool_pairing_repaired` 事件；`step/started` 记录 round 数量、issue codes、synthetic/removed 统计。事件不得包含完整工具输出、provider body、凭据或未脱敏 prompt。
+
+每个 model step 生成 `modelRequestId`，成功 assistant message 写入 `requestId` 与 `responseId`。Runtime 重启后从 EventStore 恢复 responseId，round grouping 不依赖进程内缓存。compact 后和每个 tool loop 下一步都必须重新执行 gate。
+
+M04 不包含 M05 工具结果 microcompact、provider cache edit、summary agent、compact boundary 或 overflow recovery。回滚时可退回 M03 assembly；新增字段和事件均采用兼容追加方式。
+
 ## 参考代码入口
 
 - DSH Agent Loop：`D:/Develop/deepseek-harness-fork/packages/core/agent-loop/src/agent.ts`

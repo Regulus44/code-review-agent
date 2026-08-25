@@ -23,3 +23,4 @@
 - [M01：Claude Code 式 Context Window 与 Auto-Compact Budget](m01-context-budget.zh-CN.md)
 - [M02：Claude Code 式 Token Estimation 与 Provider Exact Count](m02-token-estimation.zh-CN.md)
 - [M03：Claude Code 式 Context Assembly 与 System Prompt Sections](m03-context-assembly.zh-CN.md)
+- [M04：Claude Code 式 API Round、Message Normalize 与 Tool Pairing](m04-api-round-pairing.zh-CN.md)

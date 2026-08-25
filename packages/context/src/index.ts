@@ -8,6 +8,9 @@ import type {
 export {
   assembleContext,
 } from "./assembler.js";
+export { groupMessagesByApiRound } from "./api-round.js";
+export { normalizeMessagesForAPI } from "./api-normalize.js";
+export { ensureToolResultPairing } from "./tool-pairing.js";
 export {
   countContextTokens,
   createTokenCounter,
@@ -31,6 +34,22 @@ export type {
   SystemPromptSection,
   SystemPromptSectionPhase,
 } from "./assembler.js";
+export type {
+  ApiRound,
+} from "./api-round.js";
+export type {
+  MessageNormalizationIssue,
+  MessageNormalizationMode,
+  MessageNormalizationReport,
+  MessageNormalizationResult,
+} from "./api-normalize.js";
+export type {
+  ToolPairingIssue,
+  ToolPairingIssueCode,
+  ToolPairingMode,
+  ToolPairingReport,
+  ToolPairingResult,
+} from "./tool-pairing.js";
 
 export type {
   ContextBudgetConfig,

@@ -276,3 +276,21 @@ ID:
 改写部分：workspace、permission、EventStore、ToolRuntime、ChatMessage 和 token estimator 全部使用本项目 contract；M04 API round/tool pairing 与 M05 microcompact 不在本登记项范围内。
 
 新增测试：`packages/context/src/assembler.test.ts`、`packages/runtime/src/index.test.ts` 的 M03 assembly fingerprint/section metadata 场景。
+
+### CC-005
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`src/services/compact/grouping.ts`、`src/utils/messages.ts`、`src/query.ts`
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；本次没有复制 Claude Code 实现代码，只重新实现 API round、message normalize、tool pairing 和请求前 gate。
+
+本项目路径：`packages/context/src/api-round.ts`、`api-normalize.ts`、`tool-pairing.ts`、`packages/runtime/src/index.ts`
+
+范围：assistant response ID 分组、streaming assistant 合并、duplicate/orphan/missing tool pair 检测、repair/strict 策略、request/response identity 和诊断事件。
+
+改写部分：synthetic result、EventStore 事件、ChatMessage contract、ToolRuntime 权限和 provider request 使用本项目规则；M05 microcompact、provider cache edit 和 summary agent不在本登记项范围内。
+
+新增测试：`packages/context/src/api-round.test.ts`、`api-normalize.test.ts`、`tool-pairing.test.ts`、`packages/runtime/src/index.test.ts` 的 M04 gate 场景。

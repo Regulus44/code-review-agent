@@ -38,7 +38,7 @@ import {
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { compactMessages, DEFAULT_CONTEXT_BUDGET, type ContextBudget } from "@code-review-agent/compaction";
-import { assembleContext, calculateContextWarningState, countContextTokens, createTokenCounter, estimateContextTokens, fallbackModelContextCapability, resolveContextBudget, shouldCompactBeforeRequest, shouldUseExactTokenCount, type ContextAssembly, type ContextBudgetConfig, type ModelContextView, type TokenCount } from "@code-review-agent/context";
+import { assembleContext, calculateContextWarningState, countContextTokens, createTokenCounter, ensureToolResultPairing, estimateContextTokens, fallbackModelContextCapability, groupMessagesByApiRound, normalizeMessagesForAPI, resolveContextBudget, shouldCompactBeforeRequest, shouldUseExactTokenCount, type ApiRound, type ContextAssembly, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type TokenCount, type ToolPairingReport } from "@code-review-agent/context";
 import { randomUUID } from "node:crypto";
 import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModePolicySnapshot, type CodeModeSandbox, type ExecuteToolOutput, type JobSummary, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
 import type { SubagentRuntime } from "@code-review-agent/subagent";
@@ -66,6 +66,8 @@ export interface AgentHostOptions {
   readonly contextBudget?: Partial<ContextBudget>;
   /** Claude Code-style model window and threshold policy. */
   readonly contextPolicy?: Partial<ContextBudgetConfig>;
+  /** API message validation policy; repair keeps the model request safe by default. */
+  readonly messageValidationMode?: "repair" | "strict";
   readonly quota?: ProductizationQuotaPolicy;
   readonly operations?: ProductizationOperationsPolicy;
 }
@@ -150,6 +152,14 @@ interface CollectedModelResponse {
   readonly text: string;
   readonly toolCalls: readonly ModelToolCall[];
   readonly usage?: ModelUsage;
+  readonly responseId: string;
+}
+
+interface PreparedModelContext {
+  readonly view: ModelContextView;
+  readonly rounds: readonly ApiRound[];
+  readonly normalization: MessageNormalizationReport;
+  readonly pairing: ToolPairingReport;
 }
 
 export type TenantModelRoute = Pick<ModelRouteRecord, "provider" | "model" | "baseUrl" | "credentialRef" | "contextCapability">;
@@ -180,6 +190,7 @@ export class AgentHost {
   private readonly compactionEnabled: boolean;
   private readonly contextBudget: Partial<ContextBudget> | undefined;
   private readonly contextPolicy: Partial<ContextBudgetConfig> | undefined;
+  private readonly messageValidationMode: "repair" | "strict";
   private readonly quota: ProductizationQuotaPolicy | undefined;
   private readonly operations: ProductizationOperationsPolicy;
   private readonly quotaTails = new Map<string, Promise<void>>();
@@ -195,6 +206,7 @@ export class AgentHost {
     this.compactionEnabled = options.compactionEnabled !== false;
     this.contextBudget = options.contextBudget;
     this.contextPolicy = options.contextPolicy;
+    this.messageValidationMode = options.messageValidationMode ?? "repair";
     this.quota = options.quota;
     this.operations = options.operations ?? { backup: "deferred", migration: "deferred", upgrade: "deferred" };
     this.customSystemPrompt = options.systemPrompt;
@@ -1483,7 +1495,8 @@ export class AgentHost {
       } else if (event.type === "assistant/message") {
         const content = typeof event.payload["content"] === "string" ? event.payload["content"] as string : "";
         const toolCalls = parseModelToolCalls(event.payload["toolCalls"]);
-        if (content.length > 0 || toolCalls.length > 0) messages.push({ role: "assistant", content, ...(toolCalls.length === 0 ? {} : { toolCalls }) });
+        const responseId = typeof event.payload["responseId"] === "string" ? event.payload["responseId"] : undefined;
+        if (content.length > 0 || toolCalls.length > 0) messages.push({ role: "assistant", content, ...(toolCalls.length === 0 ? {} : { toolCalls }), ...(responseId === undefined ? {} : { responseId }) });
       } else if (event.type === "tool/result") {
         const rawToolCallId = event.payload["toolCallId"];
         if (typeof rawToolCallId !== "string") continue;
@@ -1520,6 +1533,21 @@ export class AgentHost {
       visibleTools: this.modelTools(sessionId, tenantId),
       history: history.filter((message) => message.role !== "system"),
     });
+  }
+
+  private prepareModelContext(assembly: ContextAssembly): PreparedModelContext {
+    const normalized = normalizeMessagesForAPI(assembly.modelView.messages, { mode: this.messageValidationMode });
+    const paired = ensureToolResultPairing(normalized.messages, { mode: this.messageValidationMode });
+    if (this.messageValidationMode === "strict" && (!normalized.report.valid || !paired.report.valid)) {
+      const codes = [...normalized.report.issues.map((issue) => issue.code), ...paired.report.issues.map((issue) => issue.code)];
+      throw new Error(`MODEL_MESSAGE_VALIDATION_FAILED: ${codes.join(",") || "unknown"}`);
+    }
+    return {
+      view: { messages: paired.messages, ...(assembly.modelView.tools === undefined ? {} : { tools: assembly.modelView.tools }) },
+      rounds: groupMessagesByApiRound(paired.messages),
+      normalization: normalized.report,
+      pairing: paired.report,
+    };
   }
 
   private enqueue(pending: PendingTurn): void {
@@ -1623,7 +1651,8 @@ export class AgentHost {
       const budgetSnapshot = this.contextBudgetSnapshot(tenantId);
       const primaryModel = this.modelForTenant(tenantId);
       let assembly = await this.assembleTurnContext(sessionId, messages, recovery);
-      const beforeView: ModelContextView = assembly.modelView;
+      let prepared = this.prepareModelContext(assembly);
+      const beforeView: ModelContextView = prepared.view;
       const tokenCounter = createTokenCounter(primaryModel);
       const estimate = tokenCounter.estimate(beforeView);
       const tokenCount = await countContextTokens(tokenCounter, beforeView, {
@@ -1636,13 +1665,43 @@ export class AgentHost {
       if (this.compactionEnabled && autoCompactRecommended) {
         await this.compactTurnContext(sessionId, turnId, messages, budgetSnapshot, beforeUsage, beforeState);
         assembly = await this.assembleTurnContext(sessionId, messages, recovery);
+        prepared = this.prepareModelContext(assembly);
+      }
+      if (prepared.normalization.changed) {
+        await this.options.store.append({
+          sessionId,
+          turnId,
+          type: "context/messages_normalized",
+          payload: {
+            mode: prepared.normalization.mode,
+            issueCodes: prepared.normalization.issues.map((issue) => issue.code),
+            mergedAssistantMessages: prepared.normalization.mergedAssistantMessages,
+            droppedToolCalls: prepared.normalization.droppedToolCalls,
+            droppedToolResults: prepared.normalization.droppedToolResults,
+          },
+        });
+      }
+      if (prepared.pairing.repaired) {
+        await this.options.store.append({
+          sessionId,
+          turnId,
+          type: "context/tool_pairing_repaired",
+          payload: {
+            mode: prepared.pairing.mode,
+            issueCodes: prepared.pairing.issues.map((issue) => issue.code),
+            syntheticResultCount: prepared.pairing.syntheticResultCount,
+            removedOrphanResultCount: prepared.pairing.removedOrphanResultCount,
+            removedDuplicateCallCount: prepared.pairing.removedDuplicateCallCount,
+          },
+        });
       }
       let finalCount = tokenCount;
       if (autoCompactRecommended) {
-        finalCount = await countContextTokens(tokenCounter, assembly.modelView, { signal: controller.signal });
+        finalCount = await countContextTokens(tokenCounter, prepared.view, { signal: controller.signal });
       }
       const tokenUsage = finalCount.value;
       const warningState = calculateContextWarningState(tokenUsage, budgetSnapshot, this.contextPolicyWithLegacyFallback());
+      const modelRequestId = `request_${randomUUID()}`;
       await this.options.store.append({
         sessionId,
         turnId,
@@ -1653,13 +1712,17 @@ export class AgentHost {
           contextWarning: warningState,
           tokenCount: publicTokenCount(finalCount),
           contextAssembly: publicContextAssembly(assembly),
+          messageValidation: publicMessageValidation(prepared),
+          modelRequestId,
           ...(autoCompactRecommended ? { autoCompactRecommended: true } : {}),
         },
       });
-      const response = await this.collectModelResponse(sessionId, turnId, controller, assembly, tenantId, reasoningEffort);
+      const response = await this.collectModelResponse(sessionId, turnId, controller, prepared.view, tenantId, modelRequestId, reasoningEffort);
       if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
       const assistantPayload = {
         content: response.text,
+        responseId: response.responseId,
+        requestId: modelRequestId,
         ...(response.toolCalls.length === 0 ? {} : { toolCalls: response.toolCalls }),
         ...(response.usage === undefined ? {} : { usage: response.usage }),
       };
@@ -1667,7 +1730,7 @@ export class AgentHost {
       const steersAfterResponse = this.takeSteers(turnId);
       if (response.toolCalls.length === 0) {
         if (steersAfterResponse.length > 0) {
-          messages.push({ role: "assistant", content: response.text });
+          messages.push({ role: "assistant", content: response.text, responseId: response.responseId });
           for (const steer of steersAfterResponse) messages.push({ role: "user", content: steer });
           await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "steered" } });
           continue;
@@ -1677,7 +1740,7 @@ export class AgentHost {
         this.metricCounters.turnsCompleted += 1;
         return;
       }
-      messages.push({ role: "assistant", content: response.text, toolCalls: response.toolCalls });
+      messages.push({ role: "assistant", content: response.text, toolCalls: response.toolCalls, responseId: response.responseId });
       for (const steer of steersAfterResponse) messages.push({ role: "user", content: steer });
       const outputs = await Promise.all(response.toolCalls.map((toolCall) => this.executeModelToolCall(sessionId, turnId, controller, toolCall)));
       for (let index = 0; index < outputs.length; index += 1) {
@@ -1787,8 +1850,9 @@ export class AgentHost {
     sessionId: SessionId,
     turnId: TurnId,
     controller: AbortController,
-    assembly: ContextAssembly,
-    tenantId?: string,
+    view: ModelContextView,
+    tenantId: string | undefined,
+    requestId: string,
     reasoningEffort?: string,
   ): Promise<CollectedModelResponse> {
     const candidates = [this.tenantModels.get(tenantId ?? "") ?? this.model, ...this.fallbackModels];
@@ -1800,7 +1864,7 @@ export class AgentHost {
       const calls = new Map<number, { id?: string; name?: string; arguments: string }>();
       let usage: ModelUsage | undefined;
       try {
-        for await (const part of model.stream({ messages: assembly.messages, tools: assembly.visibleTools, toolChoice: "auto", ...(reasoningEffort === undefined ? {} : { reasoningEffort }), signal: controller.signal })) {
+        for await (const part of model.stream({ messages: view.messages, ...(view.tools === undefined ? {} : { tools: view.tools }), toolChoice: "auto", ...(reasoningEffort === undefined ? {} : { reasoningEffort }), signal: controller.signal })) {
           if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
           if (part.type === "text_delta") {
             textParts.push(part.text);
@@ -1822,7 +1886,7 @@ export class AgentHost {
           if (call.name === undefined || call.name.trim() === "") throw new Error(`MALFORMED_TOOL_CALL: missing tool name at index ${index}`);
           toolCalls.push({ id: call.id ?? `call_${randomUUID()}`, name: call.name, arguments: call.arguments });
         }
-        return { text: textParts.join(""), toolCalls, ...(usage === undefined ? {} : { usage }) };
+        return { text: textParts.join(""), toolCalls, responseId: `response_${requestId.replace(/^request_/u, "")}`, ...(usage === undefined ? {} : { usage }) };
       } catch (error) {
         lastError = error;
         if (controller.signal.aborted || textParts.length > 0 || modelIndex >= candidates.length - 1) throw error;
@@ -2063,6 +2127,24 @@ function publicContextAssembly(assembly: ContextAssembly): Readonly<Record<strin
     staticSectionIds: assembly.sections.filter((section) => section.phase === "static").map((section) => section.id),
     dynamicSectionIds: assembly.sections.filter((section) => section.phase === "dynamic").map((section) => section.id),
     attachmentIds: assembly.attachments.map((attachment) => attachment.id),
+  };
+}
+
+function publicMessageValidation(prepared: PreparedModelContext): Readonly<Record<string, unknown>> {
+  return {
+    mode: prepared.normalization.mode,
+    apiRoundCount: prepared.rounds.length,
+    apiRoundResponseIds: prepared.rounds.map((round) => round.responseId ?? null),
+    normalized: prepared.normalization.changed,
+    normalizationIssueCount: prepared.normalization.issues.length,
+    normalizationIssueCodes: prepared.normalization.issues.map((issue) => issue.code),
+    pairingValid: prepared.pairing.valid,
+    pairingRepaired: prepared.pairing.repaired,
+    pairingIssueCount: prepared.pairing.issues.length,
+    pairingIssueCodes: prepared.pairing.issues.map((issue) => issue.code),
+    syntheticResultCount: prepared.pairing.syntheticResultCount,
+    removedOrphanResultCount: prepared.pairing.removedOrphanResultCount,
+    removedDuplicateCallCount: prepared.pairing.removedDuplicateCallCount,
   };
 }
 

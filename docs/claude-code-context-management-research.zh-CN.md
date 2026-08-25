@@ -442,7 +442,7 @@ M03 已按上述设计完成，详细代码对照记录见 [`claude-code-context
 | Replay metadata | `ContextAssembly.fingerprint`、`step/started.payload.contextAssembly` | 对 sections/tools/history/attachments 做稳定序列化并生成 `ctx_<8 hex>` fingerprint；事件记录 sectionIds、静态/动态分组和 attachmentIds |
 | Runtime integration | `packages/runtime/src/index.ts:assembleTurnContext()`、`runSteps()` | runTurn、恢复 turn 和每个 model step 都重新组装；compact 后重新生成 assembly 与 token count，避免沿用过期 model view |
 
-M03 的边界保持清晰：尚未实现 M04 的 API round、message normalize、tool pairing，也没有实现 M05 的 tool-result microcompact。attachments 当前是有界的 model-view wrapper；持久化 transcript、memory 和压缩后重建仍由后续模块负责。
+M03 的边界保持清晰：M04 的 API round、message normalize、tool pairing 已在后续模块实现，但不属于 assembler 本身；M05 的 tool-result microcompact 尚未实现。attachments 当前是有界的 model-view wrapper；持久化 transcript、memory 和压缩后重建仍由后续模块负责。
 
 ### M04：API Round、Message Normalize 与 Tool Pairing
 
@@ -451,7 +451,7 @@ M03 的边界保持清晰：尚未实现 M04 的 API round、message normalize�
 | Claude Code 参考 | `D:/Develop/claude-code/src/services/compact/grouping.ts:22-63`；`src/utils/messages.ts:2292-2670,5591-5947` |
 | 关键函数 | `groupMessagesByApiRound()`、`normalizeMessagesForAPI()`、`ensureToolResultPairing()` |
 | 子功能 | streaming assistant 合并、API round、tool pair、duplicate ID、orphan result、provider 字段清理 |
-| 本项目落点 | `packages/context/src/api-round.ts`、`api-normalize.ts`、`tool-pairing.ts`（拟建）；ModelAdapter 的共同 request gate |
+| 本项目落点 | `packages/context/src/api-round.ts`、`api-normalize.ts`、`tool-pairing.ts`、`packages/runtime/src/index.ts`（已实现）；Runtime 是当前共同 request gate |
 | 直接仿照程度 | round/group 和双向 pairing 逻辑直接仿照；synthetic result 的最终策略需要本项目 ADR |
 
 先按 assistant response ID 分 API round，再进行 compact 起点计算；不能按 user turn 简单切割。`ensureToolResultPairing()` 的逻辑分为：
@@ -468,6 +468,20 @@ M03 的边界保持清晰：尚未实现 M04 的 API round、message normalize�
 本项目的 pairing validator 必须位于所有模型请求的共同入口，不能只在 summary agent 中调用。`packages/compaction` 中现有 `repairToolBoundaries()` 可以保留为兼容 facade，但最终应委托该 validator。
 
 模块验收：压缩、恢复、steer、parallel tool 和 streaming chunk 都不会产生 orphan/duplicate ID；严格模式可复现失败结构；repair 事件能关联到原始 turn/request。
+
+### 14.3 M04 实施状态（2026-08-26）
+
+M04 已完成，详细代码对照记录见 [`claude-code-context-m04-implementation.zh-CN.md`](claude-code-context-m04-implementation.zh-CN.md)。当前实现入口如下：
+
+| 层次 | 实际入口 | 当前行为 |
+|---|---|---|
+| API round | `packages/context/src/api-round.ts:groupMessagesByApiRound()` | 按 assistant `responseId` 分组；同一 response 的 streaming assistant/tool loop 保持在同一 round，不按 user turn 切断 |
+| Message normalize | `packages/context/src/api-normalize.ts:normalizeMessagesForAPI()` | 合并同 response 的 assistant chunks，规范化 tool id/name/arguments，system prefix 归一化；支持 repair/strict |
+| Tool pairing | `packages/context/src/tool-pairing.ts:ensureToolResultPairing()` | 检测 duplicate call/result、missing result、orphan result；repair 模式移除孤儿并插入 synthetic result，strict 模式保留原输入并报告失败 |
+| Runtime gate | `packages/runtime/src/index.ts:prepareModelContext()` | token estimator 与 provider model request 共用 normalize + pairing 后的 messages；所有 step 经过 gate |
+| Durable metadata | `packages/contracts/src/index.ts`、`runtime/src/index.ts` | assistant/message 写入 `requestId/responseId`；step/started 写入 round、validation metadata；repair 追加 `context/messages_normalized` 与 `context/tool_pairing_repaired` |
+
+默认模式是 `repair`，可通过 `AgentHostOptions.messageValidationMode = "strict"` fail-closed。M04 尚未实现 M05 的工具结果预算、microcompact 或 provider-specific schema normalization。
 
 ### M05：Tool Result Budget 与 MicroCompact
 
@@ -886,7 +900,7 @@ M01 已按上述分层落地，详细代码对照记录见 [`claude-code-context
 | Runtime | `packages/runtime/src/index.ts` 的 `contextBudgetSnapshot()`、`runSteps()` preflight | 每次 `step/started` 写入非敏感预算快照和 warning state，并把 auto threshold 交给现有 compaction facade |
 | API | `apps/api/src/server.ts` 的 `contextPolicy`、`/v1/capabilities` | host policy 可注入；能力状态通过既有 capabilities projection 暴露 |
 
-M01 已完成的验证是预算公式和 runtime 事件记录；M02 已在 `packages/context/src/estimator.ts` 落地，M04 的 API round/tool pairing、M05 的工具结果预算仍未提前实现。M01 的兼容记录保留其当时边界，M02 的实际入口和验证见 [`claude-code-context-m02-implementation.zh-CN.md`](claude-code-context-m02-implementation.zh-CN.md)。
+M01 已完成的验证是预算公式和 runtime 事件记录；M02 已在 `packages/context/src/estimator.ts` 落地，M04 的 API round/tool pairing 已在后续模块接入，M05 的工具结果预算仍未实现。M01 的兼容记录保留其当时边界，M02 的实际入口和验证见 [`claude-code-context-m02-implementation.zh-CN.md`](claude-code-context-m02-implementation.zh-CN.md)。
 
 ## 13. M02：如何仿照 Claude Code 实现两级 token 计数
 
@@ -1377,7 +1391,7 @@ packages/context/
 | M01 | `context.ts`、`autoCompact.ts` | `packages/context/src/budget.ts`、capability contract、budget snapshot | 无 | 不同 route 得到正确窗口、输出预留和 threshold |
 | M02 | `tokenEstimation.ts`、`microCompact.ts` | `packages/context/src/estimator.ts`、exact-count adapter seam（已实现） | M01 | estimate/exact/fallback 来源可解释 |
 | M03 | `context.ts`、`prompts.ts`、system prompt builder | `packages/context/src/assembler.ts`、`runtime/src/system-prompt.ts` | M01、M02 | system/tools/history/attachments 稳定组装并可计数 |
-| M04 | `grouping.ts`、`messages.ts` | `api-round.ts`、`api-normalize.ts`、`tool-pairing.ts` | M02、M03 | 所有 model request 通过 round/pairing gate |
+| M04 | `grouping.ts`、`messages.ts` | `api-round.ts`、`api-normalize.ts`、`tool-pairing.ts`（已实现） | M02、M03 | 所有 model request 通过 round/pairing gate |
 | M05 | `query.ts`、`microCompact.ts` | `tool-result-budget.ts`、`microcompact.ts`、micro receipt | M02、M04 | 原文不变、model view 可释放旧工具结果 |
 | M06 | `sessionMemoryCompact.ts` | session-memory compact adapter、保留窗口和边界调整 | M02、M04、M05 | 已有 session summary 时可无摘要模型压缩 |
 | M07 | `compact.ts` | summary input、summary agent、PTL retry、summary usage | M02、M04、M06 | 摘要请求过大可有限重试并安全失败 |

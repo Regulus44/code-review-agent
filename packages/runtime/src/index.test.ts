@@ -154,6 +154,48 @@ describe("AgentHost", () => {
     expect(assemblies[0]?.fingerprint).not.toBe(assemblies[1]?.fingerprint);
   });
 
+  it("records M04 request/response identities and message validation metadata", async () => {
+    const requests: ModelRequest[] = [];
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        requests.push(request);
+        yield { type: "text_delta", text: "validated" };
+        yield { type: "done" };
+      },
+    };
+    const store = new InMemoryEventStore();
+    const host = new AgentHost({ store, model });
+    const session = await host.createSession("D:/m04-identities-fixture");
+    const turn = await host.sendMessage(session.id, "check message gate");
+    await host.waitForTurn(turn);
+    const events = await host.events(session.id);
+    const step = events.find((event) => event.type === "step/started");
+    const assistant = events.find((event) => event.type === "assistant/message");
+    expect(step?.payload["modelRequestId"]).toMatch(/^request_/u);
+    expect(step?.payload["messageValidation"]).toMatchObject({ mode: "repair", apiRoundCount: 1, pairingValid: true, pairingRepaired: false });
+    expect(assistant?.payload["requestId"]).toBe(step?.payload["modelRequestId"]);
+    expect(assistant?.payload["responseId"]).toMatch(/^response_/u);
+    expect(requests[0]?.messages[0]?.role).toBe("system");
+  });
+
+  it("supports strict message validation as a fail-closed request gate", async () => {
+    const store = new InMemoryEventStore();
+    const model: ChatModel = {
+      async *stream(): AsyncIterable<ModelStreamPart> {
+        yield { type: "text_delta", text: "should not run" };
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store, model, messageValidationMode: "strict" });
+    const session = await host.createSession("D:/m04-strict-fixture");
+    await store.append({ sessionId: session.id, type: "assistant/message", payload: { content: "invalid", toolCalls: [{ id: "", name: "read", arguments: "{}" }] } });
+    const turn = await host.sendMessage(session.id, "continue");
+    await host.waitForTurn(turn);
+    const events = await host.events(session.id);
+    expect(events.some((event) => event.type === "agent/error" && String(event.payload["message"]).includes("MODEL_MESSAGE_VALIDATION_FAILED"))).toBe(true);
+    expect(events.some((event) => event.type === "assistant/message" && event.payload["content"] === "should not run")).toBe(false);
+  });
+
   it("falls back to the next model before any partial output and records the recovery event", async () => {
     const store = new InMemoryEventStore();
     const failing: ChatModel = { async *stream(): AsyncIterable<ModelStreamPart> { throw new Error("PRIMARY_UNAVAILABLE"); } };

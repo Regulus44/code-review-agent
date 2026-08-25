@@ -53,6 +53,8 @@ export type AgentEventType =
   | "todo/updated"
   | "context/compacted"
   | "context/compaction_failed"
+  | "context/messages_normalized"
+  | "context/tool_pairing_repaired"
   | "worktree/created"
   | "worktree/attached"
   | "worktree/switched"
@@ -714,7 +716,7 @@ export interface ModelToolDefinition {
 
 export type ChatMessage =
   | { readonly role: "system" | "user"; readonly content: string }
-  | { readonly role: "assistant"; readonly content: string; readonly toolCalls?: readonly ModelToolCall[] }
+  | { readonly role: "assistant"; readonly content: string; readonly toolCalls?: readonly ModelToolCall[]; readonly responseId?: string }
   | { readonly role: "tool"; readonly content: string; readonly toolCallId: string };
 
 export interface ModelRequest {
