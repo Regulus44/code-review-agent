@@ -1,5 +1,52 @@
 # Phase 8 开发日志
 
+## 2026-08-25：ToolRow 按 DSH 折叠优先模型收敛
+
+本次工作属于 Phase 8.0 Web 对齐，目标是把现有“Agent activity 大组 + 原始 JSON 工具卡”改造成 DSH 风格的单调用 ToolRow。实现依据 [DSH Web 前端对照文档](../dsh-frontend-reference.zh-CN.md) 第 4 节；不复制 DSH React 组件或内部类型，继续使用本项目的 ConversationProjection、ToolCallTree 和安全 presenter。
+
+### 任务七问
+
+1. **Phase**：Phase 8.0，DSH Web ToolRow 对齐。
+2. **问题类型**：工具状态投影、Conversation UI 和详情展开交互。
+3. **契约影响**：不改变 Event、Tool、Task、Permission 或 Workspace contract；只扩展 Web `ToolRenderIntent`。
+4. **DSH 参考**：`ui-tool/src/client/tool/components/ToolRow.tsx`、`tool-call-model.ts`、`ToolCallTree.tsx`。
+5. **上游来源**：参考 DSH 的行为与布局，未复制代码；无需新增许可证登记。
+6. **验收场景**：一个 tool call 对应一个稳定行；默认折叠；摘要显示可理解目标；展开后显示 IN/OUT；running/error/stopped 状态可区分；权限请求仍独立于 ToolRow。
+7. **回滚**：回退代码 checkpoint `5e55084`，即可恢复此前工具行渲染；公共运行时和事件历史不受影响。
+
+### 已完成
+
+- 移除 Conversation 中旧的 `tool-activity` 外层聚合卡，工具调用直接以独立 `.tool-row` 按事件位置呈现；
+- Tool presenter 新增 DSH 对齐的 `variant`、`state`、`statusLabel`、摘要目标、输入/输出、错误首行和文件路径元数据；
+- `read/write/edit` 优先显示路径，`search` 显示 query/pattern，`bash` 显示 command，未知调用使用 `Tool call · tool_name` fallback；
+- 每行使用统一的图标、标题、分隔点、目标摘要、短状态和 hover chevron；默认折叠，Enter/Space 和整行点击都可展开；
+- 展开详情拆成 `IN` / `OUT` 两个 bounded 内部滚动区，长 payload 不再撑开整个对话；
+- running 使用轻量 sweep，error/stopped 使用状态色；没有继续追加尾部工具提醒；
+- 权限请求和用户问题仍由 Conversation 的独立决策 surface 渲染；当前没有 host-backed 文件打开 action，因此没有伪造点击打开行为。
+
+### 验证与证据
+
+每轮浏览器验证前重启 `http://127.0.0.1:3210/`：
+
+```text
+pnpm --filter @code-review-agent/web test                         ✓ 113 tests
+pnpm build:web                                                     ✓
+git diff --check                                                    ✓
+GET http://127.0.0.1:3210/health                                   ✓
+浏览器独立 .tool-row                                                ✓ 8 rows
+旧 .tool-activity 外层                                               ✓ 0
+默认 aria-expanded=false                                             ✓
+点击展开 aria-expanded=true                                         ✓
+IN/OUT 内部滚动区                                                    ✓
+浏览器 console warn/error                                           ✓ 0
+```
+
+代码 checkpoint：`5e55084 feat(phase8): align dsh tool rows`。
+
+### 遗留事项
+
+ToolRow 的专用 Terminal/Diff/Read/Search/Web card primitives、Trajectory Inspect 快捷入口和 host-backed 文件打开 action 仍属于后续增强；本次先完成 DSH 的通用单行、折叠、摘要、状态和 bounded IN/OUT 基础，不扩展 Planning、Reasoning 或 Effort。
+
 ## 2026-08-25：Trajectory 滚动责任按 DSH 收敛
 
 本次工作属于 Phase 8.0 Web 对齐的滚动边界修复，目标是解决 Trajectory 内容区域无法直接使用鼠标滚轮上下滚动的问题。实现依据 [DSH Conversation / Trajectory 前端实现指导方案](../dsh-conversation-trajectory-implementation-guide.zh-CN.md) 和 [问题记录](../ui-issue-conversation-trajectory-scroll.zh-CN.md)。本次只涉及 Web 布局与可丢弃的滚动位置状态，没有改变 Event、Tool、Task、Permission 或 Workspace contract。

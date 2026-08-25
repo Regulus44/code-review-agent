@@ -16,7 +16,7 @@
 | Phase 5：内部 Subagent / 多 Agent | completed（2026-08-23） | 5.0–5.4：Task/Descriptor durable projection、one-shot/continuable child、FIFO/authority/cold resume、report/MCP scope、API/SSE/Web catalog；定向 typecheck、storage/subagent/runtime/API 测试和 API/Web smoke 通过 |
 | Phase 6：A2A | deferred（暂不作为 Phase 7 前置） | [ADR：Phase 7 Web 收敛不等待 A2A](adr/phase-7-web-with-a2a-deferred.zh-CN.md)；等待明确的外部 Agent 互操作需求 |
 | Phase 7：DSH Web 前端收敛 | completed | 7.1–7.10 Web shell、连接与回放、Workspace/Session navigation、Conversation/Tool/Permission/Interaction、Trajectory、Task/Subagent/MCP、Settings/Deliverables、响应式与可访问性、五场景 browser/replay gate、Workspace reorder 与 Workspace rename/archive/delete lifecycle 已完成；`pnpm typecheck`、`pnpm test`、`pnpm test:phase7:browser` 和 `git diff --check` 通过；browser gate 总耗时 2.14s、trajectory full replay 19.03ms；独立 checkpoint `82326d6` |
-| Phase 8：高级能力与产品化 | in_progress（8.0/8.1/8.2/8.4 已完成，8.3/8.5 partial） | Phase 8.0 的 600/900/1024 visual/accessibility matrix、9 个 Web parity browser 场景和独立 checkpoint 已完成；最新 Trajectory 滚动责任 checkpoint `b6a1cf7`；8.3/8.5 仍等待目标部署环境 smoke，不影响 8.0 关闭 |
+| Phase 8：高级能力与产品化 | in_progress（8.0/8.1/8.2/8.4 已完成，8.3/8.5 partial） | Phase 8.0 的 600/900/1024 visual/accessibility matrix、9 个 Web parity browser 场景和独立 checkpoint 已完成；最新 Web checkpoint `5e55084`（ToolRow）与 `b6a1cf7`（Trajectory scroll）；8.3/8.5 仍等待目标部署环境 smoke，不影响 8.0 关闭 |
 
 ## Phase 8 计划范围（accepted）
 
@@ -39,6 +39,14 @@
 - Conversation 与 Trajectory 独立保存并恢复 `scrollTop`，tail-follow、Load older 和历史 prepend 补偿都操作当前 active view 的 scrollport；
 - 在 `http://127.0.0.1:3210/` 重启服务后验证 Trajectory 红框区域滚轮滚动、外层 scrollTop 不竞争、连续切换 10 次和 per-view 位置恢复；`pnpm build:web`、`git diff --check`、health check 通过；
 - 独立 checkpoint：`b6a1cf7 feat(phase8): align trajectory scroll ownership`；回滚该提交不会改变 Event、Tool、Task、Permission 或 Workspace contract。
+
+## Phase 8.0 ToolRow（completed，2026-08-25）
+
+- 按 DSH `ui-tool` 的折叠优先模型，一个 tool call 直接投影为一个稳定 `.tool-row`，不再依赖旧的 `tool-activity` 聚合卡；
+- 摘要按工具类型展示路径、query/pattern、command 或 tool name，原始输入和输出只在展开后的 bounded `IN` / `OUT` 区显示；
+- 行状态统一为 running/ok/error/stopped，运行中使用轻量 sweep，权限请求和用户问题继续由独立主对话决策 surface 承担；
+- 在 `http://127.0.0.1:3210/` 重启服务后完成 8 个真实工具行、默认折叠、点击展开、IN/OUT 内滚动和 console 无 warning/error 验证；Web 113 项测试和 `pnpm build:web` 通过；
+- 独立 checkpoint：`5e55084 feat(phase8): align dsh tool rows`；本切片只影响 Web projection/presentation，不改变公共 Event/Tool/Task/Permission/Workspace contract。
 
 ## Phase 8 暂存归档（2026-08-24）
 
