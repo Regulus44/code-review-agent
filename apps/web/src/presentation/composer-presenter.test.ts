@@ -16,4 +16,8 @@ describe("presentComposerSubmit", () => {
   it("keeps stopping state until the durable turn terminal event removes it", () => {
     expect(presentComposerSubmit({ bootReady: true, inputHasContent: true, turn: turn("running"), stoppingTurnId: "turn_1" })).toMatchObject({ mode: "stopping", icon: "…", disabled: true });
   });
+
+  it("returns to Send when the durable projection contains only a terminal turn", () => {
+    expect(presentComposerSubmit({ bootReady: true, inputHasContent: true, turn: turn("completed"), stoppingTurnId: "turn_1" })).toMatchObject({ mode: "send", icon: "↑", disabled: false });
+  });
 });
