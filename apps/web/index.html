@@ -151,7 +151,7 @@
       .sidebar-footer button { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px; border-radius: 9px; color: var(--text-secondary); background: transparent; text-align: left; font-size: 12px; }
       .sidebar-footer button:hover { background: var(--surface-hover); color: var(--text); }
       .sidebar-collapsed .sidebar-footer button { justify-content: center; padding-inline: 0; }
-      .workspace { display: grid; grid-template-rows: 60px minmax(0, 1fr) auto; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg); }
+      .workspace { display: grid; grid-template-rows: 60px minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; background: var(--bg); }
       .workspace-header { display: flex; align-items: center; gap: 10px; padding: 0 22px; border-bottom: 1px solid var(--border); background: rgba(247,248,250,.82); backdrop-filter: blur(12px); }
       .mobile-menu { display: none; }
       .session-heading { min-width: 0; flex: 1; }
@@ -160,18 +160,20 @@
       .connection-state { display: inline-flex; align-items: center; gap: 6px; margin-right: 4px; color: var(--text-secondary); font-size: 11px; }
       .connection-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
       .connection-state.disconnected::before { background: var(--amber); }
+      .workspace-main { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
+      .workspace-feedback { display: flex; min-width: 0; flex: 0 0 auto; flex-direction: column; }
       .connection-banner { display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 7px 22px; border-bottom: 1px solid var(--border); color: var(--text-secondary); background: var(--surface-subtle); font-size: 11px; }
       .connection-banner[hidden] { display: none; }
       .connection-banner.warning { color: #8f5c13; background: #fff8e8; }
       .connection-banner.error { color: #a13c3c; background: #fff0f0; }
       .connection-banner-message { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .session-view-tabs { display: flex; align-items: center; gap: 3px; min-height: 37px; padding: 0 22px; border-bottom: 1px solid var(--border); background: var(--surface); }
+      .session-view-tabs { display: flex; align-items: center; gap: 3px; min-height: 37px; flex: 0 0 auto; padding: 0 22px; border-bottom: 1px solid var(--border); background: var(--surface); }
       .session-view-tab { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 9px; border-radius: 7px; color: var(--text-tertiary); background: transparent; font-size: 11px; font-weight: 600; }
       .session-view-tab:hover { color: var(--text); background: var(--surface-hover); }
       .session-view-tab[aria-selected="true"] { color: var(--blue); background: var(--blue-soft); }
       .session-view-tab-count { color: var(--text-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
       .session-view-tab[aria-selected="true"] .session-view-tab-count { color: var(--blue); }
-      .main-trajectory { width: min(860px, calc(100% - 40px)); margin: 0 auto; padding: 22px 0 28px; }
+      .main-trajectory { display: flex; width: min(860px, calc(100% - 40px)); min-height: 100%; height: 100%; margin: 0 auto; flex-direction: column; overflow: hidden; }
       .main-trajectory-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
       .main-trajectory-title { color: var(--text); font-size: 14px; font-weight: 650; }
       .main-trajectory-meta { color: var(--text-tertiary); font-size: 10px; }
@@ -179,8 +181,11 @@
       .main-trajectory-controls .trajectory-search { flex: 1; }
       .main-trajectory-open-details { flex: 0 0 auto; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-secondary); background: var(--surface); font-size: 10px; }
       .main-trajectory-open-details:hover { color: var(--blue); border-color: rgba(65,118,230,.35); background: var(--blue-soft); }
+      .main-trajectory-header, .main-trajectory-controls { flex: 0 0 auto; width: 100%; padding-inline: 0; }
+      .main-trajectory-header { padding-top: 22px; }
+      .main-trajectory-scroll { display: grid; min-height: 0; flex: 1 1 auto; gap: 12px; overflow-x: hidden; overflow-y: auto; padding-bottom: 28px; overscroll-behavior: contain; }
       .main-trajectory-timeline { display: grid; gap: 5px; padding: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
-      .main-trajectory-inspector { margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+      .main-trajectory-inspector { padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
       .main-trajectory-inspector .trajectory-inspector-section:nth-child(n+4) { display: none; }
       .main-trajectory-empty { padding: 36px 12px; color: var(--text-tertiary); text-align: center; font-size: 12px; }
       .connection-retry { flex: 0 0 auto; height: 26px; padding: 0 9px; border: 1px solid currentColor; border-radius: 7px; color: inherit; background: transparent; font-size: 10px; font-weight: 650; }
@@ -204,8 +209,9 @@
       .runtime-record summary { cursor: pointer; color: var(--text); font-size: 11px; }
       .runtime-record pre { max-height: 120px; overflow: auto; margin: 6px 0 0; padding: 6px; border-radius: 6px; background: rgba(0,0,0,.04); white-space: pre-wrap; word-break: break-word; font-size: 10px; }
       .runtime-terminal { margin-top: 4px; }
-      .conversation { position: relative; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scroll-behavior: smooth; }
-      .conversation::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 50% 20%, rgba(65,118,230,.07), transparent 38%); opacity: .75; }
+      .session-body { position: relative; display: flex; min-width: 0; min-height: 0; flex: 1 1 auto; flex-direction: column; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scroll-behavior: smooth; }
+      .session-body::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 50% 20%, rgba(65,118,230,.07), transparent 38%); opacity: .75; }
+      .conversation-content { position: relative; display: flex; min-width: 0; min-height: 100%; flex: 1 0 auto; flex-direction: column; }
       .conversation-body { position: relative; width: min(748px, calc(100% - 40px)); min-height: 100%; margin: 0 auto; padding: 34px 0 28px; }
       .hero { display: grid; place-items: center; min-height: calc(100% - 20px); padding: 9vh 0 26vh; text-align: center; }
       .hero-inner { width: min(560px, 100%); }
@@ -305,7 +311,7 @@
       .interaction-card pre { margin: 8px 0 0; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
       .request-recovery { display: inline-block; margin-top: 7px; color: #315da9; font-size: 10px; }
       .trajectory-summary { margin-left: 40px; color: var(--text-tertiary); }
-      .composer-shell { position: relative; z-index: 2; padding: 0 20px 20px; background: linear-gradient(to bottom, transparent, var(--bg) 25%); }
+      .composer-shell { position: sticky; bottom: 0; z-index: 2; flex: 0 0 auto; padding: 0 20px 20px; background: linear-gradient(to bottom, transparent, var(--bg) 25%); }
       .composer-card { position: relative; width: min(780px, 100%); margin: 0 auto; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow); }
       .composer-card textarea { display: block; width: 100%; min-height: 64px; max-height: 220px; padding: 16px 17px 8px; border: 0; outline: 0; resize: none; color: var(--text); background: transparent; line-height: 1.5; font-size: 14px; }
       .composer-card textarea::placeholder { color: var(--text-tertiary); }
@@ -652,15 +658,19 @@
           <span id="status" class="connection-state disconnected" role="status" aria-live="polite">Connecting…</span>
           <button id="details-toggle" class="icon-button details-toggle" type="button" aria-label="Open details panel" aria-controls="details-panel" aria-expanded="false">☷</button>
         </header>
-        <nav id="session-view-tabs" class="session-view-tabs" aria-label="Session view">
-          <button id="conversation-view-tab" class="session-view-tab" type="button" role="tab" aria-selected="true" aria-controls="conversation" tabindex="0">Conversation</button>
-          <button id="trajectory-view-tab" class="session-view-tab" type="button" role="tab" aria-selected="false" aria-controls="conversation" tabindex="-1">Trajectory <span id="trajectory-view-count" class="session-view-tab-count">0</span></button>
-        </nav>
-        <div id="connection-banner" class="connection-banner" role="status" aria-live="polite" hidden><span id="connection-banner-message" class="connection-banner-message"></span><button id="connection-retry" class="connection-retry" type="button" hidden>Retry</button></div>
-        <section id="queue-dock" class="queue-dock" aria-label="Queued messages" hidden></section>
-        <section id="goal-bar" class="goal-bar" aria-label="Current goal" hidden></section>
-        <section id="conversation" class="conversation" aria-live="polite"></section>
-        <footer class="composer-shell">
+        <div class="workspace-main">
+          <nav id="session-view-tabs" class="session-view-tabs" aria-label="Session view">
+            <button id="conversation-view-tab" class="session-view-tab" type="button" role="tab" aria-selected="true" aria-controls="conversation" tabindex="0">Conversation</button>
+            <button id="trajectory-view-tab" class="session-view-tab" type="button" role="tab" aria-selected="false" aria-controls="conversation" tabindex="-1">Trajectory <span id="trajectory-view-count" class="session-view-tab-count">0</span></button>
+          </nav>
+          <div class="workspace-feedback">
+            <div id="connection-banner" class="connection-banner" role="status" aria-live="polite" hidden><span id="connection-banner-message" class="connection-banner-message"></span><button id="connection-retry" class="connection-retry" type="button" hidden>Retry</button></div>
+            <section id="queue-dock" class="queue-dock" aria-label="Queued messages" hidden></section>
+            <section id="goal-bar" class="goal-bar" aria-label="Current goal" hidden></section>
+          </div>
+          <section id="conversation" class="session-body" aria-live="polite">
+            <div id="conversation-content" class="conversation-content"></div>
+            <footer class="composer-shell">
           <form id="composer" class="composer-card">
             <label class="sr-only" for="input">Message</label>
             <textarea id="input" rows="1" placeholder="Ask Code Review Agent to inspect, explain, or change your code…"></textarea>
@@ -679,7 +689,9 @@
           </form>
           <button id="usage-meter" class="usage-meter" type="button" aria-live="polite" aria-expanded="false" aria-controls="usage-drawer" hidden></button>
           <div id="usage-drawer" class="usage-drawer" hidden></div>
-        </footer>
+            </footer>
+          </section>
+        </div>
       </main>
       <aside id="details-panel" class="details-panel" aria-label="Session details">
         <div class="details-header"><strong>Session details</strong><button id="details-close" class="icon-button" type="button" aria-label="Close details">›</button></div>
@@ -739,6 +751,7 @@
         const subagentList = document.querySelector('#subagent-list');
         const archiveToggle = document.querySelector('#archive-toggle');
         const conversation = document.querySelector('#conversation');
+        const conversationContent = document.querySelector('#conversation-content');
         const status = document.querySelector('#status');
         const title = document.querySelector('#session-title');
         const path = document.querySelector('#session-path');
@@ -913,8 +926,8 @@
           input.disabled = intent.status !== 'ready';
           send.disabled = intent.status !== 'ready';
           if (intent.status === 'ready') return;
-          conversation.innerHTML = `<div class="hero"><div class="hero-inner"><div class="hero-mark">${esc(intent.mark)}</div><h1>${esc(intent.title)}</h1><p>${esc(intent.message)}</p>${intent.retryable ? '<button id="boot-retry" class="workspace-create" type="button">Retry</button>' : ''}</div></div>`;
-          const retry = conversation.querySelector('#boot-retry');
+          conversationContent.innerHTML = `<div class="hero"><div class="hero-inner"><div class="hero-mark">${esc(intent.mark)}</div><h1>${esc(intent.title)}</h1><p>${esc(intent.message)}</p>${intent.retryable ? '<button id="boot-retry" class="workspace-create" type="button">Retry</button>' : ''}</div></div>`;
+          const retry = conversationContent.querySelector('#boot-retry');
           if (retry) retry.onclick = () => { void startBoot(); };
         };
         const transitionBoot = (action) => { reduceBoot(action); renderBootBoundary(); };
@@ -1326,15 +1339,16 @@
           const running = document.createElement('label'); running.className = 'trajectory-running'; const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.checked = state.trajectoryRunningOnly === true; checkbox.setAttribute('aria-label', 'Show running records only'); running.append(checkbox, document.createTextNode('Running'));
           const openDetails = document.createElement('button'); openDetails.type = 'button'; openDetails.className = 'main-trajectory-open-details'; openDetails.textContent = 'Open details'; openDetails.onclick = () => { dispatchShellLayout({ type: 'open-details' }); renderTrajectoryPanel(typedConnection?.store.getSnapshot()?.trajectory); details.querySelector('#trajectory-inspector-panel')?.scrollIntoView({ block: 'start' }); };
           controls.append(search, running, openDetails); body.append(controls);
-          if (!projection || !typedRuntime?.queryTrajectory) { meta.textContent = 'Projection unavailable'; const empty = document.createElement('div'); empty.className = 'main-trajectory-empty'; empty.textContent = 'Trajectory data will appear after the session receives events.'; body.append(empty); return; }
+          const scrollRegion = document.createElement('div'); scrollRegion.className = 'main-trajectory-scroll'; body.append(scrollRegion);
+          if (!projection || !typedRuntime?.queryTrajectory) { meta.textContent = 'Projection unavailable'; const empty = document.createElement('div'); empty.className = 'main-trajectory-empty'; empty.textContent = 'Trajectory data will appear after the session receives events.'; scrollRegion.append(empty); return; }
           const view = typedRuntime.queryTrajectory(projection, { query: state.trajectoryQuery || '', runningOnly: state.trajectoryRunningOnly === true, limit: 200 });
           meta.textContent = `${view.matchedRecords} matched · ${view.records.length} shown · sequence ${view.lastSequence}${view.truncated ? ' · more available' : ''}`;
           search.addEventListener('input', () => { state.trajectoryQuery = search.value; render(); });
           checkbox.addEventListener('change', () => { state.trajectoryRunningOnly = checkbox.checked; render(); });
-          if (!view.records.length) { const empty = document.createElement('div'); empty.className = 'main-trajectory-empty'; empty.textContent = state.trajectoryQuery || state.trajectoryRunningOnly ? 'No trajectory records match this filter.' : 'No trajectory records yet.'; body.append(empty); return; }
+          if (!view.records.length) { const empty = document.createElement('div'); empty.className = 'main-trajectory-empty'; empty.textContent = state.trajectoryQuery || state.trajectoryRunningOnly ? 'No trajectory records match this filter.' : 'No trajectory records yet.'; scrollRegion.append(empty); return; }
           const selected = view.records.find((record) => record.key === state.trajectorySelectedKey) || view.records[0];
           state.trajectorySelectedKey = selected.key;
-          const timeline = document.createElement('div'); timeline.className = 'main-trajectory-timeline'; body.append(timeline);
+          const timeline = document.createElement('div'); timeline.className = 'main-trajectory-timeline'; scrollRegion.append(timeline);
           const timelineView = typedRuntime.buildTrajectoryTimeline?.(view.records, 200);
           if (timelineView) {
             const timelineHeader = document.createElement('div'); timelineHeader.className = 'trajectory-timeline-header'; const timelineLabel = document.createElement('span'); timelineLabel.textContent = 'Timeline'; const timelineMeta = document.createElement('span'); timelineMeta.textContent = timelineView.spanMs === undefined ? 'recorded time unavailable' : `${timelineView.spanMs}ms span`; timelineHeader.append(timelineLabel, timelineMeta); timeline.append(timelineHeader);
@@ -1356,7 +1370,7 @@
               inspector.append(section);
             }
           }
-          body.append(inspector);
+          scrollRegion.append(inspector);
         };
         const renderViewTabs = (snapshot) => {
           const trajectoryCount = snapshot?.trajectory?.records?.length || 0;
@@ -1883,7 +1897,7 @@
           renderModelSeatMenu();
           if (!settingsModal.hidden) renderSettings();
           const shouldFollowTail = state.trajectoryFollow === true && isNearConversationTail();
-          conversation.innerHTML = '';
+          conversationContent.innerHTML = '';
           const typedSnapshot = typedConnection?.store.getSnapshot();
           renderComposerState(typedSnapshot || { session: state.session });
           renderQueue(typedSnapshot || { session: state.session });
@@ -1893,7 +1907,7 @@
           renderViewTabs(typedSnapshot);
           if (state.sessionView === 'trajectory') {
             const trajectoryBody = document.createElement('div');
-            conversation.append(trajectoryBody);
+            conversationContent.append(trajectoryBody);
             renderMainTrajectory(typedSnapshot?.trajectory, trajectoryBody, typedSnapshot);
             renderDetails();
             renderTrajectoryPanel(typedSnapshot?.trajectory);
@@ -1911,7 +1925,7 @@
           if (typedProjection && typedProjection.nodes.length > 0) {
             const typedBody = document.createElement('div');
             typedBody.className = 'conversation-body';
-            conversation.append(typedBody);
+            conversationContent.append(typedBody);
             if (renderTypedConversation(typedProjection, typedBody, typedSnapshot)) {
               renderDetails();
               renderTrajectoryPanel(typedSnapshot?.trajectory);
@@ -1930,9 +1944,9 @@
           const ordered = orderedEvents();
           const hasMessage = ordered.some((event) => event.type === 'user/message' || event.type === 'turn/steered' || event.type === 'assistant/chunk' || event.type === 'assistant/message');
           const hasActivity = ordered.some((event) => event.type !== 'session/created');
-          if (!hasMessage && !hasActivity) { const hero = document.createElement('div'); hero.className = 'hero'; hero.innerHTML = `<div class="hero-inner"><div class="hero-mark">⌁</div><h1>Ready to review your code</h1><p>Ask the agent to inspect a repository, explain a file, or plan the next change.</p><span class="workspace-chip">${esc(state.session?.workspaceRoot || '.')}</span></div>`; conversation.append(hero); }
+          if (!hasMessage && !hasActivity) { const hero = document.createElement('div'); hero.className = 'hero'; hero.innerHTML = `<div class="hero-inner"><div class="hero-mark">⌁</div><h1>Ready to review your code</h1><p>Ask the agent to inspect a repository, explain a file, or plan the next change.</p><span class="workspace-chip">${esc(state.session?.workspaceRoot || '.')}</span></div>`; conversationContent.append(hero); }
           else {
-            const body = document.createElement('div'); body.className = 'conversation-body'; conversation.append(body); const assistant = new Map(); const permissions = new Map(); const interactions = new Map(); const toolRows = new Map();
+            const body = document.createElement('div'); body.className = 'conversation-body'; conversationContent.append(body); const assistant = new Map(); const permissions = new Map(); const interactions = new Map(); const toolRows = new Map();
             let toolActivity = null;
             const ensureToolActivity = () => { if (!toolActivity) toolActivity = createToolActivity(body); return toolActivity; };
             const upsertTool = (id, name, text, statusText) => { const key = id || `${name}-${toolRows.size}`; let card = toolRows.get(key); if (!card) { card = appendTool(ensureToolActivity().items, name || 'tool', text, statusText); toolRows.set(key, card); } else { card.toolStatus.textContent = statusText; card.pre.textContent = text; } toolActivity?.update(); return card; };
