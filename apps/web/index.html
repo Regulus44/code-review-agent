@@ -1132,17 +1132,11 @@
             } else if (node.kind === 'tool') upsertTool(node.tool);
             else if (node.kind === 'permission') {
               const intent = typedRuntime?.presentPermission ? typedRuntime.presentPermission(node, { sessionStatus: snapshot?.session?.status, connection: snapshot?.connection }) : null;
-              const permissionActivity = ensureToolActivity();
-              appendPermission(permissionActivity.items, { permissionId: node.permissionId, toolCallId: node.toolCallId, toolName: node.toolName, status: node.status, displayStatus: intent?.status, summary: intent?.summary, recovery: intent?.recovery, recoveryLabel: intent?.recoveryLabel, interactive: intent?.interactive, details: intent?.details?.text, reason: node.reason, caller: node.caller, workspaceRoot: node.workspaceRoot, expiresAt: node.expiresAt, input: node.input });
-              if (node.status === 'pending' || intent?.status === 'pending') permissionActivity.group.open = true;
-              permissionActivity.update();
+              appendPermission(body, { permissionId: node.permissionId, toolCallId: node.toolCallId, toolName: node.toolName, status: node.status, displayStatus: intent?.status, summary: intent?.summary, recovery: intent?.recovery, recoveryLabel: intent?.recoveryLabel, interactive: intent?.interactive, details: intent?.details?.text, reason: node.reason, caller: node.caller, workspaceRoot: node.workspaceRoot, expiresAt: node.expiresAt, input: node.input });
             }
             else if (node.kind === 'interaction') {
               const intent = typedRuntime?.presentInteraction ? typedRuntime.presentInteraction(node, { sessionStatus: snapshot?.session?.status, connection: snapshot?.connection }) : null;
-              const interactionActivity = ensureToolActivity();
-              appendInteraction(interactionActivity.items, { interactionId: node.interactionId, toolCallId: node.toolCallId, question: node.question, options: node.options, status: node.status, displayStatus: intent?.status, summary: intent?.summary, recovery: intent?.recovery, recoveryLabel: intent?.recoveryLabel, interactive: intent?.interactive, details: intent?.details?.text, caller: node.caller, expiresAt: node.expiresAt, allowFreeform: node.allowFreeform, answer: node.answer });
-              if (node.status === 'pending' || intent?.status === 'pending') interactionActivity.group.open = true;
-              interactionActivity.update();
+              appendInteraction(body, { interactionId: node.interactionId, toolCallId: node.toolCallId, question: node.question, options: node.options, status: node.status, displayStatus: intent?.status, summary: intent?.summary, recovery: intent?.recovery, recoveryLabel: intent?.recoveryLabel, interactive: intent?.interactive, details: intent?.details?.text, caller: node.caller, expiresAt: node.expiresAt, allowFreeform: node.allowFreeform, answer: node.answer });
             }
             else if (node.kind === 'task') addEventRow(body, `Task · ${node.title || node.taskId} · ${node.status}${node.summary ? ` · ${node.summary}` : ''}`);
             else if (node.kind === 'event') {
@@ -1847,8 +1841,8 @@
               else if (event.type === 'lsp/server' || event.type === 'lsp/request' || event.type === 'mcp/server' || event.type === 'mcp/tool' || event.type === 'mcp/resource' || event.type === 'mcp/prompt') { const payload = event.payload || {}; const label = event.type.split('/')[0].toUpperCase(); const kind = event.type.split('/')[1]; upsertTool(`${event.type}-${payload.serverName || payload.serverId || payload.toolCallId || event.sequence}`, `${label} · ${kind}`, JSON.stringify(payload, null, 2), payload.status || payload.action || 'Updated'); }
               else if (event.type === 'agent/error') addEventRow(body, `Agent error · ${event.payload?.message || event.payload?.error || 'The agent reported an error.'}`);
             }
-            for (const permission of permissions.values()) { const activity = ensureToolActivity(); appendPermission(activity.items, permission); if ((permission.displayStatus || permission.status) === 'pending') activity.group.open = true; activity.update(); }
-            for (const interaction of interactions.values()) { const activity = ensureToolActivity(); appendInteraction(activity.items, interaction); if ((interaction.displayStatus || interaction.status) === 'pending') activity.group.open = true; activity.update(); }
+            for (const permission of permissions.values()) appendPermission(body, permission);
+            for (const interaction of interactions.values()) appendInteraction(body, interaction);
           }
           renderDetails();
           renderTrajectoryPanel(typedSnapshot?.trajectory);
