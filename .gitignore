@@ -3,6 +3,7 @@
 !.env.example
 .data/
 tmp/
+.tmp/
 docs/
 !docs/
 !docs/**
