@@ -38,7 +38,7 @@ import {
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { compactMessages, DEFAULT_CONTEXT_BUDGET, type ContextBudget } from "@code-review-agent/compaction";
-import { assembleContext, calculateContextWarningState, countContextTokens, createTokenCounter, ensureToolResultPairing, estimateContextTokens, fallbackModelContextCapability, groupMessagesByApiRound, normalizeMessagesForAPI, resolveContextBudget, shouldCompactBeforeRequest, shouldUseExactTokenCount, type ApiRound, type ContextAssembly, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type TokenCount, type ToolPairingReport } from "@code-review-agent/context";
+import { applyToolResultBudget, assembleContext, calculateContextWarningState, countContextTokens, createTokenCounter, ensureToolResultPairing, estimateContextTokens, fallbackModelContextCapability, groupMessagesByApiRound, normalizeMessagesForAPI, resolveContextBudget, shouldCompactBeforeRequest, shouldUseExactTokenCount, type ApiRound, type ContextAssembly, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport } from "@code-review-agent/context";
 import { randomUUID } from "node:crypto";
 import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModePolicySnapshot, type CodeModeSandbox, type ExecuteToolOutput, type JobSummary, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
 import type { SubagentRuntime } from "@code-review-agent/subagent";
@@ -68,6 +68,8 @@ export interface AgentHostOptions {
   readonly contextPolicy?: Partial<ContextBudgetConfig>;
   /** API message validation policy; repair keeps the model request safe by default. */
   readonly messageValidationMode?: "repair" | "strict";
+  /** Non-destructive model-view tool-result budget and microcompact policy. */
+  readonly toolResultBudget?: ToolResultBudgetPolicy;
   readonly quota?: ProductizationQuotaPolicy;
   readonly operations?: ProductizationOperationsPolicy;
 }
@@ -160,6 +162,7 @@ interface PreparedModelContext {
   readonly rounds: readonly ApiRound[];
   readonly normalization: MessageNormalizationReport;
   readonly pairing: ToolPairingReport;
+  readonly toolResultBudget: ToolResultBudgetReport;
 }
 
 export type TenantModelRoute = Pick<ModelRouteRecord, "provider" | "model" | "baseUrl" | "credentialRef" | "contextCapability">;
@@ -191,6 +194,7 @@ export class AgentHost {
   private readonly contextBudget: Partial<ContextBudget> | undefined;
   private readonly contextPolicy: Partial<ContextBudgetConfig> | undefined;
   private readonly messageValidationMode: "repair" | "strict";
+  private readonly toolResultBudget: ToolResultBudgetPolicy | undefined;
   private readonly quota: ProductizationQuotaPolicy | undefined;
   private readonly operations: ProductizationOperationsPolicy;
   private readonly quotaTails = new Map<string, Promise<void>>();
@@ -207,6 +211,7 @@ export class AgentHost {
     this.contextBudget = options.contextBudget;
     this.contextPolicy = options.contextPolicy;
     this.messageValidationMode = options.messageValidationMode ?? "repair";
+    this.toolResultBudget = options.toolResultBudget;
     this.quota = options.quota;
     this.operations = options.operations ?? { backup: "deferred", migration: "deferred", upgrade: "deferred" };
     this.customSystemPrompt = options.systemPrompt;
@@ -1535,19 +1540,40 @@ export class AgentHost {
     });
   }
 
-  private prepareModelContext(assembly: ContextAssembly): PreparedModelContext {
+  private prepareModelContext(
+    assembly: ContextAssembly,
+    protectedToolCallIds: ReadonlySet<string> = new Set<string>(),
+    toolResultTimestamps: Readonly<Record<string, string>> = {},
+    alreadyClearedToolCallIds: ReadonlySet<string> = new Set<string>(),
+  ): PreparedModelContext {
     const normalized = normalizeMessagesForAPI(assembly.modelView.messages, { mode: this.messageValidationMode });
     const paired = ensureToolResultPairing(normalized.messages, { mode: this.messageValidationMode });
     if (this.messageValidationMode === "strict" && (!normalized.report.valid || !paired.report.valid)) {
       const codes = [...normalized.report.issues.map((issue) => issue.code), ...paired.report.issues.map((issue) => issue.code)];
       throw new Error(`MODEL_MESSAGE_VALIDATION_FAILED: ${codes.join(",") || "unknown"}`);
     }
+    const budgeted = applyToolResultBudget(paired.messages, {
+      policy: this.toolResultBudgetWithLegacyFallback(),
+      protectedToolCallIds,
+      toolResultTimestamps,
+      alreadyClearedToolCallIds,
+    });
     return {
-      view: { messages: paired.messages, ...(assembly.modelView.tools === undefined ? {} : { tools: assembly.modelView.tools }) },
-      rounds: groupMessagesByApiRound(paired.messages),
+      view: { messages: budgeted.messages, ...(assembly.modelView.tools === undefined ? {} : { tools: assembly.modelView.tools }) },
+      rounds: groupMessagesByApiRound(budgeted.messages),
       normalization: normalized.report,
       pairing: paired.report,
+      toolResultBudget: budgeted.report,
     };
+  }
+
+  private toolResultBudgetWithLegacyFallback(): ToolResultBudgetPolicy {
+    try {
+      if (this.toolResultBudget?.maxResultChars !== undefined || this.contextBudget?.maxToolResultChars === undefined) return { ...(this.toolResultBudget ?? {}) };
+      return { ...(this.toolResultBudget ?? {}), maxResultChars: this.contextBudget.maxToolResultChars };
+    } catch {
+      return { ...(this.toolResultBudget ?? {}) };
+    }
   }
 
   private enqueue(pending: PendingTurn): void {
@@ -1643,6 +1669,9 @@ export class AgentHost {
   }
 
   private async runSteps(sessionId: SessionId, turnId: TurnId, controller: AbortController, messages: ChatMessage[], reasoningEffort?: string, recovery = false): Promise<void> {
+    const alreadyClearedToolCallIds = new Set<string>();
+    const reportedBudgetToolCallIds = new Set<string>();
+    const reportedMicrocompactToolCallIds = new Set<string>();
     for (let step = 1; step <= this.maxSteps; step += 1) {
       if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
       this.appendSteers(messages, turnId);
@@ -1651,7 +1680,10 @@ export class AgentHost {
       const budgetSnapshot = this.contextBudgetSnapshot(tenantId);
       const primaryModel = this.modelForTenant(tenantId);
       let assembly = await this.assembleTurnContext(sessionId, messages, recovery);
-      let prepared = this.prepareModelContext(assembly);
+      const protectedToolCallIds = pendingToolCallIds(projection);
+      const toolResultTimestamps = await this.toolResultTimestamps(sessionId);
+      let prepared = this.prepareModelContext(assembly, protectedToolCallIds, toolResultTimestamps, alreadyClearedToolCallIds);
+      await this.appendToolResultBudgetEvents(sessionId, turnId, prepared.toolResultBudget, this.toolResultBudgetWithLegacyFallback(), reportedBudgetToolCallIds, reportedMicrocompactToolCallIds, alreadyClearedToolCallIds);
       const beforeView: ModelContextView = prepared.view;
       const tokenCounter = createTokenCounter(primaryModel);
       const estimate = tokenCounter.estimate(beforeView);
@@ -1665,7 +1697,8 @@ export class AgentHost {
       if (this.compactionEnabled && autoCompactRecommended) {
         await this.compactTurnContext(sessionId, turnId, messages, budgetSnapshot, beforeUsage, beforeState);
         assembly = await this.assembleTurnContext(sessionId, messages, recovery);
-        prepared = this.prepareModelContext(assembly);
+        prepared = this.prepareModelContext(assembly, protectedToolCallIds, toolResultTimestamps, alreadyClearedToolCallIds);
+        await this.appendToolResultBudgetEvents(sessionId, turnId, prepared.toolResultBudget, this.toolResultBudgetWithLegacyFallback(), reportedBudgetToolCallIds, reportedMicrocompactToolCallIds, alreadyClearedToolCallIds);
       }
       if (prepared.normalization.changed) {
         await this.options.store.append({
@@ -1713,6 +1746,7 @@ export class AgentHost {
           tokenCount: publicTokenCount(finalCount),
           contextAssembly: publicContextAssembly(assembly),
           messageValidation: publicMessageValidation(prepared),
+          toolResultBudget: publicToolResultBudget(prepared.toolResultBudget, this.toolResultBudgetWithLegacyFallback()),
           modelRequestId,
           ...(autoCompactRecommended ? { autoCompactRecommended: true } : {}),
         },
@@ -1754,6 +1788,61 @@ export class AgentHost {
     throw new Error(`MAX_AGENT_STEPS_EXCEEDED: model did not produce a final response within ${this.maxSteps} steps`);
   }
 
+  private async toolResultTimestamps(sessionId: SessionId): Promise<Readonly<Record<string, string>>> {
+    const timestamps: Record<string, string> = {};
+    for (const event of await this.options.store.list(sessionId)) {
+      if (event.type !== "tool/result") continue;
+      const toolCallId = event.payload["toolCallId"];
+      if (typeof toolCallId === "string") timestamps[toolCallId] = event.createdAt;
+    }
+    return timestamps;
+  }
+
+  private async appendToolResultBudgetEvents(
+    sessionId: SessionId,
+    turnId: TurnId,
+    report: ToolResultBudgetReport,
+    policy: ToolResultBudgetPolicy,
+    reportedToolCallIds: Set<string>,
+    reportedMicrocompactToolCallIds: Set<string>,
+    alreadyClearedToolCallIds: Set<string>,
+  ): Promise<void> {
+    const newlyBoundedToolCallIds = report.boundedToolCallIds.filter((toolCallId) => !reportedToolCallIds.has(toolCallId));
+    const newlyClearedToolCallIds = report.newlyClearedToolCallIds.filter((toolCallId) => !reportedMicrocompactToolCallIds.has(toolCallId));
+    for (const toolCallId of newlyBoundedToolCallIds) reportedToolCallIds.add(toolCallId);
+    for (const toolCallId of newlyClearedToolCallIds) reportedMicrocompactToolCallIds.add(toolCallId);
+    for (const toolCallId of newlyClearedToolCallIds) alreadyClearedToolCallIds.add(toolCallId);
+    if (newlyBoundedToolCallIds.length === 0 && newlyClearedToolCallIds.length === 0) return;
+    await this.options.store.append({
+      sessionId,
+      turnId,
+      type: "context/tool_results_budgeted",
+      payload: {
+        boundedCount: report.boundedCount,
+        boundedToolCallIds: newlyBoundedToolCallIds,
+        clearedCount: report.clearedCount,
+        clearedToolCallIds: newlyClearedToolCallIds,
+        tokensSaved: report.tokensSaved,
+        trigger: report.trigger,
+        protectedToolCallIds: report.protectedToolCallIds,
+      },
+    });
+    if (newlyClearedToolCallIds.length === 0) return;
+    await this.options.store.append({
+      sessionId,
+      turnId,
+      type: "context/microcompacted",
+      payload: {
+        trigger: report.trigger,
+        clearedToolCallIds: report.clearedToolCallIds,
+        newlyClearedToolCallIds,
+        keptRecent: policy.keepRecentResults ?? 5,
+        tokensSaved: report.tokensSaved,
+        protectedToolCallIds: report.protectedToolCallIds,
+      },
+    });
+  }
+
   private async compactTurnContext(
     sessionId: SessionId,
     turnId: TurnId,
@@ -1764,10 +1853,7 @@ export class AgentHost {
   ): Promise<void> {
     if (!this.compactionEnabled) return;
     const projection = await this.options.store.project(sessionId);
-    const protectedToolCallIds = new Set<string>([
-      ...(projection?.permissions.filter((permission) => permission.status === "pending").map((permission) => String(permission.toolCallId)) ?? []),
-      ...(projection?.interactions.filter((interaction) => interaction.status === "pending").map((interaction) => String(interaction.toolCallId)) ?? []),
-    ]);
+    const protectedToolCallIds = pendingToolCallIds(projection);
     try {
       const resolved = budgetSnapshot ?? this.contextBudgetSnapshot(projection?.ownership?.tenantId);
       const usage = tokenUsage ?? estimateContextTokens({ messages }).value;
@@ -2146,6 +2232,39 @@ function publicMessageValidation(prepared: PreparedModelContext): Readonly<Recor
     removedOrphanResultCount: prepared.pairing.removedOrphanResultCount,
     removedDuplicateCallCount: prepared.pairing.removedDuplicateCallCount,
   };
+}
+
+function publicToolResultBudget(
+  report: ToolResultBudgetReport,
+  policy: ToolResultBudgetPolicy,
+): Readonly<Record<string, unknown>> {
+  return {
+    enabled: report.enabled,
+    changed: report.changed,
+    trigger: report.trigger,
+    boundedCount: report.boundedCount,
+    clearedCount: report.clearedCount,
+    tokensSaved: report.tokensSaved,
+    boundedToolCallIds: report.boundedToolCallIds,
+    clearedToolCallIds: report.clearedToolCallIds,
+    newlyClearedToolCallIds: report.newlyClearedToolCallIds,
+    protectedToolCallIds: report.protectedToolCallIds,
+    policy: {
+      enabled: policy.enabled !== false,
+      ...(policy.maxResultChars === undefined ? {} : { maxResultChars: policy.maxResultChars }),
+      ...(policy.microcompactTriggerToolCount === undefined ? {} : { microcompactTriggerToolCount: policy.microcompactTriggerToolCount }),
+      ...(policy.microcompactTriggerTokens === undefined ? {} : { microcompactTriggerTokens: policy.microcompactTriggerTokens }),
+      ...(policy.keepRecentResults === undefined ? {} : { keepRecentResults: policy.keepRecentResults }),
+      ...(policy.timeBasedGapMs === undefined ? {} : { timeBasedGapMs: policy.timeBasedGapMs }),
+    },
+  };
+}
+
+function pendingToolCallIds(projection: SessionProjection | undefined): Set<string> {
+  return new Set([
+    ...(projection?.permissions.filter((permission) => permission.status === "pending").map((permission) => String(permission.toolCallId)) ?? []),
+    ...(projection?.interactions.filter((interaction) => interaction.status === "pending").map((interaction) => String(interaction.toolCallId)) ?? []),
+  ]);
 }
 
 function reasoningEffortForTurn(events: readonly AgentEvent[], turnId: TurnId): string | undefined {

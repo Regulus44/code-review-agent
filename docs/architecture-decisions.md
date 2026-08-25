@@ -168,6 +168,22 @@ repair 只改变 model-visible view，不删除或修改 EventStore transcript�
 
 M04 不包含 M05 工具结果 microcompact、provider cache edit、summary agent、compact boundary 或 overflow recovery。回滚时可退回 M03 assembly；新增字段和事件均采用兼容追加方式。
 
+## ADR-017：Tool Result Budget 只改变 model view，MicroCompact 通过白名单和幂等 receipt 工作
+
+状态：accepted（2026-08-26，M05）
+
+M05 在 M04 normalize/pairing gate 之后增加工具结果局部预算层。`packages/context/src/tool-result-budget.ts` 可以对可压缩工具结果做 per-result bounded view，并按 count、bounded token 总量或结果年龄触发 microcompact；清理结果使用 `[Old tool result content cleared]` marker。默认 compactable 白名单覆盖 Read/Bash/Grep/Glob/WebSearch/WebFetch/Edit/Write 语义，不在白名单中的工具结果保持完整。
+
+model view 与 transcript 必须分离。`applyToolResultBudget()` 永远返回新消息数组，不能修改 EventStore 中的 `tool/result` payload、审计原文或用户可见历史。Runtime 的 token estimator 和 provider request 必须消费同一份 `prepared.view`，避免预算诊断与实际请求漂移。
+
+pending permission 或 interaction 对应的 tool call 进入 protected set；protected 结果本阶段不 bounded、不 cleared。Runtime 从 projection 获取 protected IDs，从 EventStore 获取 `tool/result.createdAt`，每个 turn 维护 `alreadyClearedToolCallIds`，保证同一旧结果不会在每个 step 重复追加 microcompact receipt。Runtime 重启后允许根据当前 policy 重新构造 model view，因为 transcript 才是唯一事实来源。
+
+M05 追加 `context/tool_results_budgeted` 和 `context/microcompacted` 事件，并在 `step/started.payload.toolResultBudget` 保存 counts、IDs、trigger、tokensSaved、protected IDs 和 policy 摘要。事件不得包含完整工具输出、prompt、provider body、credential 或 secret。
+
+Claude Code 的 `cachedMicrocompact.ts` 只作为行为参考，provider cache edit 暂不实现。该能力依赖具体 provider 的 cache state、request boundary 和 replay contract，不能在多 provider Runtime 中假设通用语义。M05 不包含 Session Memory、LLM summary、compact boundary、overflow recovery 或 UI projection。
+
+回滚策略：移除 M05 budget gate、两个事件类型、step 诊断字段和对应测试，即可回到 M04 的合法消息 view；旧 `contextBudget.maxToolResultChars` 兼容映射不要求事件迁移。
+
 ## 参考代码入口
 
 - DSH Agent Loop：`D:/Develop/deepseek-harness-fork/packages/core/agent-loop/src/agent.ts`

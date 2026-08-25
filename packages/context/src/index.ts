@@ -11,6 +11,7 @@ export {
 export { groupMessagesByApiRound } from "./api-round.js";
 export { normalizeMessagesForAPI } from "./api-normalize.js";
 export { ensureToolResultPairing } from "./tool-pairing.js";
+export { applyToolResultBudget, DEFAULT_COMPACTABLE_TOOLS, DEFAULT_MICROCOMPACT_MESSAGE } from "./tool-result-budget.js";
 export {
   countContextTokens,
   createTokenCounter,
@@ -50,6 +51,14 @@ export type {
   ToolPairingReport,
   ToolPairingResult,
 } from "./tool-pairing.js";
+export type {
+  ApplyToolResultBudgetOptions,
+  ToolResultBudgetPolicy,
+  ToolResultBudgetReport,
+  ToolResultBudgetResult,
+  ToolResultBudgetTrigger,
+  ToolResultContextView,
+} from "./tool-result-budget.js";
 
 export type {
   ContextBudgetConfig,

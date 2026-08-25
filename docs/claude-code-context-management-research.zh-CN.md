@@ -442,7 +442,7 @@ M03 已按上述设计完成，详细代码对照记录见 [`claude-code-context
 | Replay metadata | `ContextAssembly.fingerprint`、`step/started.payload.contextAssembly` | 对 sections/tools/history/attachments 做稳定序列化并生成 `ctx_<8 hex>` fingerprint；事件记录 sectionIds、静态/动态分组和 attachmentIds |
 | Runtime integration | `packages/runtime/src/index.ts:assembleTurnContext()`、`runSteps()` | runTurn、恢复 turn 和每个 model step 都重新组装；compact 后重新生成 assembly 与 token count，避免沿用过期 model view |
 
-M03 的边界保持清晰：M04 的 API round、message normalize、tool pairing 已在后续模块实现，但不属于 assembler 本身；M05 的 tool-result microcompact 尚未实现。attachments 当前是有界的 model-view wrapper；持久化 transcript、memory 和压缩后重建仍由后续模块负责。
+M03 的边界保持清晰：M04 的 API round、message normalize、tool pairing 已在后续模块实现，但不属于 assembler 本身；M05 的 tool-result microcompact 已在 M04 gate 之后接入。attachments 当前是有界的 model-view wrapper；持久化 transcript、memory 和压缩后重建仍由后续模块负责。
 
 ### M04：API Round、Message Normalize 与 Tool Pairing
 
@@ -481,7 +481,22 @@ M04 已完成，详细代码对照记录见 [`claude-code-context-m04-implementa
 | Runtime gate | `packages/runtime/src/index.ts:prepareModelContext()` | token estimator 与 provider model request 共用 normalize + pairing 后的 messages；所有 step 经过 gate |
 | Durable metadata | `packages/contracts/src/index.ts`、`runtime/src/index.ts` | assistant/message 写入 `requestId/responseId`；step/started 写入 round、validation metadata；repair 追加 `context/messages_normalized` 与 `context/tool_pairing_repaired` |
 
-默认模式是 `repair`，可通过 `AgentHostOptions.messageValidationMode = "strict"` fail-closed。M04 尚未实现 M05 的工具结果预算、microcompact 或 provider-specific schema normalization。
+默认模式是 `repair`，可通过 `AgentHostOptions.messageValidationMode = "strict"` fail-closed。M04 不负责 M05 的工具结果预算；M05 已在其后作为独立 model-view reduction 层接入。
+
+### 14.4 M05 实施状态（2026-08-26）
+
+M05 已完成，详细代码对照记录见 [`claude-code-context-m05-implementation.zh-CN.md`](claude-code-context-m05-implementation.zh-CN.md)。实际入口如下：
+
+| 层次 | 实际入口 | 当前行为 |
+|---|---|---|
+| Budget policy | `packages/context/src/tool-result-budget.ts:ToolResultBudgetPolicy` | 支持全局/按工具字符上限、compactable 白名单、count/token/time trigger、最近 N 个保留 |
+| Result estimator | `estimateToolResultTokens()` | 文本/JSON 使用保守估算；image/document block 计入额外媒体成本 |
+| Model-view replacement | `applyToolResultBudget()` | 只返回新的 bounded/cleared messages；输入 messages 和 EventStore transcript 不变 |
+| Protection | `packages/runtime/src/index.ts:pendingToolCallIds()` | pending permission/interaction tool call 不做 bounded/cleared；不可压缩工具不进入候选 |
+| Runtime gate | `runSteps()`、`prepareModelContext()` | 每个 step、compact 后和 tool loop 后重新应用 M05；token estimator 与 provider request 共用 `prepared.view` |
+| Durable metadata | contracts + `appendToolResultBudgetEvents()` | 追加 `context/tool_results_budgeted`、`context/microcompacted`；step/started 写入 `toolResultBudget` |
+
+当前明确不实现 `cachedMicrocompact.ts` 的 provider cache edit；该能力依赖 provider-specific cache state，留到后续 adapter 契约稳定后评估。M05 不包含 Session Memory、LLM summary、compact boundary 或 prompt-too-long recovery。
 
 ### M05：Tool Result Budget 与 MicroCompact
 
@@ -490,7 +505,7 @@ M04 已完成，详细代码对照记录见 [`claude-code-context-m04-implementa
 | Claude Code 参考 | `D:/Develop/claude-code/src/query.ts:526-624`；`src/services/compact/microCompact.ts:137-365,426-520`；`src/services/compact/cachedMicrocompact.ts` |
 | 关键函数 | `calculateToolResultTokens()`、`estimateMessageTokens()`、`microcompactMessages()`、time-based trigger、cached path |
 | 子功能 | 每工具结果上限、媒体估算、旧结果白名单、时间衰减、缓存编辑、cleared tool IDs |
-| 本项目落点 | `packages/context/src/tool-result-budget.ts`、`microcompact.ts`（拟建）；原始结果仍在 EventStore/Artifact |
+| 本项目落点 | `packages/context/src/tool-result-budget.ts`；原始结果仍在 EventStore/Artifact |
 | 直接仿照程度 | 非破坏性 model-view microcompact 直接仿照；cached provider edit 暂不直接实现 |
 
 Claude Code 的 query 顺序是 snip → microcompact → collapse → autocompact。MicroCompact 只替换模型请求中的旧工具结果，不修改 transcript。工具结果估算包括文本、image/document 和结构化 block；可压缩工具由白名单控制，避免清理 permission、交互或不可重复的状态结果。
@@ -507,9 +522,9 @@ interface ToolResultContextView {
 }
 ```
 
-第一版按工具类型、年龄和最近 N 个结果清理；第二版再评估 provider cache edit。缓存编辑依赖 Claude Code 的 provider-specific cache state，不能先复制到多 provider Runtime。
+第一版已按工具类型、年龄、count/token trigger 和最近 N 个结果清理；provider cache edit 暂缓。缓存编辑依赖 Claude Code 的 provider-specific cache state，不能先复制到多 provider Runtime。
 
-模块验收：UI/审计可重新读取原始 tool result；model view 清理后 token 下降可测；清理操作幂等；pending tool、最近结果、不可重放结果不被清理。
+模块验收：UI/审计可重新读取原始 tool result；model view 清理后 token 下降可测；清理操作幂等；pending tool、最近结果、不可重放结果不被清理。M05 的详细入口和验证见 [`claude-code-context-m05-implementation.zh-CN.md`](claude-code-context-m05-implementation.zh-CN.md)。
 
 ### M06：Session Memory Compact
 
@@ -783,7 +798,7 @@ context/compaction_failed
 | 输出预留和自动阈值 | `D:/Develop/claude-code/src/services/compact/autoCompact.ts:33-165` | `getEffectiveContextWindowSize()`、`getAutoCompactThreshold()`、`calculateTokenWarningState()` | `packages/context/src/budget.ts` + Runtime preflight |
 | 自动 compact 入口 | `D:/Develop/claude-code/src/services/compact/autoCompact.ts:270-380` | `autoCompactIfNeeded()` | `packages/context/src/manager.ts` |
 | 近似/精确 token | `D:/Develop/claude-code/src/services/tokenEstimation.ts:131-250` | `countMessagesTokensWithAPI()`、`roughTokenCountEstimation()` | `packages/context/src/estimator.ts` + model adapter capability |
-| 工具结果 microcompact | `D:/Develop/claude-code/src/services/compact/microCompact.ts:137-230,257-365` | `calculateToolResultTokens()`、`estimateMessageTokens()`、`microcompactMessages()` | `packages/context/src/microcompact.ts` |
+| 工具结果 microcompact | `D:/Develop/claude-code/src/services/compact/microCompact.ts:137-230,257-365` | `calculateToolResultTokens()`、`estimateMessageTokens()`、`microcompactMessages()` | `packages/context/src/tool-result-budget.ts` |
 | API round 分组 | `D:/Develop/claude-code/src/services/compact/grouping.ts:22-63` | `groupMessagesByApiRound()` | `packages/context/src/api-round.ts` |
 | Session Memory compact | `D:/Develop/claude-code/src/services/compact/sessionMemoryCompact.ts:234-390,516-590` | `adjustIndexToPreserveAPIInvariants()`、`calculateMessagesToKeepIndex()`、`trySessionMemoryCompaction()` | `packages/context/src/session-memory-compact.ts` |
 | 摘要输入清理 | `D:/Develop/claude-code/src/services/compact/compact.ts:149-227` | `stripImagesFromMessages()`、`stripReinjectedAttachments()` | `packages/context/src/summary-input.ts` |
@@ -900,7 +915,7 @@ M01 已按上述分层落地，详细代码对照记录见 [`claude-code-context
 | Runtime | `packages/runtime/src/index.ts` 的 `contextBudgetSnapshot()`、`runSteps()` preflight | 每次 `step/started` 写入非敏感预算快照和 warning state，并把 auto threshold 交给现有 compaction facade |
 | API | `apps/api/src/server.ts` 的 `contextPolicy`、`/v1/capabilities` | host policy 可注入；能力状态通过既有 capabilities projection 暴露 |
 
-M01 已完成的验证是预算公式和 runtime 事件记录；M02 已在 `packages/context/src/estimator.ts` 落地，M04 的 API round/tool pairing 已在后续模块接入，M05 的工具结果预算仍未实现。M01 的兼容记录保留其当时边界，M02 的实际入口和验证见 [`claude-code-context-m02-implementation.zh-CN.md`](claude-code-context-m02-implementation.zh-CN.md)。
+M01 已完成的验证是预算公式和 runtime 事件记录；M02 已在 `packages/context/src/estimator.ts` 落地；M04 的 API round/tool pairing 和 M05 的 tool-result budget 已在 Runtime request gate 接入。M01 的兼容记录保留其当时边界，M02 的实际入口和验证见 [`claude-code-context-m02-implementation.zh-CN.md`](claude-code-context-m02-implementation.zh-CN.md)。
 
 ## 13. M02：如何仿照 Claude Code 实现两级 token 计数
 
@@ -1360,7 +1375,7 @@ packages/context/
 ├── api-round.ts           # model response round grouping
 ├── api-normalize.ts       # provider-neutral message normalization
 ├── tool-pairing.ts        # strict/repair pairing validator
-├── microcompact.ts        # model-view tool result reduction
+├── tool-result-budget.ts  # model-view tool result reduction
 ├── boundary.ts             # durable boundary creation/replay
 ├── summary-input.ts        # media/UI/attachment stripping
 ├── summary-compact.ts     # summary agent + bounded PTL retry
@@ -1392,7 +1407,7 @@ packages/context/
 | M02 | `tokenEstimation.ts`、`microCompact.ts` | `packages/context/src/estimator.ts`、exact-count adapter seam（已实现） | M01 | estimate/exact/fallback 来源可解释 |
 | M03 | `context.ts`、`prompts.ts`、system prompt builder | `packages/context/src/assembler.ts`、`runtime/src/system-prompt.ts` | M01、M02 | system/tools/history/attachments 稳定组装并可计数 |
 | M04 | `grouping.ts`、`messages.ts` | `api-round.ts`、`api-normalize.ts`、`tool-pairing.ts`（已实现） | M02、M03 | 所有 model request 通过 round/pairing gate |
-| M05 | `query.ts`、`microCompact.ts` | `tool-result-budget.ts`、`microcompact.ts`、micro receipt | M02、M04 | 原文不变、model view 可释放旧工具结果 |
+| M05 | `query.ts`、`microCompact.ts` | `tool-result-budget.ts`、micro receipt（已实现） | M02、M04 | 原文不变、model view 可释放旧工具结果 |
 | M06 | `sessionMemoryCompact.ts` | session-memory compact adapter、保留窗口和边界调整 | M02、M04、M05 | 已有 session summary 时可无摘要模型压缩 |
 | M07 | `compact.ts` | summary input、summary agent、PTL retry、summary usage | M02、M04、M06 | 摘要请求过大可有限重试并安全失败 |
 | M08 | `messages.ts`、`compact.ts` | boundary event、preserved segment、post-compact attachments | M05、M06、M07 | compact 后消息顺序、附件和 dedupe 稳定 |
@@ -1429,14 +1444,14 @@ M04 是所有后续 compact 模块的共同底座。开发时必须同时完成�
 
 ### M05：Tool Result Budget 与 MicroCompact
 
-M05 只对应 Claude Code L5 的工具结果局部清理，不包含全局摘要。开发记录要对照：
+M05 只对应 Claude Code L5 的工具结果局部清理，不包含全局摘要。已完成的开发记录对照：
 
 - `COMPACTABLE_TOOLS` 白名单；
 - tool result 文本、image/document、JSON input 的估算；
 - time-based trigger 和最近结果保留；
 - `clearedToolUseIds`、`tokensSaved` 和 micro boundary；
 - transcript 原文与 model view 的分离；
-- cached microcompact 是否支持、为什么暂时关闭或启用。
+- cached microcompact 暂不支持，以及 provider-specific cache edit 的边界。
 
 参考代码对照：`D:/Develop/claude-code/src/services/compact/microCompact.ts`、`cachedMicrocompact.ts`、`D:/Develop/claude-code/src/query.ts:584-624`。
 

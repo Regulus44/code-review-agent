@@ -55,6 +55,8 @@ export type AgentEventType =
   | "context/compaction_failed"
   | "context/messages_normalized"
   | "context/tool_pairing_repaired"
+  | "context/tool_results_budgeted"
+  | "context/microcompacted"
   | "worktree/created"
   | "worktree/attached"
   | "worktree/switched"

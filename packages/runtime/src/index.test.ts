@@ -502,6 +502,38 @@ describe("AgentHost", () => {
     expect(requests[2]?.messages.some((message) => message.role === "tool" && message.toolCallId === "call_fixture")).toBe(true);
   });
 
+  it("applies M05 tool-result budget to the model view while preserving durable tool output", async () => {
+    const store = new InMemoryEventStore();
+    const requests: ModelRequest[] = [];
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        requests.push(request);
+        yield { type: "text_delta", text: "budgeted" };
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store, model, compactionEnabled: false, toolResultBudget: { maxResultChars: 8_000, microcompactTriggerToolCount: 6, keepRecentResults: 2 } });
+    const session = await host.createSession("D:/m05-budget-fixture");
+    for (let index = 0; index < 6; index += 1) {
+      const toolCallId = `old-call-${index}`;
+      await store.append({ sessionId: session.id, type: "assistant/message", payload: { content: "", toolCalls: [{ id: toolCallId, name: "read_file", arguments: "{}" }] } });
+      await store.append({ sessionId: session.id, type: "tool/result", payload: { toolCallId, status: "completed", result: { content: `durable-${index}-${"x".repeat(100)}` } } });
+    }
+    const turn = await host.sendMessage(session.id, "inspect the recent results");
+    await host.waitForTurn(turn);
+    const events = await host.events(session.id);
+    const toolMessages = requests[0]?.messages.filter((message) => message.role === "tool") ?? [];
+    expect(toolMessages.slice(0, 4).every((message) => message.content === "[Old tool result content cleared]")).toBe(true);
+    expect(toolMessages.slice(4).every((message) => message.content.includes("durable-"))).toBe(true);
+    expect(events.some((event) => event.type === "context/tool_results_budgeted")).toBe(true);
+    expect(events.some((event) => event.type === "context/microcompacted")).toBe(true);
+    const step = events.find((event) => event.type === "step/started" && (event.payload["toolResultBudget"] as { readonly clearedCount?: unknown } | undefined)?.clearedCount === 4);
+    expect(step?.payload["toolResultBudget"]).toMatchObject({ trigger: "count", clearedCount: 4, tokensSaved: expect.any(Number) });
+    const durable = events.filter((event) => event.type === "tool/result");
+    expect(durable).toHaveLength(6);
+    expect(JSON.stringify(durable)).toContain("durable-0-");
+  });
+
   it("pauses a turn for permission and resumes the same turn after approval", async () => {
     const store = new InMemoryEventStore();
     const registry = new ToolRegistry();

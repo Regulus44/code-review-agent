@@ -294,3 +294,21 @@ ID:
 改写部分：synthetic result、EventStore 事件、ChatMessage contract、ToolRuntime 权限和 provider request 使用本项目规则；M05 microcompact、provider cache edit 和 summary agent不在本登记项范围内。
 
 新增测试：`packages/context/src/api-round.test.ts`、`api-normalize.test.ts`、`tool-pairing.test.ts`、`packages/runtime/src/index.test.ts` 的 M04 gate 场景。
+
+### CC-006
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`src/query.ts:526-624`、`src/services/compact/microCompact.ts:137-365,426-520`、`src/services/compact/cachedMicrocompact.ts`
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；本次没有复制 Claude Code 代码，只重新实现工具结果估算、compactable 白名单、count/token/time trigger、最近结果保留和 model-view cleared marker。
+
+本项目路径：`packages/context/src/tool-result-budget.ts`、`packages/runtime/src/index.ts`、`packages/context/src/tool-result-budget.test.ts`。
+
+范围：Tool Result Budget、MicroCompact、protected tool call、turn-local cleared IDs、tokensSaved、`context/tool_results_budgeted` 和 `context/microcompacted` receipts。
+
+明确未复用：`cachedMicrocompact.ts` 的 provider-specific prompt-cache edit 暂不实现；本项目 transcript/model view 分离、EventStore 事件和 permission/workspace 安全边界均为自有实现。
+
+新增测试：`packages/context/src/tool-result-budget.test.ts` 和 `packages/runtime/src/index.test.ts` 的 M05 model-view、幂等、事件和原文保留场景。
