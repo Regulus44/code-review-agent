@@ -958,3 +958,31 @@ git diff --check                        ✓
 ### 恢复入口
 
 从 `61cd9ca` 继续，优先推进 tenant-scoped provider/model routing、credential reference 生命周期、8.3 OS-level isolation/deployment evidence、8.4 跨场景 browser recovery matrix，以及 backup/restore、migration rollback 和 upgrade/deployment policy。外部 IdP/JWT 和完整 principal catalog 仍未实现。
+
+## 2026-08-25：权限请求与用户问题 Composer takeover 调研
+
+本次工作只做调研和文档沉淀，没有修改运行时代码。目标是为后续解决“权限请求伴随工具调用堆在 Conversation 尾部”和“用户问题没有进入对话主操作区”建立 DSH 对照方案。
+
+### 调研结论
+
+- DSH 把 approval/question 视为 Host-owned pending request，不把 pending 操作卡渲染成普通 transcript 行；
+- `conversation.composer` 是 selector-routed takeover chain，QuestionComposer 和 ApprovalPanel 替换默认 InputBar，共享同一个 sticky composer seat；
+- 同一时刻只显示一个 pending request，Question 优先于 Approval；前一个 request 的 durable resolved frame 到达后，下一个 request 才进入 Composer；
+- HTTP/RPC receipt 只代表响应被接受，不能让前端自行删除 pending UI；resolved frame、Session projection 和 replay 才是权威状态；
+- Approval 的 reason/command、Question 的 detail/options 在内部滚动区中展示，操作区固定在卡片底部；
+- 点击后使用 one-shot disabled，receipt 失败可重试，request key 变化时重置本地 latch；
+- 页面刷新、SSE 重连和恢复都从 durable pending projection 重建 Composer takeover；
+- 本项目的 Event、Runtime、API、SQLite replay 和 Web Conversation projection 已具备基础，当前主要差距位于 `apps/web/index.html` 的挂载职责和 Composer 状态连接。
+
+### 形成文档
+
+详细的状态模型、职责边界、DSH 源码入口、实现分层、错误/过期/恢复语义和验收矩阵记录在：
+
+`docs/dsh-permission-question-composer-research.zh-CN.md`
+
+### 本轮边界
+
+- 未修改 `apps/web`、`apps/api`、`packages/runtime` 或 `packages/tools` 代码；
+- 未修改 Event/Tool/Task/Permission contract；
+- 未恢复 Reasoning/Effort，未修改 Planning、三栏 Shell 或 ToolRow；
+- 后续实现应拆成 pending projection、Approval takeover、Question takeover 三个独立 checkpoint。
