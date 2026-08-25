@@ -2,13 +2,14 @@ import { describe, expect, it } from "vitest";
 import { presentToolCall } from "./tool-presenter.js";
 import type { ToolCallView } from "../projection/conversation.js";
 
-function call(name: string, result: unknown): ToolCallView {
+function call(name: string, result: unknown, input?: unknown, status: ToolCallView["status"] = "completed"): ToolCallView {
   return {
     id: "tool_1" as never,
     name,
-    status: "completed",
+    status,
     riskLevel: "read",
     result,
+    ...(input === undefined ? {} : { input }),
     sequence: 1,
     lastSequence: 1,
     createdAt: "2026-08-23T00:00:00.000Z",
@@ -30,5 +31,22 @@ describe("Tool presenter", () => {
     expect(view.kind).toBe("builtin");
     expect(view.truncated).toBe(true);
     expect(view.details).toContain("output truncated");
+  });
+
+  it("derives a compact target summary and separate IN/OUT sections", () => {
+    const view = presentToolCall(call("read_file", { output: "contents" }, { path: "src/index.ts" }));
+    expect(view.title).toBe("Read");
+    expect(view.summary).toBe("src/index.ts");
+    expect(view.filePath).toBe("src/index.ts");
+    expect(view.input).toContain("path");
+    expect(view.output).toContain("output");
+    expect(view.state).toBe("ok");
+    expect(view.statusLabel).toBe("Completed");
+  });
+
+  it("maps pending, failed and cancelled calls to DSH row states", () => {
+    expect(presentToolCall(call("bash", undefined, { command: "pnpm test" }, "pending")).state).toBe("running");
+    expect(presentToolCall(call("bash", { message: "boom" }, { command: "pnpm test" }, "failed")).state).toBe("error");
+    expect(presentToolCall(call("bash", { message: "stopped" }, { command: "pnpm test" }, "cancelled")).state).toBe("stopped");
   });
 });

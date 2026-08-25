@@ -260,32 +260,33 @@
       .turn-state.running::before { background: var(--blue); box-shadow: 0 0 0 3px rgba(65,118,230,.12); }
       .turn-state.completed::before { background: var(--green); }
       .turn-state.failed::before { background: var(--red); }
-      .tool-row { margin: 10px 0 14px 40px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: rgba(255,255,255,.72); }
-      .tool-summary { display: flex; align-items: center; gap: 9px; width: 100%; padding: 10px 12px; background: transparent; text-align: left; }
-      .tool-summary:hover { background: var(--surface-hover); }
-      .tool-icon { display: grid; place-items: center; flex: 0 0 22px; width: 22px; height: 22px; border-radius: 7px; color: var(--blue); background: var(--blue-soft); font-size: 11px; }
-      .tool-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
-      .tool-status { color: var(--text-tertiary); font-size: 11px; }
-      .tool-chevron { color: var(--text-tertiary); transition: transform .15s var(--ease); }
+      .tool-row { position: relative; display: flex; flex-direction: column; margin: 8px 0 10px 40px; border: 0; border-radius: 8px; overflow: visible; background: transparent; }
+      .tool-summary { position: relative; z-index: 1; display: flex; align-items: center; gap: 7px; width: 100%; min-height: 28px; padding: 2px 4px; border-radius: 7px; background: transparent; color: var(--text-secondary); text-align: left; cursor: pointer; }
+      .tool-summary:hover, .tool-summary:focus-visible { background: var(--surface-hover); outline: none; }
+      .tool-icon { display: grid; place-items: center; flex: 0 0 16px; width: 16px; height: 16px; border-radius: 5px; color: var(--blue); background: var(--blue-soft); font-size: 9px; }
+      .tool-title { flex: 0 0 auto; max-width: 28%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 12px; font-weight: 600; line-height: 24px; }
+      .tool-summary-sep { flex: 0 0 3px; width: 3px; height: 3px; border-radius: 50%; background: var(--text-tertiary); }
+      .tool-target { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-tertiary); font-size: 12px; line-height: 24px; }
+      .tool-target-link { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; border: 0; background: transparent; color: var(--text-secondary); font: inherit; font-size: 12px; line-height: 24px; text-align: left; text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; cursor: pointer; }
+      .tool-target-link:hover { color: var(--text); text-decoration-color: currentColor; }
+      .tool-status { flex: 0 0 auto; color: var(--text-tertiary); font-size: 10px; line-height: 20px; white-space: nowrap; }
+      .tool-row[data-state="running"] .tool-status { color: var(--blue); }
+      .tool-row[data-state="error"] .tool-status, .tool-row[data-state="error"] .tool-target { color: var(--red); }
+      .tool-row[data-state="stopped"] .tool-status { color: #8f5c13; }
+      .tool-chevron { flex: 0 0 auto; color: var(--text-tertiary); opacity: 0; transform: rotate(0deg); transition: opacity .15s var(--ease), transform .15s var(--ease); }
+      .tool-summary:hover .tool-chevron, .tool-summary:focus-visible .tool-chevron, .tool-row.open .tool-chevron { opacity: 1; }
       .tool-row.open .tool-chevron { transform: rotate(180deg); }
-      .tool-details { display: none; padding: 0 12px 12px 43px; }
+      .tool-details { display: none; margin: 3px 0 3px 23px; padding: 0; }
       .tool-row.open .tool-details { display: block; }
-      .tool-details pre { margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary); font: 11px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
-      .tool-activity { margin: 12px 0 16px 40px; border: 1px solid var(--border); border-radius: 12px; background: rgba(255,255,255,.62); overflow: hidden; }
-      .tool-activity-summary { display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 9px 12px; color: var(--text-secondary); cursor: pointer; list-style: none; }
-      .tool-activity-summary::-webkit-details-marker { display: none; }
-      .tool-activity-summary::before { content: "⌘"; display: grid; place-items: center; flex: 0 0 22px; width: 22px; height: 22px; border-radius: 7px; color: var(--blue); background: var(--blue-soft); font-size: 11px; }
-      .tool-activity-summary:hover { background: var(--surface-hover); }
-      .tool-activity-title { min-width: 0; flex: 1; color: var(--text); font-size: 12px; font-weight: 650; }
-      .tool-activity-meta { color: var(--text-tertiary); font-size: 11px; }
-      .tool-activity-chevron { color: var(--text-tertiary); transition: transform .15s var(--ease); }
-      .tool-activity[open] .tool-activity-chevron { transform: rotate(180deg); }
-      .tool-activity-items { display: grid; gap: 8px; padding: 0 10px 10px; }
-      .tool-activity:not([open]) .tool-activity-items { display: none; }
-      .tool-activity-items .tool-row { margin: 0; border-radius: 9px; background: var(--surface); }
-      .tool-activity-items .permission-card, .tool-activity-items .interaction-card { margin: 0; }
-      .tool-activity[data-state="running"] .tool-activity-title { color: var(--blue); }
-      .tool-activity[data-state="attention"] .tool-activity-title { color: #8f5c13; }
+      .tool-io-card { display: flex; flex-direction: column; max-width: min(760px, calc(100% - 8px)); border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); overflow: hidden; }
+      .tool-io-section { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 10px; align-items: start; max-height: 150px; padding: 10px 12px; overflow-y: auto; }
+      .tool-io-section + .tool-io-section { border-top: 1px solid var(--border); }
+      .tool-io-label { position: sticky; top: 0; color: var(--text-tertiary); font: 10px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .06em; }
+      .tool-io-text { min-width: 0; color: var(--text-secondary); font: 11px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .tool-io-section[data-kind="output"] .tool-io-text { color: var(--text-secondary); }
+      .tool-row[data-state="error"] .tool-io-section[data-kind="output"] .tool-io-text { color: var(--red); }
+      .tool-row[data-state="running"] .tool-summary::after { content: ""; position: absolute; inset: 0; width: 180px; pointer-events: none; background: linear-gradient(90deg, transparent, rgba(255,255,255,.7), transparent); animation: tool-row-sweep 2.6s ease-out infinite; }
+      @keyframes tool-row-sweep { 0% { transform: translateX(-220px); } 90%, 100% { transform: translateX(720px); } }
       .permission-card { position: relative; }
       .permission-summary-row, .interaction-summary-row { display: flex; align-items: center; gap: 9px; min-height: 28px; cursor: pointer; list-style: none; }
       .permission-summary-row::-webkit-details-marker, .interaction-summary-row::-webkit-details-marker { display: none; }
@@ -1084,29 +1085,45 @@
         };
         const setMessageContent = (body, content) => { const value = String(content ?? ''); body.dataset.rawContent = value; if (body.classList.contains('markdown')) body.innerHTML = renderMarkdown(value); else body.textContent = value; };
         const appendMessage = (parent, role, content) => { const row = document.createElement('div'); row.className = `message ${role}`; const avatar = document.createElement('div'); avatar.className = 'avatar'; avatar.textContent = role === 'user' ? 'You' : 'AI'; const body = document.createElement('div'); body.className = `message-body ${role === 'assistant' ? 'markdown' : ''}`; setMessageContent(body, content); row.append(avatar, body); parent.append(row); return body; };
-        const createToolActivity = (parent) => {
-          const group = document.createElement('details'); group.className = 'tool-activity'; group.dataset.state = 'completed';
-          const summary = document.createElement('summary'); summary.className = 'tool-activity-summary';
-          const title = document.createElement('span'); title.className = 'tool-activity-title';
-          const meta = document.createElement('span'); meta.className = 'tool-activity-meta';
-          const chevron = document.createElement('span'); chevron.className = 'tool-activity-chevron'; chevron.textContent = '⌄';
-          summary.append(title, meta, chevron);
-          const items = document.createElement('div'); items.className = 'tool-activity-items';
-          group.append(summary, items); parent.append(group);
-          const update = () => {
-            const rows = [...items.querySelectorAll('.tool-row')];
-            const permissions = [...items.querySelectorAll('.permission-card, .interaction-card')];
-            const running = rows.filter((row) => /running|pending|awaiting/i.test(row.querySelector('.tool-status')?.textContent || '')).length;
-            const attention = permissions.filter((row) => !row.classList.contains('resolved') && !row.classList.contains('expired')).length;
-            const total = rows.length + permissions.length;
-            group.dataset.state = attention ? 'attention' : running ? 'running' : 'completed';
-            title.textContent = attention ? 'Agent activity · approval required' : 'Agent activity';
-            meta.textContent = `${total} item${total === 1 ? '' : 's'}${running ? ` · ${running} running` : ''}${attention ? ` · ${attention} needs review` : ''}`;
-          };
-          update();
-          return { group, items, update };
+        const stringifyToolValue = (value) => {
+          if (value === undefined || value === null) return null;
+          if (typeof value === 'string') return value;
+          try { return JSON.stringify(value, null, 2); } catch { return String(value); }
         };
-        const appendTool = (parent, name, text, statusText = 'Completed') => { const row = document.createElement('div'); row.className = 'tool-row'; const summary = document.createElement('button'); summary.className = 'tool-summary'; summary.type = 'button'; const icon = document.createElement('span'); icon.className = 'tool-icon'; icon.textContent = '⌘'; const heading = document.createElement('span'); heading.className = 'tool-title'; const source = state.tools.get(name)?.source; heading.textContent = source?.kind === 'mcp' ? `MCP · ${source.serverName} · ${source.rawName}` : `Tool · ${name}`; const toolStatus = document.createElement('span'); toolStatus.className = 'tool-status'; toolStatus.textContent = statusText; const chevron = document.createElement('span'); chevron.className = 'tool-chevron'; chevron.textContent = '⌄'; const details = document.createElement('div'); details.className = 'tool-details'; const pre = document.createElement('pre'); pre.textContent = text; details.append(pre); summary.append(icon, heading, toolStatus, chevron); summary.onclick = () => row.classList.toggle('open'); row.append(summary, details); parent.append(row); return { row, heading, toolStatus, pre }; };
+        const firstToolLine = (value) => String(value || '').split(/\r?\n/, 1)[0] || '';
+        const toolStateForStatus = (status) => /pending|running|awaiting/i.test(String(status || '')) ? 'running' : /fail|denied|error/i.test(String(status || '')) ? 'error' : /cancel|stop|interrupt/i.test(String(status || '')) ? 'stopped' : 'ok';
+        const toolIconFor = (variant) => ({ search: '⌕', read: '↳', bash: '›_', write: '＋', edit: '✎', code: '⌘', others: '·' }[variant] || '·');
+        const fallbackToolVariant = (name) => { const value = String(name || '').toLowerCase(); if (/grep|glob|search|find/.test(value)) return 'search'; if (/read|cat|fetch|inspect/.test(value)) return 'read'; if (/bash|pwsh|shell|terminal|command|job|exec/.test(value)) return 'bash'; if (/write|create_file/.test(value)) return 'write'; if (/edit|patch|apply/.test(value)) return 'edit'; if (/code|python|javascript|typescript/.test(value)) return 'code'; return 'others'; };
+        const fallbackToolTitle = (variant) => ({ search: 'Search', read: 'Read', bash: 'Bash', write: 'Write', edit: 'Edit', code: 'Code', others: 'Tool call' }[variant] || 'Tool call');
+        const fallbackToolSummary = (name, input) => { const record = input && typeof input === 'object' && !Array.isArray(input) ? input : null; const variant = fallbackToolVariant(name); const keys = variant === 'search' ? ['query', 'pattern', 'path', 'url'] : variant === 'read' || variant === 'write' || variant === 'edit' ? ['path', 'file_path', 'url'] : variant === 'bash' ? ['description', 'command', 'cmd'] : ['description', 'target', 'name', 'id']; for (const key of keys) { const value = record?.[key]; if (typeof value === 'string' && value.trim()) return firstToolLine(value.trim()); } if (record) for (const value of Object.values(record)) if (typeof value === 'string' && value.trim()) return firstToolLine(value.trim()); return String(name || 'tool'); };
+        const fallbackToolIntent = (name, input, output, statusText = 'Completed') => { const variant = fallbackToolVariant(name); const outputText = stringifyToolValue(output); const inputText = stringifyToolValue(input); const stateValue = toolStateForStatus(statusText); const source = state.tools.get(name)?.source; const sourceLabel = source?.kind === 'mcp' ? `MCP · ${source.serverName} · ${source.rawName}` : 'Tool'; const filePath = ['read', 'write', 'edit'].includes(variant) && input && typeof input === 'object' ? (typeof input.path === 'string' ? input.path : typeof input.file_path === 'string' ? input.file_path : undefined) : undefined; return { variant, title: fallbackToolTitle(variant), sourceLabel, summary: fallbackToolSummary(name, input), statusLabel: statusText, state: stateValue, input: inputText, output: outputText, errorSummary: stateValue === 'error' ? firstToolLine(outputText) : null, filePath }; };
+        const renderToolDetails = (details, intent) => {
+          details.innerHTML = '';
+          const sections = [['input', intent.input], ['output', intent.output]].filter(([, value]) => value !== null && value !== undefined && String(value).length > 0);
+          if (!sections.length) return false;
+          const card = document.createElement('div'); card.className = 'tool-io-card';
+          sections.forEach(([kind, value]) => { const section = document.createElement('div'); section.className = 'tool-io-section'; section.dataset.kind = kind; const label = document.createElement('span'); label.className = 'tool-io-label'; label.textContent = kind === 'input' ? 'IN' : 'OUT'; const text = document.createElement('span'); text.className = 'tool-io-text'; text.textContent = String(value); section.append(label, text); card.append(section); });
+          details.append(card); return true;
+        };
+        const appendTool = (parent, name, intentOrText, statusText = 'Completed', legacyInput = undefined, legacyOutput = undefined) => {
+          const intent = intentOrText && typeof intentOrText === 'object' && 'title' in intentOrText ? intentOrText : fallbackToolIntent(name, legacyInput, legacyOutput ?? intentOrText, statusText);
+          const row = document.createElement('div'); row.className = 'tool-row'; row.dataset.tool = name || 'tool';
+          const summary = document.createElement('div'); summary.className = 'tool-summary'; summary.setAttribute('role', 'button'); summary.tabIndex = 0;
+          const icon = document.createElement('span'); icon.className = 'tool-icon'; icon.textContent = toolIconFor(intent.variant);
+          const heading = document.createElement('span'); heading.className = 'tool-title'; heading.textContent = intent.sourceLabel && intent.sourceLabel !== 'Tool' ? intent.sourceLabel : intent.title;
+          const separator = document.createElement('span'); separator.className = 'tool-summary-sep'; separator.setAttribute('aria-hidden', 'true');
+          const target = document.createElement('span'); target.className = 'tool-target'; target.textContent = intent.errorSummary || intent.summary || name || 'tool'; if (intent.filePath) target.title = intent.filePath;
+          const toolStatus = document.createElement('span'); toolStatus.className = 'tool-status';
+          const chevron = document.createElement('span'); chevron.className = 'tool-chevron'; chevron.textContent = '⌄'; chevron.setAttribute('aria-hidden', 'true');
+          const details = document.createElement('div'); details.className = 'tool-details';
+          summary.append(icon, heading, separator, target, toolStatus, chevron); row.append(summary, details); parent.append(row);
+          const update = (nextIntent) => { card.intent = nextIntent; const expandable = renderToolDetails(details, nextIntent); row.dataset.state = nextIntent.state || 'ok'; row.dataset.expandable = String(expandable); toolStatus.textContent = nextIntent.statusLabel || statusText; target.textContent = nextIntent.errorSummary || nextIntent.summary || name || 'tool'; target.classList.toggle('tool-target-error', Boolean(nextIntent.errorSummary)); chevron.hidden = !expandable; if (!expandable) { row.classList.remove('open'); summary.setAttribute('aria-expanded', 'false'); } };
+          const toggle = () => { if (row.dataset.expandable !== 'true') return; const open = !row.classList.contains('open'); row.classList.toggle('open', open); summary.setAttribute('aria-expanded', String(open)); };
+          summary.addEventListener('click', toggle); summary.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(); } }); summary.setAttribute('aria-expanded', 'false');
+          const card = { row, heading, target, toolStatus, details, update, intent };
+          update(intent);
+          return card;
+        };
         const appendPermission = (parent, payload) => {
           const status = payload.displayStatus || payload.status || 'pending';
           const interactive = payload.interactive === undefined ? status === 'pending' : payload.interactive === true;
@@ -1198,22 +1215,16 @@
           if (!projection || !Array.isArray(projection.nodes) || projection.nodes.length === 0) return false;
           const assistant = new Map();
           const toolRows = new Map();
-          let toolActivity = null;
-          const ensureToolActivity = () => { if (!toolActivity) toolActivity = createToolActivity(body); return toolActivity; };
           const toolTreeNodes = new Map((snapshot?.toolCallTree?.nodes || []).map((node) => [node.call.id, node]));
           const upsertTool = (tool) => {
             const key = tool.id || `tool-${toolRows.size}`;
-            const payload = { input: tool.input, result: tool.result, progress: tool.progress };
             const intent = typedRuntime?.presentToolCall ? typedRuntime.presentToolCall(tool) : null;
             let card = toolRows.get(key);
-            const text = intent?.details || JSON.stringify(payload, null, 2);
-            const statusText = intent?.summary || tool.status || 'unknown';
-            if (!card) { card = appendTool(ensureToolActivity().items, tool.name || 'tool', text, statusText); toolRows.set(key, card); }
-            else { card.toolStatus.textContent = statusText; card.pre.textContent = text; }
-            if (intent) card.heading.textContent = `${intent.sourceLabel} · ${intent.title}`;
+            const model = intent || fallbackToolIntent(tool.name || 'tool', tool.input, tool.result, tool.status || 'unknown');
+            if (!card) { card = appendTool(body, tool.name || 'tool', model); toolRows.set(key, card); }
+            else card.update(model);
             const treeNode = toolTreeNodes.get(tool.id);
-            if (treeNode) { card.row.style.marginLeft = `${treeNode.depth * 18}px`; if (treeNode.warning) card.toolStatus.textContent = `${statusText} · ${treeNode.warning}`; }
-            toolActivity?.update();
+            if (treeNode) { card.row.style.marginLeft = `${40 + treeNode.depth * 18}px`; if (treeNode.warning) card.toolStatus.textContent = `${model.statusLabel} · ${treeNode.warning}`; }
           };
           for (const node of projection.nodes) {
             if (node.kind === 'user') appendMessage(body, 'user', node.content || '');
@@ -2007,9 +2018,7 @@
           if (!hasMessage && !hasActivity) { const hero = document.createElement('div'); hero.className = 'hero'; hero.innerHTML = `<div class="hero-inner"><div class="hero-mark">⌁</div><h1>Ready to review your code</h1><p>Ask the agent to inspect a repository, explain a file, or plan the next change.</p><span class="workspace-chip">${esc(state.session?.workspaceRoot || '.')}</span></div>`; conversationContent.append(hero); }
           else {
             const body = document.createElement('div'); body.className = 'conversation-body'; conversationContent.append(body); const assistant = new Map(); const permissions = new Map(); const interactions = new Map(); const toolRows = new Map();
-            let toolActivity = null;
-            const ensureToolActivity = () => { if (!toolActivity) toolActivity = createToolActivity(body); return toolActivity; };
-            const upsertTool = (id, name, text, statusText) => { const key = id || `${name}-${toolRows.size}`; let card = toolRows.get(key); if (!card) { card = appendTool(ensureToolActivity().items, name || 'tool', text, statusText); toolRows.set(key, card); } else { card.toolStatus.textContent = statusText; card.pre.textContent = text; } toolActivity?.update(); return card; };
+            const upsertTool = (id, name, input, output, statusText, summaryOverride) => { const key = id || `${name}-${toolRows.size}`; const model = fallbackToolIntent(name || 'tool', input, output, statusText || 'Completed'); if (summaryOverride) model.summary = summaryOverride; let card = toolRows.get(key); if (!card) { card = appendTool(body, name || 'tool', model); toolRows.set(key, card); } else card.update(model); return card; };
             for (const event of ordered) {
               if (event.type === 'user/message' || event.type === 'turn/steered') appendMessage(body, 'user', event.payload?.content || '');
               else if (event.type === 'attachment/received' || event.type === 'attachment/rejected') addEventRow(body, `Attachment · ${event.payload?.fileName || 'file'} · ${event.payload?.status || 'unknown'}${event.payload?.reason ? ` · ${event.payload.reason}` : ''}`);
@@ -2017,19 +2026,19 @@
               else if (event.type === 'turn/ended') { const turnStatus = event.payload?.status || 'completed'; addTurnStateRow(body, turnStatus === 'completed' ? 'Turn completed' : `Turn ${turnStatus}`, turnStatus === 'completed' ? 'completed' : 'failed'); }
               else if (event.type === 'assistant/chunk') { const key = event.turnId || 'assistant'; let messageBody = assistant.get(key); if (!messageBody) { messageBody = appendMessage(body, 'assistant', ''); assistant.set(key, messageBody); } setMessageContent(messageBody, `${messageBody.dataset.rawContent || ''}${event.payload?.text || ''}`); }
               else if (event.type === 'assistant/message') { const key = event.turnId || 'assistant'; const content = event.payload?.content || ''; const current = assistant.get(key); if (!content) { if (!assistant.has(key)) assistant.set(key, null); } else if (current && current.dataset.rawContent === content) setMessageContent(current, content); else if (current && current.dataset.rawContent && content.startsWith(current.dataset.rawContent)) setMessageContent(current, content); else { const next = appendMessage(body, 'assistant', content); assistant.set(key, next); } }
-              else if (event.type === 'tool/call') { const payload = event.payload || {}; upsertTool(payload.toolCallId, payload.name || 'tool', `${payload.caller || 'agent'} · ${payload.workspaceRoot || ''}\n${JSON.stringify(payload.input || {}, null, 2)}`, 'Running'); }
-              else if (event.type === 'tool/progress') { const payload = event.payload || {}; const key = payload.toolCallId || 'tool'; const card = toolRows.get(key) || upsertTool(key, 'tool', '', 'Running'); card.toolStatus.textContent = payload.phase || payload.status || 'Running'; if (payload.text) card.pre.textContent = `${card.pre.textContent}${card.pre.textContent ? '\n\n' : ''}Progress: ${payload.text}`; }
-              else if (event.type === 'tool/result') { const payload = event.payload || {}; const result = payload.result || {}; upsertTool(payload.toolCallId, payload.name || payload.toolCallId || 'tool', JSON.stringify({ ...result, output: result.modelView ?? result.output, audit: undefined, modelView: undefined }, null, 2), payload.status || 'Completed'); }
+              else if (event.type === 'tool/call') { const payload = event.payload || {}; upsertTool(payload.toolCallId, payload.name || 'tool', payload.input, null, 'Running'); }
+              else if (event.type === 'tool/progress') { const payload = event.payload || {}; const key = payload.toolCallId || 'tool'; const card = toolRows.get(key) || upsertTool(key, 'tool', null, null, 'Running'); const previous = card.intent || {}; card.update({ ...previous, statusLabel: payload.phase || payload.status || 'Running', state: 'running', output: payload.text ? `${previous.output || ''}${previous.output ? '\n\n' : ''}${payload.text}` : previous.output }); }
+              else if (event.type === 'tool/result') { const payload = event.payload || {}; const result = payload.result || {}; upsertTool(payload.toolCallId, payload.name || payload.toolCallId || 'tool', null, result.modelView ?? result.output ?? result, payload.status || 'Completed'); }
               else if (event.type === 'permission/requested') permissions.set(event.payload?.permissionId, event.payload);
               else if (event.type === 'permission/resolved' && permissions.has(event.payload?.permissionId)) permissions.get(event.payload.permissionId).status = event.payload.status;
               else if (event.type === 'interaction/requested') interactions.set(event.payload?.interactionId, event.payload);
               else if (event.type === 'interaction/resolved' && interactions.has(event.payload?.interactionId)) interactions.get(event.payload.interactionId).status = event.payload.status;
-              else if (event.type === 'job/started' || event.type === 'job/output' || event.type === 'job/ended') { const payload = event.payload || {}; upsertTool(`job-${payload.jobId || event.sequence}`, 'job', `${payload.command || payload.stream || 'job'}${payload.text ? `\n${payload.text}` : ''}`, payload.status || (event.type === 'job/started' ? 'Running' : event.type === 'job/ended' ? 'Completed' : 'Output')); }
-              else if (event.type === 'terminal/session') { const payload = event.payload || {}; upsertTool(`terminal-${payload.terminalId || event.sequence}`, 'terminal', JSON.stringify(payload, null, 2), payload.status || payload.action || 'Updated'); }
-              else if (event.type === 'diff/preview') upsertTool(`diff-${event.sequence}`, 'diff', JSON.stringify(event.payload?.diff || {}, null, 2), 'Preview');
-              else if (event.type === 'patch/preview') { const payload = event.payload || {}; upsertTool(`patch-${payload.patchId || event.sequence}`, 'apply_patch', JSON.stringify({ patchId: payload.patchId, dryRun: payload.dryRun, files: payload.files || [] }, null, 2), payload.dryRun ? 'Preview' : 'Prepared'); }
+              else if (event.type === 'job/started' || event.type === 'job/output' || event.type === 'job/ended') { const payload = event.payload || {}; upsertTool(`job-${payload.jobId || event.sequence}`, 'job', { command: payload.command || payload.stream || 'job' }, payload.text || null, payload.status || (event.type === 'job/started' ? 'Running' : event.type === 'job/ended' ? 'Completed' : 'Output')); }
+              else if (event.type === 'terminal/session') { const payload = event.payload || {}; upsertTool(`terminal-${payload.terminalId || event.sequence}`, 'terminal', payload, null, payload.status || payload.action || 'Updated'); }
+              else if (event.type === 'diff/preview') upsertTool(`diff-${event.sequence}`, 'diff', null, event.payload?.diff || {}, 'Preview');
+              else if (event.type === 'patch/preview') { const payload = event.payload || {}; upsertTool(`patch-${payload.patchId || event.sequence}`, 'apply_patch', { patchId: payload.patchId, dryRun: payload.dryRun }, { files: payload.files || [] }, payload.dryRun ? 'Preview' : 'Prepared'); }
               else if (event.type === 'patch/applied' || event.type === 'patch/rejected' || event.type === 'patch/rolled_back') { const payload = event.payload || {}; addEventRow(body, `Patch · ${payload.patchId || 'patch'} · ${event.type.split('/')[1]}`); }
-              else if (event.type === 'lsp/server' || event.type === 'lsp/request' || event.type === 'mcp/server' || event.type === 'mcp/tool' || event.type === 'mcp/resource' || event.type === 'mcp/prompt') { const payload = event.payload || {}; const label = event.type.split('/')[0].toUpperCase(); const kind = event.type.split('/')[1]; upsertTool(`${event.type}-${payload.serverName || payload.serverId || payload.toolCallId || event.sequence}`, `${label} · ${kind}`, JSON.stringify(payload, null, 2), payload.status || payload.action || 'Updated'); }
+              else if (event.type === 'lsp/server' || event.type === 'lsp/request' || event.type === 'mcp/server' || event.type === 'mcp/tool' || event.type === 'mcp/resource' || event.type === 'mcp/prompt') { const payload = event.payload || {}; const label = event.type.split('/')[0].toUpperCase(); const kind = event.type.split('/')[1]; upsertTool(`${event.type}-${payload.serverName || payload.serverId || payload.toolCallId || event.sequence}`, `${label} · ${kind}`, payload, null, payload.status || payload.action || 'Updated'); }
               else if (event.type === 'agent/error') addEventRow(body, `Agent error · ${event.payload?.message || event.payload?.error || 'The agent reported an error.'}`);
             }
             for (const permission of permissions.values()) appendPermission(body, permission);
