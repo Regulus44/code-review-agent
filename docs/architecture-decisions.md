@@ -118,6 +118,18 @@ Phase 5 已完成内部 Task/Subagent、父子 Session、权限、workspace、MC
 
 Phase 7 只消费本项目内部 EventStore、Session、Task、Permission 和 Workspace projection；不把 A2A 作为内部 Subagent transport，也不在 Web contract 中预留未经验证的外部 envelope。未来恢复 Phase 6 时，A2A 仍必须作为 inbound adapter 映射到已有内部 Task/Session，并独立完成 Agent Card、认证、租户、Artifact、流式恢复和安全验收。完整记录见 [`docs/adr/phase-7-web-with-a2a-deferred.zh-CN.md`](adr/phase-7-web-with-a2a-deferred.zh-CN.md)。
 
+## ADR-013：Context Window 与 Auto-Compact Budget 由独立预算层计算
+
+状态：accepted（2026-08-26，M01）
+
+上下文窗口、输出预留、auto-compact buffer、warning/error/auto/blocking threshold 不再由 `packages/compaction` 的固定压缩参数隐式推导。新增 `@code-review-agent/context` 预算层，输入为 `ModelContextCapability` 与 `ContextBudgetConfig`，输出为 request-scoped `ContextBudgetSnapshot` 和 `ContextWarningState`。
+
+本决策直接仿照 Claude Code `src/utils/context.ts` 与 `src/services/compact/autoCompact.ts` 的职责分离：窗口能力只回答 provider/model 的上限；effective window 先扣除摘要/输出预留；auto-compact buffer 按窗口大小选择 13K、30K 或 50K；blocking threshold 单独保留 3K 手动 compact headroom。M01 不实现精确 token API、tool pairing、microcompact、summary agent、boundary recovery 或 context collapse，它们分别属于后续 M02、M04–M14。
+
+模型 adapter 通过 `ChatModel.contextCapability` 提供能力；tenant route 可以附带同一份无秘密 capability。没有能力元数据时，host 使用保守 fallback，并把 snapshot `source` 标记为 `estimate`；host policy 覆盖窗口或输出预留时标记为 `hybrid`。每个 `step/started` 事件记录脱敏预算快照和 warning state，EventStore 仍是唯一事实来源，重放不依赖内存预算状态。
+
+旧 `ContextBudget` 的 `maxTokens/recentMessageTokens/maxToolResultChars/maxSummaryChars` 继续作为 compaction 兼容配置。runtime 只把 M01 的 `autoCompactThreshold` 映射为当前压缩 gate；更精确的消息计数和工具结果预算必须等待对应模块，不能在 M01 内复制新的估算器。
+
 ## 参考代码入口
 
 - DSH Agent Loop：`D:/Develop/deepseek-harness-fork/packages/core/agent-loop/src/agent.ts`

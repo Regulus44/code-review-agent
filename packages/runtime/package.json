@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@code-review-agent/contracts": "workspace:*",
+    "@code-review-agent/context": "workspace:*",
     "@code-review-agent/compaction": "workspace:*",
     "@code-review-agent/llm": "workspace:*",
     "@code-review-agent/subagent": "workspace:*",

@@ -510,6 +510,8 @@ export interface ModelRouteRecord {
   readonly model: string;
   readonly baseUrl?: string;
   readonly credentialRef?: McpCredentialReference;
+  /** Optional host-owned model context capability; never contains credentials. */
+  readonly contextCapability?: ModelContextCapability;
   readonly updatedAt: string;
 }
 
@@ -724,6 +726,61 @@ export interface ModelRequest {
   readonly signal?: AbortSignal;
 }
 
+/** Provider/model limits used by the context budget layer. */
+export interface ModelContextCapability {
+  readonly provider: string;
+  readonly model: string;
+  /** Maximum input/context window accepted by the provider. */
+  readonly maxInputTokens: number;
+  /** Maximum output tokens available to a normal model request. */
+  readonly maxOutputTokens: number;
+  readonly supportsExactCount: boolean;
+  readonly supportsPromptCache: boolean;
+  /** Optional provenance supplied by a host registry or adapter. */
+  readonly source?: "provider" | "estimate" | "hybrid";
+}
+
+/** Host policy knobs for Claude Code-style context budgeting. */
+export interface ContextBudgetConfig {
+  /** Fallback input window when the adapter does not expose capability metadata. */
+  readonly contextWindowTokens?: number;
+  /** Fallback output reservation when the adapter does not expose capability metadata. */
+  readonly maxOutputTokens?: number;
+  readonly autoCompactEnabled?: boolean;
+  readonly autoCompactBufferTokens?: number;
+  readonly warningBufferTokens?: number;
+  readonly errorBufferTokens?: number;
+  readonly blockingBufferTokens?: number;
+  readonly summaryOutputReservationTokens?: number;
+  /** Conservative growth allowance used by predictive preflight. */
+  readonly predictiveGrowthTokens?: number;
+}
+
+export type ContextBudgetSource = "provider" | "estimate" | "hybrid";
+
+/** Computed, request-scoped budget derived from capability and host policy. */
+export interface ContextBudgetSnapshot {
+  readonly capability: ModelContextCapability;
+  readonly reservedOutputTokens: number;
+  readonly effectiveWindowTokens: number;
+  readonly autoCompactBufferTokens: number;
+  readonly warningThreshold: number;
+  readonly errorThreshold: number;
+  readonly autoCompactThreshold: number;
+  readonly blockingThreshold: number;
+  readonly source: ContextBudgetSource;
+}
+
+export interface ContextWarningState {
+  readonly tokenUsage: number;
+  readonly percentLeft: number;
+  readonly isAboveWarningThreshold: boolean;
+  readonly isAboveErrorThreshold: boolean;
+  readonly isAboveAutoCompactThreshold: boolean;
+  readonly isAtBlockingLimit: boolean;
+  readonly isPredictiveCompactRecommended: boolean;
+}
+
 export type ModelStreamPart =
   | { readonly type: "text_delta"; readonly text: string }
   | { readonly type: "tool_call_start"; readonly index: number; readonly id?: string; readonly name?: string }
@@ -741,6 +798,8 @@ export interface ModelUsage {
 }
 
 export interface ChatModel {
+  /** Optional capability metadata; absent adapters use a conservative host fallback. */
+  readonly contextCapability?: ModelContextCapability;
   stream(request: ModelRequest): AsyncIterable<ModelStreamPart>;
 }
 

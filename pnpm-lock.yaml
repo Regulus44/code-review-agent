@@ -66,6 +66,12 @@ importers:
         specifier: workspace:*
         version: link:../contracts
 
+  packages/context:
+    dependencies:
+      '@code-review-agent/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+
   packages/contracts: {}
 
   packages/llm:
@@ -94,6 +100,9 @@ importers:
       '@code-review-agent/compaction':
         specifier: workspace:*
         version: link:../compaction
+      '@code-review-agent/context':
+        specifier: workspace:*
+        version: link:../context
       '@code-review-agent/contracts':
         specifier: workspace:*
         version: link:../contracts

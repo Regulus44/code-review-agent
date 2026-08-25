@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { createInProcessSubagentProvider, sessionId, AgentHost, turnId, type TenantModelRoute } from "@code-review-agent/runtime";
 import { SqliteEventStore } from "@code-review-agent/storage";
-import { brand, type AgentEvent, type ChatModel, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem, type ProductizationCapability, type SessionOwnership, type ModelRouteBackend, type ModelRouteRecord, type CredentialBackend, type McpCredentialReference, type PrincipalBackend } from "@code-review-agent/contracts";
+import { brand, type AgentEvent, type ChatModel, type ContextBudgetConfig, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem, type ProductizationCapability, type SessionOwnership, type ModelRouteBackend, type ModelRouteRecord, type CredentialBackend, type McpCredentialReference, type PrincipalBackend } from "@code-review-agent/contracts";
 import { SubagentRuntime } from "@code-review-agent/subagent";
 import { createConfiguredChatModel, DEEPSEEK_MODELS, type ModelConfigView } from "@code-review-agent/llm";
 import { McpConnectionManager, type McpServerConfig } from "@code-review-agent/mcp-client";
@@ -72,6 +72,7 @@ export interface ApiServerOptions {
     readonly maxToolResultChars?: number;
     readonly maxSummaryChars?: number;
   };
+  readonly contextPolicy?: Partial<ContextBudgetConfig>;
   readonly codeMode?: CodeModeSandbox;
   readonly productization?: ProductizationServerOptions;
   readonly webRoot?: string;
@@ -83,7 +84,7 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
   const credentials = options.credentials ?? new CredentialVault(options.credentialBackend ?? credentialBackendFrom(store), options.secretProvider);
   const principals = options.principalBackend ?? principalBackendFrom(store);
   const subagentRuntime = options.subagentRuntime ?? new SubagentRuntime({ store: store as SessionEventStore });
-  const host = options.host ?? new AgentHost({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), ...(options.fallbackModels === undefined ? {} : { fallbackModels: options.fallbackModels }), ...(options.permissionPreset === undefined ? {} : { permissionPreset: options.permissionPreset }), ...(options.contextBudget === undefined ? {} : { contextBudget: options.contextBudget }), ...(options.codeMode === undefined ? {} : { codeMode: options.codeMode }), ...(options.productization?.quota === undefined ? {} : { quota: options.productization.quota }), ...(store instanceof SqliteEventStore ? { operations: { backup: "available", migration: "available", upgrade: "deferred" } } : {}), subagentRuntime });
+  const host = options.host ?? new AgentHost({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), ...(options.fallbackModels === undefined ? {} : { fallbackModels: options.fallbackModels }), ...(options.permissionPreset === undefined ? {} : { permissionPreset: options.permissionPreset }), ...(options.contextBudget === undefined ? {} : { contextBudget: options.contextBudget }), ...(options.contextPolicy === undefined ? {} : { contextPolicy: options.contextPolicy }), ...(options.codeMode === undefined ? {} : { codeMode: options.codeMode }), ...(options.productization?.quota === undefined ? {} : { quota: options.productization.quota }), ...(store instanceof SqliteEventStore ? { operations: { backup: "available", migration: "available", upgrade: "deferred" } } : {}), subagentRuntime });
   if (!subagentRuntime.providerCatalog().some((provider) => provider.name === "in-process")) subagentRuntime.registerProvider(createInProcessSubagentProvider({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), baseToolDefinitions: host.toolRegistry().listAll(), subagentRuntime }));
   const modelRuntime: ModelRuntimeState = {
     availableModels: options.availableModels ?? [],
@@ -252,6 +253,7 @@ function rebindModelCredential(tenantId: string, credentialId: string, record: i
         provider: selected.config.provider,
         model: selected.config.model,
         ...(selected.config.baseUrl === undefined ? {} : { baseUrl: selected.config.baseUrl }),
+        ...(selected.model.contextCapability === undefined ? {} : { contextCapability: selected.model.contextCapability }),
         credentialRef: reference,
         updatedAt: new Date().toISOString(),
       };
@@ -385,6 +387,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         provider: selected.config.provider,
         model: selected.config.model,
         ...(selected.config.baseUrl === undefined ? {} : { baseUrl: selected.config.baseUrl }),
+        ...(selected.model.contextCapability === undefined ? {} : { contextCapability: selected.model.contextCapability }),
         ...(requestedCredential === undefined ? {} : { credentialRef: credentials.reference(credentials.requireReference(identity.tenantId, requestedCredential)) }),
         updatedAt: new Date().toISOString(),
       };
@@ -400,7 +403,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/capabilities") {
-        sendJson(response, 200, { attachments: currentAttachmentCapability(attachmentPolicy, modelRuntime, identity?.tenantId), context: host.contextSettings(), codeMode: host.codeModeSettings(), lsp: host.lspSettings(), plugins: host.pluginsSettings(), productization: productizationCapability(host.productizationSettings(identity?.tenantId), productization, principals, credentials) });
+        sendJson(response, 200, { attachments: currentAttachmentCapability(attachmentPolicy, modelRuntime, identity?.tenantId), context: host.contextSettings(identity?.tenantId), codeMode: host.codeModeSettings(), lsp: host.lspSettings(), plugins: host.pluginsSettings(), productization: productizationCapability(host.productizationSettings(identity?.tenantId), productization, principals, credentials) });
       return;
     }
     if (request.method === "GET" && (url.pathname === "/v1/principals" || url.pathname.startsWith("/v1/principals/"))) {
@@ -1047,6 +1050,7 @@ function routeSelection(route: ModelRouteRecord): TenantModelRoute {
     model: route.model,
     ...(route.baseUrl === undefined ? {} : { baseUrl: route.baseUrl }),
     ...(route.credentialRef === undefined ? {} : { credentialRef: route.credentialRef }),
+    ...(route.contextCapability === undefined ? {} : { contextCapability: route.contextCapability }),
   };
 }
 
@@ -1056,6 +1060,7 @@ function publicModelRoute(route: ModelRouteRecord): Record<string, unknown> {
     model: route.model,
     ...(route.baseUrl === undefined ? {} : { baseUrl: route.baseUrl }),
     ...(route.credentialRef === undefined ? {} : { credentialRef: route.credentialRef }),
+    ...(route.contextCapability === undefined ? {} : { contextCapability: route.contextCapability }),
     updatedAt: route.updatedAt,
   };
 }

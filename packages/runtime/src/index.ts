@@ -32,9 +32,13 @@ import {
   type ProductizationCapability,
   type SessionOwnership,
   type ModelRouteRecord,
+  type ContextBudgetSnapshot,
+  type ContextWarningState,
+  type ModelContextCapability,
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
-import { compactMessages, type ContextBudget } from "@code-review-agent/compaction";
+import { compactMessages, DEFAULT_CONTEXT_BUDGET, estimateMessagesTokens, type ContextBudget } from "@code-review-agent/compaction";
+import { calculateContextWarningState, fallbackModelContextCapability, resolveContextBudget, shouldCompactBeforeRequest, type ContextBudgetConfig } from "@code-review-agent/context";
 import { randomUUID } from "node:crypto";
 import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModePolicySnapshot, type CodeModeSandbox, type ExecuteToolOutput, type JobSummary, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
 import type { SubagentRuntime } from "@code-review-agent/subagent";
@@ -60,6 +64,8 @@ export interface AgentHostOptions {
   readonly subagentRuntime?: SubagentRuntime;
   readonly compactionEnabled?: boolean;
   readonly contextBudget?: Partial<ContextBudget>;
+  /** Claude Code-style model window and threshold policy. */
+  readonly contextPolicy?: Partial<ContextBudgetConfig>;
   readonly quota?: ProductizationQuotaPolicy;
   readonly operations?: ProductizationOperationsPolicy;
 }
@@ -79,6 +85,8 @@ export interface ContextSettings {
   readonly enabled: boolean;
   readonly configured: boolean;
   readonly budget?: Partial<ContextBudget>;
+  readonly capability?: ModelContextCapability;
+  readonly budgetSnapshot?: ContextBudgetSnapshot;
 }
 
 export interface CodeModeSettings {
@@ -144,7 +152,7 @@ interface CollectedModelResponse {
   readonly usage?: ModelUsage;
 }
 
-export type TenantModelRoute = Pick<ModelRouteRecord, "provider" | "model" | "baseUrl" | "credentialRef">;
+export type TenantModelRoute = Pick<ModelRouteRecord, "provider" | "model" | "baseUrl" | "credentialRef" | "contextCapability">;
 
 /** Coordinates durable sessions, queued turns and model execution behind storage/model interfaces. */
 export class AgentHost {
@@ -171,6 +179,7 @@ export class AgentHost {
   private readonly toolPromptRegistry: ToolPromptRegistry;
   private readonly compactionEnabled: boolean;
   private readonly contextBudget: Partial<ContextBudget> | undefined;
+  private readonly contextPolicy: Partial<ContextBudgetConfig> | undefined;
   private readonly quota: ProductizationQuotaPolicy | undefined;
   private readonly operations: ProductizationOperationsPolicy;
   private readonly quotaTails = new Map<string, Promise<void>>();
@@ -185,6 +194,7 @@ export class AgentHost {
     this.fallbackModels = options.fallbackModels ?? [];
     this.compactionEnabled = options.compactionEnabled !== false;
     this.contextBudget = options.contextBudget;
+    this.contextPolicy = options.contextPolicy;
     this.quota = options.quota;
     this.operations = options.operations ?? { backup: "deferred", migration: "deferred", upgrade: "deferred" };
     this.customSystemPrompt = options.systemPrompt;
@@ -233,12 +243,50 @@ export class AgentHost {
     this.tenantModelRoutes.delete(tenantId);
   }
 
-  contextSettings(): ContextSettings {
+  contextSettings(tenantId?: string): ContextSettings {
+    const snapshot = this.contextBudgetSnapshot(tenantId);
     return {
       enabled: this.compactionEnabled,
-      configured: this.contextBudget !== undefined,
+      configured: this.contextBudget !== undefined || this.contextPolicy !== undefined || snapshot.source !== "estimate",
       ...(this.contextBudget === undefined ? {} : { budget: { ...this.contextBudget } }),
+      capability: snapshot.capability,
+      budgetSnapshot: snapshot,
     };
+  }
+
+  /** Returns the current model's resolved M01 budget for diagnostics and API consumers. */
+  contextBudgetSnapshot(tenantId?: string): ContextBudgetSnapshot {
+    const capability = this.modelContextCapability(tenantId);
+    return resolveContextBudget(capability, this.contextPolicyWithLegacyFallback());
+  }
+
+  private contextPolicyWithLegacyFallback(): ContextBudgetConfig {
+    try {
+      return {
+        ...(this.contextPolicy ?? {}),
+        ...(this.contextPolicy?.contextWindowTokens !== undefined || this.contextBudget?.maxTokens === undefined
+          ? {}
+          : { contextWindowTokens: this.contextBudget.maxTokens }),
+        ...(this.contextPolicy?.maxOutputTokens === undefined ? {} : { maxOutputTokens: this.contextPolicy.maxOutputTokens }),
+      };
+    } catch {
+      // Keep the request alive so compactTurnContext can record the exact
+      // configuration failure as context/compaction_failed.
+      return { ...(this.contextPolicy ?? {}) };
+    }
+  }
+
+  private modelContextCapability(tenantId?: string): ModelContextCapability {
+    const tenantModel = tenantId === undefined ? undefined : this.tenantModels.get(tenantId);
+    if (tenantModel?.contextCapability !== undefined) return tenantModel.contextCapability;
+    const route = tenantId === undefined ? undefined : this.tenantModelRoutes.get(tenantId);
+    if (route?.contextCapability !== undefined) return route.contextCapability;
+    if (tenantId === undefined && this.model.contextCapability !== undefined) return this.model.contextCapability;
+    return fallbackModelContextCapability(
+      "unknown",
+      "unknown",
+      this.contextPolicyWithLegacyFallback(),
+    );
   }
 
   codeModeSettings(): CodeModeSettings {
@@ -1554,10 +1602,29 @@ export class AgentHost {
     for (let step = 1; step <= this.maxSteps; step += 1) {
       if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
       this.appendSteers(messages, turnId);
-      await this.compactTurnContext(sessionId, turnId, messages);
-      await this.options.store.append({ sessionId, turnId, type: "step/started", payload: { step } });
       const projection = await this.options.store.project(sessionId);
-      const response = await this.collectModelResponse(sessionId, turnId, controller, messages, projection?.ownership?.tenantId, reasoningEffort);
+      const tenantId = projection?.ownership?.tenantId;
+      const budgetSnapshot = this.contextBudgetSnapshot(tenantId);
+      const beforeUsage = estimateMessagesTokens(messages);
+      const beforeState = calculateContextWarningState(beforeUsage, budgetSnapshot, this.contextPolicyWithLegacyFallback());
+      const autoCompactRecommended = shouldCompactBeforeRequest(beforeState, this.contextPolicyWithLegacyFallback());
+      if (this.compactionEnabled && autoCompactRecommended) {
+        await this.compactTurnContext(sessionId, turnId, messages, budgetSnapshot, beforeUsage, beforeState);
+      }
+      const tokenUsage = estimateMessagesTokens(messages);
+      const warningState = calculateContextWarningState(tokenUsage, budgetSnapshot, this.contextPolicyWithLegacyFallback());
+      await this.options.store.append({
+        sessionId,
+        turnId,
+        type: "step/started",
+        payload: {
+          step,
+          contextBudget: publicContextBudgetSnapshot(budgetSnapshot),
+          contextWarning: warningState,
+          ...(autoCompactRecommended ? { autoCompactRecommended: true } : {}),
+        },
+      });
+      const response = await this.collectModelResponse(sessionId, turnId, controller, messages, tenantId, reasoningEffort);
       if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
       const assistantPayload = {
         content: response.text,
@@ -1592,7 +1659,14 @@ export class AgentHost {
     throw new Error(`MAX_AGENT_STEPS_EXCEEDED: model did not produce a final response within ${this.maxSteps} steps`);
   }
 
-  private async compactTurnContext(sessionId: SessionId, turnId: TurnId, messages: ChatMessage[]): Promise<void> {
+  private async compactTurnContext(
+    sessionId: SessionId,
+    turnId: TurnId,
+    messages: ChatMessage[],
+    budgetSnapshot?: ContextBudgetSnapshot,
+    tokenUsage?: number,
+    warningState?: ContextWarningState,
+  ): Promise<void> {
     if (!this.compactionEnabled) return;
     const projection = await this.options.store.project(sessionId);
     const protectedToolCallIds = new Set<string>([
@@ -1600,7 +1674,16 @@ export class AgentHost {
       ...(projection?.interactions.filter((interaction) => interaction.status === "pending").map((interaction) => String(interaction.toolCallId)) ?? []),
     ]);
     try {
-      const result = compactMessages(messages, { ...(this.contextBudget === undefined ? {} : { budget: this.contextBudget }), protectedToolCallIds });
+      const resolved = budgetSnapshot ?? this.contextBudgetSnapshot(projection?.ownership?.tenantId);
+      const usage = tokenUsage ?? estimateMessagesTokens(messages);
+      const predictive = warningState?.isPredictiveCompactRecommended === true && usage < resolved.autoCompactThreshold;
+      const maxTokens = predictive ? Math.max(1, usage - 1) : resolved.autoCompactThreshold;
+      const compactionBudget: ContextBudget = {
+        ...DEFAULT_CONTEXT_BUDGET,
+        ...(this.contextBudget ?? {}),
+        maxTokens,
+      };
+      const result = compactMessages(messages, { budget: compactionBudget, protectedToolCallIds });
       if (!result.didCompact) return;
       messages.splice(0, messages.length, ...result.messages);
       await this.options.store.append({
@@ -1727,6 +1810,7 @@ export class AgentHost {
       model: route.model,
       ...(route.baseUrl === undefined ? {} : { baseUrl: route.baseUrl }),
       ...(route.credentialRef === undefined ? {} : { credentialRef: route.credentialRef }),
+      ...(route.contextCapability === undefined ? {} : { contextCapability: route.contextCapability }),
     };
   }
 
@@ -1904,6 +1988,27 @@ function mergeModelUsage(previous: ModelUsage | undefined, next: ModelUsage): Mo
     ...(previous?.outputTokens === undefined && next.outputTokens === undefined ? {} : { outputTokens: (previous?.outputTokens ?? 0) + (next.outputTokens ?? 0) }),
     ...(previous?.cacheReadTokens === undefined && next.cacheReadTokens === undefined ? {} : { cacheReadTokens: (previous?.cacheReadTokens ?? 0) + (next.cacheReadTokens ?? 0) }),
     ...(previous?.reasoningTokens === undefined && next.reasoningTokens === undefined ? {} : { reasoningTokens: (previous?.reasoningTokens ?? 0) + (next.reasoningTokens ?? 0) }),
+  };
+}
+
+function publicContextBudgetSnapshot(snapshot: ContextBudgetSnapshot): Readonly<Record<string, unknown>> {
+  return {
+    capability: {
+      provider: snapshot.capability.provider,
+      model: snapshot.capability.model,
+      maxInputTokens: snapshot.capability.maxInputTokens,
+      maxOutputTokens: snapshot.capability.maxOutputTokens,
+      supportsExactCount: snapshot.capability.supportsExactCount,
+      supportsPromptCache: snapshot.capability.supportsPromptCache,
+    },
+    reservedOutputTokens: snapshot.reservedOutputTokens,
+    effectiveWindowTokens: snapshot.effectiveWindowTokens,
+    autoCompactBufferTokens: snapshot.autoCompactBufferTokens,
+    warningThreshold: snapshot.warningThreshold,
+    errorThreshold: snapshot.errorThreshold,
+    autoCompactThreshold: snapshot.autoCompactThreshold,
+    blockingThreshold: snapshot.blockingThreshold,
+    source: snapshot.source,
   };
 }
 

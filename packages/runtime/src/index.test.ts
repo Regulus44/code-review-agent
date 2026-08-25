@@ -229,6 +229,39 @@ describe("AgentHost", () => {
     expect((await host.getSession(session.id))?.messages.at(-1)?.content).toBe("continued");
   });
 
+  it("records a model-aware M01 budget snapshot on every model step", async () => {
+    const store = new InMemoryEventStore();
+    const model: ChatModel = {
+      contextCapability: {
+        provider: "fixture-provider",
+        model: "fixture-128k",
+        maxInputTokens: 128_000,
+        maxOutputTokens: 32_000,
+        supportsExactCount: false,
+        supportsPromptCache: false,
+        source: "provider",
+      },
+      async *stream(): AsyncIterable<ModelStreamPart> {
+        yield { type: "text_delta", text: "budget recorded" };
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store, model });
+    const session = await host.createSession("D:/context-budget-fixture");
+    const turn = await host.sendMessage(session.id, "inspect budget");
+    await host.waitForTurn(turn);
+    const step = (await host.events(session.id)).find((event) => event.type === "step/started");
+    expect(step?.payload["contextBudget"]).toMatchObject({
+      capability: { provider: "fixture-provider", model: "fixture-128k", maxInputTokens: 128_000 },
+      reservedOutputTokens: 20_000,
+      effectiveWindowTokens: 108_000,
+      autoCompactThreshold: 95_000,
+      blockingThreshold: 105_000,
+      source: "provider",
+    });
+    expect(step?.payload["contextWarning"]).toMatchObject({ isAboveAutoCompactThreshold: false });
+  });
+
   it("builds the prompt from the permission-filtered tool set and preserves custom instructions", async () => {
     const requests: ModelRequest[] = [];
     const store = new InMemoryEventStore();

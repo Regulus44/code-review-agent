@@ -1,10 +1,11 @@
-import type { ChatMessage, ChatModel, ModelRequest, ModelStreamPart, ModelToolCall, ModelUsage } from "@code-review-agent/contracts";
+import type { ChatMessage, ChatModel, ModelContextCapability, ModelRequest, ModelStreamPart, ModelToolCall, ModelUsage } from "@code-review-agent/contracts";
 
 export interface OpenAICompatibleOptions {
   readonly baseUrl: string;
   readonly apiKey?: string;
   readonly model: string;
   readonly headers?: Readonly<Record<string, string>>;
+  readonly contextCapability?: ModelContextCapability;
   /** Injectable for contract tests; production uses the platform Fetch API. */
   readonly fetch?: typeof globalThis.fetch;
 }
@@ -55,7 +56,11 @@ export class EchoChatModel implements ChatModel {
 
 /** Minimal OpenAI-compatible SSE adapter; provider-specific policy stays outside AgentHost. */
 export class OpenAICompatibleChatModel implements ChatModel {
-  constructor(private readonly options: OpenAICompatibleOptions) {}
+  readonly contextCapability?: ModelContextCapability;
+
+  constructor(private readonly options: OpenAICompatibleOptions) {
+    if (options.contextCapability !== undefined) this.contextCapability = options.contextCapability;
+  }
 
   async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
     const url = `${this.options.baseUrl.replace(/\/$/u, "")}/chat/completions`;
@@ -185,8 +190,19 @@ export function createConfiguredChatModel(env: NodeJS.ProcessEnv = process.env):
   validateHttpUrl(baseUrl, "DEEPSEEK_BASE_URL");
   const safeBaseUrl = publicBaseUrl(baseUrl);
   const model = env["DEEPSEEK_MODEL"]?.trim() || DEFAULT_DEEPSEEK_MODEL;
+  const contextCapability: ModelContextCapability = {
+    provider: "deepseek",
+    model,
+    // DeepSeek's OpenAI-compatible route is treated as a host capability
+    // estimate until a provider metadata endpoint is added.
+    maxInputTokens: 128_000,
+    maxOutputTokens: 8_000,
+    supportsExactCount: false,
+    supportsPromptCache: false,
+    source: "provider",
+  };
   return {
-    model: new OpenAICompatibleChatModel({ baseUrl: safeBaseUrl, model, ...(apiKey === undefined ? {} : { apiKey }) }),
+    model: new OpenAICompatibleChatModel({ baseUrl: safeBaseUrl, model, contextCapability, ...(apiKey === undefined ? {} : { apiKey }) }),
     config: { provider: "deepseek", model, baseUrl: safeBaseUrl, configured: true },
   };
 }
