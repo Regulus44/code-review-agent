@@ -1,0 +1,235 @@
+export interface UsageSummary {
+  readonly turnCount: number;
+  readonly stepCount: number;
+  readonly toolCallCount: number;
+  readonly turnDurationMs?: number;
+  readonly llmDurationMs?: number;
+  readonly toolDurationMs?: number;
+  readonly ttftMs?: number;
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  readonly cacheReadTokens?: number;
+  readonly reasoningTokens?: number;
+  readonly totalTokens?: number;
+  readonly outputTokensPerSecond?: number;
+  readonly cacheHitPercent?: number;
+  readonly status?: string;
+}
+
+export interface UsageDetail {
+  readonly label: string;
+  readonly value: string;
+  readonly detail?: string;
+}
+
+export interface UsageRenderIntent {
+  readonly compactLabel: string;
+  readonly title: string;
+  readonly hasData: boolean;
+  readonly summary: UsageSummary;
+  readonly details: readonly UsageDetail[];
+}
+
+export interface UsageEvent {
+  readonly type: string;
+  readonly turnId?: string;
+  readonly createdAt: string;
+  readonly sequence: number;
+  readonly payload: Readonly<Record<string, unknown>>;
+}
+
+export function presentUsage(events: readonly UsageEvent[]): UsageRenderIntent {
+  const ordered = [...events].sort((left, right) => left.sequence - right.sequence);
+  const summary = summarizeUsage(ordered);
+  const compactLabel = [
+    `${summary.stepCount || "—"} 步`,
+    `LLM ${formatDuration(summary.llmDurationMs)}`,
+    `工具 ${summary.toolCallCount || "—"} 次`,
+    `输入 ${formatTokens(summary.inputTokens)}`,
+    `输出 ${formatTokens(summary.outputTokens)}`,
+    `缓存 ${formatTokens(summary.cacheReadTokens)}`,
+  ].join(" · ");
+  const details: UsageDetail[] = [
+    { label: "Turns", value: String(summary.turnCount) },
+    { label: "Steps", value: String(summary.stepCount) },
+    { label: "Turn elapsed", value: formatDuration(summary.turnDurationMs) },
+    { label: "LLM elapsed", value: formatDuration(summary.llmDurationMs), detail: "Derived from step/started to assistant response events." },
+    { label: "Tool calls", value: `${summary.toolCallCount} · ${formatDuration(summary.toolDurationMs)}` },
+    { label: "First token", value: formatDuration(summary.ttftMs), detail: "Provider TTFT when reported; otherwise derived from the first assistant chunk." },
+    { label: "Input tokens", value: formatTokens(summary.inputTokens) },
+    { label: "Output tokens", value: formatTokens(summary.outputTokens) },
+    { label: "Total tokens", value: formatTokens(summary.totalTokens) },
+    { label: "Reasoning tokens", value: formatTokens(summary.reasoningTokens) },
+    { label: "Generation speed", value: summary.outputTokensPerSecond === undefined ? "—" : `${formatDecimal(summary.outputTokensPerSecond)} tok/s` },
+    { label: "Cache hit", value: summary.cacheHitPercent === undefined ? "—" : `${formatDecimal(summary.cacheHitPercent)}%` },
+    { label: "Status", value: summary.status ?? "unknown" },
+  ];
+  const hasData = ordered.some((event) => ["turn/queued", "turn/started", "step/started", "assistant/chunk", "assistant/message", "tool/call", "tool/result", "turn/ended"].includes(event.type));
+  return {
+    compactLabel,
+    title: "Runtime usage and timing. Unknown provider values are shown as —.",
+    hasData,
+    summary,
+    details,
+  };
+}
+
+export function summarizeUsage(events: readonly UsageEvent[]): UsageSummary {
+  const ordered = [...events].sort((left, right) => left.sequence - right.sequence);
+  const turns = new Set<string>();
+  const turnStarts = new Map<string, number>();
+  const turnDurations: number[] = [];
+  const stepStarts = new Map<string, number[]>();
+  const llmDurations: number[] = [];
+  const toolStarts = new Map<string, number>();
+  const toolDurations: number[] = [];
+  const firstTurnStart = new Map<string, number>();
+  const firstAssistant = new Map<string, number>();
+  let inputTokens: number | undefined;
+  let outputTokens: number | undefined;
+  let cacheReadTokens: number | undefined;
+  let reasoningTokens: number | undefined;
+  let status: string | undefined;
+  let reportedTtft: number | undefined;
+
+  for (const event of ordered) {
+    const turnId = event.turnId === undefined ? undefined : String(event.turnId);
+    if (turnId !== undefined) turns.add(turnId);
+    const timestamp = eventTime(event);
+    const payload = event.payload;
+    const explicitTtft = finiteNumber(payload.ttftMs ?? payload.ttft_ms);
+    if (shouldUseExplicitTtft(reportedTtft, explicitTtft)) reportedTtft = explicitTtft;
+    if (event.type === "turn/started" && turnId !== undefined && timestamp !== undefined) {
+      turnStarts.set(turnId, timestamp);
+      firstTurnStart.set(turnId, timestamp);
+    } else if (event.type === "turn/ended") {
+      status = typeof payload.status === "string" ? payload.status : status;
+      if (turnId !== undefined && timestamp !== undefined) {
+        const started = turnStarts.get(turnId);
+        if (started !== undefined && timestamp >= started) turnDurations.push(timestamp - started);
+      }
+    } else if (event.type === "step/started" && turnId !== undefined && timestamp !== undefined) {
+      const key = `${turnId}:${String(payload.step ?? "")}`;
+      stepStarts.set(key, [timestamp]);
+    } else if (event.type === "assistant/chunk" || event.type === "assistant/message") {
+      if (turnId !== undefined && timestamp !== undefined && !firstAssistant.has(turnId)) firstAssistant.set(turnId, timestamp);
+      if (event.type === "assistant/message") {
+        const usage = readUsage(payload.usage ?? payload);
+        inputTokens = addOptional(inputTokens, usage.inputTokens);
+        outputTokens = addOptional(outputTokens, usage.outputTokens);
+        cacheReadTokens = addOptional(cacheReadTokens, usage.cacheReadTokens);
+        reasoningTokens = addOptional(reasoningTokens, usage.reasoningTokens);
+        if (turnId !== undefined && timestamp !== undefined) {
+          const pending = [...stepStarts.entries()].find(([key]) => key.startsWith(`${turnId}:`));
+          if (pending !== undefined) {
+            const [key, starts] = pending;
+            const started = starts[0];
+            if (started !== undefined && timestamp >= started) llmDurations.push(timestamp - started);
+            stepStarts.delete(key);
+          }
+        }
+      }
+    } else if (event.type === "tool/call") {
+      const toolCallId = String(payload.toolCallId ?? payload.id ?? `${event.sequence}`);
+      if (timestamp !== undefined) toolStarts.set(toolCallId, timestamp);
+    } else if (event.type === "tool/result") {
+      const toolCallId = String(payload.toolCallId ?? payload.id ?? "");
+      const started = toolStarts.get(toolCallId);
+      if (started !== undefined && timestamp !== undefined && timestamp >= started) toolDurations.push(timestamp - started);
+      toolStarts.delete(toolCallId);
+    }
+  }
+
+  const stepCount = ordered.filter((event) => event.type === "step/started").length;
+  const toolCallCount = ordered.filter((event) => event.type === "tool/call").length;
+  const turnDurationMs = sum(turnDurations);
+  const llmDurationMs = sum(llmDurations);
+  const toolDurationMs = sum(toolDurations);
+  const ttftMs = reportedTtft ?? firstAssistantDelta(firstTurnStart, firstAssistant);
+  const totalTokens = inputTokens === undefined || outputTokens === undefined ? undefined : inputTokens + outputTokens;
+  const outputTokensPerSecond = outputTokens === undefined || llmDurationMs === undefined || llmDurationMs <= 0 ? undefined : outputTokens / (llmDurationMs / 1000);
+  const cacheHitPercent = inputTokens === undefined || inputTokens <= 0 || cacheReadTokens === undefined ? undefined : Math.min(100, cacheReadTokens / inputTokens * 100);
+  return {
+    turnCount: turns.size,
+    stepCount,
+    toolCallCount,
+    ...(turnDurationMs === undefined ? {} : { turnDurationMs }),
+    ...(llmDurationMs === undefined ? {} : { llmDurationMs }),
+    ...(toolDurationMs === undefined ? {} : { toolDurationMs }),
+    ...(ttftMs === undefined ? {} : { ttftMs }),
+    ...(inputTokens === undefined ? {} : { inputTokens }),
+    ...(outputTokens === undefined ? {} : { outputTokens }),
+    ...(cacheReadTokens === undefined ? {} : { cacheReadTokens }),
+    ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+    ...(totalTokens === undefined ? {} : { totalTokens }),
+    ...(outputTokensPerSecond === undefined ? {} : { outputTokensPerSecond }),
+    ...(cacheHitPercent === undefined ? {} : { cacheHitPercent }),
+    ...(status === undefined ? {} : { status }),
+  };
+}
+
+export function formatTokens(value: number | undefined): string {
+  if (value === undefined || !Number.isFinite(value)) return "—";
+  if (value >= 1_000_000) return `${formatDecimal(value / 1_000_000)}M`;
+  if (value >= 1_000) return `${formatDecimal(value / 1_000)}k`;
+  return String(Math.round(value));
+}
+
+export function formatDuration(value: number | undefined): string {
+  if (value === undefined || !Number.isFinite(value)) return "—";
+  if (value < 1000) return `${Math.max(0, Math.round(value))}ms`;
+  const seconds = value / 1000;
+  if (seconds < 60) return `${formatDecimal(seconds)}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${Math.round(seconds % 60)}s`;
+}
+
+function eventTime(event: UsageEvent): number | undefined {
+  const value = Date.parse(event.createdAt);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function readUsage(value: unknown): { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; reasoningTokens?: number } {
+  if (typeof value !== "object" || value === null) return {};
+  const source = value as Record<string, unknown>;
+  const inputTokens = finiteNumber(source.inputTokens ?? source.input_tokens ?? source.promptTokens ?? source.prompt_tokens);
+  const outputTokens = finiteNumber(source.outputTokens ?? source.output_tokens ?? source.completionTokens ?? source.completion_tokens);
+  const cacheReadTokens = finiteNumber(source.cacheReadTokens ?? source.cache_read_tokens ?? source.cachedTokens ?? source.cached_tokens ?? source.promptCacheHitTokens ?? source.prompt_cache_hit_tokens);
+  const reasoningTokens = finiteNumber(source.reasoningTokens ?? source.reasoning_tokens);
+  return {
+    ...(inputTokens === undefined ? {} : { inputTokens }),
+    ...(outputTokens === undefined ? {} : { outputTokens }),
+    ...(cacheReadTokens === undefined ? {} : { cacheReadTokens }),
+    ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+  };
+}
+
+function addOptional(previous: number | undefined, next: number | undefined): number | undefined {
+  if (previous === undefined) return next;
+  if (next === undefined) return previous;
+  return previous + next;
+}
+
+function sum(values: readonly number[]): number | undefined {
+  return values.length === 0 ? undefined : values.reduce((total, value) => total + value, 0);
+}
+
+function firstAssistantDelta(starts: ReadonlyMap<string, number>, assistants: ReadonlyMap<string, number>): number | undefined {
+  const deltas = [...assistants.entries()].map(([turnId, timestamp]) => {
+    const started = starts.get(turnId);
+    return started === undefined || timestamp < started ? undefined : timestamp - started;
+  }).filter((value): value is number => value !== undefined);
+  return deltas.length === 0 ? undefined : Math.min(...deltas);
+}
+
+function formatDecimal(value: number): string {
+  return value >= 100 ? Math.round(value).toString() : value.toFixed(1).replace(/\.0$/u, "");
+}
+
+function shouldUseExplicitTtft(previous: number | undefined, next: number | undefined): boolean {
+  return previous === undefined && next !== undefined;
+}

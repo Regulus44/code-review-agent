@@ -23,6 +23,8 @@ import { presentQuestionBatch } from "./presentation/question-presenter.js";
 import { presentContextMeter } from "./presentation/context-presenter.js";
 import { presentWorktrees } from "./presentation/worktree-presenter.js";
 import { presentLspTool } from "./presentation/lsp-presenter.js";
+import { presentComposerSubmit } from "./presentation/composer-presenter.js";
+import { presentUsage } from "./presentation/usage-presenter.js";
 import { createShellLayoutState, presentShellLayout, reduceShellLayout, shellViewport } from "./shell/layout.js";
 import { createShellBootState, normalizeBootError, presentShellBoot, reduceShellBoot } from "./shell/boot.js";
 import { createShellOverlayState, presentShellOverlay, reduceShellOverlay } from "./shell/overlay.js";
@@ -62,6 +64,8 @@ export interface BrowserWebRuntime {
   readonly presentContextMeter: typeof presentContextMeter;
   readonly presentWorktrees: typeof presentWorktrees;
   readonly presentLspTool: typeof presentLspTool;
+  readonly presentComposerSubmit: typeof presentComposerSubmit;
+  readonly presentUsage: typeof presentUsage;
   readonly createShellLayoutState: typeof createShellLayoutState;
   readonly reduceShellLayout: typeof reduceShellLayout;
   readonly presentShellLayout: typeof presentShellLayout;
@@ -116,6 +120,8 @@ const runtime: BrowserWebRuntime = {
   presentContextMeter,
   presentWorktrees,
   presentLspTool,
+  presentComposerSubmit,
+  presentUsage,
   createShellLayoutState,
   reduceShellLayout,
   presentShellLayout,

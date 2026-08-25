@@ -19,8 +19,8 @@
 | Send / Stop / Stopping 状态机 | 已落地 | Composer 根据 durable turn projection 和 `turn/ended` 渲染 |
 | 模型切换与 reasoning effort | 已落地 | `/v1/models` capability；仅对后续 turn 生效 |
 | Composer 下方 usage 条 | 已落地 | 读取事件中 host/provider 报告的 usage；未知值显示 `—` |
-| 独立 `composer-presenter.ts` / `usage-presenter.ts` | 后续收敛 | 当前逻辑仍集中在 `apps/web/index.html`，后续可拆分为可测试 presenter |
-| 完整 Usage drawer、TTFT、tok/s、cache hit 百分比 | 后续收敛 | 需要更完整的 projection 字段和 provider 数据 |
+| 独立 `composer-presenter.ts` / `usage-presenter.ts` | 已落地 | 纯函数 presenter 已接入浏览器 runtime；页面事件编排仍在 `apps/web/index.html` |
+| Usage drawer、TTFT、tok/s、cache hit 百分比 | 部分落地 | Usage drawer 已可展开；TTFT/LLM/工具耗时优先使用事件或 provider 字段，缺失时显示 `—` |
 
 ## 2. 参考材料与边界
 
@@ -266,12 +266,13 @@ interface ModelCapability {
 
 #### 数据来源要求
 
-指标必须来自模型 adapter、tool lifecycle 和 Event Store projection。当前 `Trajectory` 已有 Usage/Timing inspector 的兼容入口，但 `TurnProjection` 尚未有标准化 usage 字段，因此实施时应：
+指标必须来自模型 adapter、tool lifecycle 和 Event Store projection。当前已由 `apps/web/src/presentation/usage-presenter.ts` 对 replayed events 聚合：provider 报告的 token 直接使用 `assistant/message` usage，LLM/工具耗时由 durable event timestamp 配对推导，provider 提供的 TTFT 字段优先级更高。
 
-1. 先扩展事件 payload/contract，定义 input/output/total、TTFT、duration、tool duration；
-2. 再在 storage projection 中聚合；
-3. 最后由 `usage-presenter.ts` 输出 UI render intent；
-4. 缺少 provider 数据时显示 `unknown`，不根据字符数冒充真实 token。
+后续若 Runtime 增加标准化 timing 字段，应保持 presenter 的优先级：
+
+1. 使用 provider/host 明确报告的 input/output/total、TTFT、duration、tool duration；
+2. 缺少字段时使用可解释的事件时间差；
+3. 仍缺少数据时显示 `—`，不根据字符数冒充真实 token。
 
 ### 5.5 工具活动与任务条
 
@@ -354,7 +355,7 @@ Conversation / Composer / Usage bar / Details drawer
 3. `apps/web/src/shell/app-frame.ts`
    - resizer、抽屉、focus restore、ARIA。
 4. `apps/web/src/presentation/composer-presenter.ts`
-   - 集中生成 send/stop/stopping、权限、模型、推理强度和 usage view。
+   - 集中生成 send/stop/stopping 的状态矩阵；模型、推理强度和权限能力继续由 host-backed controls 提供。
 5. `apps/web/src/presentation/usage-presenter.ts`
    - 格式化 token、duration、TTFT、tok/s、cache hit。
 

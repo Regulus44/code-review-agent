@@ -271,10 +271,19 @@
       .model-trigger { max-width: 194px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .context-meter { color: var(--text-tertiary); font-size: 10px; }
       .reasoning-trigger { max-width: 112px; }
-      .usage-meter { width: min(860px, 100%); margin: 7px auto 0; overflow: hidden; color: var(--text-tertiary); text-overflow: ellipsis; white-space: nowrap; font-size: 10px; line-height: 1.5; text-align: center; }
+      .usage-meter { display: block; width: min(860px, 100%); margin: 7px auto 0; padding: 0; overflow: hidden; border: 0; color: var(--text-tertiary); background: transparent; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-size: 10px; line-height: 1.5; text-align: center; }
       .usage-meter[hidden] { display: none; }
       .usage-meter strong { color: var(--text-secondary); font-weight: 600; }
       .usage-separator { padding: 0 7px; color: var(--border-strong); }
+      .usage-meter:hover, .usage-meter:focus-visible { color: var(--text-secondary); text-decoration: underline; text-underline-offset: 3px; }
+      .usage-drawer { width: min(860px, 100%); margin: 10px auto 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: 0 8px 24px rgba(30,39,55,.08); }
+      .usage-drawer[hidden] { display: none; }
+      .usage-drawer-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; color: var(--text-secondary); font-size: 11px; font-weight: 650; }
+      .usage-drawer-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px 14px; }
+      .usage-drawer-item { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; color: var(--text-tertiary); font-size: 11px; }
+      .usage-drawer-item strong { color: var(--text-secondary); font-weight: 650; text-align: right; }
+      .usage-drawer-item small { display: block; margin-top: 2px; color: var(--text-muted); font-size: 9px; }
+      @media (max-width: 700px) { .usage-drawer-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
       .send-button { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; color: #fff; background: var(--blue); font-size: 15px; transition: background .15s var(--ease), transform .15s var(--ease); }
       .send-button.stop { background: var(--red); font-size: 13px; }
       .send-button.stopping { background: var(--amber); animation: send-pulse 1s ease-in-out infinite; }
@@ -587,7 +596,8 @@
             <div id="mode-popover" class="model-popover" hidden></div>
             <div id="reasoning-popover" class="model-popover" hidden></div>
           </form>
-          <div id="usage-meter" class="usage-meter" aria-live="polite" hidden></div>
+          <button id="usage-meter" class="usage-meter" type="button" aria-live="polite" aria-expanded="false" aria-controls="usage-drawer" hidden></button>
+          <div id="usage-drawer" class="usage-drawer" hidden></div>
         </footer>
       </main>
       <aside id="details-panel" class="details-panel" aria-label="Session details">
@@ -639,6 +649,7 @@
         const typedRuntime = window.CodeReviewAgentWeb;
         const typedConnection = typedRuntime?.connection || null;
         const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, reasoningEffort: 'default', stoppingTurnId: null, workspaces: null, lastWorkspaceOrderSequence: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 252, details: 'closed', mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', workspaceViewMode: 'tree', workspaceSort: 'recent', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
+        let usageDrawerOpen = false;
         const app = document.querySelector('#app');
         const shellFrame = typedRuntime?.mountShellFrame ? typedRuntime.mountShellFrame(document) : null;
         const list = document.querySelector('#session-list');
@@ -668,6 +679,7 @@
         const planToggle = document.querySelector('#plan-toggle');
         const contextMeter = document.querySelector('#context-meter');
         const usageMeter = document.querySelector('#usage-meter');
+        const usageDrawer = document.querySelector('#usage-drawer');
         const sidebarResizer = document.querySelector('#sidebar-resizer');
          const renameTitle = document.querySelector('#rename-title');
          const renameDescription = document.querySelector('#rename-description');
@@ -1182,51 +1194,46 @@
           const turns = snapshot?.session?.turns || state.session?.turns || [];
           return turns.find((turn) => turn.status === 'running') || turns.find((turn) => turn.status === 'queued');
         };
-        const usageNumber = (value) => typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-        const formatCount = (value) => value === undefined ? '—' : value >= 1000000 ? `${(value / 1000000).toFixed(1)}M` : value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(Math.round(value));
-        const formatDuration = (milliseconds) => milliseconds === undefined || milliseconds < 0 ? '—' : milliseconds < 1000 ? `${Math.round(milliseconds)}ms` : `${(milliseconds / 1000).toFixed(1)}s`;
-        const readUsage = (payload) => {
-          const source = payload && typeof payload === 'object' ? payload : {};
-          const usage = source.usage && typeof source.usage === 'object' ? source.usage : source;
-          return {
-            input: usageNumber(usage.inputTokens ?? usage.input_tokens ?? usage.promptTokens ?? usage.prompt_tokens),
-            output: usageNumber(usage.outputTokens ?? usage.output_tokens ?? usage.completionTokens ?? usage.completion_tokens),
-            cache: usageNumber(usage.cacheReadTokens ?? usage.cache_read_tokens ?? usage.cachedTokens),
-          };
+        const renderUsageDrawer = (intent) => {
+          if (!usageDrawer) return;
+          usageDrawer.hidden = !usageDrawerOpen || !intent.hasData;
+          usageDrawer.innerHTML = '';
+          if (usageDrawer.hidden) return;
+          const header = document.createElement('div'); header.className = 'usage-drawer-header';
+          const title = document.createElement('span'); title.textContent = 'Runtime usage';
+          const hint = document.createElement('span'); hint.textContent = 'Replay-backed';
+          header.append(title, hint);
+          const grid = document.createElement('div'); grid.className = 'usage-drawer-grid';
+          for (const detail of intent.details) {
+            const item = document.createElement('div'); item.className = 'usage-drawer-item';
+            const label = document.createElement('span'); label.textContent = detail.label;
+            const value = document.createElement('strong'); value.textContent = detail.value; value.title = detail.detail || '';
+            item.append(label, value); grid.append(item);
+          }
+          usageDrawer.append(header, grid);
         };
-        const renderUsageMeter = (snapshot) => {
+        const renderUsageMeter = () => {
           if (!usageMeter) return;
           const events = [...state.events.values()].sort((left, right) => left.sequence - right.sequence);
-          const steps = events.filter((event) => event.type === 'step/started').length;
-          const toolCalls = events.filter((event) => event.type === 'tool/call').length;
-          const current = activeTurn(snapshot);
-          const starts = events.filter((event) => event.type === 'turn/started' && (!current || event.turnId === current.id));
-          const ends = events.filter((event) => event.type === 'turn/ended' && (!current || event.turnId === current.id));
-          const startAt = starts.at(-1)?.createdAt ? Date.parse(starts.at(-1).createdAt) : undefined;
-          const endAt = ends.at(-1)?.createdAt ? Date.parse(ends.at(-1).createdAt) : Date.now();
-          const duration = startAt === undefined || !Number.isFinite(startAt) ? undefined : Math.max(0, endAt - startAt);
-          const usage = events.reduce((total, event) => {
-            const next = readUsage(event.payload);
-            return {
-              input: total.input === undefined ? next.input : next.input === undefined ? total.input : total.input + next.input,
-              output: total.output === undefined ? next.output : next.output === undefined ? total.output : total.output + next.output,
-              cache: total.cache === undefined ? next.cache : next.cache === undefined ? total.cache : total.cache + next.cache,
-            };
-          }, { input: undefined, output: undefined, cache: undefined });
-          usageMeter.hidden = events.length === 0 && (snapshot?.session?.turns?.length || 0) === 0;
-          usageMeter.innerHTML = `<strong>${steps || '—'} 步</strong><span class="usage-separator">·</span>LLM ${formatDuration(duration)}<span class="usage-separator">·</span>工具 ${toolCalls || '—'} 次<span class="usage-separator">·</span>输入 ${formatCount(usage.input)}<span class="usage-separator">·</span>输出 ${formatCount(usage.output)}<span class="usage-separator">·</span>缓存 ${formatCount(usage.cache)}`;
-          usageMeter.title = '指标只展示 host/provider 已报告的数据；未知 token 不用字符数估算。';
+          const intent = typedRuntime?.presentUsage ? typedRuntime.presentUsage(events) : { compactLabel: 'Usage · —', title: 'Usage presenter unavailable.', hasData: events.length > 0, details: [] };
+          usageMeter.hidden = !intent.hasData;
+          usageMeter.innerHTML = `<strong>${esc(intent.compactLabel.split(' · ')[0])}</strong>${intent.compactLabel.split(' · ').slice(1).map((part) => `<span class="usage-separator">·</span>${esc(part)}`).join('')}`;
+          usageMeter.title = intent.title;
+          usageMeter.setAttribute('aria-expanded', String(usageDrawerOpen && intent.hasData));
+          renderUsageDrawer(intent);
         };
         const renderComposerState = (snapshot) => {
           if (!send) return;
           const turn = activeTurn(snapshot);
-          const stopping = turn !== undefined && state.stoppingTurnId === turn.id;
-          const mode = stopping ? 'stopping' : turn === undefined ? 'send' : 'stop';
+          const submitView = typedRuntime?.presentComposerSubmit
+            ? typedRuntime.presentComposerSubmit({ turn, stoppingTurnId: state.stoppingTurnId, inputHasContent: Boolean(input.value.trim()), bootReady: state.boot.status === 'ready' })
+            : { mode: state.stoppingTurnId === turn?.id ? 'stopping' : turn === undefined ? 'send' : 'stop', icon: state.stoppingTurnId === turn?.id ? '…' : turn === undefined ? '↑' : '■', disabled: state.boot.status !== 'ready' || (turn === undefined && !input.value.trim()), ariaLabel: 'Send message', title: 'Send message' };
+          const mode = submitView.mode;
           send.className = `send-button${mode === 'stop' ? ' stop' : mode === 'stopping' ? ' stopping' : ''}`;
-          send.textContent = mode === 'send' ? '↑' : mode === 'stop' ? '■' : '…';
-          send.setAttribute('aria-label', mode === 'send' ? 'Send message' : mode === 'stop' ? (turn?.status === 'queued' ? 'Stop queued turn' : 'Stop running turn') : 'Stopping turn');
-          send.title = mode === 'send' ? 'Send message' : mode === 'stop' ? 'Stop current turn' : 'Stopping current turn';
-          send.disabled = state.boot.status !== 'ready' || mode === 'stopping' || (mode === 'send' && !input.value.trim());
+          send.textContent = submitView.icon;
+          send.setAttribute('aria-label', submitView.ariaLabel);
+          send.title = submitView.title;
+          send.disabled = submitView.disabled;
           if (turn === undefined || (turn.status !== 'running' && turn.status !== 'queued')) state.stoppingTurnId = null;
           const effectiveReasoning = state.reasoningEffort === 'default' ? (state.models?.reasoning?.current || 'default') : state.reasoningEffort;
           if (reasoningTrigger) reasoningTrigger.textContent = `Effort · ${effectiveReasoning === 'default' ? 'Default' : effectiveReasoning}`;
@@ -1905,6 +1912,7 @@
         const renderDetails = () => { const connected = state.mcp.filter((server) => !['disabled', 'failed', 'needs_auth'].includes(server.status)).length; const typedSnapshot = typedConnection?.store.getSnapshot(); const trajectory = typedSnapshot?.trajectory; const treeWarnings = typedSnapshot?.toolCallTree?.warnings || []; const pendingPermissions = typedSnapshot?.conversation?.nodes?.filter((node) => node.kind === 'permission' && node.status === 'pending').length || 0; const pendingInteractions = typedSnapshot?.conversation?.nodes?.filter((node) => node.kind === 'interaction' && node.status === 'pending').length || 0; const diagnostics = state.mcp.map((server) => { const name = server.config?.name || server.name; const catalog = Array.isArray(server.catalog) ? server.catalog : []; const disabled = catalog.filter((item) => item.enabled === false).length; const active = server.status === 'connected' ? catalog.length - disabled : 0; return `<div class="detail-line"><span>${esc(name)}</span><strong>${esc(server.status)} · g${server.generation || 0} · ${active}/${catalog.length} active</strong></div><div class="detail-line"><span>Auth</span><strong>${server.status === 'needs_auth' ? 'Needs authorization' : server.config?.credentialRef ? 'Credential reference configured' : 'No credential reference'}</strong></div>${server.retry?.nextAttemptAt ? `<div class="detail-line"><span>Next retry</span><strong>${esc(server.retry.nextAttemptAt)}</strong></div>` : ''}`; }).join(''); details.innerHTML = `<div class="detail-section"><div class="detail-label">Model</div><div class="detail-value">${esc(currentModel())}</div><div class="detail-line"><span>Provider</span><strong>${esc(state.models?.provider || 'DeepSeek-compatible')}</strong></div><div class="detail-line"><span>Default</span><strong>${esc(state.models?.defaultModel || 'deepseek-v4-flash')}</strong></div></div><div class="detail-section"><div class="detail-label">Session</div><div class="detail-line"><span>Status</span><span class="status-pill">Connected</span></div><div class="detail-line"><span>Events</span><strong>${state.events.size}</strong></div><div class="detail-line"><span>Workspace</span><strong title="${esc(state.session?.workspaceRoot || '.')}">${esc(state.session?.workspaceRoot || '.')}</strong></div></div><div class="detail-section"><div class="detail-label">Trajectory</div><div class="detail-line"><span>Records</span><strong>${trajectory?.records.length || 0} · seq ${trajectory?.lastSequence || 0}</strong></div><div class="detail-line"><span>Running</span><strong>${trajectory?.records.filter((record) => record.running).length || 0}</strong></div><div class="detail-line"><span>Lineage warnings</span><strong>${treeWarnings.length}</strong></div></div><div class="detail-section"><div class="detail-label">MCP diagnostics</div><div class="detail-line"><span>Servers</span><strong>${connected}/${state.mcp.length} connected</strong></div><div class="detail-line"><span>Tools</span><strong>${state.tools.size}</strong></div>${diagnostics || '<div class="empty-detail">No MCP servers configured.</div>'}</div><div class="detail-section"><div class="detail-label">Tools</div><div id="detail-tools" class="tool-list"></div></div><div class="detail-section"><div class="detail-label">Permissions</div><div class="detail-line"><span>Pending approvals</span><strong>${pendingPermissions}</strong></div><div class="detail-line"><span>Pending questions</span><strong>${pendingInteractions}</strong></div></div>`; const toolList = details.querySelector('#detail-tools'); const names = [...state.tools.keys()].slice(0, 8); if (!names.length) toolList.innerHTML = '<div class="empty-detail">No tools discovered.</div>'; else names.forEach((name) => { const row = document.createElement('div'); row.className = 'tool-list-item'; row.textContent = name; toolList.append(row); }); };
         const openSession = async (id) => {
            dispatchShellLayout({ type: 'close-mobile-sidebar' });
+          usageDrawerOpen = false;
           state.trajectoryQuery = ''; state.trajectoryRunningOnly = false; state.trajectorySelectedKey = null; state.trajectoryFollow = true; state.trajectoryCollapsedLanes.clear(); state.trajectoryCollapsedRecords.clear(); state.taskSelectedId = null;
           state.lastWorkspaceOrderSequence = 0;
           if (state.storeUnsubscribe) { state.storeUnsubscribe(); state.storeUnsubscribe = null; }
@@ -1986,6 +1994,8 @@
         modelTrigger.onclick = () => { dispatchOverlay({ type: 'toggle', overlay: 'model-popover' }); };
         modeTrigger.onclick = () => { dispatchOverlay({ type: 'toggle', overlay: 'mode-popover' }); renderModes(); };
         reasoningTrigger.onclick = () => { dispatchOverlay({ type: 'toggle', overlay: 'reasoning-popover' }); renderReasoning(); };
+        usageMeter.onclick = () => { if (usageMeter.hidden) return; usageDrawerOpen = !usageDrawerOpen; renderUsageMeter(typedConnection?.store.getSnapshot() || { session: state.session }); };
+        usageMeter.addEventListener('keydown', (event) => { if (event.key === 'Escape' && usageDrawerOpen) { event.preventDefault(); usageDrawerOpen = false; renderUsageMeter(typedConnection?.store.getSnapshot() || { session: state.session }); } });
         if (planToggle) planToggle.onclick = () => { if (state.layout.details === 'closed') dispatchShellLayout({ type: 'toggle-details' }); renderPlanningPanel(typedConnection?.store.getSnapshot() || { session: state.session }); };
         document.addEventListener('click', (event) => { if (!modelPopover.hidden && !modelPopover.contains(event.target) && event.target !== modelTrigger) dispatchOverlay({ type: 'close', overlay: 'model-popover' }); if (!modePopover.hidden && !modePopover.contains(event.target) && event.target !== modeTrigger) dispatchOverlay({ type: 'close', overlay: 'mode-popover' }); if (!reasoningPopover.hidden && !reasoningPopover.contains(event.target) && event.target !== reasoningTrigger) dispatchOverlay({ type: 'close', overlay: 'reasoning-popover' }); if (!sessionMenu.hidden && !sessionMenu.contains(event.target)) closeSessionMenu(); });
         input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 220)}px`; const snapshot = typedConnection?.store.getSnapshot(); const runningTurn = snapshot?.session?.turns.find((turn) => turn.status === 'running'); steer.hidden = runningTurn === undefined; steer.disabled = runningTurn === undefined || !input.value.trim(); renderComposerState(snapshot || { session: state.session }); });
