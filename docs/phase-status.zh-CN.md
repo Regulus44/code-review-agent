@@ -48,6 +48,13 @@
 - 在 `http://127.0.0.1:3210/` 重启服务后完成 8 个真实工具行、默认折叠、点击展开、IN/OUT 内滚动和 console 无 warning/error 验证；Web 113 项测试和 `pnpm build:web` 通过；
 - 独立 checkpoint：`5e55084 feat(phase8): align dsh tool rows`；本切片只影响 Web projection/presentation，不改变公共 Event/Tool/Task/Permission/Workspace contract。
 
+## Phase 8.0 ToolRow timeline correction（completed，2026-08-25）
+
+- 修复旧 Conversation projection 使用 `assistant:${turnId}` 合并整轮 assistant 内容的问题；现在由 `step/started` 建立 step key，assistant segments 与 tool rows 按真实 sequence 交错排列；
+- `turn:*` 节点 sequence 跟随最新状态事件，`Turn completed/failed` 位于对应 turn tail；tool-only assistant message 不产生空头像行；
+- 在 `http://127.0.0.1:3210/` 重启服务后验证历史会话 DOM 顺序、ToolRow 独立行和 console 无 warning/error；`pnpm typecheck`、Web 115 项测试、`pnpm build:web`、`git diff --check` 通过；
+- 独立 checkpoint：`1935dc5 fix(phase8): preserve conversation tool order`；详细根因、DSH 对照和回滚方式见 [ToolRow 对话顺序问题记录](ui-issue-tool-row-order.zh-CN.md)。
+
 ## Phase 8 暂存归档（2026-08-24）
 
 - 该节记录历史暂存动作；Phase 8 已从 `c1aae6c` 恢复推进，provider/model routing 已在 `c7e417c` 建立独立 checkpoint，credential lifecycle 已由本次恢复提交建立独立 checkpoint。

@@ -249,7 +249,7 @@ DSH 的共同视觉规律：
 - 工具运行提示不以不断新增的尾部通知呈现；
 - permission/question 独立进入主对话决策 surface。
 
-当前项目实现状态（2026-08-25）：`5e55084 feat(phase8): align dsh tool rows` 已完成通用 ToolRow 基础切片。Conversation 不再使用 `tool-activity` 作为工具调用的唯一容器；每个 tool call 直接渲染为默认折叠的稳定行，摘要展示路径/query/command，展开后显示 bounded `IN` / `OUT`，running/error/stopped 状态和权限独立渲染均已接入。专用 Terminal/Diff/Read/Search/Web card primitives、Trajectory Inspect 快捷入口和 host-backed 文件打开 action 保留为后续增强。
+当前项目实现状态（2026-08-25）：`5e55084 feat(phase8): align dsh tool rows` 完成通用 ToolRow 基础切片，`1935dc5 fix(phase8): preserve conversation tool order` 修复了 Conversation projection 将整轮 assistant 合并为单节点造成的 ToolRow 尾部堆叠。当前每个 tool call 直接渲染为默认折叠的稳定行，assistant segment 按 step 保留原始时间线，turn 终态位于 tail，摘要展示路径/query/command，展开后显示 bounded `IN` / `OUT`，running/error/stopped 状态和权限独立渲染均已接入。专用 Terminal/Diff/Read/Search/Web card primitives、Trajectory Inspect 快捷入口和 host-backed 文件打开 action 保留为后续增强。
 
 ### 暂缓
 

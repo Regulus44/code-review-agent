@@ -1,5 +1,41 @@
 # Phase 8 开发日志
 
+## 2026-08-25：修复 ToolRow 集中堆叠到对话尾部
+
+本次工作属于 Phase 8.0 Web 对齐，目标是修复上一轮 ToolRow 改造后仍存在的 Conversation 时间线错误。问题记录见 [ToolRow 对话顺序问题记录](../ui-issue-tool-row-order.zh-CN.md)。实现继续依据 [DSH Web 前端对照文档](../dsh-frontend-reference.zh-CN.md) 的 stable node、keyed slot 和 tool-row timeline 规则。
+
+### 任务七问
+
+1. **Phase**：Phase 8.0，Conversation/ToolRow 时间线修复。
+2. **问题类型**：事件投影、消息分段、工具行排序和 turn tail。
+3. **契约影响**：不改变 Event、Tool、Task、Permission 或 Workspace contract；只修正 Web ConversationProjection 的节点边界。
+4. **DSH 参考**：`ui-conversation` 的 keyed conversation node、`ui-tool` 的 `ToolCallTree`/`ToolRow`；工具更新保持在原 row 内。
+5. **上游来源**：参考 DSH 行为与结构，没有复制代码或内部类型；无需新增许可证登记。
+6. **验收场景**：同一 turn 含多个 step、每个 step 含 assistant 文本和 tool call 时，ToolRow 必须出现在对应 assistant segment 后；turn 终态出现在 tail；tool-only assistant 不显示空行。
+7. **回滚**：回退代码 checkpoint `1935dc5`；事件历史和公共运行时不受影响。
+
+### 根因与实现
+
+- 旧 projection 使用 `assistant:${turnId}` 合并整轮 assistant 内容，导致工具前说明、工具后说明和最终总结变成一个节点，所有 ToolRow 被排序到该节点之后；
+- `step/started` 现在为当前 turn 建立稳定 step key，assistant chunk/message 按 step 分段，兼容无 step 事件的旧流；
+- `turn:*` 节点的 sequence 跟随最新状态事件，终态自然成为 turn tail；
+- 空的 tool-only assistant message 不再创建空 avatar 行；
+- ToolRow 仍由 durable `toolCallId` keyed projection 驱动，progress/result 只更新原行。
+
+### 验证
+
+```text
+pnpm typecheck                         ✓
+pnpm --filter @code-review-agent/web test  ✓ 115 tests
+pnpm build:web                         ✓
+git diff --check                       ✓
+GET http://127.0.0.1:3210/health       ✓ 200
+真实浏览器 ToolRow 时间线顺序          ✓
+浏览器 console warning/error           ✓ 0
+```
+
+代码 checkpoint：`1935dc5 fix(phase8): preserve conversation tool order`。
+
 ## 2026-08-25：ToolRow 按 DSH 折叠优先模型收敛
 
 本次工作属于 Phase 8.0 Web 对齐，目标是把现有“Agent activity 大组 + 原始 JSON 工具卡”改造成 DSH 风格的单调用 ToolRow。实现依据 [DSH Web 前端对照文档](../dsh-frontend-reference.zh-CN.md) 第 4 节；不复制 DSH React 组件或内部类型，继续使用本项目的 ConversationProjection、ToolCallTree 和安全 presenter。
