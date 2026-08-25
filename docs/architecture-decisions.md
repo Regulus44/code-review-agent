@@ -140,6 +140,20 @@ Phase 7 只消费本项目内部 EventStore、Session、Task、Permission 和 Wo
 
 M02 的 estimator 只处理当前 model-visible messages/tools，不负责 API round、消息 normalize、tool pairing、工具结果裁剪、附件恢复或 provider-specific SDK；这些能力按研究文档的 M03–M14 模块继续实现。
 
+## ADR-015：Canonical Context Assembly 统一 model-visible 请求输入
+
+状态：accepted（2026-08-26，M03）
+
+每次模型请求必须由一个 canonical `ContextAssembly` 同时提供 system prompt、history、attachments、visible tool schemas 和 M02 token estimator 的 `ModelContextView`。Runtime 不得分别手工构造“用于计数的消息”和“用于发送的消息”，也不得在 `runTurn()`、恢复流程和 tool loop 中维护互相漂移的 system prompt 拼装逻辑。
+
+System prompt 使用稳定的 static/dynamic section 分层。static section 负责 identity、task execution、safety、verification 和 communication；dynamic section 负责当前工具、tool guidance、workspace、permission、recovery 和 custom instructions。Assembler 按 `phase → order → id` 排序，tools 按名称排序，history 保留事件回放顺序，attachments 按 `order → id` 排序。外部文件、MCP、工具结果和应用上下文都通过明确的 untrusted-data wrapper 进入 model view，不能覆盖本地安全、workspace、permission 或 verification 规则。
+
+Assembler 对规范化后的 sections、tools、history、attachments 生成稳定 fingerprint，并在 `step/started.payload.contextAssembly` 中记录 fingerprint 和 section/attachment IDs。fingerprint 只用于 request/replay 关联，不替代 EventStore sequence，也不把完整 prompt、凭据或外部原文写入事件。
+
+M03 不实现 API round、message normalize、tool pairing、tool-result microcompact、summary agent、durable compact boundary 或 overflow recovery；这些能力必须在后续 M04–M10 中按研究文档单独接入。compact 或 tool loop 改变 model-visible history 后，Runtime 必须重新调用 assembler 并重新计数。
+
+回滚策略：删除 M03 assembler 接入并回退到 M02 checkpoint；新增 section 类型和 `contextAssembly` 诊断字段均保持附加兼容，不要求旧事件迁移。
+
 ## 参考代码入口
 
 - DSH Agent Loop：`D:/Develop/deepseek-harness-fork/packages/core/agent-loop/src/agent.ts`

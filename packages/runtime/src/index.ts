@@ -38,12 +38,12 @@ import {
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { compactMessages, DEFAULT_CONTEXT_BUDGET, type ContextBudget } from "@code-review-agent/compaction";
-import { calculateContextWarningState, countContextTokens, createTokenCounter, estimateContextTokens, fallbackModelContextCapability, resolveContextBudget, shouldCompactBeforeRequest, shouldUseExactTokenCount, type ContextBudgetConfig, type ModelContextView, type TokenCount } from "@code-review-agent/context";
+import { assembleContext, calculateContextWarningState, countContextTokens, createTokenCounter, estimateContextTokens, fallbackModelContextCapability, resolveContextBudget, shouldCompactBeforeRequest, shouldUseExactTokenCount, type ContextAssembly, type ContextBudgetConfig, type ModelContextView, type TokenCount } from "@code-review-agent/context";
 import { randomUUID } from "node:crypto";
 import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModePolicySnapshot, type CodeModeSandbox, type ExecuteToolOutput, type JobSummary, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
 import type { SubagentRuntime } from "@code-review-agent/subagent";
 import { GitWorktreeManager } from "@code-review-agent/workspace";
-import { buildAgentSystemPrompt } from "./system-prompt.js";
+import { buildAgentSystemPromptSections } from "./system-prompt.js";
 
 export interface AgentHostOptions {
   readonly store: SessionEventStore;
@@ -1496,15 +1496,29 @@ export class AgentHost {
   }
 
   private async systemMessage(sessionId: SessionId, recovery = false): Promise<string> {
+    return (await this.assembleTurnContext(sessionId, [], recovery)).systemPrompt;
+  }
+
+  /** Builds the one canonical model-visible context for a turn/step. */
+  private async assembleTurnContext(
+    sessionId: SessionId,
+    history: readonly ChatMessage[],
+    recovery = false,
+  ): Promise<ContextAssembly> {
     const projection = await this.options.store.project(sessionId);
-    const workspaceRoot = projection === undefined ? "." : effectiveWorkspaceRoot(projection);
-    return buildAgentSystemPrompt({
-      workspaceRoot,
-      tools: this.toolRuntime.listTools(sessionId, projection?.ownership?.tenantId),
-      toolGuidance: this.toolPromptRegistry.assemble(this.toolRuntime.listTools(sessionId, projection?.ownership?.tenantId)),
-      permissionPreset: projection?.permissionPreset ?? this.permissionPreset ?? "ask-on-write",
-      ...(this.customSystemPrompt === undefined ? {} : { customInstructions: this.customSystemPrompt }),
-      ...(recovery ? { recovery: true } : {}),
+    const tenantId = projection?.ownership?.tenantId;
+    const tools = this.toolRuntime.listTools(sessionId, tenantId);
+    return assembleContext({
+      systemSections: buildAgentSystemPromptSections({
+        workspaceRoot: projection === undefined ? "." : effectiveWorkspaceRoot(projection),
+        tools,
+        toolGuidance: this.toolPromptRegistry.assemble(tools),
+        permissionPreset: projection?.permissionPreset ?? this.permissionPreset ?? "ask-on-write",
+        ...(this.customSystemPrompt === undefined ? {} : { customInstructions: this.customSystemPrompt }),
+        ...(recovery ? { recovery: true } : {}),
+      }),
+      visibleTools: this.modelTools(sessionId, tenantId),
+      history: history.filter((message) => message.role !== "system"),
     });
   }
 
@@ -1572,11 +1586,8 @@ export class AgentHost {
       const projection = await this.options.store.project(sessionId);
       const route = this.modelRouteForTenant(projection?.ownership?.tenantId);
       await this.options.store.append({ sessionId, turnId, type: "turn/started", payload: { traceId, ...(route === undefined ? {} : route), ...(reasoningEffort === undefined ? {} : { reasoningEffort }) } });
-      const messages: ChatMessage[] = [
-        { role: "system", content: await this.systemMessage(sessionId) },
-        ...previousMessages,
-        { role: "user", content },
-      ];
+      const assembly = await this.assembleTurnContext(sessionId, [...previousMessages, { role: "user", content }]);
+      const messages: ChatMessage[] = [...assembly.messages];
       await this.runSteps(sessionId, turnId, controller, messages, reasoningEffort);
     } catch (error) {
       await this.finishTurnAfterError(sessionId, turnId, controller, error);
@@ -1593,8 +1604,9 @@ export class AgentHost {
       const projection = await this.options.store.project(sessionId);
       const route = this.modelRouteForTenant(projection?.ownership?.tenantId);
       await this.options.store.append({ sessionId, turnId, type: "agent/status", payload: { status: "running", reason: "permission_resolved_after_restart", traceId, ...(route === undefined ? {} : route) } });
-      const messages: ChatMessage[] = [{ role: "system", content: await this.systemMessage(sessionId, true) }, ...(await this.conversationMessages(sessionId))];
-      await this.runSteps(sessionId, turnId, controller, messages);
+      const assembly = await this.assembleTurnContext(sessionId, await this.conversationMessages(sessionId), true);
+      const messages: ChatMessage[] = [...assembly.messages];
+      await this.runSteps(sessionId, turnId, controller, messages, undefined, true);
     } catch (error) {
       await this.finishTurnAfterError(sessionId, turnId, controller, error);
     } finally {
@@ -1602,7 +1614,7 @@ export class AgentHost {
     }
   }
 
-  private async runSteps(sessionId: SessionId, turnId: TurnId, controller: AbortController, messages: ChatMessage[], reasoningEffort?: string): Promise<void> {
+  private async runSteps(sessionId: SessionId, turnId: TurnId, controller: AbortController, messages: ChatMessage[], reasoningEffort?: string, recovery = false): Promise<void> {
     for (let step = 1; step <= this.maxSteps; step += 1) {
       if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
       this.appendSteers(messages, turnId);
@@ -1610,7 +1622,8 @@ export class AgentHost {
       const tenantId = projection?.ownership?.tenantId;
       const budgetSnapshot = this.contextBudgetSnapshot(tenantId);
       const primaryModel = this.modelForTenant(tenantId);
-      const beforeView: ModelContextView = { messages, tools: this.modelTools(sessionId, tenantId) };
+      let assembly = await this.assembleTurnContext(sessionId, messages, recovery);
+      const beforeView: ModelContextView = assembly.modelView;
       const tokenCounter = createTokenCounter(primaryModel);
       const estimate = tokenCounter.estimate(beforeView);
       const tokenCount = await countContextTokens(tokenCounter, beforeView, {
@@ -1622,11 +1635,11 @@ export class AgentHost {
       const autoCompactRecommended = shouldCompactBeforeRequest(beforeState, this.contextPolicyWithLegacyFallback());
       if (this.compactionEnabled && autoCompactRecommended) {
         await this.compactTurnContext(sessionId, turnId, messages, budgetSnapshot, beforeUsage, beforeState);
+        assembly = await this.assembleTurnContext(sessionId, messages, recovery);
       }
       let finalCount = tokenCount;
       if (autoCompactRecommended) {
-        const afterView: ModelContextView = { messages, ...(beforeView.tools === undefined ? {} : { tools: beforeView.tools }) };
-        finalCount = await countContextTokens(tokenCounter, afterView, { signal: controller.signal });
+        finalCount = await countContextTokens(tokenCounter, assembly.modelView, { signal: controller.signal });
       }
       const tokenUsage = finalCount.value;
       const warningState = calculateContextWarningState(tokenUsage, budgetSnapshot, this.contextPolicyWithLegacyFallback());
@@ -1639,10 +1652,11 @@ export class AgentHost {
           contextBudget: publicContextBudgetSnapshot(budgetSnapshot),
           contextWarning: warningState,
           tokenCount: publicTokenCount(finalCount),
+          contextAssembly: publicContextAssembly(assembly),
           ...(autoCompactRecommended ? { autoCompactRecommended: true } : {}),
         },
       });
-      const response = await this.collectModelResponse(sessionId, turnId, controller, messages, tenantId, reasoningEffort);
+      const response = await this.collectModelResponse(sessionId, turnId, controller, assembly, tenantId, reasoningEffort);
       if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
       const assistantPayload = {
         content: response.text,
@@ -1773,7 +1787,7 @@ export class AgentHost {
     sessionId: SessionId,
     turnId: TurnId,
     controller: AbortController,
-    messages: readonly ChatMessage[],
+    assembly: ContextAssembly,
     tenantId?: string,
     reasoningEffort?: string,
   ): Promise<CollectedModelResponse> {
@@ -1786,7 +1800,7 @@ export class AgentHost {
       const calls = new Map<number, { id?: string; name?: string; arguments: string }>();
       let usage: ModelUsage | undefined;
       try {
-        for await (const part of model.stream({ messages, tools: this.modelTools(sessionId, tenantId), toolChoice: "auto", ...(reasoningEffort === undefined ? {} : { reasoningEffort }), signal: controller.signal })) {
+        for await (const part of model.stream({ messages: assembly.messages, tools: assembly.visibleTools, toolChoice: "auto", ...(reasoningEffort === undefined ? {} : { reasoningEffort }), signal: controller.signal })) {
           if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
           if (part.type === "text_delta") {
             textParts.push(part.text);
@@ -2039,6 +2053,16 @@ function publicTokenCount(count: TokenCount): Readonly<Record<string, unknown>> 
     ...(count.exactAttempted === true ? { exactAttempted: true } : {}),
     ...(count.exactError === undefined ? {} : { exactError: count.exactError }),
     ...(count.breakdown === undefined ? {} : { breakdown: count.breakdown }),
+  };
+}
+
+function publicContextAssembly(assembly: ContextAssembly): Readonly<Record<string, unknown>> {
+  return {
+    fingerprint: assembly.fingerprint,
+    sectionIds: assembly.sections.map((section) => section.id),
+    staticSectionIds: assembly.sections.filter((section) => section.phase === "static").map((section) => section.id),
+    dynamicSectionIds: assembly.sections.filter((section) => section.phase === "dynamic").map((section) => section.id),
+    attachmentIds: assembly.attachments.map((attachment) => attachment.id),
   };
 }
 

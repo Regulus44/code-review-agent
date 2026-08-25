@@ -258,3 +258,21 @@ ID:
 改写部分：所有 durable event、projection、permission、workspace、MCP allowlist、ToolRuntime、SSE 和 DTO 均为本项目自有实现；MCP child 默认 deny 未显式 allow 的 server/tool，Web 只消费 projection/DTO。
 
 新增测试：`packages/subagent/src/index.test.ts` 覆盖 descriptor、SQLite child metadata、foreground/background report、sequence gap、FIFO/interrupt/direct-parent report；`apps/api/src/server.test.ts` 覆盖 catalog/output/scoped replay。
+
+### CC-004
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`src/context.ts`、`src/constants/prompts.ts`、`src/utils/systemPrompt.ts`、`src/utils/messages.ts`
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；本次没有复制 Claude Code 实现代码，只重新实现 section 分层、canonical model view、稳定排序和不可信上下文边界。
+
+本项目路径：`packages/context/src/assembler.ts`、`packages/runtime/src/system-prompt.ts`、`packages/runtime/src/index.ts`
+
+范围：static/dynamic system prompt sections、visible tool schema 与 history/attachment 的统一组装、稳定 fingerprint、compact 后重新组装和 `step/started` 诊断元数据。
+
+改写部分：workspace、permission、EventStore、ToolRuntime、ChatMessage 和 token estimator 全部使用本项目 contract；M04 API round/tool pairing 与 M05 microcompact 不在本登记项范围内。
+
+新增测试：`packages/context/src/assembler.test.ts`、`packages/runtime/src/index.test.ts` 的 M03 assembly fingerprint/section metadata 场景。

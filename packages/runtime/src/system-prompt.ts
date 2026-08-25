@@ -1,4 +1,5 @@
 import type { ToolDefinition } from "@code-review-agent/contracts";
+import { assembleContext, type SystemPromptSection } from "@code-review-agent/context";
 import type { PermissionPreset } from "@code-review-agent/tools";
 
 /** The runtime context that is safe and useful to expose to the model for one turn. */
@@ -22,20 +23,33 @@ export type AgentPromptTool = Pick<ToolDefinition, "name" | "riskLevel" | "appro
  * tool/file output as untrusted data.
  */
 export function buildAgentSystemPrompt(context: AgentPromptContext): string {
-  const sections = [
-    identitySection(),
-    taskExecutionSection(),
-    toolUseSection(context.tools),
-    toolGuidanceSection(context.toolGuidance),
-    workspaceSection(context.workspaceRoot),
-    permissionSection(context.permissionPreset),
-    safetySection(),
-    verificationSection(),
-    communicationSection(),
-    context.recovery === true ? recoverySection() : undefined,
-    customInstructionsSection(context.customInstructions),
+  return assembleContext({
+    systemSections: buildAgentSystemPromptSections(context),
+    visibleTools: [],
+    history: [],
+  }).systemPrompt;
+}
+
+/** Returns stable, replayable static and dynamic system-prompt sections. */
+export function buildAgentSystemPromptSections(context: AgentPromptContext): readonly SystemPromptSection[] {
+  const sections: Array<SystemPromptSection | undefined> = [
+    { id: "identity", phase: "static", order: 10, cacheable: true, content: identitySection() },
+    { id: "task_execution", phase: "static", order: 20, cacheable: true, content: taskExecutionSection() },
+    { id: "safety", phase: "static", order: 30, cacheable: true, content: safetySection() },
+    { id: "verification", phase: "static", order: 40, cacheable: true, content: verificationSection() },
+    { id: "communication", phase: "static", order: 50, cacheable: true, content: communicationSection() },
+    { id: "tool_use", phase: "dynamic", order: 100, content: toolUseSection(context.tools) },
+    optionalSection("tool_guidance", 110, toolGuidanceSection(context.toolGuidance)),
+    { id: "workspace", phase: "dynamic", order: 120, content: workspaceSection(context.workspaceRoot) },
+    { id: "permissions", phase: "dynamic", order: 130, content: permissionSection(context.permissionPreset) },
+    context.recovery === true ? { id: "recovery", phase: "dynamic", order: 140, content: recoverySection() } : undefined,
+    optionalSection("custom_instructions", 150, customInstructionsSection(context.customInstructions)),
   ];
-  return sections.filter((section): section is string => section !== undefined).join("\n\n");
+  return sections.filter((section): section is SystemPromptSection => section !== undefined);
+}
+
+function optionalSection(id: string, order: number, content: string | undefined): SystemPromptSection | undefined {
+  return content === undefined ? undefined : { id, phase: "dynamic", order, content };
 }
 
 function toolGuidanceSection(guidance: string | undefined): string | undefined {

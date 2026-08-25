@@ -105,6 +105,55 @@ describe("AgentHost", () => {
     expect(system).toContain("Before editing, read the current file");
   });
 
+  it("records the canonical M03 context assembly fingerprint and stable section metadata", async () => {
+    const store = new InMemoryEventStore();
+    const model: ChatModel = {
+      async *stream(): AsyncIterable<ModelStreamPart> {
+        yield { type: "text_delta", text: "assembled" };
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store, model });
+    const session = await host.createSession("D:/m03-assembly-fixture");
+    const turn = await host.sendMessage(session.id, "inspect assembly");
+    await host.waitForTurn(turn);
+    const step = (await host.events(session.id)).find((event) => event.type === "step/started");
+    expect(step?.payload["contextAssembly"]).toMatchObject({
+      fingerprint: expect.stringMatching(/^ctx_[0-9a-f]{8}$/u),
+      sectionIds: ["identity", "task_execution", "safety", "verification", "communication", "tool_use", "tool_guidance", "workspace", "permissions"],
+      staticSectionIds: ["identity", "task_execution", "safety", "verification", "communication"],
+      dynamicSectionIds: ["tool_use", "tool_guidance", "workspace", "permissions"],
+      attachmentIds: [],
+    });
+  });
+
+  it("rebuilds the assembly after a tool loop so the model-visible history gets a new fingerprint", async () => {
+    const store = new InMemoryEventStore();
+    const registry = new ToolRegistry();
+    registry.register({ name: "assembly_fixture", description: "fixture", inputSchema: { type: "object" }, executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel", execute: async () => ({ ok: true, output: "tool output" }) });
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        if (request.messages.some((message) => message.role === "tool")) {
+          yield { type: "text_delta", text: "finished" };
+        } else {
+          yield { type: "tool_call_start", index: 0, id: "call_assembly", name: "assembly_fixture" };
+          yield { type: "tool_call_delta", index: 0, arguments: "{}" };
+          yield { type: "tool_call_end", index: 0 };
+        }
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store, model, toolRuntime: new ToolRuntime({ store, registry }) });
+    const session = await host.createSession("D:/m03-tool-loop-fixture");
+    const turn = await host.sendMessage(session.id, "run the fixture");
+    await host.waitForTurn(turn);
+    const assemblies = (await host.events(session.id))
+      .filter((event) => event.type === "step/started")
+      .map((event) => event.payload["contextAssembly"] as { readonly fingerprint?: string });
+    expect(assemblies).toHaveLength(2);
+    expect(assemblies[0]?.fingerprint).not.toBe(assemblies[1]?.fingerprint);
+  });
+
   it("falls back to the next model before any partial output and records the recovery event", async () => {
     const store = new InMemoryEventStore();
     const failing: ChatModel = { async *stream(): AsyncIterable<ModelStreamPart> { throw new Error("PRIMARY_UNAVAILABLE"); } };

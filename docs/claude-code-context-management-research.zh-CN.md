@@ -410,7 +410,7 @@ interface TokenCounter {
 | Claude Code 参考 | `D:/Develop/claude-code/src/context.ts`；`src/constants/prompts.ts`；`src/utils/systemPrompt.ts`；`src/utils/messages.ts:3841-4000` |
 | 关键结构 | 静态 system prompt、动态 boundary、workspace/tool/memory/session context、attachment |
 | 子功能 | system section 排序、动态上下文注入、tool schema、用户上下文、压缩后 attachment 注入 |
-| 本项目落点 | `D:/Develop/code-review-agent/packages/runtime/src/system-prompt.ts` + 拟建 `packages/context/src/assembler.ts` |
+| 本项目落点 | `D:/Develop/code-review-agent/packages/context/src/assembler.ts`、`packages/runtime/src/system-prompt.ts`、`packages/runtime/src/index.ts`（已实现） |
 | 直接仿照程度 | section 分层和稳定排序直接仿照；本项目安全规则和 EventStore projection 是权威来源 |
 
 Claude Code 把 system prompt 拆为稳定前缀和动态区，目的是让 workspace、tools、memory、日期和 session 状态变化时不破坏全部缓存前缀。后续本项目的 `ContextAssembler` 应接收：
@@ -429,6 +429,20 @@ interface ContextAssemblyInput {
 组装器只生成 model view，不把 MCP description 或工具结果变成可覆盖本地安全规则的 system instruction。动态 section 必须有稳定排序和独立 token 统计，否则后续 budget 无法解释。
 
 模块验收：同一 EventStore replay 产生稳定的 section 顺序；tool visibility、workspace root、permission preset 来自 host projection；compact 后动态 section 能重新组装；MCP/skill 内容不能覆盖安全 section。
+
+### 13.4 M03 实施状态（2026-08-26）
+
+M03 已按上述设计完成，详细代码对照记录见 [`claude-code-context-m03-implementation.zh-CN.md`](claude-code-context-m03-implementation.zh-CN.md)。当前实现入口如下：
+
+| 层次 | 实际入口 | 当前行为 |
+|---|---|---|
+| Section builder | `packages/runtime/src/system-prompt.ts:buildAgentSystemPromptSections()` | 将 identity、task execution、safety、verification、communication 固定为 static sections；workspace、tools、permissions、recovery、custom instructions 作为 dynamic sections，并提供稳定 `id/order` |
+| Canonical assembler | `packages/context/src/assembler.ts:assembleContext()` | static-first、phase/order/id 稳定排序；tools 按名称排序；history 保留原顺序；attachments 按 order/id 排序并包装为不可信 context data |
+| Model view | `ContextAssembly.modelView` | 统一输出 system message、history、attachment messages 和 visible tool schemas，直接交给 M02 estimator 与 model adapter |
+| Replay metadata | `ContextAssembly.fingerprint`、`step/started.payload.contextAssembly` | 对 sections/tools/history/attachments 做稳定序列化并生成 `ctx_<8 hex>` fingerprint；事件记录 sectionIds、静态/动态分组和 attachmentIds |
+| Runtime integration | `packages/runtime/src/index.ts:assembleTurnContext()`、`runSteps()` | runTurn、恢复 turn 和每个 model step 都重新组装；compact 后重新生成 assembly 与 token count，避免沿用过期 model view |
+
+M03 的边界保持清晰：尚未实现 M04 的 API round、message normalize、tool pairing，也没有实现 M05 的 tool-result microcompact。attachments 当前是有界的 model-view wrapper；持久化 transcript、memory 和压缩后重建仍由后续模块负责。
 
 ### M04：API Round、Message Normalize 与 Tool Pairing
 

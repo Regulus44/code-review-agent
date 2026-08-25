@@ -22,3 +22,4 @@
 - [Phase 8：高级能力与产品化](phase-8-productization.zh-CN.md)
 - [M01：Claude Code 式 Context Window 与 Auto-Compact Budget](m01-context-budget.zh-CN.md)
 - [M02：Claude Code 式 Token Estimation 与 Provider Exact Count](m02-token-estimation.zh-CN.md)
+- [M03：Claude Code 式 Context Assembly 与 System Prompt Sections](m03-context-assembly.zh-CN.md)

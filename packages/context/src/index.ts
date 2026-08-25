@@ -6,6 +6,9 @@ import type {
 } from "@code-review-agent/contracts";
 
 export {
+  assembleContext,
+} from "./assembler.js";
+export {
   countContextTokens,
   createTokenCounter,
   estimateContextTokens,
@@ -20,6 +23,14 @@ export type {
   TokenCounter,
   TokenCountSource,
 } from "./estimator.js";
+export type {
+  ContextAssembly,
+  ContextAssemblyInput,
+  ContextAttachment,
+  ContextAttachmentKind,
+  SystemPromptSection,
+  SystemPromptSectionPhase,
+} from "./assembler.js";
 
 export type {
   ContextBudgetConfig,
