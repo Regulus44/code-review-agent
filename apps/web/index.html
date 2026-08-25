@@ -25,8 +25,8 @@
         --amber: #c78327;
         --red: #d54444;
         --shadow: 0 14px 40px rgba(30, 39, 55, 0.12);
-        --sidebar-width: 252px;
-        --details-width: 340px;
+        --sidebar-width: 280px;
+        --details-width: 360px;
         --rail-width: 56px;
         --radius-lg: 22px;
         --ease: cubic-bezier(0.4, 0, 0.2, 1);
@@ -39,13 +39,13 @@
       button { border: 0; cursor: pointer; color: inherit; }
       button:disabled { cursor: not-allowed; opacity: 0.55; }
       .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-      .app-shell { display: grid; grid-template-columns: var(--sidebar-width) 4px minmax(0, 1fr); height: 100dvh; min-height: 0; transition: grid-template-columns 0.2s var(--ease); }
+      .app-shell { position: relative; display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--details-width); height: 100dvh; min-height: 0; transition: grid-template-columns 0.2s var(--ease); }
       .app-shell.sidebar-collapsed { grid-template-columns: var(--rail-width) 4px minmax(0, 1fr); }
       .app-shell.details-collapsed { grid-template-columns: var(--sidebar-width) 4px minmax(0, 1fr); }
       .app-shell.sidebar-collapsed.details-collapsed { grid-template-columns: var(--rail-width) 4px minmax(0, 1fr); }
       .sidebar, .details-panel { min-width: 0; overflow: hidden; background: var(--surface); }
       .sidebar { display: flex; flex-direction: column; border-right: 1px solid var(--border); }
-      .sidebar-resizer { position: relative; z-index: 4; width: 4px; cursor: col-resize; background: transparent; touch-action: none; }
+      .sidebar-resizer { position: absolute; top: 0; bottom: 0; left: var(--sidebar-width); z-index: 12; width: 8px; margin-left: -4px; cursor: col-resize; background: transparent; touch-action: none; }
       .sidebar-resizer::after { content: ""; position: absolute; inset: 0 1px; background: var(--border); opacity: .7; transition: background .15s var(--ease), opacity .15s var(--ease); }
       .sidebar-resizer:hover::after, .app-shell.resizing .sidebar-resizer::after { background: var(--blue); opacity: 1; }
       .app-shell.resizing, .app-shell.resizing * { cursor: col-resize !important; user-select: none !important; }
@@ -362,9 +362,15 @@
       .model-option.selected { color: var(--text); background: var(--blue-soft); }
       .model-check { width: 14px; color: var(--blue); font-weight: 700; }
       .model-meta { display: block; margin-top: 2px; color: var(--text-tertiary); font-size: 10px; }
-      .details-panel { position: fixed; z-index: 10; inset: 0 0 0 auto; display: flex; flex-direction: column; width: min(var(--details-width), 92vw); border-left: 1px solid var(--border); box-shadow: -18px 0 44px rgba(30,39,55,.12); transform: translateX(100%); transition: transform .2s var(--ease); }
-      .details-open .details-panel { transform: translateX(0); }
-      .details-collapsed .details-panel { pointer-events: none; }
+      .details-panel { position: relative; z-index: 3; display: flex; grid-column: 3; min-width: 0; width: auto; flex-direction: column; overflow: hidden; border-left: 1px solid var(--border); box-shadow: none; transform: none; transition: none; }
+      .details-collapsed .details-panel { pointer-events: none; border-left: 0; }
+      .details-resizer { position: absolute; top: 0; right: var(--details-width); bottom: 0; z-index: 12; width: 8px; margin-right: -4px; cursor: col-resize; background: transparent; touch-action: none; }
+      .details-resizer::after { content: ""; position: absolute; top: 50%; left: 50%; width: 12px; height: 32px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface); opacity: 0; transform: translate(-50%, -50%); transition: opacity .15s var(--ease), background .15s var(--ease), border-color .15s var(--ease); }
+      .details-resizer:hover::after, .details-resizer:focus-visible::after, .app-shell.resizing .details-resizer::after { border-color: var(--blue); background: var(--blue-soft); opacity: 1; }
+      .app-shell[data-details-collapsed="true"] .details-resizer { display: none; }
+      .app-shell[data-sidebar-collapsed="true"] .sidebar-resizer { display: none; }
+      .app-shell[data-dragging="true"], .app-shell[data-dragging="true"] * { user-select: none !important; }
+      .app-shell[data-dragging="true"] { transition: none; }
       .details-header { display: flex; align-items: center; justify-content: space-between; flex: 0 0 60px; height: 60px; padding: 0 14px 0 18px; border-bottom: 1px solid var(--border); }
       .details-header strong { font-size: 13px; }
       .details-content { flex: 1; overflow: auto; padding: 14px; }
@@ -575,6 +581,27 @@
       .worktree-create-row { display: flex; gap: 5px; margin-bottom: 7px; }
       .worktree-create-row input { min-width: 0; flex: 1; height: 28px; padding: 0 7px; border: 1px solid var(--border); border-radius: 7px; color: var(--text); background: var(--surface); font-size: 10px; }
       @media (max-width: 1120px) { :root { --details-width: 320px; } }
+      @media (max-width: 1023px) {
+        .app-shell:not(.mobile-sidebar-open) .sidebar .section-label,
+        .app-shell:not(.mobile-sidebar-open) .sidebar .session-copy,
+        .app-shell:not(.mobile-sidebar-open) .sidebar .mcp-copy,
+        .app-shell:not(.mobile-sidebar-open) .sidebar .sidebar-footer-copy { display: none; }
+        .app-shell:not(.mobile-sidebar-open) .new-session { width: 36px; margin-inline: auto; font-size: 0; }
+        .app-shell:not(.mobile-sidebar-open) .new-session .plus { font-size: 20px; }
+        .app-shell:not(.mobile-sidebar-open) .sidebar-footer button { justify-content: center; padding-inline: 0; }
+        .app-shell:not(.mobile-sidebar-open) #sidebar-toggle { display: none; }
+        .app-shell:not(.mobile-sidebar-open) .sidebar .brand,
+        .app-shell:not(.mobile-sidebar-open) .sidebar .collapse-symbol { display: none; }
+        .app-shell:not(.mobile-sidebar-open) .sidebar-header { justify-content: center; padding-inline: 0; }
+        .app-shell.mobile-sidebar-open .sidebar { display: flex; position: relative; z-index: 5; }
+        .app-shell.mobile-sidebar-open .sidebar .brand,
+        .app-shell.mobile-sidebar-open .sidebar .brand span:last-child,
+        .app-shell.mobile-sidebar-open .sidebar .session-copy,
+        .app-shell.mobile-sidebar-open .sidebar .mcp-copy,
+        .app-shell.mobile-sidebar-open .sidebar .sidebar-footer-copy,
+        .app-shell.mobile-sidebar-open .sidebar .collapse-symbol { display: flex; }
+        .app-shell.mobile-sidebar-open .sidebar-header { justify-content: space-between; padding-inline: 13px; }
+      }
       @media (max-width: 900px) {
         .app-shell,
         .app-shell.details-collapsed,
@@ -654,7 +681,7 @@
         </div>
         <div class="sidebar-footer"><button id="settings-button" type="button"><span>⚙</span><span class="sidebar-footer-copy">Workspace settings</span></button></div>
       </aside>
-      <div id="sidebar-resizer" class="sidebar-resizer" role="separator" aria-label="Resize sidebar" aria-orientation="vertical" aria-valuemin="220" aria-valuemax="360" aria-valuenow="252" tabindex="0"></div>
+      <div id="sidebar-resizer" class="sidebar-resizer" role="separator" aria-label="Resize sidebar" aria-orientation="vertical" aria-valuemin="264" aria-valuemax="420" aria-valuenow="280" tabindex="0"></div>
       <main class="workspace">
         <header class="workspace-header">
           <button id="mobile-menu" class="icon-button mobile-menu" type="button" aria-label="Open sidebar" aria-controls="sidebar-panel" aria-expanded="false">☰</button>
@@ -701,6 +728,7 @@
         <div class="details-header"><strong>Session details</strong><button id="details-close" class="icon-button" type="button" aria-label="Close details">›</button></div>
         <div id="details-content" class="details-content"></div>
       </aside>
+      <div id="details-resizer" class="details-resizer" role="separator" aria-label="Resize details panel" aria-orientation="vertical" aria-valuemin="300" aria-valuemax="520" aria-valuenow="360" tabindex="0"></div>
       <div id="workspace-modal" class="modal-backdrop" hidden>
         <form id="workspace-form" class="workspace-modal" role="dialog" aria-modal="true" aria-labelledby="workspace-title">
           <div class="workspace-modal-header"><div><h2 id="workspace-title">Choose a workspace</h2><p>New sessions run their file and terminal tools inside this local directory.</p></div><button id="workspace-close" class="icon-button" type="button" aria-label="Close workspace picker">×</button></div>
@@ -745,7 +773,7 @@
       (() => {
         const typedRuntime = window.CodeReviewAgentWeb;
         const typedConnection = typedRuntime?.connection || null;
-        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, stoppingTurnId: null, workspaces: null, lastWorkspaceOrderSequence: 0, conversationScrollTop: 0, trajectoryScrollTop: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 252, details: 'closed', mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sessionView: 'conversation', trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
+        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, stoppingTurnId: null, workspaces: null, lastWorkspaceOrderSequence: 0, conversationScrollTop: 0, trajectoryScrollTop: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 280, details: 'closed', detailsWidthPx: 0, narrow: false, narrowExpanded: false, mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sessionView: 'conversation', trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
         let usageDrawerOpen = false;
         let renderedSessionView = state.sessionView;
         let modelMenuPane = 'root';
@@ -779,6 +807,7 @@
         const usageMeter = document.querySelector('#usage-meter');
         const usageDrawer = document.querySelector('#usage-drawer');
         const sidebarResizer = document.querySelector('#sidebar-resizer');
+        const detailsResizer = document.querySelector('#details-resizer');
         const conversationViewTab = document.querySelector('#conversation-view-tab');
         const trajectoryViewTab = document.querySelector('#trajectory-view-tab');
         const trajectoryViewCount = document.querySelector('#trajectory-view-count');
@@ -864,35 +893,33 @@
         const api = async (url, options) => { const response = await fetch(url, options); if (!response.ok) throw new Error(await response.text()); return response.json(); };
         const commandKey = () => globalThis.crypto?.randomUUID?.() || `web_${Date.now()}_${Math.random().toString(36).slice(2)}`;
         const commandApi = (url, body) => { const idempotencyKey = commandKey(); return api(url, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKey }, body: JSON.stringify({ ...body, commandId: idempotencyKey }) }); };
+        let shellLayoutIntent = null;
         const applyShellLayout = () => {
-          const viewport = typedRuntime?.shellViewport ? typedRuntime.shellViewport(window.innerWidth) : window.innerWidth <= 600 ? 'mobile' : window.innerWidth <= 900 ? 'tablet' : 'desktop';
+          const frameWidth = Math.max(0, app.getBoundingClientRect?.().width || window.innerWidth);
+          const viewport = typedRuntime?.shellViewport ? typedRuntime.shellViewport(frameWidth) : frameWidth <= 600 ? 'mobile' : frameWidth < 1024 ? 'tablet' : 'desktop';
           if (typedRuntime?.reduceShellLayout) state.layout = typedRuntime.reduceShellLayout(state.layout, { type: 'set-viewport', viewport });
           if (typedRuntime?.presentShellLayout) {
-            const intent = typedRuntime.presentShellLayout(state.layout, viewport);
+            const intent = typedRuntime.presentShellLayout(state.layout, viewport, frameWidth);
+            shellLayoutIntent = intent;
             if (shellFrame && typedRuntime.applyShellFrame) typedRuntime.applyShellFrame(shellFrame, intent);
             else {
               app.className = intent.appClassName;
-              app.style.setProperty('--sidebar-width', `${intent.sidebarWidthPx}px`);
+              app.style.setProperty('--sidebar-width', `${intent.renderedColumns.sidebar}px`);
+              app.style.setProperty('--details-width', `${intent.renderedColumns.details}px`);
+              app.style.gridTemplateColumns = intent.gridTemplateColumns;
               mobileMenu.hidden = !intent.mobileMenuVisible;
               mobileMenu.setAttribute('aria-expanded', String(intent.mobileSidebarOpen));
               mobileMenu.setAttribute('aria-label', intent.mobileSidebarOpen ? 'Close sidebar' : 'Open sidebar');
             }
-            sidebarResizer.setAttribute('aria-valuenow', String(intent.sidebarWidthPx));
+            sidebarResizer.setAttribute('aria-valuenow', String(intent.renderedColumns.sidebar));
+            detailsResizer?.setAttribute('aria-valuenow', String(intent.renderedColumns.details || intent.detailsWidthPx || 360));
             sidebarToggle.setAttribute('aria-expanded', String(!intent.sidebarCollapsed || intent.mobileSidebarOpen));
             sidebarToggle.setAttribute('aria-label', intent.mobileSidebarOpen ? 'Close sidebar' : 'Collapse sidebar');
             detailsToggle.setAttribute('aria-expanded', String(intent.detailsOpen));
             detailsToggle.setAttribute('aria-label', intent.detailsOpen ? 'Close details panel' : 'Open details panel');
-            return;
+            return intent;
           }
-          app.classList.toggle('sidebar-collapsed', state.layout.sidebar === 'collapsed');
-          app.classList.toggle('details-collapsed', state.layout.details === 'closed');
-          app.classList.toggle('details-open', state.layout.details === 'open');
-          app.style.setProperty('--sidebar-width', `${state.layout.sidebarWidthPx || 252}px`);
-          sidebarResizer.setAttribute('aria-valuenow', String(state.layout.sidebarWidthPx || 252));
-          sidebarToggle.setAttribute('aria-expanded', String(state.layout.sidebar === 'expanded' || state.layout.mobileSidebarOpen));
-          sidebarToggle.setAttribute('aria-label', state.layout.mobileSidebarOpen ? 'Close sidebar' : 'Collapse sidebar');
-          detailsToggle.setAttribute('aria-expanded', String(state.layout.details === 'open'));
-          detailsToggle.setAttribute('aria-label', state.layout.details === 'open' ? 'Close details panel' : 'Open details panel');
+          return null;
         };
         const dispatchShellLayout = (action) => {
           const wasMobileSidebarOpen = state.layout.mobileSidebarOpen;
@@ -902,43 +929,101 @@
           if ((action.type === 'close-mobile-sidebar' || action.type === 'toggle-sidebar') && wasMobileSidebarOpen && !state.layout.mobileSidebarOpen) mobileMenu.focus();
         };
         window.addEventListener('resize', applyShellLayout, { passive: true });
-        const persistSidebarWidth = (widthPx) => {
-          try { window.localStorage.setItem('code-review-agent.sidebar-width', String(widthPx)); } catch { /* local UI preference is optional */ }
-        };
+        const shellResizeObserver = typeof ResizeObserver === 'function'
+          ? new ResizeObserver(() => { applyShellLayout(); })
+          : null;
+        shellResizeObserver?.observe(app);
         const setSidebarWidth = (widthPx) => {
           if (typedRuntime?.reduceShellLayout) state.layout = typedRuntime.reduceShellLayout(state.layout, { type: 'set-sidebar-width', widthPx });
-          else state.layout = { ...state.layout, sidebarWidthPx: Math.min(360, Math.max(220, Math.round(widthPx))) };
-          persistSidebarWidth(state.layout.sidebarWidthPx);
+          else state.layout = { ...state.layout, sidebarWidthPx: Math.min(420, Math.max(264, Math.round(widthPx))) };
           applyShellLayout();
         };
-        const restoreSidebarWidth = () => {
-          try {
-            const saved = Number(window.localStorage.getItem('code-review-agent.sidebar-width'));
-            if (Number.isFinite(saved) && saved > 0) setSidebarWidth(saved);
-          } catch { /* local UI preference is optional */ }
+        const setDetailsWidth = (widthPx) => {
+          if (typedRuntime?.reduceShellLayout) state.layout = typedRuntime.reduceShellLayout(state.layout, { type: 'set-details-width', widthPx });
+          else state.layout = { ...state.layout, details: 'open', detailsWidthPx: Math.min(520, Math.max(300, Math.round(widthPx))) };
+          applyShellLayout();
         };
-        let resizeStart = null;
-        sidebarResizer.addEventListener('pointerdown', (event) => {
-          if (window.innerWidth <= 600 || state.layout.sidebar === 'collapsed') return;
-          resizeStart = { x: event.clientX, width: state.layout.sidebarWidthPx || 252 };
-          sidebarResizer.setPointerCapture?.(event.pointerId);
-          app.classList.add('resizing');
-          event.preventDefault();
-        });
-        sidebarResizer.addEventListener('pointermove', (event) => {
-          if (!resizeStart) return;
-          setSidebarWidth(resizeStart.width + event.clientX - resizeStart.x);
-        });
-        const finishResize = () => { resizeStart = null; app.classList.remove('resizing'); };
-        sidebarResizer.addEventListener('pointerup', finishResize);
-        sidebarResizer.addEventListener('pointercancel', finishResize);
-        sidebarResizer.addEventListener('keydown', (event) => {
-          const current = state.layout.sidebarWidthPx || 252;
-          if (event.key === 'ArrowLeft') { event.preventDefault(); setSidebarWidth(current - 8); }
-          else if (event.key === 'ArrowRight') { event.preventDefault(); setSidebarWidth(current + 8); }
-          else if (event.key === 'Home') { event.preventDefault(); setSidebarWidth(220); }
-          else if (event.key === 'End') { event.preventDefault(); setSidebarWidth(360); }
-        });
+        const installResizeHandle = (handle, side) => {
+          if (!handle) return;
+          let gesture = null;
+          let frame = null;
+          const commit = () => {
+            if (!gesture) return;
+            const dx = gesture.latestX - gesture.originX;
+            if (side === 'sidebar') setSidebarWidth(gesture.baseWidth + dx);
+            else setDetailsWidth(gesture.baseWidth - dx);
+          };
+          const finish = (event) => {
+            if (!gesture) return;
+            if (gesture.pointerId !== undefined && handle.hasPointerCapture?.(gesture.pointerId)) handle.releasePointerCapture?.(gesture.pointerId);
+            if (frame !== null) { cancelAnimationFrame(frame); frame = null; }
+            commit();
+            gesture = null;
+            app.classList.remove('resizing');
+            app.dataset.dragging = 'false';
+          };
+          handle.addEventListener('pointerdown', (event) => {
+            const intent = shellLayoutIntent;
+            if (!intent || (side === 'sidebar' ? intent.sidebarCollapsed : !intent.detailsOpen)) return;
+            event.preventDefault();
+            handle.setPointerCapture?.(event.pointerId);
+            gesture = {
+              pointerId: event.pointerId,
+              originX: event.clientX,
+              latestX: event.clientX,
+              baseWidth: side === 'sidebar' ? intent.renderedColumns.sidebar : intent.renderedColumns.details,
+            };
+            app.classList.add('resizing');
+            app.dataset.dragging = 'true';
+          });
+          // Keep a mouse fallback for embedded/CUA surfaces that synthesize
+          // mouse events without exposing PointerEvent capture state.
+          handle.addEventListener('mousedown', (event) => {
+            if (gesture) return;
+            const intent = shellLayoutIntent;
+            if (!intent || (side === 'sidebar' ? intent.sidebarCollapsed : !intent.detailsOpen)) return;
+            event.preventDefault();
+            gesture = {
+              pointerId: undefined,
+              originX: event.clientX,
+              latestX: event.clientX,
+              baseWidth: side === 'sidebar' ? intent.renderedColumns.sidebar : intent.renderedColumns.details,
+            };
+            app.classList.add('resizing');
+            app.dataset.dragging = 'true';
+          });
+          handle.addEventListener('pointermove', (event) => {
+            // Pointer capture is the primary path (matching DSH), while the
+            // pointer-id check keeps synthetic/CUA drag events usable when a
+            // browser does not expose capture state back to the page.
+            if (!gesture) return;
+            gesture.latestX = event.clientX;
+            if (frame === null) {
+              frame = requestAnimationFrame(() => { frame = null; commit(); });
+            }
+          });
+          window.addEventListener('mousemove', (event) => {
+            if (!gesture) return;
+            gesture.latestX = event.clientX;
+            if (frame === null) {
+              frame = requestAnimationFrame(() => { frame = null; commit(); });
+            }
+          });
+          handle.addEventListener('pointerup', finish);
+          handle.addEventListener('pointercancel', finish);
+          window.addEventListener('mouseup', finish);
+          window.addEventListener('pointerup', finish);
+          window.addEventListener('pointercancel', finish);
+          handle.addEventListener('keydown', (event) => {
+            const current = side === 'sidebar' ? state.layout.sidebarWidthPx : state.layout.detailsWidthPx || 360;
+            if (event.key === 'ArrowLeft') { event.preventDefault(); side === 'sidebar' ? setSidebarWidth(current - 8) : setDetailsWidth(current + 8); }
+            else if (event.key === 'ArrowRight') { event.preventDefault(); side === 'sidebar' ? setSidebarWidth(current + 8) : setDetailsWidth(current - 8); }
+            else if (event.key === 'Home') { event.preventDefault(); side === 'sidebar' ? setSidebarWidth(264) : setDetailsWidth(300); }
+            else if (event.key === 'End') { event.preventDefault(); side === 'sidebar' ? setSidebarWidth(420) : setDetailsWidth(520); }
+          });
+        };
+        installResizeHandle(sidebarResizer, 'sidebar');
+        installResizeHandle(detailsResizer, 'details');
         const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
         const reduceBoot = (action) => {
           if (typedRuntime?.reduceShellBoot) { state.boot = typedRuntime.reduceShellBoot(state.boot, action); return; }
@@ -2351,7 +2436,7 @@
         document.querySelector('#workspace-cancel').onclick = () => closeWorkspacePicker();
         workspaceModal.addEventListener('click', (event) => { if (event.target === workspaceModal) closeWorkspacePicker(); });
         workspaceForm.addEventListener('submit', async (event) => { event.preventDefault(); const workspaceRoot = workspaceInput.value.trim(); if (!workspaceRoot) { workspaceError.textContent = 'Enter a local folder path.'; return; } workspaceCreate.disabled = true; workspaceError.textContent = ''; try { await createSession(workspaceRoot); closeWorkspacePicker(); } catch (error) { workspaceError.textContent = error.message; } finally { workspaceCreate.disabled = false; } });
-        mobileMenu.onclick = () => { const viewport = typedRuntime?.shellViewport ? typedRuntime.shellViewport(window.innerWidth) : window.innerWidth <= 900 ? 'tablet' : 'desktop'; dispatchShellLayout({ type: viewport === 'desktop' ? 'toggle-sidebar' : state.layout.mobileSidebarOpen ? 'close-mobile-sidebar' : 'open-mobile-sidebar' }); };
+        mobileMenu.onclick = () => { const viewport = typedRuntime?.shellViewport ? typedRuntime.shellViewport(app.getBoundingClientRect?.().width || window.innerWidth) : (window.innerWidth <= 600 ? 'mobile' : window.innerWidth < 1024 ? 'tablet' : 'desktop'); dispatchShellLayout({ type: viewport === 'desktop' ? 'toggle-sidebar' : state.layout.mobileSidebarOpen ? 'close-mobile-sidebar' : 'open-mobile-sidebar' }); };
         conversationViewTab.onclick = () => { state.sessionView = 'conversation'; render(); conversationViewTab.focus(); };
         trajectoryViewTab.onclick = () => { state.sessionView = 'trajectory'; render(); trajectoryViewTab.focus(); };
         document.querySelector('#session-view-tabs')?.addEventListener('keydown', (event) => {
@@ -2436,7 +2521,6 @@
           } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); }
           finally { input.focus(); renderComposerState(typedConnection?.store.getSnapshot() || { session: state.session }); }
         });
-        restoreSidebarWidth();
         applyShellLayout();
         applyOverlay();
         renderBootBoundary();

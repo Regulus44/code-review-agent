@@ -5,6 +5,7 @@ function element(): HTMLElement {
   return {
     className: "",
     hidden: false,
+    dataset: {},
     style: { setProperty: () => undefined } as unknown as CSSStyleDeclaration,
     setAttribute: () => undefined,
   } as unknown as HTMLElement;
@@ -18,8 +19,12 @@ describe("physical Shell frame", () => {
     mobileMenu.setAttribute = (name: string, value: string) => { attributes.set(name, value); };
     applyShellFrame({ app, mobileMenu } satisfies ShellFrameElements, {
       appClassName: "app-shell details-collapsed mobile-sidebar-open",
+      mobile: true,
       sidebarCollapsed: false,
       sidebarWidthPx: 252,
+      detailsWidthPx: 360,
+      renderedColumns: { sidebar: 252, center: 828, details: 360 },
+      gridTemplateColumns: "252px minmax(0, 1fr) 360px",
       detailsOpen: false,
       mobileSidebarOpen: true,
       mobileMenuVisible: true,

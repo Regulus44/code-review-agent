@@ -1,5 +1,45 @@
 # Phase 8 开发日志
 
+## 2026-08-25：实现 DSH 风格三栏 Shell、Details 可调宽度与响应式让步
+
+本次工作属于 Phase 8.0 Web 对齐，按照 [DSH 三栏 Shell 与可调宽度实现指导方案](../dsh-three-column-resizable-shell-implementation-guide.zh-CN.md) 将 Web Shell 从 Sidebar + Center + overlay Details 收敛为真实的 `sidebar | center | details` 三列。实现只改变 Web layout state、纯布局 presenter 和 DOM 交互，不改变 Event、Tool、Task、Permission 或 Workspace contract。
+
+### 任务七问
+
+1. **Phase**：Phase 8.0 Web Shell 对齐。
+2. **问题类型**：三栏几何、Details/Sidebar 宽度、响应式让步、拖拽和无障碍。
+3. **契约影响**：不改变 Event、Tool、Task、Permission 或 Workspace contract；新增 `detailsWidthPx`、窄屏状态和列计算仅属于 Web layout state。
+4. **DSH 参考**：`packages/client/ui-layout/src/client/columns.ts`、`AppFrame.tsx`、`AppFrame.module.css`、`stores.ts`、`service.ts` 和 `ui-layout/tests/*`。
+5. **上游来源**：本轮只做行为参考，没有复制 DSH 代码、品牌资源或产品文案；既有 `DSH-003` 来源登记覆盖本范围。
+6. **验收场景**：桌面三列同时存在；Details 关闭保持第三列 0px 且子树挂载；Sidebar/Details 可通过鼠标和键盘独立调整；空间不足遵循 Center 保底 → Details 缩小 → Details 关闭 → Center 承压；1024px 以下 Sidebar 自动 rail；600px 以下进入移动侧栏 overlay。
+7. **回滚**：回退本次代码 checkpoint 即可恢复旧 Sidebar-only resizer 与 Details overlay；Runtime、API、EventStore 和会话历史不受影响。
+
+### 实现内容
+
+- 新增 `apps/web/src/shell/columns.ts`，集中定义 DSH 几何常量与 `computeShellColumns()` 纯求解器；偏好宽度和实际渲染宽度分离。
+- `ShellLayoutState` 增加 `detailsWidthPx`、`narrow`、`narrowExpanded`，并由 presenter 输出实际列宽、grid template、关闭态和移动态语义。
+- `#app` 改为真实三列 grid；Details 关闭时使用 `0px` track，保留 Details DOM 子树；Sidebar/Details 分隔条统一使用 pointer capture、rAF 合帧和实际渲染宽度作为拖拽起点。
+- 增加鼠标事件兼容路径，保证内嵌 CUA/合成鼠标事件仍能完成拖拽，同时保留 PointerEvent 作为主路径。
+- 窄屏布局在 1024px 进入 Sidebar rail，600px 以下使用移动 Sidebar overlay；移动态由 typed frame intent 写入专用 grid，避免 inline grid 覆盖 CSS 断点行为。
+- 移除 Sidebar 宽度 localStorage 持久化，避免浏览器缓存成为布局事实来源。
+
+### 验证证据
+
+```text
+git diff --check                                  ✓
+pnpm typecheck                                   ✓
+pnpm --filter @code-review-agent/web test         ✓ 118 tests
+pnpm build:web                                   ✓
+http://127.0.0.1:3210/ 重启并浏览器复验             ✓
+  - 初始关闭态：280px | center | 0px，Details 无边框/不可交互
+  - 打开 Details：280px | 640px | 360px
+  - Sidebar CUA 拖拽：280px → 330px，Details 按让步链收缩到 310px
+  - Details CUA 向左拖拽：在有剩余空间时 360px → 376px
+  - 键盘 Arrow/Home/End 调整与 ARIA separator 状态可用
+```
+
+本次实现待提交为独立 Phase 8.0 Web Shell checkpoint；Phase 8 仍保持 `in_progress`。
+
 ## 2026-08-25：记录 DSH 三栏 Shell 与可调宽度实现指导
 
 本次工作属于 Phase 8.0 Web 对齐，先研究 D:\Develop\deepseek-harness-fork\packages\client\ui-layout 的三栏 AppFrame、纯列宽求解器、窄屏 auto-collapse 和双向 DragHandle，形成 [DSH 三栏 Shell 与可调宽度实现指导方案](../dsh-three-column-resizable-shell-implementation-guide.zh-CN.md)。本轮只新增指导文档，没有修改布局代码。
