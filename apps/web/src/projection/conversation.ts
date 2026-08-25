@@ -127,6 +127,12 @@ export interface MutableConversationProjection {
   readonly sessionId: SessionId;
   readonly nodes: Map<string, ConversationNode>;
   readonly toolById: Map<ToolCallId, ToolCallView>;
+  /**
+   * The runtime emits assistant chunks within a step. Keeping the active
+   * step in the projection lets the conversation preserve message segments
+   * around tool calls instead of merging the entire turn into one bubble.
+   */
+  readonly activeStepByTurn: Map<TurnId, string>;
   lastSequence: number;
 }
 
@@ -137,7 +143,7 @@ export function projectConversation(sessionId: SessionId, events: readonly Agent
 }
 
 export function createConversationProjection(sessionId: SessionId): MutableConversationProjection {
-  return { sessionId, nodes: new Map(), toolById: new Map(), lastSequence: 0 };
+  return { sessionId, nodes: new Map(), toolById: new Map(), activeStepByTurn: new Map(), lastSequence: 0 };
 }
 
 export function applyConversationEvent(projection: MutableConversationProjection, event: AgentEvent): boolean {
@@ -184,7 +190,7 @@ export function applyConversationEvent(projection: MutableConversationProjection
       if (text === undefined || text.length === 0) return markUnkeyedEvent(projection, event);
       const channel = stringValue(event.payload["channel"]) ?? stringValue(event.payload["kind"]);
       const kind: "assistant" | "reasoning" = channel === "reasoning" || channel === "thought" ? "reasoning" : "assistant";
-      const key = messageKey(kind, turnId, event.eventId);
+      const key = messageKey(kind, turnId, event.eventId, activeStepKey(projection, turnId));
       const previous = projection.nodes.get(key);
       const oldContent = isMessageNode(previous) ? previous.content : "";
       projection.nodes.set(key, {
@@ -197,8 +203,11 @@ export function applyConversationEvent(projection: MutableConversationProjection
     }
     case "assistant/message": {
       const content = stringValue(event.payload["content"]) ?? "";
-      const key = messageKey("assistant", turnId, event.eventId);
+      const key = messageKey("assistant", turnId, event.eventId, activeStepKey(projection, turnId));
       const previous = projection.nodes.get(key);
+      // Tool-only assistant messages carry metadata/toolCalls but no visible
+      // text. Do not create an empty avatar row for those events.
+      if (content.length === 0 && !isMessageNode(previous)) return true;
       const previousContent = isMessageNode(previous) ? previous.content : "";
       // A final message replaces the partial stream when it is non-empty; an
       // empty final message must not erase streamed text from a provider that
@@ -222,6 +231,9 @@ export function applyConversationEvent(projection: MutableConversationProjection
         ...base(key, "turn", previous),
         kind: "turn",
         status: turnStatus(event.type === "turn/queued" ? "queued" : event.type === "turn/started" ? "running" : event.payload["status"]),
+        // Turn rows are tails. Their durable key stays stable while their
+        // visual position follows the latest turn state event.
+        sequence: event.sequence,
       });
       return true;
     }
@@ -348,12 +360,16 @@ export function applyConversationEvent(projection: MutableConversationProjection
     case "step/ended":
     case "agent/error":
       if (turnId !== undefined) {
+        if (event.type === "step/started") {
+          projection.activeStepByTurn.set(turnId, stepKey(event.payload["step"], event.eventId));
+        }
         const key = `turn:${turnId}`;
         const previous = projection.nodes.get(key);
         projection.nodes.set(key, {
           ...base(key, "turn", previous),
           kind: "turn",
           status: event.type === "agent/error" ? "failed" : previous && isTurnNode(previous) ? previous.status : "running",
+          sequence: event.sequence,
         });
         return true;
       }
@@ -400,8 +416,17 @@ function markUnkeyedEvent(projection: MutableConversationProjection, event: Agen
   return true;
 }
 
-function messageKey(kind: "user" | "assistant" | "reasoning", turnId: TurnId | undefined, eventId: string): string {
-  return `${kind}:${turnId ?? eventId}`;
+function messageKey(kind: "user" | "assistant" | "reasoning", turnId: TurnId | undefined, eventId: string, stepKey?: string): string {
+  if (turnId === undefined || stepKey === undefined) return `${kind}:${turnId ?? eventId}`;
+  return `${kind}:${turnId}:step:${stepKey}`;
+}
+
+function activeStepKey(projection: MutableConversationProjection, turnId: TurnId | undefined): string | undefined {
+  return turnId === undefined ? undefined : projection.activeStepByTurn.get(turnId);
+}
+
+function stepKey(value: unknown, fallback: string): string {
+  return typeof value === "string" || typeof value === "number" ? String(value) : fallback;
 }
 
 function isMessageNode(node: ConversationNode | undefined): node is MessageNode {

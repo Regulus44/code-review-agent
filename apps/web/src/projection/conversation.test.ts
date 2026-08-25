@@ -30,6 +30,37 @@ describe("conversation projection", () => {
     expect(projection.nodes.find((node) => node.kind === "assistant")).toMatchObject({ content: "one two", partial: false });
   });
 
+  it("keeps assistant segments and tools in their original step order", () => {
+    const projection = projectConversation(sessionId, [
+      event(1, "turn/started", {}),
+      event(2, "step/started", { step: 1 }),
+      event(3, "assistant/chunk", { text: "before " }),
+      event(4, "assistant/message", { content: "before tool" }),
+      event(5, "tool/call", { toolCallId: "tool_order", name: "glob", input: { pattern: "*" }, riskLevel: "read" }),
+      event(6, "tool/result", { toolCallId: "tool_order", status: "completed", result: { ok: true } }),
+      event(7, "step/ended", { step: 1, status: "completed" }),
+      event(8, "step/started", { step: 2 }),
+      event(9, "assistant/chunk", { text: "after " }),
+      event(10, "assistant/message", { content: "after tool" }),
+      event(11, "turn/ended", { status: "completed" }),
+    ]);
+
+    expect(projection.nodes.map((node) => node.kind)).toEqual(["assistant", "tool", "assistant", "turn"]);
+    expect(projection.nodes.filter((node) => node.kind === "assistant").map((node) => "content" in node ? node.content : "")).toEqual(["before tool", "after tool"]);
+    expect(projection.nodes.at(-1)).toMatchObject({ kind: "turn", status: "completed" });
+  });
+
+  it("does not render an empty assistant node for a tool-only step", () => {
+    const projection = projectConversation(sessionId, [
+      event(1, "step/started", { step: 1 }),
+      event(2, "assistant/message", { content: "", toolCalls: [{ id: "tool_only" }] }),
+      event(3, "tool/call", { toolCallId: "tool_only", name: "read_file" }),
+    ]);
+
+    expect(projection.nodes.filter((node) => node.kind === "assistant")).toHaveLength(0);
+    expect(projection.nodes.filter((node) => node.kind === "tool")).toHaveLength(1);
+  });
+
   it("keeps tool, permission and interaction rows keyed by durable ids", () => {
     const projection = projectConversation(sessionId, [
       event(1, "tool/call", { toolCallId: "tool_1", name: "edit_file", input: { path: "a.ts" }, riskLevel: "write" }),
