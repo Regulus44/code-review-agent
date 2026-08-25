@@ -173,7 +173,7 @@
       .session-view-tab[aria-selected="true"] { color: var(--blue); background: var(--blue-soft); }
       .session-view-tab-count { color: var(--text-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
       .session-view-tab[aria-selected="true"] .session-view-tab-count { color: var(--blue); }
-      .main-trajectory { display: flex; width: min(860px, calc(100% - 40px)); min-height: 100%; height: 100%; margin: 0 auto; flex-direction: column; overflow: hidden; }
+      .main-trajectory { display: flex; width: min(860px, calc(100% - 40px)); min-height: 0; height: 100%; margin: 0 auto; flex: 1 1 0; flex-direction: column; overflow: hidden; box-sizing: border-box; }
       .main-trajectory-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
       .main-trajectory-title { color: var(--text); font-size: 14px; font-weight: 650; }
       .main-trajectory-meta { color: var(--text-tertiary); font-size: 10px; }
@@ -183,7 +183,7 @@
       .main-trajectory-open-details:hover { color: var(--blue); border-color: rgba(65,118,230,.35); background: var(--blue-soft); }
       .main-trajectory-header, .main-trajectory-controls { flex: 0 0 auto; width: 100%; padding-inline: 0; }
       .main-trajectory-header { padding-top: 22px; }
-      .main-trajectory-scroll { display: grid; min-height: 0; flex: 1 1 auto; gap: 12px; overflow-x: hidden; overflow-y: auto; padding-bottom: 28px; overscroll-behavior: contain; }
+      .main-trajectory-scroll { display: grid; min-width: 0; min-height: 0; flex: 1 1 0; gap: 12px; overflow-x: hidden; overflow-y: auto; padding-bottom: var(--trajectory-bottom-clearance, 28px); overscroll-behavior: auto; scrollbar-gutter: stable; }
       .main-trajectory-timeline { display: grid; gap: 5px; padding: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
       .main-trajectory-inspector { padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
       .main-trajectory-inspector .trajectory-inspector-section:nth-child(n+4) { display: none; }
@@ -210,6 +210,9 @@
       .runtime-record pre { max-height: 120px; overflow: auto; margin: 6px 0 0; padding: 6px; border-radius: 6px; background: rgba(0,0,0,.04); white-space: pre-wrap; word-break: break-word; font-size: 10px; }
       .runtime-terminal { margin-top: 4px; }
       .session-body { position: relative; display: flex; min-width: 0; min-height: 0; flex: 1 1 auto; flex-direction: column; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scroll-behavior: smooth; }
+      .session-body[data-session-view="trajectory"] { overflow: hidden; scrollbar-gutter: auto; }
+      .session-body[data-session-view="trajectory"] .conversation-content { flex: 1 1 0; min-height: 0; height: 100%; }
+      .session-body[data-session-view="trajectory"] .main-trajectory { flex: 1 1 0; min-height: 0; height: 100%; }
       .session-body::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 50% 20%, rgba(65,118,230,.07), transparent 38%); opacity: .75; }
       .conversation-content { position: relative; display: flex; min-width: 0; min-height: 100%; flex: 1 0 auto; flex-direction: column; }
       .conversation-body { position: relative; width: min(748px, calc(100% - 40px)); min-height: 100%; margin: 0 auto; padding: 34px 0 28px; }
@@ -741,8 +744,9 @@
       (() => {
         const typedRuntime = window.CodeReviewAgentWeb;
         const typedConnection = typedRuntime?.connection || null;
-        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, stoppingTurnId: null, workspaces: null, lastWorkspaceOrderSequence: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 252, details: 'closed', mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', workspaceViewMode: 'tree', workspaceSort: 'recent', sidebarSessions: [], sessionView: 'conversation', trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
+        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, stoppingTurnId: null, workspaces: null, lastWorkspaceOrderSequence: 0, conversationScrollTop: 0, trajectoryScrollTop: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 252, details: 'closed', mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sessionView: 'conversation', trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
         let usageDrawerOpen = false;
+        let renderedSessionView = state.sessionView;
         let modelMenuPane = 'root';
         const app = document.querySelector('#app');
         const shellFrame = typedRuntime?.mountShellFrame ? typedRuntime.mountShellFrame(document) : null;
@@ -752,6 +756,7 @@
         const archiveToggle = document.querySelector('#archive-toggle');
         const conversation = document.querySelector('#conversation');
         const conversationContent = document.querySelector('#conversation-content');
+        const composerShell = document.querySelector('.composer-shell');
         const status = document.querySelector('#status');
         const title = document.querySelector('#session-title');
         const path = document.querySelector('#session-path');
@@ -831,8 +836,30 @@
           else if (action.type === 'close' && state.overlay.open === action.overlay) state.overlay = { open: null };
           applyOverlay();
         };
-        const isNearConversationTail = () => conversation.scrollHeight === 0 || conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight <= 64;
-        conversation.addEventListener('scroll', () => { state.trajectoryFollow = isNearConversationTail(); }, { passive: true });
+        const trajectoryScrollPort = () => conversation.querySelector('.main-trajectory-scroll');
+        const scrollPortForView = (view) => view === 'trajectory' ? trajectoryScrollPort() || conversation : conversation;
+        const activeScrollPort = () => scrollPortForView(state.sessionView);
+        const isNearScrollTail = (scrollport) => !scrollport || scrollport.scrollHeight === 0 || scrollport.scrollHeight - scrollport.scrollTop - scrollport.clientHeight <= 64;
+        const updateScrollPosition = (view, scrollport) => {
+          if (!scrollport) return;
+          if (view === 'trajectory') state.trajectoryScrollTop = scrollport.scrollTop;
+          else state.conversationScrollTop = scrollport.scrollTop;
+        };
+        const syncTrajectoryComposerClearance = () => {
+          if (!composerShell) return;
+          const height = Math.ceil(composerShell.getBoundingClientRect().height || composerShell.offsetHeight || 152);
+          conversation.style.setProperty('--trajectory-bottom-clearance', `${height + 16}px`);
+        };
+        const composerResizeObserver = typeof ResizeObserver === 'function' && composerShell
+          ? new ResizeObserver(syncTrajectoryComposerClearance)
+          : null;
+        composerResizeObserver?.observe(composerShell);
+        syncTrajectoryComposerClearance();
+        conversation.addEventListener('scroll', () => {
+          if (state.sessionView !== 'conversation') return;
+          updateScrollPosition('conversation', conversation);
+          state.trajectoryFollow = isNearScrollTail(conversation);
+        }, { passive: true });
         const api = async (url, options) => { const response = await fetch(url, options); if (!response.ok) throw new Error(await response.text()); return response.json(); };
         const commandKey = () => globalThis.crypto?.randomUUID?.() || `web_${Date.now()}_${Math.random().toString(36).slice(2)}`;
         const commandApi = (url, body) => { const idempotencyKey = commandKey(); return api(url, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKey }, body: JSON.stringify({ ...body, commandId: idempotencyKey }) }); };
@@ -1228,17 +1255,21 @@
             const search = document.createElement('input'); search.className = 'trajectory-search'; search.type = 'search'; search.placeholder = 'Search records'; search.setAttribute('aria-label', 'Search trajectory records');
             const running = document.createElement('label'); running.className = 'trajectory-running'; const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.setAttribute('aria-label', 'Show running records only'); running.append(checkbox, document.createTextNode('Running'));
             const follow = document.createElement('button'); follow.type = 'button'; follow.className = 'trajectory-follow'; follow.setAttribute('aria-label', 'Toggle trajectory tail follow');
-            follow.addEventListener('click', () => { state.trajectoryFollow = !state.trajectoryFollow; if (state.trajectoryFollow) requestAnimationFrame(() => { conversation.scrollTop = conversation.scrollHeight; }); refresh(); });
+            follow.addEventListener('click', () => { state.trajectoryFollow = !state.trajectoryFollow; if (state.trajectoryFollow) requestAnimationFrame(() => { const scrollport = activeScrollPort(); if (scrollport) scrollport.scrollTop = scrollport.scrollHeight; }); refresh(); });
             const loadOlder = document.createElement('button'); loadOlder.type = 'button'; loadOlder.className = 'toolbar-button trajectory-load-older'; loadOlder.textContent = 'Load older'; loadOlder.setAttribute('aria-label', 'Load older trajectory records');
             loadOlder.addEventListener('click', async () => {
               if (!typedRuntime?.loadOlder) return;
               const snapshotBefore = typedConnection?.store.getSnapshot();
-              const heightBefore = conversation.scrollHeight;
-              const topBefore = conversation.scrollTop;
+              const scrollportBefore = activeScrollPort();
+              const heightBefore = scrollportBefore?.scrollHeight || 0;
+              const topBefore = scrollportBefore?.scrollTop || 0;
               loadOlder.disabled = true;
               try {
                 await typedRuntime.loadOlder(200);
-                requestAnimationFrame(() => { conversation.scrollTop = topBefore + (conversation.scrollHeight - heightBefore); });
+                requestAnimationFrame(() => {
+                  const scrollport = activeScrollPort();
+                  if (scrollport) scrollport.scrollTop = topBefore + (scrollport.scrollHeight - heightBefore);
+                });
               } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); }
               finally { loadOlder.disabled = snapshotBefore?.history.loadingOlder === true; refresh(); }
             });
@@ -1339,7 +1370,14 @@
           const running = document.createElement('label'); running.className = 'trajectory-running'; const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.checked = state.trajectoryRunningOnly === true; checkbox.setAttribute('aria-label', 'Show running records only'); running.append(checkbox, document.createTextNode('Running'));
           const openDetails = document.createElement('button'); openDetails.type = 'button'; openDetails.className = 'main-trajectory-open-details'; openDetails.textContent = 'Open details'; openDetails.onclick = () => { dispatchShellLayout({ type: 'open-details' }); renderTrajectoryPanel(typedConnection?.store.getSnapshot()?.trajectory); details.querySelector('#trajectory-inspector-panel')?.scrollIntoView({ block: 'start' }); };
           controls.append(search, running, openDetails); body.append(controls);
-          const scrollRegion = document.createElement('div'); scrollRegion.className = 'main-trajectory-scroll'; body.append(scrollRegion);
+          const scrollRegion = document.createElement('div');
+          scrollRegion.className = 'main-trajectory-scroll';
+          scrollRegion.dataset.trajectoryScroll = '';
+          scrollRegion.addEventListener('scroll', () => {
+            updateScrollPosition('trajectory', scrollRegion);
+            state.trajectoryFollow = isNearScrollTail(scrollRegion);
+          }, { passive: true });
+          body.append(scrollRegion);
           if (!projection || !typedRuntime?.queryTrajectory) { meta.textContent = 'Projection unavailable'; const empty = document.createElement('div'); empty.className = 'main-trajectory-empty'; empty.textContent = 'Trajectory data will appear after the session receives events.'; scrollRegion.append(empty); return; }
           const view = typedRuntime.queryTrajectory(projection, { query: state.trajectoryQuery || '', runningOnly: state.trajectoryRunningOnly === true, limit: 200 });
           meta.textContent = `${view.matchedRecords} matched · ${view.records.length} shown · sequence ${view.lastSequence}${view.truncated ? ' · more available' : ''}`;
@@ -1892,11 +1930,31 @@
           normalizeDetailsPanel();
         });
         trajectoryDetailsObserver.observe(details, { childList: true });
+        const restoreRenderedScroll = (previousView, previousScrollTop, previousNearTail) => {
+          requestAnimationFrame(() => {
+            const scrollport = activeScrollPort();
+            if (!scrollport) return;
+            const sameView = previousView === state.sessionView;
+            if ((sameView && state.trajectoryFollow && previousNearTail) || (!sameView && state.sessionView === 'trajectory' && state.trajectoryFollow)) {
+              scrollport.scrollTop = scrollport.scrollHeight;
+            } else if (sameView) {
+              scrollport.scrollTop = Math.min(previousScrollTop, Math.max(0, scrollport.scrollHeight - scrollport.clientHeight));
+            } else {
+              const savedScrollTop = state.sessionView === 'trajectory' ? state.trajectoryScrollTop : state.conversationScrollTop;
+              scrollport.scrollTop = Math.min(savedScrollTop, Math.max(0, scrollport.scrollHeight - scrollport.clientHeight));
+            }
+            updateScrollPosition(state.sessionView, scrollport);
+          });
+        };
         const render = () => {
           if (state.session) renderModes();
           renderModelSeatMenu();
           if (!settingsModal.hidden) renderSettings();
-          const shouldFollowTail = state.trajectoryFollow === true && isNearConversationTail();
+          const previousView = renderedSessionView;
+          const previousScrollport = scrollPortForView(previousView);
+          const previousScrollTop = previousScrollport?.scrollTop || 0;
+          const previousNearTail = isNearScrollTail(previousScrollport);
+          conversation.dataset.sessionView = state.sessionView;
           conversationContent.innerHTML = '';
           const typedSnapshot = typedConnection?.store.getSnapshot();
           renderComposerState(typedSnapshot || { session: state.session });
@@ -1918,7 +1976,8 @@
             renderRuntimeDiagnosticsPanel(typedSnapshot);
             renderWorktreePanel(typedSnapshot);
             renderPlanningPanel(typedSnapshot);
-            requestAnimationFrame(() => { if (shouldFollowTail) conversation.scrollTop = conversation.scrollHeight; });
+            renderedSessionView = state.sessionView;
+            restoreRenderedScroll(previousView, previousScrollTop, previousNearTail);
             return;
           }
           const typedProjection = typedSnapshot?.conversation;
@@ -1936,7 +1995,8 @@
               renderRuntimeDiagnosticsPanel(typedSnapshot);
               renderWorktreePanel(typedSnapshot);
               renderPlanningPanel(typedSnapshot);
-              requestAnimationFrame(() => { if (shouldFollowTail) conversation.scrollTop = conversation.scrollHeight; });
+              renderedSessionView = state.sessionView;
+              restoreRenderedScroll(previousView, previousScrollTop, previousNearTail);
               return;
             }
             typedBody.remove();
@@ -1983,7 +2043,8 @@
           renderRequestRecoveryPanel(typedSnapshot);
           renderRuntimeDiagnosticsPanel(typedSnapshot);
           renderPlanningPanel(typedSnapshot);
-          requestAnimationFrame(() => { if (shouldFollowTail) conversation.scrollTop = conversation.scrollHeight; });
+          renderedSessionView = state.sessionView;
+          restoreRenderedScroll(previousView, previousScrollTop, previousNearTail);
         };
         const renderWorkspaceRecent = () => { workspaceRecent.innerHTML = ''; const roots = [...new Set(state.recentWorkspaces.filter(Boolean))].slice(0, 6); if (!roots.length) return; const label = document.createElement('div'); label.className = 'workspace-recent-label'; label.textContent = 'Recent workspaces'; workspaceRecent.append(label); roots.forEach((root) => { const button = document.createElement('button'); button.type = 'button'; button.className = 'workspace-recent-button'; button.textContent = root; button.onclick = () => { workspaceInput.value = root; workspaceError.textContent = ''; workspaceInput.focus(); }; workspaceRecent.append(button); }); };
         const openWorkspacePicker = () => { workspaceError.textContent = ''; workspaceInput.value = state.session?.workspaceRoot || ''; permissionPreset.value = currentMode(); renderWorkspaceRecent(); dispatchOverlay({ type: 'open', overlay: 'workspace' }); workspaceFocusTrap?.activate(); workspaceInput.focus(); workspaceInput.select(); };
@@ -2202,6 +2263,8 @@
            dispatchShellLayout({ type: 'close-mobile-sidebar' });
           usageDrawerOpen = false;
           state.sessionView = 'conversation';
+          state.conversationScrollTop = 0;
+          state.trajectoryScrollTop = 0;
           state.trajectoryQuery = ''; state.trajectoryRunningOnly = false; state.trajectorySelectedKey = null; state.trajectoryFollow = true; state.trajectoryCollapsedLanes.clear(); state.trajectoryCollapsedRecords.clear(); state.taskSelectedId = null;
           state.lastWorkspaceOrderSequence = 0;
           if (state.storeUnsubscribe) { state.storeUnsubscribe(); state.storeUnsubscribe = null; }
@@ -2301,9 +2364,6 @@
         usageMeter.addEventListener('keydown', (event) => { if (event.key === 'Escape' && usageDrawerOpen) { event.preventDefault(); usageDrawerOpen = false; renderUsageMeter(typedConnection?.store.getSnapshot() || { session: state.session }); } });
         if (planToggle) planToggle.onclick = () => { if (state.layout.details === 'closed') dispatchShellLayout({ type: 'toggle-details' }); renderPlanningPanel(typedConnection?.store.getSnapshot() || { session: state.session }); };
         document.addEventListener('click', (event) => {
-          const target = event.target?.closest?.('#trajectory-view-tab, #conversation-view-tab') || null;
-          if (target?.id === 'trajectory-view-tab') { state.sessionView = 'trajectory'; render(); trajectoryViewTab.focus(); return; }
-          if (target?.id === 'conversation-view-tab') { state.sessionView = 'conversation'; render(); conversationViewTab.focus(); return; }
           if (!modelPopover.hidden && !modelPopover.contains(event.target) && event.target !== modelTrigger) dispatchOverlay({ type: 'close', overlay: 'model-popover' });
           if (!modePopover.hidden && !modePopover.contains(event.target) && event.target !== modeTrigger) dispatchOverlay({ type: 'close', overlay: 'mode-popover' });
           if (!sessionMenu.hidden && !sessionMenu.contains(event.target)) closeSessionMenu();
