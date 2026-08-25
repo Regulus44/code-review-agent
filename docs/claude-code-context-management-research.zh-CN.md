@@ -872,7 +872,7 @@ M01 已按上述分层落地，详细代码对照记录见 [`claude-code-context
 | Runtime | `packages/runtime/src/index.ts` 的 `contextBudgetSnapshot()`、`runSteps()` preflight | 每次 `step/started` 写入非敏感预算快照和 warning state，并把 auto threshold 交给现有 compaction facade |
 | API | `apps/api/src/server.ts` 的 `contextPolicy`、`/v1/capabilities` | host policy 可注入；能力状态通过既有 capabilities projection 暴露 |
 
-M01 已完成的验证是预算公式和 runtime 事件记录；M02 的精确 token 计数、M04 的 API round/tool pairing、M05 的工具结果预算仍未提前实现。研究文档中“拟建”文件名在后续模块完成前保持不变，避免把 M01 的兼容 estimator 误认为 M02。
+M01 已完成的验证是预算公式和 runtime 事件记录；M02 已在 `packages/context/src/estimator.ts` 落地，M04 的 API round/tool pairing、M05 的工具结果预算仍未提前实现。M01 的兼容记录保留其当时边界，M02 的实际入口和验证见 [`claude-code-context-m02-implementation.zh-CN.md`](claude-code-context-m02-implementation.zh-CN.md)。
 
 ## 13. M02：如何仿照 Claude Code 实现两级 token 计数
 
@@ -914,6 +914,20 @@ export interface TokenCounter {
 - system prompt 与工具 schema：单独计数，不能藏在普通 message 估算中。
 
 每个估算结果必须记录 `source` 和 `confidence`，Web 只能把 estimate 展示为 estimate，不能称为 provider 的实际 token 使用量。
+
+### 13.3 M02 实施状态（2026-08-26）
+
+M02 已按上述设计完成：
+
+| 层次 | 实际入口 | 当前行为 |
+|---|---|---|
+| Estimator | `packages/context/src/estimator.ts` | `estimateContextTokens()` 按 system/message/schema/arguments/results 输出 breakdown；普通文本 `/4`，结构化 JSON `/2` |
+| Exact seam | `packages/contracts/src/index.ts:ChatModel.countTokens()`、`createTokenCounter()` | 可选 provider exact count，不绑定具体 SDK |
+| Fallback | `countContextTokens()` | exact 不可用直接 estimate；exact 失败保留 estimate 并写 `exactError`；显式 stale usage 才返回 `stale_usage` |
+| Boundary gate | `shouldUseExactTokenCount()` | 仅在 capability 支持且接近 warning/predictive threshold 时调用 exact |
+| Runtime | `packages/runtime/src/index.ts:runSteps()` | `step/started.payload.tokenCount` 记录 value/source/confidence/breakdown，compact 后重新 estimate |
+
+M02 已验证 exact 成功、exact 失败、stale usage、结构化内容分项和 Runtime 事件 provenance。图片/document provider tokenizer、API round、tool pairing、microcompact 仍属于后续模块；详细实现记录见 [`claude-code-context-m02-implementation.zh-CN.md`](claude-code-context-m02-implementation.zh-CN.md)。
 
 ## 14. M04：如何仿照 API round 分组和 tool pairing
 
@@ -1347,7 +1361,7 @@ packages/context/
 | 模块 | Claude Code 依据 | 本项目主要文件/交付物 | 前置模块 | 模块完成标志 |
 |---|---|---|---|---|
 | M01 | `context.ts`、`autoCompact.ts` | `packages/context/src/budget.ts`、capability contract、budget snapshot | 无 | 不同 route 得到正确窗口、输出预留和 threshold |
-| M02 | `tokenEstimation.ts`、`microCompact.ts` | `packages/context/src/estimator.ts`、exact-count adapter seam | M01 | estimate/exact/fallback 来源可解释 |
+| M02 | `tokenEstimation.ts`、`microCompact.ts` | `packages/context/src/estimator.ts`、exact-count adapter seam（已实现） | M01 | estimate/exact/fallback 来源可解释 |
 | M03 | `context.ts`、`prompts.ts`、system prompt builder | `packages/context/src/assembler.ts`、`runtime/src/system-prompt.ts` | M01、M02 | system/tools/history/attachments 稳定组装并可计数 |
 | M04 | `grouping.ts`、`messages.ts` | `api-round.ts`、`api-normalize.ts`、`tool-pairing.ts` | M02、M03 | 所有 model request 通过 round/pairing gate |
 | M05 | `query.ts`、`microCompact.ts` | `tool-result-budget.ts`、`microcompact.ts`、micro receipt | M02、M04 | 原文不变、model view 可释放旧工具结果 |

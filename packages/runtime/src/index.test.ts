@@ -262,6 +262,32 @@ describe("AgentHost", () => {
     expect(step?.payload["contextWarning"]).toMatchObject({ isAboveAutoCompactThreshold: false });
   });
 
+  it("uses an exact model counter near the boundary and records its provenance", async () => {
+    const store = new InMemoryEventStore();
+    const model: ChatModel = {
+      contextCapability: {
+        provider: "exact-fixture",
+        model: "exact-model",
+        maxInputTokens: 2_000,
+        maxOutputTokens: 0,
+        supportsExactCount: true,
+        supportsPromptCache: false,
+        source: "provider",
+      },
+      countTokens: async () => 123,
+      async *stream(): AsyncIterable<ModelStreamPart> {
+        yield { type: "text_delta", text: "exact count recorded" };
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store, model, contextPolicy: { autoCompactEnabled: false, warningBufferTokens: 100, errorBufferTokens: 100, blockingBufferTokens: 10, predictiveGrowthTokens: 1 } });
+    const session = await host.createSession("D:/exact-count-fixture");
+    const turn = await host.sendMessage(session.id, "x".repeat(12_000));
+    await host.waitForTurn(turn);
+    const step = (await host.events(session.id)).find((event) => event.type === "step/started");
+    expect(step?.payload["tokenCount"]).toMatchObject({ value: 123, source: "provider", confidence: "exact", exactAttempted: true });
+  });
+
   it("builds the prompt from the permission-filtered tool set and preserves custom instructions", async () => {
     const requests: ModelRequest[] = [];
     const store = new InMemoryEventStore();

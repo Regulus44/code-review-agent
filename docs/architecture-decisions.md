@@ -130,6 +130,16 @@ Phase 7 只消费本项目内部 EventStore、Session、Task、Permission 和 Wo
 
 旧 `ContextBudget` 的 `maxTokens/recentMessageTokens/maxToolResultChars/maxSummaryChars` 继续作为 compaction 兼容配置。runtime 只把 M01 的 `autoCompactThreshold` 映射为当前压缩 gate；更精确的消息计数和工具结果预算必须等待对应模块，不能在 M01 内复制新的估算器。
 
+## ADR-014：Token 计数采用 estimate-first、boundary-exact 的双路径
+
+状态：accepted（2026-08-26，M02）
+
+上下文 token 计数由 `@code-review-agent/context` 的 `TokenCounter` 统一抽象。每个请求先使用 provider-neutral estimate；只有模型 capability 声明支持 exact count，且 estimate 已接近 warning 或 predictive boundary 时，才调用可选的 `ChatModel.countTokens()`。这样保留 Claude Code 的热路径低延迟和关键决策高准确度。
+
+估算结果必须携带 `source`、`confidence` 和 breakdown。exact 调用失败不能返回 0，也不能覆盖为虚假的 provider usage：没有显式 stale usage 时保留 estimate 并记录 `exactError`；只有调用方明确提供旧 usage 时才允许返回 `source: "stale_usage"`。Runtime 将 token count 诊断写入 `step/started`，不把 provider 原始 body 或凭据写入事件。
+
+M02 的 estimator 只处理当前 model-visible messages/tools，不负责 API round、消息 normalize、tool pairing、工具结果裁剪、附件恢复或 provider-specific SDK；这些能力按研究文档的 M03–M14 模块继续实现。
+
 ## 参考代码入口
 
 - DSH Agent Loop：`D:/Develop/deepseek-harness-fork/packages/core/agent-loop/src/agent.ts`

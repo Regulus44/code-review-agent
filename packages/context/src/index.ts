@@ -5,6 +5,22 @@ import type {
   ModelContextCapability,
 } from "@code-review-agent/contracts";
 
+export {
+  countContextTokens,
+  createTokenCounter,
+  estimateContextTokens,
+  shouldUseExactTokenCount,
+} from "./estimator.js";
+export type {
+  CountContextTokensOptions,
+  ModelContextView,
+  TokenCount,
+  TokenCountBreakdown,
+  TokenCountConfidence,
+  TokenCounter,
+  TokenCountSource,
+} from "./estimator.js";
+
 export type {
   ContextBudgetConfig,
   ContextBudgetSnapshot,

@@ -801,6 +801,8 @@ export interface ChatModel {
   /** Optional capability metadata; absent adapters use a conservative host fallback. */
   readonly contextCapability?: ModelContextCapability;
   stream(request: ModelRequest): AsyncIterable<ModelStreamPart>;
+  /** Optional provider exact token counter used by M02 near budget boundaries. */
+  countTokens?(request: ModelRequest): Promise<number | undefined>;
 }
 
 export interface EventStore {

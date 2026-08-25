@@ -21,3 +21,4 @@
 - [Phase 7：DSH Web 前端收敛](phase-7-web-convergence.zh-CN.md)
 - [Phase 8：高级能力与产品化](phase-8-productization.zh-CN.md)
 - [M01：Claude Code 式 Context Window 与 Auto-Compact Budget](m01-context-budget.zh-CN.md)
+- [M02：Claude Code 式 Token Estimation 与 Provider Exact Count](m02-token-estimation.zh-CN.md)

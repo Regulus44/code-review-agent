@@ -37,8 +37,8 @@ import {
   type ModelContextCapability,
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
-import { compactMessages, DEFAULT_CONTEXT_BUDGET, estimateMessagesTokens, type ContextBudget } from "@code-review-agent/compaction";
-import { calculateContextWarningState, fallbackModelContextCapability, resolveContextBudget, shouldCompactBeforeRequest, type ContextBudgetConfig } from "@code-review-agent/context";
+import { compactMessages, DEFAULT_CONTEXT_BUDGET, type ContextBudget } from "@code-review-agent/compaction";
+import { calculateContextWarningState, countContextTokens, createTokenCounter, estimateContextTokens, fallbackModelContextCapability, resolveContextBudget, shouldCompactBeforeRequest, shouldUseExactTokenCount, type ContextBudgetConfig, type ModelContextView, type TokenCount } from "@code-review-agent/context";
 import { randomUUID } from "node:crypto";
 import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModePolicySnapshot, type CodeModeSandbox, type ExecuteToolOutput, type JobSummary, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
 import type { SubagentRuntime } from "@code-review-agent/subagent";
@@ -287,6 +287,10 @@ export class AgentHost {
       "unknown",
       this.contextPolicyWithLegacyFallback(),
     );
+  }
+
+  private modelForTenant(tenantId?: string): ChatModel {
+    return tenantId === undefined ? this.model : this.tenantModels.get(tenantId) ?? this.model;
   }
 
   codeModeSettings(): CodeModeSettings {
@@ -1605,13 +1609,26 @@ export class AgentHost {
       const projection = await this.options.store.project(sessionId);
       const tenantId = projection?.ownership?.tenantId;
       const budgetSnapshot = this.contextBudgetSnapshot(tenantId);
-      const beforeUsage = estimateMessagesTokens(messages);
+      const primaryModel = this.modelForTenant(tenantId);
+      const beforeView: ModelContextView = { messages, tools: this.modelTools(sessionId, tenantId) };
+      const tokenCounter = createTokenCounter(primaryModel);
+      const estimate = tokenCounter.estimate(beforeView);
+      const tokenCount = await countContextTokens(tokenCounter, beforeView, {
+        preferExact: shouldUseExactTokenCount(estimate, budgetSnapshot, this.contextPolicyWithLegacyFallback()),
+        signal: controller.signal,
+      });
+      const beforeUsage = tokenCount.value;
       const beforeState = calculateContextWarningState(beforeUsage, budgetSnapshot, this.contextPolicyWithLegacyFallback());
       const autoCompactRecommended = shouldCompactBeforeRequest(beforeState, this.contextPolicyWithLegacyFallback());
       if (this.compactionEnabled && autoCompactRecommended) {
         await this.compactTurnContext(sessionId, turnId, messages, budgetSnapshot, beforeUsage, beforeState);
       }
-      const tokenUsage = estimateMessagesTokens(messages);
+      let finalCount = tokenCount;
+      if (autoCompactRecommended) {
+        const afterView: ModelContextView = { messages, ...(beforeView.tools === undefined ? {} : { tools: beforeView.tools }) };
+        finalCount = await countContextTokens(tokenCounter, afterView, { signal: controller.signal });
+      }
+      const tokenUsage = finalCount.value;
       const warningState = calculateContextWarningState(tokenUsage, budgetSnapshot, this.contextPolicyWithLegacyFallback());
       await this.options.store.append({
         sessionId,
@@ -1621,6 +1638,7 @@ export class AgentHost {
           step,
           contextBudget: publicContextBudgetSnapshot(budgetSnapshot),
           contextWarning: warningState,
+          tokenCount: publicTokenCount(finalCount),
           ...(autoCompactRecommended ? { autoCompactRecommended: true } : {}),
         },
       });
@@ -1675,7 +1693,7 @@ export class AgentHost {
     ]);
     try {
       const resolved = budgetSnapshot ?? this.contextBudgetSnapshot(projection?.ownership?.tenantId);
-      const usage = tokenUsage ?? estimateMessagesTokens(messages);
+      const usage = tokenUsage ?? estimateContextTokens({ messages }).value;
       const predictive = warningState?.isPredictiveCompactRecommended === true && usage < resolved.autoCompactThreshold;
       const maxTokens = predictive ? Math.max(1, usage - 1) : resolved.autoCompactThreshold;
       const compactionBudget: ContextBudget = {
@@ -2009,6 +2027,18 @@ function publicContextBudgetSnapshot(snapshot: ContextBudgetSnapshot): Readonly<
     autoCompactThreshold: snapshot.autoCompactThreshold,
     blockingThreshold: snapshot.blockingThreshold,
     source: snapshot.source,
+  };
+}
+
+function publicTokenCount(count: TokenCount): Readonly<Record<string, unknown>> {
+  return {
+    value: count.value,
+    source: count.source,
+    confidence: count.confidence,
+    ...(count.stale === true ? { stale: true } : {}),
+    ...(count.exactAttempted === true ? { exactAttempted: true } : {}),
+    ...(count.exactError === undefined ? {} : { exactError: count.exactError }),
+    ...(count.breakdown === undefined ? {} : { breakdown: count.breakdown }),
   };
 }
 
