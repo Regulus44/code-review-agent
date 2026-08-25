@@ -1,6 +1,6 @@
 # 权限请求与用户问题：DSH Composer Takeover 调研与实施指导
 
-> 状态：仅完成调研，未修改运行时代码。
+> 状态：调研完成，第一版 Composer takeover 已实现并通过 Web 检查。
 >
 > 目标：明确本项目如何按照 DeepSeek Harness（DSH）的交互逻辑处理 permission request 和 user question，避免等待型请求继续堆叠在 Conversation 尾部。
 >
@@ -342,7 +342,20 @@ Runtime 已有 expiry/resolved 事件。前端只把 expired request 呈现为�
 - 不接入新的外部协议或插件；
 - 不复制 DSH 的品牌、产品文案、内部类型或未登记代码。
 
-## 11. 后续开发顺序和 checkpoint
+## 11. 第一版实现状态
+
+本项目已完成本指导方案的第一版 Web 实现：
+
+- `apps/web/src/presentation/request-presenter.ts` 增加 pending request presenter，按 question 优先、同类型按 durable sequence 选择 Composer active request，并过滤过期请求；
+- `apps/web/src/presentation/request-action-gate.ts` 增加 one-shot action gate，重复点击被拒绝，回执失败可重试，resolved/移除后的 request key 会清理；
+- `apps/web/index.html` 增加同一 Composer seat 上的 approval/question takeover。长 reason、command、question 和 options 在内部滚动区展示，操作区固定在底部；
+- pending permission/interaction 不再作为操作卡追加到 Conversation 尾部。resolved/expired 请求仍保留紧凑事实行，Details Requests 继续承担历史和恢复查看；
+- HTTP/RPC receipt 成功只显示等待 Host 确认，只有 durable resolved projection 到达后才恢复普通 Composer；
+- `apps/web/src/browser.ts` 暴露 presenter 和 gate，未改变 Event、Tool、Task、Permission contract。
+
+已通过：`pnpm typecheck`、Web 122 tests、`pnpm build:web`、`pnpm test:phase8:web` 和 `git diff --check`。浏览器已重启并检查 `http://127.0.0.1:3210/` 的普通 Composer、默认 takeover 隐藏和 Conversation 无 pending 操作卡。当前没有安全可复用的真实 pending session，因此 approval/question 的真实点击闭环仍需后续 fixture 或手工安全场景补充。
+
+## 12. 后续开发顺序和 checkpoint
 
 建议拆成三个可回滚 checkpoint：
 
@@ -352,7 +365,7 @@ Runtime 已有 expiry/resolved 事件。前端只把 expired request 呈现为�
 
 每个 checkpoint 都应运行与改动范围匹配的 Web/API/Runtime 测试和 `git diff --check`。本调研文档本身先作为后续实现的入口，不将未实现能力标记为完成。
 
-## 12. 参考源码和本项目映射
+## 13. 参考源码和本项目映射
 
 ### DSH
 

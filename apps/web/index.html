@@ -315,6 +315,29 @@
       .interaction-card pre { margin: 8px 0 0; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
       .request-recovery { display: inline-block; margin-top: 7px; color: #315da9; font-size: 10px; }
       .trajectory-summary { margin-left: 40px; color: var(--text-tertiary); }
+      .composer-takeover { position: relative; width: min(780px, 100%); margin: 0 auto; overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow); }
+      .composer-takeover[hidden] { display: none; }
+      .takeover-strip { display: flex; align-items: center; gap: 8px; padding: 10px 16px; color: var(--text-secondary); background: var(--blue-soft); font-size: 11px; font-weight: 650; }
+      .takeover-strip.approval { color: #8f5c13; background: #fff3d6; }
+      .takeover-strip.question { color: #315da9; background: #edf3ff; }
+      .takeover-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: currentColor; }
+      .takeover-body { display: flex; flex-direction: column; gap: 9px; max-height: 336px; padding: 14px 16px 4px; overflow-y: auto; }
+      .takeover-body:focus-visible { outline: 2px solid rgba(65,118,230,.35); outline-offset: -2px; }
+      .takeover-title { color: var(--text); font-size: 15px; font-weight: 650; line-height: 1.45; }
+      .takeover-reason { color: var(--text-secondary); font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .takeover-command { color: var(--text-tertiary); font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .takeover-meta { color: var(--text-tertiary); font-size: 10px; }
+      .takeover-options { display: flex; flex-direction: column; gap: 7px; }
+      .takeover-option { width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px; color: var(--text-secondary); background: var(--surface-subtle); text-align: left; font-size: 12px; }
+      .takeover-option:hover, .takeover-option:focus-visible { border-color: rgba(65,118,230,.45); color: var(--text); background: var(--blue-soft); }
+      .takeover-freeform { width: 100%; min-height: 38px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 9px; outline: none; color: var(--text); background: var(--surface-subtle); font: inherit; font-size: 12px; resize: vertical; }
+      .takeover-freeform:focus { border-color: rgba(65,118,230,.55); box-shadow: 0 0 0 3px rgba(65,118,230,.12); }
+      .takeover-error { color: var(--red); font-size: 11px; line-height: 1.45; }
+      .takeover-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 16px 14px; border-top: 1px solid var(--border); }
+      .takeover-actions button { min-height: 30px; padding: 0 12px; border-radius: 8px; color: #fff; background: var(--blue); font-size: 11px; font-weight: 650; }
+      .takeover-actions button.secondary { color: var(--text-secondary); background: var(--surface-hover); }
+      .takeover-actions button.danger { background: var(--red); }
+      .takeover-actions button:disabled { cursor: not-allowed; opacity: .52; }
       .composer-shell { position: sticky; bottom: 0; z-index: 2; flex: 0 0 auto; padding: 0 20px 20px; background: linear-gradient(to bottom, transparent, var(--bg) 25%); }
       .composer-card { position: relative; width: min(780px, 100%); margin: 0 auto; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow); }
       .composer-card textarea { display: block; width: 100%; min-height: 64px; max-height: 220px; padding: 16px 17px 8px; border: 0; outline: 0; resize: none; color: var(--text); background: transparent; line-height: 1.5; font-size: 14px; }
@@ -701,7 +724,8 @@
           </div>
           <section id="conversation" class="session-body" aria-live="polite">
             <div id="conversation-content" class="conversation-content"></div>
-            <footer class="composer-shell">
+          <footer class="composer-shell">
+            <section id="composer-takeover" class="composer-takeover" aria-live="polite" hidden></section>
           <form id="composer" class="composer-card">
             <label class="sr-only" for="input">Message</label>
             <textarea id="input" rows="1" placeholder="Ask Code Review Agent to inspect, explain, or change your code…"></textarea>
@@ -773,7 +797,7 @@
       (() => {
         const typedRuntime = window.CodeReviewAgentWeb;
         const typedConnection = typedRuntime?.connection || null;
-        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, stoppingTurnId: null, workspaces: null, lastWorkspaceOrderSequence: 0, conversationScrollTop: 0, trajectoryScrollTop: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 280, details: 'closed', detailsWidthPx: 0, narrow: false, narrowExpanded: false, mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sessionView: 'conversation', trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
+        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, stoppingTurnId: null, requestActions: typedRuntime?.createRequestActionGate?.() || null, workspaces: null, lastWorkspaceOrderSequence: 0, conversationScrollTop: 0, trajectoryScrollTop: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 280, details: 'closed', detailsWidthPx: 0, narrow: false, narrowExpanded: false, mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sessionView: 'conversation', trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
         let usageDrawerOpen = false;
         let renderedSessionView = state.sessionView;
         let modelMenuPane = 'root';
@@ -786,9 +810,11 @@
         const conversation = document.querySelector('#conversation');
         const conversationContent = document.querySelector('#conversation-content');
         const composerShell = document.querySelector('.composer-shell');
+        const composerTakeover = document.querySelector('#composer-takeover');
         const status = document.querySelector('#status');
         const title = document.querySelector('#session-title');
         const path = document.querySelector('#session-path');
+        const composer = document.querySelector('#composer');
         const input = document.querySelector('#input');
         const attach = document.querySelector('#attach');
         const attachmentInput = document.querySelector('#attachment-input');
@@ -1324,11 +1350,11 @@
             } else if (node.kind === 'tool') upsertTool(node.tool);
             else if (node.kind === 'permission') {
               const intent = typedRuntime?.presentPermission ? typedRuntime.presentPermission(node, { sessionStatus: snapshot?.session?.status, connection: snapshot?.connection }) : null;
-              appendPermission(body, { permissionId: node.permissionId, toolCallId: node.toolCallId, toolName: node.toolName, status: node.status, displayStatus: intent?.status, summary: intent?.summary, recovery: intent?.recovery, recoveryLabel: intent?.recoveryLabel, interactive: intent?.interactive, details: intent?.details?.text, reason: node.reason, caller: node.caller, workspaceRoot: node.workspaceRoot, expiresAt: node.expiresAt, input: node.input });
+              if (intent?.status !== 'pending') addEventRow(body, intent?.summary || `Permission ${node.status} · ${node.toolName}`);
             }
             else if (node.kind === 'interaction') {
               const intent = typedRuntime?.presentInteraction ? typedRuntime.presentInteraction(node, { sessionStatus: snapshot?.session?.status, connection: snapshot?.connection }) : null;
-              appendInteraction(body, { interactionId: node.interactionId, toolCallId: node.toolCallId, question: node.question, options: node.options, status: node.status, displayStatus: intent?.status, summary: intent?.summary, recovery: intent?.recovery, recoveryLabel: intent?.recoveryLabel, interactive: intent?.interactive, details: intent?.details?.text, caller: node.caller, expiresAt: node.expiresAt, allowFreeform: node.allowFreeform, answer: node.answer });
+              if (intent?.status !== 'pending') addEventRow(body, intent?.summary || `Interaction ${node.status}`);
             }
             else if (node.kind === 'task') addEventRow(body, `Task · ${node.title || node.taskId} · ${node.status}${node.summary ? ` · ${node.summary}` : ''}`);
             else if (node.kind === 'event') {
@@ -1581,8 +1607,88 @@
           usageMeter.setAttribute('aria-expanded', String(usageDrawerOpen && intent.hasData));
           renderUsageDrawer(intent);
         };
+        const pendingRequestIntent = (snapshot) => typedRuntime?.presentPendingRequests
+          ? typedRuntime.presentPendingRequests(snapshot?.conversation?.nodes, { now: Date.now(), sessionStatus: snapshot?.session?.status, connection: snapshot?.connection })
+          : { pending: [], pendingCount: 0 };
+        const requestFailureText = (error) => error instanceof Error ? error.message : String(error || 'Request failed');
+        const requestGateState = (key) => state.requestActions?.state(key) || { status: 'idle' };
+        const submitPendingRequest = async (active, payload) => {
+          if (!active || !state.session || !state.requestActions?.begin(active.key)) return;
+          renderComposerState(typedConnection?.store.getSnapshot() || { session: state.session });
+          try {
+            const request = active.request;
+            if (request.kind === 'permission') {
+              if (typedRuntime?.api?.resolvePermission) await typedRuntime.api.resolvePermission(state.session.id, request.permissionId, payload.status, commandKey());
+              else await commandApi(`/v1/sessions/${encodeURIComponent(state.session.id)}/permissions/${encodeURIComponent(request.permissionId)}`, { status: payload.status });
+            } else if (typedRuntime?.api?.resolveInteraction) {
+              await typedRuntime.api.resolveInteraction(state.session.id, request.interactionId, payload.answer, payload.status || 'answered', commandKey());
+            } else {
+              await commandApi(`/v1/sessions/${encodeURIComponent(state.session.id)}/interactions/${encodeURIComponent(request.interactionId)}`, { status: payload.status || 'answered', ...(payload.answer === undefined ? {} : { answer: payload.answer }) });
+            }
+            setStatus('Waiting for host confirmation…', true);
+          } catch (error) {
+            state.requestActions.fail(active.key, requestFailureText(error));
+            setStatus(requestFailureText(error), false);
+            renderComposerState(typedConnection?.store.getSnapshot() || { session: state.session });
+          }
+        };
+        const renderComposerTakeover = (snapshot) => {
+          if (!composerTakeover || !composer) return undefined;
+          const intent = pendingRequestIntent(snapshot);
+          const active = intent.active;
+          state.requestActions?.retain(new Set(intent.pending.map((item) => item.key)));
+          if (!active) {
+            composerTakeover.hidden = true;
+            composer.hidden = false;
+            composerTakeover.innerHTML = '';
+            return undefined;
+          }
+          composer.hidden = true;
+          composerTakeover.hidden = false;
+          composerTakeover.innerHTML = '';
+          const request = active.request;
+          const gate = requestGateState(active.key);
+          const submitting = gate.status === 'submitting';
+          let freeformInput = null;
+          const strip = document.createElement('div');
+          strip.className = `takeover-strip ${request.kind === 'permission' ? 'approval' : 'question'}`;
+          const dot = document.createElement('span'); dot.className = 'takeover-dot'; dot.setAttribute('aria-hidden', 'true');
+          const stripText = document.createElement('span'); stripText.textContent = request.kind === 'permission' ? 'Waiting for approval' : 'Waiting for your answer';
+          strip.append(dot, stripText);
+          const body = document.createElement('div'); body.className = 'takeover-body'; body.tabIndex = 0; body.setAttribute('role', 'group'); body.setAttribute('aria-label', request.kind === 'permission' ? 'Approval details' : 'Question details');
+          const heading = document.createElement('div'); heading.className = 'takeover-title'; heading.textContent = request.kind === 'permission' ? request.reason || request.summary : request.question; body.append(heading);
+          if (request.kind === 'permission') {
+            if (request.command) { const command = document.createElement('div'); command.className = 'takeover-command'; command.textContent = request.command; body.append(command); }
+            const meta = document.createElement('div'); meta.className = 'takeover-meta'; meta.textContent = `${request.toolName}${request.workspaceRoot ? ` · ${request.workspaceRoot}` : ''}${request.recoveryLabel ? ` · ${request.recoveryLabel}` : ''}`; body.append(meta);
+          } else {
+            const options = document.createElement('div'); options.className = 'takeover-options';
+            for (const option of request.options) { const button = document.createElement('button'); button.type = 'button'; button.className = 'takeover-option'; button.textContent = option.label || option.value; button.disabled = submitting; button.onclick = () => { void submitPendingRequest(active, { status: 'answered', answer: option.value }); }; options.append(button); }
+            if (request.options.length) body.append(options);
+            if (request.allowFreeform) {
+              freeformInput = document.createElement('textarea'); freeformInput.className = 'takeover-freeform'; freeformInput.rows = 2; freeformInput.placeholder = 'Type a custom answer'; freeformInput.disabled = submitting; freeformInput.setAttribute('aria-label', 'Custom answer'); body.append(freeformInput);
+              freeformInput.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submitPendingRequest(active, { status: 'answered', answer: freeformInput.value.trim() }); } });
+            }
+            if (request.recoveryLabel) { const recovery = document.createElement('div'); recovery.className = 'takeover-meta'; recovery.textContent = request.recoveryLabel; body.append(recovery); }
+            if (!request.options.length && !request.allowFreeform) { const empty = document.createElement('div'); empty.className = 'takeover-reason'; empty.textContent = 'No answer options are available.'; body.append(empty); }
+          }
+          if (gate.status === 'error') { const error = document.createElement('div'); error.className = 'takeover-error'; error.textContent = gate.error || 'The request could not be submitted. Try again.'; body.append(error); }
+          const actions = document.createElement('div'); actions.className = 'takeover-actions';
+          if (request.kind === 'permission') {
+            const reject = document.createElement('button'); reject.type = 'button'; reject.className = 'danger'; reject.textContent = 'Reject'; reject.disabled = submitting; reject.onclick = () => { void submitPendingRequest(active, { status: 'denied' }); };
+            const allow = document.createElement('button'); allow.type = 'button'; allow.textContent = 'Allow once'; allow.disabled = submitting; allow.onclick = () => { void submitPendingRequest(active, { status: 'approved' }); };
+            actions.append(reject, allow);
+          } else {
+            const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'secondary'; cancel.textContent = 'Cancel'; cancel.disabled = submitting; cancel.onclick = () => { void submitPendingRequest(active, { status: 'cancelled' }); };
+            if (freeformInput) { const answer = document.createElement('button'); answer.type = 'button'; answer.textContent = 'Send answer'; answer.disabled = submitting; answer.onclick = () => { const value = freeformInput.value.trim(); if (value) void submitPendingRequest(active, { status: 'answered', answer: value }); }; actions.append(cancel, answer); }
+            else actions.append(cancel);
+          }
+          composerTakeover.append(strip, body, actions);
+          return active;
+        };
         const renderComposerState = (snapshot) => {
           if (!send) return;
+          const takeover = renderComposerTakeover(snapshot);
+          if (takeover) { send.disabled = true; return; }
           const turn = activeTurn(snapshot);
           if (turn === undefined) state.stoppingTurnId = null;
           const submitView = typedRuntime?.presentComposerSubmit
@@ -2126,8 +2232,8 @@
               else if (event.type === 'lsp/server' || event.type === 'lsp/request' || event.type === 'mcp/server' || event.type === 'mcp/tool' || event.type === 'mcp/resource' || event.type === 'mcp/prompt') { const payload = event.payload || {}; const label = event.type.split('/')[0].toUpperCase(); const kind = event.type.split('/')[1]; upsertTool(`${event.type}-${payload.serverName || payload.serverId || payload.toolCallId || event.sequence}`, `${label} · ${kind}`, payload, null, payload.status || payload.action || 'Updated'); }
               else if (event.type === 'agent/error') addEventRow(body, `Agent error · ${event.payload?.message || event.payload?.error || 'The agent reported an error.'}`);
             }
-            for (const permission of permissions.values()) appendPermission(body, permission);
-            for (const interaction of interactions.values()) appendInteraction(body, interaction);
+            for (const permission of permissions.values()) if ((permission.status || 'pending') !== 'pending') addEventRow(body, `Permission ${permission.status || 'resolved'} · ${permission.toolName || 'tool'}`);
+            for (const interaction of interactions.values()) if ((interaction.status || 'pending') !== 'pending') addEventRow(body, `Interaction ${interaction.status || 'resolved'}`);
           }
           renderDetails();
           renderTrajectoryPanel(typedSnapshot?.trajectory);

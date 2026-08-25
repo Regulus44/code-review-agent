@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { InteractionNode, PermissionNode } from "../projection/conversation.js";
-import { presentInteraction, presentPermission } from "./request-presenter.js";
+import { presentInteraction, presentPermission, presentPendingRequests } from "./request-presenter.js";
 
 const permission = (overrides: Partial<PermissionNode> = {}): PermissionNode => ({
   key: "permission:fixture",
@@ -65,5 +65,20 @@ describe("request presenters", () => {
     const view = presentInteraction(interaction({ status: "expired" }), { now: Date.parse("2026-08-23T00:00:30.000Z") });
     expect(view).toMatchObject({ status: "expired", interactive: false, recovery: "expired", actions: [] });
     expect(view.summary).toBe("Question expired");
+  });
+
+  it("selects one active request with question priority", () => {
+    const approval = permission({ key: "permission:early", sequence: 2 });
+    const question = interaction({ key: "interaction:later", sequence: 9 });
+    const view = presentPendingRequests([approval, question], { now: Date.parse("2026-08-23T00:00:30.000Z") });
+    expect(view.pendingCount).toBe(2);
+    expect(view.active?.kind).toBe("interaction");
+    expect(view.active?.key).toBe("interaction:later");
+  });
+
+  it("does not select expired requests as a Composer takeover", () => {
+    const view = presentPendingRequests([permission()], { now: Date.parse("2026-08-23T00:02:00.000Z") });
+    expect(view.pending).toEqual([]);
+    expect(view.active).toBeUndefined();
   });
 });

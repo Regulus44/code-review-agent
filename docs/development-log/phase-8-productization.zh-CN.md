@@ -1,5 +1,41 @@
 # Phase 8 开发日志
 
+## 2026-08-25：实现 DSH 风格权限请求与用户问题 Composer takeover
+
+本次工作属于 Phase 8 Web 收敛，按照 [权限请求与用户问题 Composer takeover 调研与实施指导](../dsh-permission-question-composer-research.zh-CN.md) 将等待型 permission/interaction 从 Conversation 尾部迁移到 Composer 主操作入口。变更只涉及 Web presenter、DOM renderer 和本地 action gate，不改变 Event、Tool、Task、Permission 或 Workspace contract。
+
+### 任务七问
+
+1. **Phase**：Phase 8 Web 收敛。
+2. **问题类型**：权限/用户问题的 UI projection、Composer 交互、恢复和可访问性。
+3. **契约影响**：不改变 Event、Tool、Task、Permission 或 Workspace contract。
+4. **DSH 参考**：`runtime/src/client/sessions/pending.ts`、`ui-conversation/src/client/apply.ts`、`skeleton/ApprovalPanel.tsx`、`ui-user-questions/src/client/QuestionComposer.tsx`。
+5. **上游来源**：只参考 DSH 的状态和布局行为，没有复制源码、品牌或产品文案；既有来源登记继续适用。
+6. **验收场景**：pending request 接管 Composer；Conversation 不堆叠操作卡；长内容内部滚动；重复点击受控；回执失败可重试；resolved 后恢复普通输入。
+7. **回滚方式**：回滚本次独立 Web checkpoint 即可恢复原 presenter/renderer；后端事件和 API 保持兼容。
+
+### 已完成
+
+- `request-presenter.ts` 新增 `presentPendingRequests()`，只选 pending 且未过期请求；question 优先，同类按 durable sequence 排序；
+- `request-action-gate.ts` 提供 `idle → submitting → error` 的 one-shot gate，`retain()` 清理已 resolved request；
+- Composer 增加 approval takeover（Reject / Allow once）和 question takeover（选项、自由回答、Cancel）；takeover 期间普通 Composer 隐藏；
+- receipt 成功仅进入 `Waiting for host confirmation…`，直到 durable resolved event 到达才恢复普通 Composer；
+- pending permission/interaction 从 Conversation typed/fallback renderer 移除，resolved/expired 仅保留紧凑事实行；
+- reason、command、question、options 使用 takeover 内部滚动区，操作区保持固定可见；
+- presenter 和 gate 通过 browser runtime 暴露，便于 typed browser projection 使用。
+
+### 验证
+
+```text
+pnpm typecheck                                      ✓
+pnpm --filter @code-review-agent/web test -- --run  ✓ (33 files / 122 tests)
+pnpm build:web                                      ✓
+pnpm test:phase8:web                                ✓
+git diff --check                                    ✓
+```
+
+已重启 `http://127.0.0.1:3210/` 并确认 HTTP 200、页面无 console error/warn、普通 Composer 默认可见、takeover 默认隐藏、Conversation 没有 pending 操作卡。当前缺少可安全复用的真实 pending request session，真实点击 approval/question 的浏览器闭环留待 fixture 补充；presenter、action gate 和静态/Web gate 已覆盖核心状态边界。
+
 ## 2026-08-25：实现 DSH 风格三栏 Shell、Details 可调宽度与响应式让步
 
 本次工作属于 Phase 8.0 Web 对齐，按照 [DSH 三栏 Shell 与可调宽度实现指导方案](../dsh-three-column-resizable-shell-implementation-guide.zh-CN.md) 将 Web Shell 从 Sidebar + Center + overlay Details 收敛为真实的 `sidebar | center | details` 三列。实现只改变 Web layout state、纯布局 presenter 和 DOM 交互，不改变 Event、Tool、Task、Permission 或 Workspace contract。

@@ -8,7 +8,8 @@ import { buildTrajectoryTimeline, inspectTrajectory, queryTrajectory } from "./p
 import { presentTask } from "./presentation/task-presenter.js";
 import { presentMcpServer } from "./presentation/mcp-presenter.js";
 import { presentToolCall } from "./presentation/tool-presenter.js";
-import { presentInteraction, presentPermission } from "./presentation/request-presenter.js";
+import { presentInteraction, presentPermission, presentPendingRequests } from "./presentation/request-presenter.js";
+import { RequestActionGate } from "./presentation/request-action-gate.js";
 import { presentSettings } from "./presentation/settings-presenter.js";
 import { presentDeliverables } from "./presentation/deliverables-presenter.js";
 import { createFocusTrap, FOCUSABLE_SELECTOR, nextFocusableIndex } from "./presentation/focus-trap.js";
@@ -44,6 +45,8 @@ export interface BrowserWebRuntime {
   readonly presentMcpServer: typeof presentMcpServer;
   readonly presentPermission: typeof presentPermission;
   readonly presentInteraction: typeof presentInteraction;
+  readonly presentPendingRequests: typeof presentPendingRequests;
+  readonly createRequestActionGate: () => RequestActionGate;
   readonly presentSettings: typeof presentSettings;
   readonly presentDeliverables: typeof presentDeliverables;
   readonly createFocusTrap: typeof createFocusTrap;
@@ -100,6 +103,8 @@ const runtime: BrowserWebRuntime = {
   presentMcpServer,
   presentPermission,
   presentInteraction,
+  presentPendingRequests,
+  createRequestActionGate: () => new RequestActionGate(),
   presentSettings,
   presentDeliverables,
   createFocusTrap,
