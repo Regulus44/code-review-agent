@@ -16,7 +16,7 @@
 | Phase 5：内部 Subagent / 多 Agent | completed（2026-08-23） | 5.0–5.4：Task/Descriptor durable projection、one-shot/continuable child、FIFO/authority/cold resume、report/MCP scope、API/SSE/Web catalog；定向 typecheck、storage/subagent/runtime/API 测试和 API/Web smoke 通过 |
 | Phase 6：A2A | deferred（暂不作为 Phase 7 前置） | [ADR：Phase 7 Web 收敛不等待 A2A](adr/phase-7-web-with-a2a-deferred.zh-CN.md)；等待明确的外部 Agent 互操作需求 |
 | Phase 7：DSH Web 前端收敛 | completed | 7.1–7.10 Web shell、连接与回放、Workspace/Session navigation、Conversation/Tool/Permission/Interaction、Trajectory、Task/Subagent/MCP、Settings/Deliverables、响应式与可访问性、五场景 browser/replay gate、Workspace reorder 与 Workspace rename/archive/delete lifecycle 已完成；`pnpm typecheck`、`pnpm test`、`pnpm test:phase7:browser` 和 `git diff --check` 通过；browser gate 总耗时 2.14s、trajectory full replay 19.03ms；独立 checkpoint `82326d6` |
-| Phase 8：高级能力与产品化 | in_progress（8.0/8.1/8.2/8.4 已完成，8.3/8.5 partial） | Phase 8.0 的 600/900/1024 visual/accessibility matrix、9 个 Web parity browser 场景和独立 checkpoint 已完成；8.3/8.5 仍等待目标部署环境 smoke，不影响 8.0 关闭 |
+| Phase 8：高级能力与产品化 | in_progress（8.0/8.1/8.2/8.4 已完成，8.3/8.5 partial） | Phase 8.0 的 600/900/1024 visual/accessibility matrix、9 个 Web parity browser 场景和独立 checkpoint 已完成；最新 Trajectory 滚动责任 checkpoint `b6a1cf7`；8.3/8.5 仍等待目标部署环境 smoke，不影响 8.0 关闭 |
 
 ## Phase 8 计划范围（accepted）
 
@@ -31,6 +31,14 @@
 - 使用 `PHASE8_WEB_LIVE_TURN=1`、`PHASE8_WEB_LIVE_DELAY_MS=2000` 的 SQLite/API/AgentHost fixture，在真实 Codex In-app Browser 中验证 running turn 的 Steer、queued follow-up、durable receipt 和 reload replay；没有把静态 DOM marker 当作交互成功。
 - `pnpm typecheck`、`pnpm test`、`pnpm build:web`、`pnpm test:phase7:browser`、`pnpm test:phase8:web`、`pnpm test:phase8:settings`、`pnpm test:phase8:visual`、`pnpm test:phase8:parity`、`pnpm test:phase8:browser:evidence` 和 `git diff --check` 通过；8.0 独立 checkpoint 在本次提交建立。
 - 8.0 回滚边界：只回滚本次 browser evidence JSON/gate、fixture live-control 开关和阶段文档；生产 Event/Tool/Task/Permission/Workspace contract 不变。
+
+## Phase 8.0 Trajectory scroll ownership（completed，2026-08-25）
+
+- 按 DSH 的 active view / single scrollport 结构，Trajectory 模式下外层 `#conversation` 不再承担纵向滚动，`.main-trajectory-scroll` 成为唯一内部垂直 scrollport；
+- 补齐 Trajectory active view 的 `flex: 1 1 0`、`min-height: 0`、`height: 100%`，并使用 Composer `ResizeObserver` 提供动态 bottom clearance；
+- Conversation 与 Trajectory 独立保存并恢复 `scrollTop`，tail-follow、Load older 和历史 prepend 补偿都操作当前 active view 的 scrollport；
+- 在 `http://127.0.0.1:3210/` 重启服务后验证 Trajectory 红框区域滚轮滚动、外层 scrollTop 不竞争、连续切换 10 次和 per-view 位置恢复；`pnpm build:web`、`git diff --check`、health check 通过；
+- 独立 checkpoint：`b6a1cf7 feat(phase8): align trajectory scroll ownership`；回滚该提交不会改变 Event、Tool、Task、Permission 或 Workspace contract。
 
 ## Phase 8 暂存归档（2026-08-24）
 

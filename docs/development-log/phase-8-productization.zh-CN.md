@@ -1,5 +1,46 @@
 # Phase 8 开发日志
 
+## 2026-08-25：Trajectory 滚动责任按 DSH 收敛
+
+本次工作属于 Phase 8.0 Web 对齐的滚动边界修复，目标是解决 Trajectory 内容区域无法直接使用鼠标滚轮上下滚动的问题。实现依据 [DSH Conversation / Trajectory 前端实现指导方案](../dsh-conversation-trajectory-implementation-guide.zh-CN.md) 和 [问题记录](../ui-issue-conversation-trajectory-scroll.zh-CN.md)。本次只涉及 Web 布局与可丢弃的滚动位置状态，没有改变 Event、Tool、Task、Permission 或 Workspace contract。
+
+### 任务七问
+
+1. **Phase**：Phase 8.0，DSH Web 对齐与滚动边界维护。
+2. **问题类型**：UI 布局、滚动容器和视图恢复。
+3. **契约影响**：不改变公共事件、工具、任务、权限或 workspace contract。
+4. **DSH 参考**：`ui-conversation` 的稳定 conversation scrollport、`ui-trajectory` 的内部 table scrollport、Composer overlay/bottom clearance。
+5. **上游来源**：只参考 DSH 的结构和行为，没有复制代码或内部类型；无需新增许可证登记。
+6. **验收场景**：Trajectory 红框区域滚轮滚动、外层不抢滚动、Conversation/Trajectory 往返切换、按视图恢复位置、Composer 不遮挡末尾。
+7. **回滚**：回退本 checkpoint `b6a1cf7`；保留第一轮外层几何修复 `14d836d`。
+
+### 实现内容
+
+- Trajectory 模式下将外层 `#conversation` 设为 `overflow: hidden`，把纵向滚动责任交给 `.main-trajectory-scroll`；
+- 为 Trajectory active view 补齐 `flex: 1 1 0`、`min-height: 0`、`height: 100%`，防止 Flex 子项按内容扩张；
+- 为内部 scrollport 设置 `overflow-y: auto`、`overflow-x: hidden`、`scrollbar-gutter: stable`，并移除会阻断滚轮链路的 `overscroll-behavior: contain`；
+- 新增 Conversation/Trajectory 独立 `scrollTop` 状态，统一 tail-follow、Load older、scroll restoration 和历史 prepend 补偿；
+- 使用 `ResizeObserver` 动态计算 Composer clearance，写入 `--trajectory-bottom-clearance`；
+- 删除重复的全局 Tab click 处理，避免双重 render 造成滚动位置重置。
+
+### 验证与 checkpoint
+
+```text
+pnpm build:web                                      ✓
+git diff --check                                     ✓
+GET http://127.0.0.1:3210/health                    ✓
+Trajectory inner scrollport wheel scroll             ✓
+Conversation ↔ Trajectory × 10                      ✓
+Per-view scrollTop restoration                       ✓
+Browser console warning/error                        0
+```
+
+代码 checkpoint：`b6a1cf7 feat(phase8): align trajectory scroll ownership`。
+
+### 遗留事项
+
+Planning 侧栏、Reasoning 和 Effort 按用户要求不在本次范围内；后续若修改 Conversation/Trajectory 布局，必须继续在 `3210` 重启后验证滚轮、Tab 可达性、Composer clearance 和视图恢复，并追加本日志与问题文档记录。
+
 ## 2026-08-25：8.0 Web parity browser matrix 收口
 
 本次继续属于 Phase 8.0 Web 对齐，依据 DSH `ui-goal/GoalBar.tsx`、`ui-conversation/skeleton/InputBar.tsx`、`ui-user-questions/QuestionComposer.tsx`、`ui-jobs/JobListAction.tsx`、`ui-trajectory/TrajectoryView.tsx` 和 `ui-layout` 的行为边界补齐最后一组真实浏览器证据；没有复制 DSH 代码或内部类型，Web 仍只消费本项目 projection、REST/SSE 和 typed bridge。

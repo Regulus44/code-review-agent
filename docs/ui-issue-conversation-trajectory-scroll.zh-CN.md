@@ -1,6 +1,6 @@
 # Conversation / Trajectory 视图切换后的滚动边界异常
 
-状态：`resolved (first implementation slice)`
+状态：`resolved (DSH scroll ownership slice)`
 
 记录日期：2026-08-25
 
@@ -264,3 +264,36 @@ DSH 通过 per-session view store 保存当前 view id；Header 从 view ring �
 - 不恢复 Reasoning / Effort 控件；
 - 不在本问题中扩展完整 Trajectory 诊断功能；
 - 不改变 Event、Tool、Task、Permission 或 Workspace contract。
+
+## 9. 第二轮实现：按 DSH 收敛滚动责任
+
+提交：`b6a1cf7 feat(phase8): align trajectory scroll ownership`
+
+本轮针对“Trajectory 红框区域无法用鼠标滚轮滚动”的回归问题完成最终滚动责任收敛：
+
+1. Trajectory 模式下，外层 `#conversation` 设置为 `overflow: hidden`，不再与内部列表竞争纵向滚动；
+2. `.main-trajectory-scroll` 成为 Trajectory 的唯一垂直 scrollport，使用 `flex: 1 1 0`、`min-height: 0`、`overflow-y: auto` 和稳定 scrollbar gutter；
+3. 去除 `overscroll-behavior: contain` 对内部滚轮链路的阻断；
+4. Conversation 与 Trajectory 分别保存 `conversationScrollTop` / `trajectoryScrollTop`，切换视图和重新渲染后恢复对应位置；
+5. Tail-follow、Load older 和历史 prepend 补偿统一操作当前 active view 的 scrollport；
+6. Composer 通过 `ResizeObserver` 发布实时高度，并写入 `--trajectory-bottom-clearance`，保证轨迹末尾可滚到 Composer 上方；
+7. 移除 Conversation/Trajectory Tab 的重复 document click 分支，避免双重 render 重置滚动位置。
+
+### 验证证据
+
+在每轮验证前重启 `http://127.0.0.1:3210/`，最终结果如下：
+
+```text
+pnpm build:web                                      ✓
+git diff --check                                     ✓
+GET http://127.0.0.1:3210/health                    ✓
+Trajectory outer #conversation overflow-y: hidden   ✓
+Trajectory inner scrollport overflow-y: auto        ✓
+Trajectory inner scrollTop changes on wheel         ✓
+Outer #conversation scrollTop remains 0             ✓
+Conversation ↔ Trajectory × 10                      ✓
+Per-view scrollTop restoration                       ✓
+Browser console warning/error                        0
+```
+
+本轮没有改变 Event、Tool、Task、Permission 或 Workspace contract，也没有修改 Planning、Reasoning、Effort。回滚方式为回退 `b6a1cf7`，保留第一轮 `14d836d` 的外层 active-view 几何修复。
