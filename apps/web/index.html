@@ -26,7 +26,7 @@
         --red: #d54444;
         --shadow: 0 14px 40px rgba(30, 39, 55, 0.12);
         --sidebar-width: 252px;
-        --details-width: 300px;
+        --details-width: 340px;
         --rail-width: 56px;
         --radius-lg: 22px;
         --ease: cubic-bezier(0.4, 0, 0.2, 1);
@@ -361,6 +361,32 @@
       .details-header { display: flex; align-items: center; justify-content: space-between; flex: 0 0 60px; height: 60px; padding: 0 14px 0 18px; border-bottom: 1px solid var(--border); }
       .details-header strong { font-size: 13px; }
       .details-content { flex: 1; overflow: auto; padding: 14px; }
+      .details-overview { margin-bottom: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+      .details-overview-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+      .details-overview-title { min-width: 0; overflow: hidden; color: var(--text); font-size: 13px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+      .details-overview-meta { margin-top: 3px; color: var(--text-tertiary); font-size: 10px; }
+      .details-overview-workspace { margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+      .details-attention { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; padding: 9px 10px; border: 1px solid rgba(199,131,39,.26); border-radius: 10px; color: #8f5c13; background: #fff8e8; font-size: 11px; }
+      .details-attention strong { margin-left: auto; color: #8f5c13; font-variant-numeric: tabular-nums; }
+      .details-group { margin-bottom: 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); overflow: hidden; }
+      .details-group > summary { display: flex; align-items: center; gap: 7px; padding: 11px 12px; cursor: pointer; list-style: none; color: var(--text); font-size: 12px; font-weight: 650; }
+      .details-group > summary::-webkit-details-marker { display: none; }
+      .details-group > summary::before { content: '›'; flex: 0 0 9px; color: var(--text-tertiary); font-size: 15px; transition: transform .16s var(--ease); }
+      .details-group[open] > summary::before { transform: rotate(90deg); }
+      .details-group > summary:hover { background: var(--surface-hover); }
+      .details-group-summary { min-width: 0; flex: 1; }
+      .details-group-meta { display: block; margin-top: 2px; overflow: hidden; color: var(--text-tertiary); font-size: 10px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+      .details-group-count { flex: 0 0 auto; padding: 2px 6px; border-radius: 99px; color: var(--text-tertiary); background: var(--surface-subtle); font-size: 9px; font-variant-numeric: tabular-nums; }
+      .details-group-count.attention { color: #8f5c13; background: #fff3d9; }
+      .details-group-body { padding: 0 12px 10px; }
+      .details-group-body > .detail-section:first-child { padding-top: 2px; }
+      .details-group-body > .detail-section:last-child { border-bottom: 0; }
+      .details-group-body .detail-section { padding-inline: 0; }
+      .planning-subsection { margin-top: 7px; border-top: 1px solid var(--border); }
+      .planning-subsection summary { padding: 7px 0 4px; cursor: pointer; list-style: none; color: var(--text-tertiary); font-size: 10px; font-weight: 650; }
+      .planning-subsection summary::-webkit-details-marker { display: none; }
+      .planning-subsection summary::before { content: '›'; display: inline-block; width: 12px; color: var(--text-muted); transition: transform .16s var(--ease); }
+      .planning-subsection[open] summary::before { transform: rotate(90deg); }
       .detail-section { padding: 12px 0; border-bottom: 1px solid var(--border); }
       .detail-section:first-child { padding-top: 3px; }
       .detail-label { margin-bottom: 8px; color: var(--text-tertiary); font-size: 10px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; }
@@ -709,7 +735,7 @@
       (() => {
         const typedRuntime = window.CodeReviewAgentWeb;
         const typedConnection = typedRuntime?.connection || null;
-        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, reasoningEffort: 'default', stoppingTurnId: null, workspaces: null, lastWorkspaceOrderSequence: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 252, details: 'closed', mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', workspaceViewMode: 'tree', workspaceSort: 'recent', sidebarSessions: [], sessionView: 'conversation', trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
+        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, reasoningEffort: 'default', reasoningStatus: 'idle', reasoningError: '', stoppingTurnId: null, workspaces: null, lastWorkspaceOrderSequence: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 252, details: 'closed', mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', workspaceViewMode: 'tree', workspaceSort: 'recent', sidebarSessions: [], sessionView: 'conversation', trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
         let usageDrawerOpen = false;
         let modelMenuPane = 'root';
         const app = document.querySelector('#app');
@@ -808,6 +834,35 @@
         const api = async (url, options) => { const response = await fetch(url, options); if (!response.ok) throw new Error(await response.text()); return response.json(); };
         const commandKey = () => globalThis.crypto?.randomUUID?.() || `web_${Date.now()}_${Math.random().toString(36).slice(2)}`;
         const commandApi = (url, body) => { const idempotencyKey = commandKey(); return api(url, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKey }, body: JSON.stringify({ ...body, commandId: idempotencyKey }) }); };
+        const saveReasoningEffort = async (effort, label) => {
+          const capability = state.models?.reasoning;
+          if (!capability?.supported || !capability.options.some((option) => option.id === effort)) return;
+          const previousEffort = capability.current || state.reasoningEffort || 'default';
+          state.reasoningEffort = effort;
+          state.reasoningStatus = 'saving';
+          state.reasoningError = '';
+          renderReasoning();
+          renderModelSeatMenu();
+          try {
+            // The endpoint returns a durable receipt containing the authoritative
+            // capability. Merge it into the catalog instead of replacing the
+            // model list with the smaller reasoning-only response.
+            const receipt = await api('/v1/models', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reasoningEffort: effort }) });
+            if (receipt?.reasoning) state.models = { ...state.models, reasoning: receipt.reasoning };
+            state.reasoningEffort = receipt?.reasoning?.current || effort;
+            state.reasoningStatus = 'idle';
+            setStatus(`Effort · ${label || effort} (next turn)`, true);
+          } catch (error) {
+            state.reasoningEffort = previousEffort;
+            state.reasoningStatus = 'error';
+            state.reasoningError = error instanceof Error ? error.message : String(error);
+            setStatus(state.reasoningError, false);
+          } finally {
+            renderReasoning();
+            renderModelSeatMenu();
+            renderComposerState(typedConnection?.store.getSnapshot() || { session: state.session });
+          }
+        };
         const applyShellLayout = () => {
           const viewport = typedRuntime?.shellViewport ? typedRuntime.shellViewport(window.innerWidth) : window.innerWidth <= 600 ? 'mobile' : window.innerWidth <= 900 ? 'tablet' : 'desktop';
           if (typedRuntime?.reduceShellLayout) state.layout = typedRuntime.reduceShellLayout(state.layout, { type: 'set-viewport', viewport });
@@ -1098,6 +1153,47 @@
           }
           if (actions.childNodes.length) row.append(actions); parent.append(row);
         };
+        const detailGroupConfig = {
+          planning: { title: 'Planning', open: false },
+          execution: { title: 'Execution', open: false },
+          requests: { title: 'Requests', open: false },
+          workspace: { title: 'Workspace', open: false },
+          integrations: { title: 'Integrations', open: false },
+        };
+        const ensureDetailsGroup = (id, meta, count, openOverride) => {
+          const config = detailGroupConfig[id] || { title: id, open: false };
+          let group = details.querySelector(`#details-group-${id}`);
+          if (!group) {
+            group = document.createElement('details');
+            group.id = `details-group-${id}`;
+            group.className = 'details-group';
+            group.open = openOverride === undefined ? config.open : openOverride;
+            const summary = document.createElement('summary');
+            const copy = document.createElement('span'); copy.className = 'details-group-summary';
+            const title = document.createElement('span'); title.textContent = config.title;
+            const metaNode = document.createElement('span'); metaNode.className = 'details-group-meta';
+            copy.append(title, metaNode);
+            const badge = document.createElement('span'); badge.className = 'details-group-count';
+            summary.append(copy, badge);
+            const body = document.createElement('div'); body.className = 'details-group-body';
+            group.append(summary, body);
+            details.append(group);
+          }
+          const metaNode = group.querySelector('.details-group-meta');
+          const badge = group.querySelector('.details-group-count');
+          if (meta !== undefined && metaNode) metaNode.textContent = meta;
+          if (count !== undefined && badge) { badge.textContent = count; badge.hidden = !count; badge.classList.toggle('attention', id === 'requests' && count !== '0'); }
+          if (openOverride !== undefined && !group.dataset.userToggled) group.open = openOverride;
+          if (!group.dataset.bound) {
+            group.addEventListener('toggle', () => { group.dataset.userToggled = 'true'; });
+            group.dataset.bound = 'true';
+          }
+          return group.querySelector('.details-group-body');
+        };
+        const mountDetailSection = (section, groupId) => {
+          const body = ensureDetailsGroup(groupId);
+          if (body && !body.contains(section)) body.append(section);
+        };
         const renderTypedConversation = (projection, body, snapshot) => {
           if (!projection || !Array.isArray(projection.nodes) || projection.nodes.length === 0) return false;
           const assistant = new Map();
@@ -1140,7 +1236,7 @@
             }
             else if (node.kind === 'task') addEventRow(body, `Task · ${node.title || node.taskId} · ${node.status}${node.summary ? ` · ${node.summary}` : ''}`);
             else if (node.kind === 'event') {
-              const visible = new Set(['attachment/received', 'attachment/rejected', 'plan/updated', 'todo/updated', 'goal/created', 'goal/updated', 'goal/ended', 'patch/applied', 'patch/rejected', 'patch/rolled_back', 'agent/error']);
+              const visible = new Set(['attachment/received', 'attachment/rejected', 'patch/applied', 'patch/rejected', 'patch/rolled_back', 'agent/error']);
               if (!visible.has(node.eventType)) continue;
               const payload = node.payload || {}; const attachment = node.eventType === 'attachment/received' || node.eventType === 'attachment/rejected';
               addEventRow(body, attachment ? `Attachment · ${payload.fileName || 'file'} · ${payload.status || 'unknown'}${payload.reason ? ` · ${payload.reason}` : ''}` : `${node.eventType} · ${node.key}`);
@@ -1181,7 +1277,7 @@
             const refresh = () => renderTrajectoryPanel(typedConnection?.store.getSnapshot()?.trajectory);
             search.addEventListener('input', () => { state.trajectoryQuery = search.value; refresh(); });
             checkbox.addEventListener('change', () => { state.trajectoryRunningOnly = checkbox.checked; refresh(); });
-            details.append(section);
+            mountDetailSection(section, 'execution');
           }
           const search = section.querySelector('.trajectory-search');
           const checkbox = section.querySelector('input[type="checkbox"]');
@@ -1462,7 +1558,7 @@
             const meta = document.createElement('div'); meta.className = 'trajectory-meta'; meta.id = 'task-ledger-meta'; section.append(meta);
             const ledger = document.createElement('div'); ledger.className = 'task-ledger'; ledger.id = 'task-ledger'; section.append(ledger);
             const inspector = document.createElement('div'); inspector.className = 'task-inspector'; inspector.id = 'task-record-inspector'; section.append(inspector);
-            details.append(section);
+            mountDetailSection(section, 'planning');
           }
           const meta = section.querySelector('#task-ledger-meta');
           const ledger = section.querySelector('#task-ledger');
@@ -1516,7 +1612,7 @@
             const label = document.createElement('div'); label.className = 'detail-label'; label.textContent = 'Produced files & artifacts'; section.append(label);
             const meta = document.createElement('div'); meta.className = 'trajectory-meta'; meta.id = 'deliverables-ledger-meta'; section.append(meta);
             const ledger = document.createElement('div'); ledger.className = 'deliverables-ledger'; ledger.id = 'deliverables-ledger'; section.append(ledger);
-            details.append(section);
+            mountDetailSection(section, 'planning');
           }
           const meta = section.querySelector('#deliverables-ledger-meta');
           const ledger = section.querySelector('#deliverables-ledger');
@@ -1565,7 +1661,7 @@
             const meta = document.createElement('div'); meta.className = 'trajectory-meta'; meta.id = 'mcp-ledger-meta'; section.append(meta);
             const ledger = document.createElement('div'); ledger.className = 'mcp-ledger'; ledger.id = 'mcp-ledger'; section.append(ledger);
             const inspector = document.createElement('div'); inspector.className = 'mcp-inspector'; inspector.id = 'mcp-record-inspector'; section.append(inspector);
-            details.append(section);
+            mountDetailSection(section, 'integrations');
           }
           const meta = section.querySelector('#mcp-ledger-meta');
           const ledger = section.querySelector('#mcp-ledger');
@@ -1601,7 +1697,7 @@
           if (!section) {
             section = document.createElement('section'); section.id = 'planning-panel'; section.className = 'detail-section';
             const label = document.createElement('div'); label.className = 'detail-label'; label.textContent = 'Goal · Plan · Todo · Questions'; section.append(label);
-            const body = document.createElement('div'); body.id = 'planning-body'; section.append(body); details.append(section);
+            const body = document.createElement('div'); body.id = 'planning-body'; section.append(body); mountDetailSection(section, 'planning');
           }
           const body = section.querySelector('#planning-body'); body.innerHTML = '';
           const session = snapshot?.session || state.session;
@@ -1609,10 +1705,15 @@
           const plan = typedRuntime?.presentPlan ? typedRuntime.presentPlan(session?.plan, { commandSurfaceAvailable: typedRuntime?.api?.updatePlan !== undefined }) : { visible: false, statusLabel: 'unknown', content: '', reviewable: false, unavailableReason: 'Typed presenter unavailable.' };
           const todos = typedRuntime?.presentTodoPanel ? typedRuntime.presentTodoPanel(session?.todos) : { visible: false, summary: 'unknown', items: [] };
           const questions = typedRuntime?.presentQuestionBatch ? typedRuntime.presentQuestionBatch(session?.interactions, { now: Date.now() }) : { visible: false, summary: 'unknown', questions: [] };
-          const heading = document.createElement('div'); heading.className = 'planning-heading'; heading.textContent = goal.visible ? `${goal.title} · ${goal.statusLabel}` : goal.title; body.append(heading);
-          const goalMeta = document.createElement('div'); goalMeta.className = 'detail-line'; const goalLabel = document.createElement('span'); goalLabel.textContent = 'Goal'; const goalValue = document.createElement('strong'); goalValue.textContent = goal.visible ? goal.completion.label : 'No durable goal'; goalMeta.append(goalLabel, goalValue); body.append(goalMeta);
-          if (goal.criteria?.length) { const criteria = document.createElement('ul'); criteria.className = 'planning-list'; for (const item of goal.criteria) { const row = document.createElement('li'); row.textContent = `${item.state === 'satisfied' ? '✓' : '·'} ${item.text}`; criteria.append(row); } body.append(criteria); }
-          const planMeta = document.createElement('div'); planMeta.className = 'detail-line'; const planLabel = document.createElement('span'); planLabel.textContent = 'Plan'; const planValue = document.createElement('strong'); planValue.textContent = plan.visible ? `${plan.statusLabel} · ${plan.content || 'empty'}` : 'No plan'; planMeta.append(planLabel, planValue); body.append(planMeta);
+           const heading = document.createElement('div'); heading.className = 'planning-heading'; heading.textContent = goal.visible ? `${goal.title} · ${goal.statusLabel}` : goal.title; body.append(heading);
+           const goalMeta = document.createElement('div'); goalMeta.className = 'detail-line'; const goalLabel = document.createElement('span'); goalLabel.textContent = 'Goal'; const goalValue = document.createElement('strong'); goalValue.textContent = goal.visible ? goal.completion.label : 'No durable goal'; goalMeta.append(goalLabel, goalValue); body.append(goalMeta);
+           if (goal.criteria?.length) {
+             const criteriaDetails = document.createElement('details'); criteriaDetails.className = 'planning-subsection';
+             const criteriaSummary = document.createElement('summary'); criteriaSummary.textContent = `Criteria · ${goal.criteria.length}`; criteriaDetails.append(criteriaSummary);
+             const criteria = document.createElement('ul'); criteria.className = 'planning-list'; for (const item of goal.criteria) { const row = document.createElement('li'); row.textContent = `${item.state === 'satisfied' ? '✓' : '·'} ${item.text}`; criteria.append(row); } criteriaDetails.append(criteria); body.append(criteriaDetails);
+           }
+           const planMeta = document.createElement('div'); planMeta.className = 'detail-line'; const planLabel = document.createElement('span'); planLabel.textContent = 'Plan'; const planValue = document.createElement('strong'); planValue.textContent = plan.visible ? `${plan.statusLabel}${plan.content ? ' · ready' : ''}` : 'No plan'; planMeta.append(planLabel, planValue); body.append(planMeta);
+           if (plan.visible && plan.content) { const planDetails = document.createElement('details'); planDetails.className = 'planning-subsection'; const planSummary = document.createElement('summary'); planSummary.textContent = 'View plan content'; const planText = document.createElement('div'); planText.className = 'detail-value'; planText.textContent = plan.content; planDetails.append(planSummary, planText); body.append(planDetails); }
           if (plan.reviewable && typedRuntime?.api?.updatePlan && session?.id) {
             const actions = document.createElement('div'); actions.className = 'planning-actions';
             const review = async (status) => { try { const updated = await typedRuntime.api.updatePlan(session.id, plan.content, status, session.plan.lastSequence, commandKey()); state.session = updated; typedConnection?.store.replaceProjection(updated); render(); } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); } };
@@ -1620,8 +1721,8 @@
             const reject = document.createElement('button'); reject.type = 'button'; reject.className = 'goal-bar-action'; reject.textContent = 'Reject plan'; reject.onclick = () => { void review('rejected'); };
             actions.append(approve, reject); body.append(actions);
           }
-          const todoMeta = document.createElement('div'); todoMeta.className = 'detail-line'; const todoLabel = document.createElement('span'); todoLabel.textContent = 'Todo'; const todoValue = document.createElement('strong'); todoValue.textContent = todos.summary; todoMeta.append(todoLabel, todoValue); body.append(todoMeta);
-          if (todos.items?.length) { const list = document.createElement('ul'); list.className = 'planning-list'; for (const item of todos.items.slice(0, 8)) { const row = document.createElement('li'); row.textContent = `${item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '→' : '·'} ${item.detail}`; list.append(row); } body.append(list); }
+           const todoMeta = document.createElement('div'); todoMeta.className = 'detail-line'; const todoLabel = document.createElement('span'); todoLabel.textContent = 'Todo'; const todoValue = document.createElement('strong'); todoValue.textContent = todos.summary; todoMeta.append(todoLabel, todoValue); body.append(todoMeta);
+           if (todos.items?.length) { const todoDetails = document.createElement('details'); todoDetails.className = 'planning-subsection'; const todoSummary = document.createElement('summary'); todoSummary.textContent = `View todo items · ${todos.items.length}`; const list = document.createElement('ul'); list.className = 'planning-list'; for (const item of todos.items.slice(0, 8)) { const row = document.createElement('li'); row.textContent = `${item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '→' : '·'} ${item.detail}`; list.append(row); } todoDetails.append(todoSummary, list); body.append(todoDetails); }
           const questionMeta = document.createElement('div'); questionMeta.className = 'detail-line'; const questionLabel = document.createElement('span'); questionLabel.textContent = 'Questions'; const questionValue = document.createElement('strong'); questionValue.textContent = questions.summary; questionMeta.append(questionLabel, questionValue); body.append(questionMeta);
           if (goal.unavailableReason || plan.unavailableReason) { const note = document.createElement('div'); note.className = 'empty-detail'; note.textContent = goal.unavailableReason || plan.unavailableReason; body.append(note); }
         };
@@ -1631,7 +1732,7 @@
             section = document.createElement('section'); section.id = 'request-recovery-panel'; section.className = 'detail-section';
             const label = document.createElement('div'); label.className = 'detail-label'; label.textContent = 'Permission & interaction recovery'; section.append(label);
             const meta = document.createElement('div'); meta.className = 'trajectory-meta'; meta.id = 'request-recovery-meta'; section.append(meta);
-            const body = document.createElement('div'); body.id = 'request-recovery-body'; section.append(body); details.append(section);
+            const body = document.createElement('div'); body.id = 'request-recovery-body'; section.append(body); mountDetailSection(section, 'requests');
           }
           const meta = section.querySelector('#request-recovery-meta'); const body = section.querySelector('#request-recovery-body'); body.innerHTML = '';
           const nodes = snapshot?.conversation?.nodes || [];
@@ -1650,7 +1751,7 @@
             section = document.createElement('section'); section.id = 'runtime-diagnostics-panel'; section.className = 'detail-section';
             const label = document.createElement('div'); label.className = 'detail-label'; label.textContent = 'Terminal & long-running jobs'; section.append(label);
             const meta = document.createElement('div'); meta.className = 'trajectory-meta'; meta.id = 'runtime-diagnostics-meta'; section.append(meta);
-            const body = document.createElement('div'); body.id = 'runtime-diagnostics-body'; section.append(body); details.append(section);
+            const body = document.createElement('div'); body.id = 'runtime-diagnostics-body'; section.append(body); mountDetailSection(section, 'execution');
           }
           const intent = typedRuntime?.presentRuntimeDiagnostics ? typedRuntime.presentRuntimeDiagnostics(snapshot?.events || []) : { visible: false, jobs: [], terminals: [], runningJobs: 0, failedJobs: 0, orphanedJobs: 0, interruptedTerminals: 0 };
           const meta = section.querySelector('#runtime-diagnostics-meta'); const body = section.querySelector('#runtime-diagnostics-body'); body.innerHTML = '';
@@ -1702,7 +1803,7 @@
               finally { create.disabled = false; }
             };
             createRow.append(branchInput, create); section.append(createRow);
-            const ledger = document.createElement('div'); ledger.className = 'worktree-ledger'; ledger.id = 'worktree-ledger'; section.append(ledger); details.append(section);
+            const ledger = document.createElement('div'); ledger.className = 'worktree-ledger'; ledger.id = 'worktree-ledger'; section.append(ledger); mountDetailSection(section, 'workspace');
           }
           const meta = section.querySelector('#worktree-ledger-meta'); const ledger = section.querySelector('#worktree-ledger'); ledger.innerHTML = '';
           const view = typedRuntime?.presentWorktrees ? typedRuntime.presentWorktrees(state.worktrees, snapshot?.session?.activeWorktreeId || state.session?.activeWorktreeId) : { visible: false, items: [], clean: 0, dirty: 0, conflicted: 0, summary: 'Worktree presenter unavailable.' };
@@ -1727,7 +1828,7 @@
             section = document.createElement('section'); section.id = 'lsp-inspector-panel'; section.className = 'detail-section';
             const label = document.createElement('div'); label.className = 'detail-label'; label.textContent = 'LSP diagnostics & source locations'; section.append(label);
             const meta = document.createElement('div'); meta.className = 'trajectory-meta'; meta.id = 'lsp-inspector-meta'; section.append(meta);
-            const body = document.createElement('div'); body.id = 'lsp-inspector-body'; section.append(body); details.append(section);
+            const body = document.createElement('div'); body.id = 'lsp-inspector-body'; section.append(body); mountDetailSection(section, 'integrations');
           }
           const meta = section.querySelector('#lsp-inspector-meta'); const body = section.querySelector('#lsp-inspector-body'); body.innerHTML = '';
           const views = (snapshot?.conversation?.nodes || []).filter((node) => node.kind === 'tool').map((node) => typedRuntime?.presentLspTool ? typedRuntime.presentLspTool(node.tool) : null).filter((view) => view?.visible);
@@ -1742,6 +1843,66 @@
             body.append(card);
           }
         };
+        const normalizeDetailsPanel = () => {
+          if (details.dataset.normalizing === 'true') return;
+          details.dataset.normalizing = 'true';
+          try {
+            const openState = new Map([...details.querySelectorAll('.details-group')].map((group) => [group.id.replace('details-group-', ''), group.open]));
+            const sections = [...details.querySelectorAll('.detail-section')].filter((section) => section.id);
+            const snapshot = typedConnection?.store.getSnapshot();
+            const trajectory = snapshot?.trajectory;
+            const running = trajectory?.records?.filter((record) => record.running).length || 0;
+            const pendingPermissions = snapshot?.conversation?.nodes?.filter((node) => node.kind === 'permission' && node.status === 'pending').length || 0;
+            const pendingInteractions = snapshot?.conversation?.nodes?.filter((node) => node.kind === 'interaction' && node.status === 'pending').length || 0;
+            const pending = pendingPermissions + pendingInteractions;
+            const connected = state.mcp.filter((server) => !['disabled', 'failed', 'needs_auth'].includes(server.status)).length;
+            const session = snapshot?.session || state.session;
+            const goal = typedRuntime?.presentGoalBar ? typedRuntime.presentGoalBar(session?.goals) : { visible: false, title: 'No active goal', statusLabel: 'No goal' };
+            const todos = typedRuntime?.presentTodoPanel ? typedRuntime.presentTodoPanel(session?.todos) : { summary: 'No todo list', items: [] };
+            const plan = typedRuntime?.presentPlan ? typedRuntime.presentPlan(session?.plan) : { statusLabel: 'No plan' };
+            const workspace = session?.workspaceRoot || '.';
+            const hasLegacySections = [...details.children].some((child) => child.classList?.contains('detail-section'));
+            if (!hasLegacySections && details.querySelector('.details-overview')) return;
+            details.innerHTML = '';
+
+            const overview = document.createElement('section'); overview.className = 'details-overview';
+            const header = document.createElement('div'); header.className = 'details-overview-header';
+            const copy = document.createElement('div'); copy.style.minWidth = '0';
+            const title = document.createElement('div'); title.className = 'details-overview-title'; title.textContent = currentModel();
+            const meta = document.createElement('div'); meta.className = 'details-overview-meta';
+            const connection = snapshot?.connection || 'connecting';
+            meta.textContent = `${connection === 'connected' ? 'Connected' : connection} · ${state.events.size} events`;
+            copy.append(title, meta);
+            const status = document.createElement('span'); status.className = 'status-pill'; status.textContent = connection === 'connected' ? 'Ready' : 'Syncing';
+            header.append(copy, status); overview.append(header);
+            const workspaceLine = document.createElement('div'); workspaceLine.className = 'details-overview-workspace'; workspaceLine.textContent = workspace; overview.append(workspaceLine);
+            details.append(overview);
+
+            if (pending) {
+              const attention = document.createElement('div'); attention.className = 'details-attention';
+              attention.append(document.createTextNode('Needs your decision'));
+              const detail = document.createElement('span'); detail.textContent = `${pendingPermissions} approvals · ${pendingInteractions} questions`; attention.append(detail);
+              const count = document.createElement('strong'); count.textContent = String(pending); attention.append(count); details.append(attention);
+            }
+
+            const groupMeta = {
+              planning: `${goal.visible ? goal.statusLabel : 'No active goal'} · ${plan.statusLabel || 'No plan'} · ${todos.summary || 'No todos'}`,
+              execution: `${trajectory?.records?.length || 0} records · ${running} running · ${state.tools.size} tools`,
+              requests: pending ? 'Action required' : 'No pending requests',
+              workspace: `${state.worktrees?.length || 0} worktrees · ${workspace}`,
+              integrations: `${connected}/${state.mcp.length} MCP connected · ${state.tools.size} tools`,
+            };
+            const groupCounts = { planning: todos.items?.length ? String(todos.items.length) : '', execution: running ? String(running) : '', requests: String(pending), workspace: '', integrations: state.mcp.length ? String(state.mcp.length) : '' };
+            for (const id of Object.keys(detailGroupConfig)) ensureDetailsGroup(id, groupMeta[id], groupCounts[id], openState.has(id) ? openState.get(id) : undefined);
+            const targetGroup = { 'planning-panel': 'planning', 'task-inspector-panel': 'planning', 'deliverables-inspector-panel': 'planning', 'trajectory-inspector-panel': 'execution', 'runtime-diagnostics-panel': 'execution', 'request-recovery-panel': 'requests', 'worktree-inspector-panel': 'workspace', 'mcp-inspector-panel': 'integrations', 'lsp-inspector-panel': 'integrations' };
+            for (const section of sections) {
+              const groupId = targetGroup[section.id];
+              if (groupId) mountDetailSection(section, groupId);
+            }
+          } finally {
+            details.dataset.normalizing = 'false';
+          }
+        };
         const trajectoryDetailsObserver = new MutationObserver(() => {
           if (!details.querySelector('#trajectory-inspector-panel')) renderTrajectoryPanel(typedConnection?.store.getSnapshot()?.trajectory);
           if (!details.querySelector('#task-inspector-panel')) renderTaskPanel(typedConnection?.store.getSnapshot());
@@ -1752,6 +1913,7 @@
           if (!details.querySelector('#worktree-inspector-panel')) renderWorktreePanel(typedConnection?.store.getSnapshot());
           if (!details.querySelector('#planning-panel')) renderPlanningPanel(typedConnection?.store.getSnapshot());
           if (!details.querySelector('#lsp-inspector-panel')) renderLspPanel(typedConnection?.store.getSnapshot());
+          normalizeDetailsPanel();
         });
         trajectoryDetailsObserver.observe(details, { childList: true });
         const render = () => {
@@ -1830,9 +1992,6 @@
               else if (event.type === 'permission/resolved' && permissions.has(event.payload?.permissionId)) permissions.get(event.payload.permissionId).status = event.payload.status;
               else if (event.type === 'interaction/requested') interactions.set(event.payload?.interactionId, event.payload);
               else if (event.type === 'interaction/resolved' && interactions.has(event.payload?.interactionId)) interactions.get(event.payload.interactionId).status = event.payload.status;
-              else if (event.type === 'plan/updated') addEventRow(body, `Plan · ${event.payload?.status || 'updated'}${event.payload?.content ? ` · ${event.payload.content}` : ''}`);
-              else if (event.type === 'todo/updated') addEventRow(body, `Todo list · ${Array.isArray(event.payload?.todos) ? event.payload.todos.length : 0} item(s)`);
-              else if (event.type === 'goal/created' || event.type === 'goal/updated' || event.type === 'goal/ended') addEventRow(body, `Goal · ${event.payload?.title || event.payload?.goalId || 'goal'} · ${event.payload?.status || event.type}`);
               else if (event.type === 'job/started' || event.type === 'job/output' || event.type === 'job/ended') { const payload = event.payload || {}; upsertTool(`job-${payload.jobId || event.sequence}`, 'job', `${payload.command || payload.stream || 'job'}${payload.text ? `\n${payload.text}` : ''}`, payload.status || (event.type === 'job/started' ? 'Running' : event.type === 'job/ended' ? 'Completed' : 'Output')); }
               else if (event.type === 'terminal/session') { const payload = event.payload || {}; upsertTool(`terminal-${payload.terminalId || event.sequence}`, 'terminal', JSON.stringify(payload, null, 2), payload.status || payload.action || 'Updated'); }
               else if (event.type === 'diff/preview') upsertTool(`diff-${event.sequence}`, 'diff', JSON.stringify(event.payload?.diff || {}, null, 2), 'Preview');
@@ -2029,7 +2188,7 @@
         };
         const renderSubagents = () => { subagentList.innerHTML = ''; if (!state.subagents.length) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = 'No child agents.'; subagentList.append(empty); return; } for (const entry of state.subagents) { const task = entry.task || {}; const row = document.createElement('div'); row.className = 'subagent-row'; const copy = document.createElement('span'); copy.className = 'subagent-copy'; const name = task.title || task.provider || 'Child agent'; copy.innerHTML = `<span class="subagent-name">${esc(name)}</span><span class="subagent-meta">${esc(entry.status || task.status || 'ready')} · ${esc(task.mode || 'one-shot')} · ${esc(task.id || '')}</span>`; row.append(copy); if (entry.live || task.status === 'running' || task.status === 'waiting') { const cancel = document.createElement('button'); cancel.className = 'subagent-cancel'; cancel.type = 'button'; cancel.textContent = '×'; cancel.title = 'Cancel child'; cancel.onclick = async () => { cancel.disabled = true; try { await api(`/v1/sessions/${encodeURIComponent(state.session.id)}/tasks/${encodeURIComponent(task.id)}/cancel`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); await refreshSubagents(); } catch (error) { setStatus(error.message, false); cancel.disabled = false; } }; row.append(cancel); } row.onclick = () => { if (task.childSessionId) openSession(task.childSessionId); }; subagentList.append(row); } };
         const renderMcp = () => { mcpList.innerHTML = ''; for (const server of state.mcp) { const name = server.config?.name || server.name; const scope = server.config?.scope || 'user'; const row = document.createElement('div'); row.className = 'mcp-row'; const label = document.createElement('span'); const unhealthy = ['disabled', 'failed', 'needs_auth'].includes(server.status); label.className = `mcp-copy mcp-status ${unhealthy ? 'error' : ''}`; label.title = `scope=${scope} · transport=${server.config?.transport || 'unknown'} · revision=${server.revision || 1} · generation=${server.generation || 0}${server.lastError ? ` · ${server.lastError}` : ''}`; label.textContent = `${name} · ${server.status} · ${scope} · r${server.revision || 1}`; const actions = document.createElement('span'); actions.className = 'mcp-actions'; const reconnect = document.createElement('button'); reconnect.type = 'button'; reconnect.textContent = '↻'; reconnect.title = 'Reconnect'; reconnect.onclick = async () => { reconnect.disabled = true; try { await api(`/v1/mcp/servers/${encodeURIComponent(name)}/reconnect`, { method: 'POST' }); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); renderDetails(); } finally { reconnect.disabled = false; } }; const toggle = document.createElement('button'); toggle.type = 'button'; toggle.textContent = server.status === 'disabled' ? '＋' : '−'; toggle.title = server.status === 'disabled' ? 'Enable' : 'Disable'; toggle.onclick = async () => { await api(`/v1/mcp/servers/${encodeURIComponent(name)}/${server.status === 'disabled' ? 'enable' : 'disable'}`, { method: 'POST' }); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); renderDetails(); }; actions.append(reconnect, toggle); row.append(label, actions); mcpList.append(row); } if (!state.mcp.length) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = 'No MCP servers configured.'; mcpList.append(empty); } };
-        const renderModels = (payload) => { state.models = payload; modelTrigger.textContent = `Model · ${currentModel()}`; modelTrigger.disabled = state.modelStatus === 'loading'; modelPopover.innerHTML = '<div class="popover-label">Choose a model</div>'; for (const model of payload?.models || []) { const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${model === currentModel() ? 'selected' : ''}`; option.innerHTML = `<span class="model-check">${model === currentModel() ? '✓' : ''}</span><span>${esc(model)}<span class="model-meta">DeepSeek API</span></span>`; option.onclick = async () => { modelPopover.hidden = true; modelTrigger.setAttribute('aria-expanded', 'false'); modelTrigger.disabled = true; state.modelStatus = 'loading'; state.modelError = ''; renderSettings(); try { await api('/v1/models', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }) }); const payload = await api('/v1/models'); state.modelStatus = 'ready'; state.modelReceipt = `Selected ${model}`; renderModels(payload); await refreshCapabilities(); renderSettings(); setStatus(`Model · ${model}`); } catch (error) { state.modelStatus = 'error'; state.modelError = error instanceof Error ? error.message : String(error); renderSettings(); setStatus(state.modelError, false); } finally { modelTrigger.disabled = state.modelStatus === 'loading'; } }; modelPopover.append(option); } };
+        const renderModels = (payload) => { state.models = payload; if (payload?.reasoning?.supported) { state.reasoningEffort = payload.reasoning.current || state.reasoningEffort || 'default'; state.reasoningStatus = 'idle'; state.reasoningError = ''; } else { state.reasoningStatus = 'idle'; } modelTrigger.textContent = `Model · ${currentModel()}`; modelTrigger.disabled = state.modelStatus === 'loading'; modelPopover.innerHTML = '<div class="popover-label">Choose a model</div>'; for (const model of payload?.models || []) { const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${model === currentModel() ? 'selected' : ''}`; option.innerHTML = `<span class="model-check">${model === currentModel() ? '✓' : ''}</span><span>${esc(model)}<span class="model-meta">${esc(state.models?.provider || 'Host model catalog')}</span></span>`; option.onclick = async () => { modelPopover.hidden = true; modelTrigger.setAttribute('aria-expanded', 'false'); modelTrigger.disabled = true; state.modelStatus = 'loading'; state.modelError = ''; renderSettings(); try { await api('/v1/models', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }) }); const payload = await api('/v1/models'); state.modelStatus = 'ready'; state.modelReceipt = `Selected ${model}`; renderModels(payload); await refreshCapabilities(); renderReasoning(); renderModelSeatMenu(); renderSettings(); setStatus(`Model · ${model}`); } catch (error) { state.modelStatus = 'error'; state.modelError = error instanceof Error ? error.message : String(error); renderSettings(); setStatus(state.modelError, false); } finally { modelTrigger.disabled = state.modelStatus === 'loading'; } }; modelPopover.append(option); } };
         const renderModelSeatMenu = () => {
           if (!modelPopover || !modelTrigger) return;
           const capability = state.models?.reasoning;
@@ -2076,10 +2235,8 @@
             for (const optionData of options) {
               const selected = effort === optionData.id; const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${selected ? 'selected' : ''}`; option.setAttribute('role', 'menuitemradio'); option.setAttribute('aria-checked', String(selected)); option.innerHTML = `<span class="model-check">${selected ? '✓' : ''}</span><span>${esc(optionData.label)}<span class="model-meta">${esc(optionData.description || '')}</span></span>`;
               option.onclick = async () => {
-                const previousEffort = state.reasoningEffort; state.reasoningEffort = optionData.id; modelPopover.hidden = true; dispatchOverlay({ type: 'close', overlay: 'model-popover' });
-                try { await api('/v1/models', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reasoningEffort: optionData.id }) }); const next = await api('/v1/models'); state.models = next; state.reasoningEffort = next?.reasoning?.current || optionData.id; setStatus(`Effort · ${optionData.label} (next turn)`, true); }
-                catch (error) { state.reasoningEffort = previousEffort; setStatus(error instanceof Error ? error.message : String(error), false); }
-                renderModelSeatMenu(); renderComposerState(typedConnection?.store.getSnapshot());
+                modelPopover.hidden = true; dispatchOverlay({ type: 'close', overlay: 'model-popover' });
+                await saveReasoningEffort(optionData.id, optionData.label);
               };
               modelPopover.append(option);
             }
@@ -2100,39 +2257,26 @@
           const currentEffort = capability?.supported
             ? (capability.current || state.reasoningEffort || 'default')
             : 'default';
-          state.reasoningEffort = currentEffort;
-          if (!capability?.supported) reasoningTrigger.textContent = 'Effort · N/A';
-          else reasoningTrigger.textContent = `Effort · ${currentEffort === 'default' ? 'Default' : currentEffort}`;
+          if (capability?.supported) state.reasoningEffort = currentEffort;
+          const supported = Boolean(capability?.supported && options.length > 0);
+          reasoningTrigger.hidden = !supported;
+          reasoningTrigger.disabled = !supported || state.reasoningStatus === 'saving';
+          reasoningTrigger.setAttribute('aria-busy', String(state.reasoningStatus === 'saving'));
+          reasoningTrigger.title = supported
+            ? (state.reasoningStatus === 'saving' ? 'Saving effort for the next turn…' : 'Reasoning effort for the next turn')
+            : 'This model does not expose reasoning effort controls';
+          if (supported) reasoningTrigger.textContent = `Effort · ${currentEffort === 'default' ? 'Default' : currentEffort}`;
           reasoningPopover.innerHTML = '<div class="popover-label">Model and reasoning effort</div>';
-          if (!capability?.supported || options.length === 0) {
+          if (state.reasoningError) reasoningPopover.innerHTML += `<div class="empty-detail">${esc(state.reasoningError)}</div>`;
+          if (!supported) {
             reasoningPopover.innerHTML += '<div class="empty-detail">This model does not expose reasoning effort controls.</div>';
-            reasoningTrigger.disabled = true;
             return;
           }
-          reasoningTrigger.disabled = false;
           for (const optionData of options) {
             const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${currentEffort === optionData.value ? 'selected' : ''}`;
             option.innerHTML = `<span class="model-check">${currentEffort === optionData.value ? '✓' : ''}</span><span>${optionData.label}<span class="model-meta">${optionData.detail}</span></span>`;
-            option.onclick = () => {
-              const previousEffort = currentEffort;
-              state.reasoningEffort = optionData.value;
-              reasoningPopover.hidden = true;
-              dispatchOverlay({ type: 'close', overlay: 'reasoning-popover' });
-              void (async () => {
-                try {
-                  await api('/v1/models', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reasoningEffort: optionData.value }) });
-                  const payload = await api('/v1/models');
-                  state.models = payload;
-                  state.reasoningEffort = payload?.reasoning?.current || optionData.value;
-                  setStatus(`Effort · ${optionData.label} (next turn)`, true);
-                } catch (error) {
-                  state.reasoningEffort = previousEffort;
-                  setStatus(error instanceof Error ? error.message : String(error), false);
-                }
-                renderReasoning();
-                renderComposerState(typedConnection?.store.getSnapshot());
-              })();
-            };
+            option.disabled = state.reasoningStatus === 'saving';
+            option.onclick = () => { reasoningPopover.hidden = true; dispatchOverlay({ type: 'close', overlay: 'reasoning-popover' }); void saveReasoningEffort(optionData.value, optionData.label); };
             reasoningPopover.append(option);
           }
         };

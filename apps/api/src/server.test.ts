@@ -665,8 +665,14 @@ describe("Phase 2 API", () => {
       const address = configured.address();
       if (address === null || typeof address === "string") throw new Error("Model API did not bind");
       const configuredUrl = `http://127.0.0.1:${address.port}`;
-      const models = await (await fetch(`${configuredUrl}/v1/models`)).json() as { current: string; models: string[] };
-      expect(models).toMatchObject({ current: "deepseek-v4-flash", models: [...DEEPSEEK_MODELS] });
+      const models = await (await fetch(`${configuredUrl}/v1/models`)).json() as { current: string; models: string[]; reasoning: { supported: boolean; current?: string; options: { id: string }[] } };
+      expect(models).toMatchObject({ current: "deepseek-v4-flash", models: [...DEEPSEEK_MODELS], reasoning: { supported: true } });
+      expect(models.reasoning.options.map((option) => option.id)).toEqual(["default", "off", "high", "max"]);
+      const effort = await fetch(`${configuredUrl}/v1/models`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ reasoningEffort: "high" }) });
+      expect(effort.status).toBe(200);
+      expect(await effort.json()).toMatchObject({ reasoning: { supported: true, current: "high" } });
+      const effortReadback = await (await fetch(`${configuredUrl}/v1/models`)).json() as { reasoning: { current?: string } };
+      expect(effortReadback.reasoning.current).toBe("high");
       const switched = await fetch(`${configuredUrl}/v1/models`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "deepseek-v4-pro" }) });
       expect(switched.status).toBe(200);
       expect(await switched.json()).toMatchObject({ model: { model: "deepseek-v4-pro" } });

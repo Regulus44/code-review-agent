@@ -58,7 +58,7 @@
 - 右侧 Details panel 汇总大量 Goal、Plan、Todo、Task、Trajectory、MCP、LSP、Job 等信息；
 - Composer 已有 Attach、Plan、权限 Mode、Model、Context meter、Steer 和 Send 控件；
 - `/v1/sessions/:id/cancel` 已存在，Runtime 也有 `turn/ended` 的 `stopped` 状态；
-- `/v1/models` 已支持模型目录和模型切换；当前缺少独立的“推理强度/工作强度”契约；
+- `/v1/models` 已支持模型目录、模型切换和 host-backed reasoning capability；DeepSeek provider 可切换 `default/off/high/max`，Echo 或未声明能力的 provider 明确显示不可用；
 - `context-presenter.ts` 目前只把上下文预算投影成简短的 `Context · used/budget` 文本。
 
 当前运行截图（用于改造前基线）：
@@ -265,7 +265,7 @@ Model and reasoning effort
   Reasoning   Default                  ›
 ```
 
-再分别进入模型列表或 reasoning effort 列表。模型列表使用 `menuitemradio` 和 `aria-checked` 标记当前值；切换失败时保留原选择并显示错误。当前后端 `/v1/models` 只返回模型目录，没有返回 `reasoning` capability，因此实际页面会显示 `Reasoning · N/A` 且禁用该行。待 Host 声明能力后，前端无需改变入口结构即可显示可用档位。
+再分别进入模型列表或 reasoning effort 列表。模型列表使用 `menuitemradio` 和 `aria-checked` 标记当前值；切换失败时保留原选择并显示错误。当前 `/v1/models` 会返回 `reasoning.supported`、当前值和可选档位。DeepSeek provider 的选择会通过 `POST /v1/models { reasoningEffort }` 写入 Host，并只对后续 turn 生效；页面保留原模型目录，不会因为 reasoning-only receipt 而进入持续 loading。Echo 或其他未声明能力的 provider 仍显示 `Reasoning · N/A`，不会伪造档位。
 
 在窄屏下，模型和推理强度合并成一个 `Model · High` 菜单，权限模式仍单独保留。
 
@@ -318,7 +318,7 @@ Model and reasoning effort
 
 当前实现已将这一条提升为最高优先级的交互约束：同一轮中的工具、Job、Terminal、LSP、MCP 统一进入一个 `Agent activity` 活动组。活动组使用原生 `<details>`，默认折叠，摘要只显示项目数量和运行中数量。权限请求、用户交互请求则作为 Conversation 中独立的决策卡片出现，不埋在工具活动组里；卡片保留操作按钮，命令、workspace、expiresAt、输入 JSON 等技术信息只有在点击 `Details` 后才显示。
 
-兼容旧事件回放的 fallback renderer 也遵循同一规则：工具生命周期、Job/Terminal、LSP/MCP 和 patch 预览不再逐条追加到主对话，而是进入活动组；权限/交互请求保留在主对话决策位置；主对话其余内容保留用户、助手、错误、附件、计划、任务和目标等结果导向摘要。`context/compacted`、`queue/changed` 等内部事件继续保留在轨迹/详情视图，不污染 Conversation。
+兼容旧事件回放的 fallback renderer 也遵循同一规则：工具生命周期、Job/Terminal、LSP/MCP 和 patch 预览不再逐条追加到主对话，而是进入活动组；权限/交互请求保留在主对话决策位置；Goal、Plan、Todo 生命周期由顶部 Goal bar、Planning 面板和轨迹承载，不再重复插入原始事件文本。主对话其余内容保留用户、助手、错误和附件等结果导向摘要。`context/compacted`、`queue/changed` 等内部事件继续保留在轨迹/详情视图，不污染 Conversation。
 
 当前“轨迹”Tab 是轻量诊断雏形，用于承载原始事件和 bounded inspector；后续可在不改变 Conversation 规则的前提下扩展筛选、时间线和事件详情。
 
@@ -484,11 +484,11 @@ git diff --check
 本轮统一模型入口的真实浏览器检查结果：
 
 1. 页面启动状态为 `ready`，连接状态为 `Connected`。
-2. Composer 显示 `Model · deepseek-v4-flash · N/A`；`N/A` 来自当前 Host 未声明 reasoning capability。
-3. 点击入口后，根菜单包含 `Model` 和禁用的 `Reasoning` 两行。
+2. Composer 显示当前模型以及 host 返回的 reasoning 值；未声明能力时显示 `N/A`。
+3. DeepSeek capability 返回时，根菜单包含可进入的 `Model` 和 `Reasoning` 两行；选择档位后收到 durable receipt，并保留模型目录。
 4. 点击 `Model` 后，模型子菜单包含三个 provider 返回的模型，并以 `aria-checked=true` 标记当前模型。
 5. Escape、点击菜单外部和返回按钮均能关闭或回到根菜单。
-6. API 实际返回的模型目录为 `deepseek-v4-flash`、`deepseek-v4-pro`、`deepseek-v4-flash-vision-exp`；没有 reasoning 能力时不显示虚假的档位。
+6. API 实际返回的模型目录为 `deepseek-v4-flash`、`deepseek-v4-pro`、`deepseek-v4-flash-vision-exp`；DeepSeek provider 返回 `default/off/high/max`，没有 reasoning 能力时不显示虚假的档位。
 
 对应检查命令：
 
