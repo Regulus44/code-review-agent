@@ -4,6 +4,7 @@ import {
   type AttachmentReceipt,
   type ChatMessage,
   type ChatModel,
+  type ModelUsage,
   type ModelToolCall,
   type ModelToolDefinition,
   type SessionEventStore,
@@ -43,6 +44,8 @@ import { buildAgentSystemPrompt } from "./system-prompt.js";
 export interface AgentHostOptions {
   readonly store: SessionEventStore;
   readonly model?: ChatModel;
+  /** Provider-owned reasoning level applied to future turns when supplied. */
+  readonly reasoningEffort?: string;
   readonly fallbackModels?: readonly ChatModel[];
   readonly systemPrompt?: string;
   readonly maxSteps?: number;
@@ -112,6 +115,7 @@ interface PendingTurn {
   readonly sessionId: SessionId;
   readonly turnId: TurnId;
   readonly content: string;
+  readonly reasoningEffort?: string;
   readonly previousMessages: readonly ChatMessage[];
 }
 
@@ -137,6 +141,7 @@ interface RecoveredTurn {
 interface CollectedModelResponse {
   readonly text: string;
   readonly toolCalls: readonly ModelToolCall[];
+  readonly usage?: ModelUsage;
 }
 
 export type TenantModelRoute = Pick<ModelRouteRecord, "provider" | "model" | "baseUrl" | "credentialRef">;
@@ -147,6 +152,7 @@ export class AgentHost {
   private readonly fallbackModels: readonly ChatModel[];
   private readonly customSystemPrompt: string | undefined;
   private readonly permissionPreset: PermissionPreset | undefined;
+  private reasoningEffort: string | undefined;
   private readonly controllers = new Map<TurnId, AbortController>();
   private readonly activeTurns = new Map<SessionId, TurnId>();
   private readonly queues = new Map<SessionId, PendingTurn[]>();
@@ -175,6 +181,7 @@ export class AgentHost {
 
   constructor(private readonly options: AgentHostOptions) {
     this.model = options.model ?? new EchoChatModel();
+    this.reasoningEffort = normalizeReasoningEffort(options.reasoningEffort);
     this.fallbackModels = options.fallbackModels ?? [];
     this.compactionEnabled = options.compactionEnabled !== false;
     this.contextBudget = options.contextBudget;
@@ -202,6 +209,15 @@ export class AgentHost {
   /** Replaces the model used for turns that have not started yet. */
   setModel(model: ChatModel): void {
     this.model = model;
+  }
+
+  /** Sets the default reasoning level for future turns; active turns keep their recorded value. */
+  setReasoningEffort(effort: string | undefined): void {
+    this.reasoningEffort = normalizeReasoningEffort(effort);
+  }
+
+  currentReasoningEffort(): string | undefined {
+    return this.reasoningEffort;
   }
 
   /** Selects a host-created model for one tenant without changing other tenants or legacy local sessions. */
@@ -1044,29 +1060,30 @@ export class AgentHost {
     return cancellable ? this.toolRuntime.cancel(toolCallId) : false;
   }
 
-  async sendMessage(sessionId: SessionId, content: string, commandId?: string): Promise<TurnId> {
+  async sendMessage(sessionId: SessionId, content: string, commandId?: string, options?: { readonly reasoningEffort?: string }): Promise<TurnId> {
     await this.ready;
     const projection = await this.options.store.project(sessionId);
     if (projection === undefined) throw new Error(`Unknown session: ${sessionId}`);
     return this.withQuotaLock(projection.ownership?.tenantId, async () => {
       await this.enforceTurnQuota(projection);
-      return this.sendMessageInternal(sessionId, content, commandId);
+      return this.sendMessageInternal(sessionId, content, commandId, options);
     });
   }
 
-  private async sendMessageInternal(sessionId: SessionId, content: string, commandId?: string): Promise<TurnId> {
+  private async sendMessageInternal(sessionId: SessionId, content: string, commandId?: string, options?: { readonly reasoningEffort?: string }): Promise<TurnId> {
     await this.ready;
     const projection = await this.options.store.project(sessionId);
     if (projection === undefined) throw new Error(`Unknown session: ${sessionId}`);
     if (content.trim() === "") throw new Error("Message content cannot be empty");
 
+    const reasoningEffort = normalizeReasoningEffort(options?.reasoningEffort ?? this.reasoningEffort);
     const turnId = brand<string, "TurnId">(`turn_${randomUUID()}`);
     const idempotencyKey = commandId ?? `cmd_${randomUUID()}`;
     const claim = await this.options.store.claimCommand({
       sessionId,
       commandId: idempotencyKey,
       kind: "send_message",
-      request: { content },
+      request: { content, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) },
       result: { turnId },
     });
     if (!claim.created) {
@@ -1079,6 +1096,7 @@ export class AgentHost {
       sessionId,
       turnId,
       content,
+      ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
       previousMessages: await this.conversationMessages(sessionId),
     };
     await this.options.store.append({
@@ -1093,7 +1111,7 @@ export class AgentHost {
       turnId,
       correlationId: idempotencyKey,
       type: "turn/queued",
-      payload: { commandId: idempotencyKey },
+      payload: { commandId: idempotencyKey, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) },
     });
     const queue = this.queues.get(sessionId) ?? [];
     queue.push(pending);
@@ -1325,16 +1343,19 @@ export class AgentHost {
       let projection = await this.options.store.project(summary.id);
       if (projection === undefined) continue;
       this.toolRuntime.setSessionPermissionPreset(summary.id, projection.permissionPreset ?? this.permissionPreset ?? "ask-on-write");
-      await this.toolRuntime.restorePending(summary.id, effectiveWorkspaceRoot(projection), await this.options.store.list(summary.id));
+      const history = await this.options.store.list(summary.id);
+      await this.toolRuntime.restorePending(summary.id, effectiveWorkspaceRoot(projection), history);
       projection = await this.options.store.project(summary.id);
       if (projection === undefined) continue;
       for (const turn of projection.turns
         .filter((item) => item.status === "queued" && item.userMessage !== undefined)
         .sort((left, right) => (left.queuePosition ?? Number.MAX_SAFE_INTEGER) - (right.queuePosition ?? Number.MAX_SAFE_INTEGER) || left.lastSequence - right.lastSequence)) {
+        const restoredReasoningEffort = reasoningEffortForTurn(history, turn.id);
         this.enqueue({
           sessionId: summary.id,
           turnId: turn.id,
           content: turn.userMessage as string,
+          ...(restoredReasoningEffort === undefined ? {} : { reasoningEffort: restoredReasoningEffort }),
           previousMessages: await this.conversationMessages(summary.id, turn.id),
         });
       }
@@ -1461,7 +1482,7 @@ export class AgentHost {
     this.activeTurns.set(sessionId, pending.turnId);
     this.controllers.set(pending.turnId, controller);
     await this.appendQueueChanged(sessionId, queue ?? [], undefined);
-    void this.runTurn(sessionId, pending.turnId, controller, pending.previousMessages, pending.content).finally(() => {
+    void this.runTurn(sessionId, pending.turnId, controller, pending.previousMessages, pending.content, pending.reasoningEffort).finally(() => {
       this.controllers.delete(pending.turnId);
       this.activeTurns.delete(sessionId);
       this.steerQueues.delete(pending.turnId);
@@ -1490,6 +1511,7 @@ export class AgentHost {
     controller: AbortController,
     previousMessages: readonly ChatMessage[],
     content: string,
+    reasoningEffort?: string,
   ): Promise<void> {
     try {
       this.metricCounters.turnsStarted += 1;
@@ -1497,13 +1519,13 @@ export class AgentHost {
       this.turnTraces.set(turnId, traceId);
       const projection = await this.options.store.project(sessionId);
       const route = this.modelRouteForTenant(projection?.ownership?.tenantId);
-      await this.options.store.append({ sessionId, turnId, type: "turn/started", payload: { traceId, ...(route === undefined ? {} : route) } });
+      await this.options.store.append({ sessionId, turnId, type: "turn/started", payload: { traceId, ...(route === undefined ? {} : route), ...(reasoningEffort === undefined ? {} : { reasoningEffort }) } });
       const messages: ChatMessage[] = [
         { role: "system", content: await this.systemMessage(sessionId) },
         ...previousMessages,
         { role: "user", content },
       ];
-      await this.runSteps(sessionId, turnId, controller, messages);
+      await this.runSteps(sessionId, turnId, controller, messages, reasoningEffort);
     } catch (error) {
       await this.finishTurnAfterError(sessionId, turnId, controller, error);
     } finally {
@@ -1528,16 +1550,20 @@ export class AgentHost {
     }
   }
 
-  private async runSteps(sessionId: SessionId, turnId: TurnId, controller: AbortController, messages: ChatMessage[]): Promise<void> {
+  private async runSteps(sessionId: SessionId, turnId: TurnId, controller: AbortController, messages: ChatMessage[], reasoningEffort?: string): Promise<void> {
     for (let step = 1; step <= this.maxSteps; step += 1) {
       if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
       this.appendSteers(messages, turnId);
       await this.compactTurnContext(sessionId, turnId, messages);
       await this.options.store.append({ sessionId, turnId, type: "step/started", payload: { step } });
       const projection = await this.options.store.project(sessionId);
-      const response = await this.collectModelResponse(sessionId, turnId, controller, messages, projection?.ownership?.tenantId);
+      const response = await this.collectModelResponse(sessionId, turnId, controller, messages, projection?.ownership?.tenantId, reasoningEffort);
       if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
-      const assistantPayload = { content: response.text, ...(response.toolCalls.length === 0 ? {} : { toolCalls: response.toolCalls }) };
+      const assistantPayload = {
+        content: response.text,
+        ...(response.toolCalls.length === 0 ? {} : { toolCalls: response.toolCalls }),
+        ...(response.usage === undefined ? {} : { usage: response.usage }),
+      };
       await this.options.store.append({ sessionId, turnId, type: "assistant/message", payload: assistantPayload });
       const steersAfterResponse = this.takeSteers(turnId);
       if (response.toolCalls.length === 0) {
@@ -1648,6 +1674,7 @@ export class AgentHost {
     controller: AbortController,
     messages: readonly ChatMessage[],
     tenantId?: string,
+    reasoningEffort?: string,
   ): Promise<CollectedModelResponse> {
     const candidates = [this.tenantModels.get(tenantId ?? "") ?? this.model, ...this.fallbackModels];
     let lastError: unknown = new Error("No model configured");
@@ -1656,8 +1683,9 @@ export class AgentHost {
       if (model === undefined) continue;
       const textParts: string[] = [];
       const calls = new Map<number, { id?: string; name?: string; arguments: string }>();
+      let usage: ModelUsage | undefined;
       try {
-        for await (const part of model.stream({ messages, tools: this.modelTools(sessionId, tenantId), toolChoice: "auto", signal: controller.signal })) {
+        for await (const part of model.stream({ messages, tools: this.modelTools(sessionId, tenantId), toolChoice: "auto", ...(reasoningEffort === undefined ? {} : { reasoningEffort }), signal: controller.signal })) {
           if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
           if (part.type === "text_delta") {
             textParts.push(part.text);
@@ -1668,6 +1696,8 @@ export class AgentHost {
           } else if (part.type === "tool_call_delta") {
             const current = calls.get(part.index) ?? { arguments: "" };
             calls.set(part.index, { ...current, arguments: `${current.arguments}${part.arguments}` });
+          } else if (part.type === "usage") {
+            usage = mergeModelUsage(usage, part.usage);
           } else if (part.type === "error") {
             throw new Error(`${part.code}: ${part.message}`);
           }
@@ -1677,7 +1707,7 @@ export class AgentHost {
           if (call.name === undefined || call.name.trim() === "") throw new Error(`MALFORMED_TOOL_CALL: missing tool name at index ${index}`);
           toolCalls.push({ id: call.id ?? `call_${randomUUID()}`, name: call.name, arguments: call.arguments });
         }
-        return { text: textParts.join(""), toolCalls };
+        return { text: textParts.join(""), toolCalls, ...(usage === undefined ? {} : { usage }) };
       } catch (error) {
         lastError = error;
         if (controller.signal.aborted || textParts.length > 0 || modelIndex >= candidates.length - 1) throw error;
@@ -1857,6 +1887,30 @@ function sessionIdFrom(value: string): SessionId {
 
 function turnIdFrom(value: string): TurnId {
   return brand<string, "TurnId">(value);
+}
+
+function normalizeReasoningEffort(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "" || normalized === "default") return undefined;
+  if (normalized.length > 64) throw new Error("reasoningEffort must be 64 characters or fewer");
+  if (!/^[a-z0-9][a-z0-9._-]*$/u.test(normalized)) throw new Error("reasoningEffort contains unsupported characters");
+  return normalized;
+}
+
+function mergeModelUsage(previous: ModelUsage | undefined, next: ModelUsage): ModelUsage {
+  return {
+    ...(previous?.inputTokens === undefined && next.inputTokens === undefined ? {} : { inputTokens: (previous?.inputTokens ?? 0) + (next.inputTokens ?? 0) }),
+    ...(previous?.outputTokens === undefined && next.outputTokens === undefined ? {} : { outputTokens: (previous?.outputTokens ?? 0) + (next.outputTokens ?? 0) }),
+    ...(previous?.cacheReadTokens === undefined && next.cacheReadTokens === undefined ? {} : { cacheReadTokens: (previous?.cacheReadTokens ?? 0) + (next.cacheReadTokens ?? 0) }),
+    ...(previous?.reasoningTokens === undefined && next.reasoningTokens === undefined ? {} : { reasoningTokens: (previous?.reasoningTokens ?? 0) + (next.reasoningTokens ?? 0) }),
+  };
+}
+
+function reasoningEffortForTurn(events: readonly AgentEvent[], turnId: TurnId): string | undefined {
+  const queued = [...events].reverse().find((event) => event.turnId === turnId && event.type === "turn/queued");
+  const value = queued?.payload["reasoningEffort"];
+  return typeof value === "string" ? normalizeReasoningEffort(value) : undefined;
 }
 
 function commandConflict(message: string): Error {

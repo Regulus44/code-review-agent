@@ -719,6 +719,8 @@ export interface ModelRequest {
   readonly messages: readonly ChatMessage[];
   readonly tools?: readonly ModelToolDefinition[];
   readonly toolChoice?: "auto" | "none" | "required" | { readonly type: "function"; readonly name: string };
+  /** Provider-owned reasoning effort. Omitted means provider default. */
+  readonly reasoningEffort?: string;
   readonly signal?: AbortSignal;
 }
 
@@ -727,8 +729,16 @@ export type ModelStreamPart =
   | { readonly type: "tool_call_start"; readonly index: number; readonly id?: string; readonly name?: string }
   | { readonly type: "tool_call_delta"; readonly index: number; readonly arguments: string }
   | { readonly type: "tool_call_end"; readonly index: number }
+  | { readonly type: "usage"; readonly usage: ModelUsage }
   | { readonly type: "error"; readonly code: string; readonly message: string }
   | { readonly type: "done" };
+
+export interface ModelUsage {
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  readonly cacheReadTokens?: number;
+  readonly reasoningTokens?: number;
+}
 
 export interface ChatModel {
   stream(request: ModelRequest): AsyncIterable<ModelStreamPart>;

@@ -349,13 +349,25 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         current: route?.model ?? modelRuntime.info?.model ?? "custom",
         configured: route === undefined ? modelRuntime.info?.configured ?? false : true,
         models: modelRuntime.availableModels,
+        reasoning: reasoningCapability(route?.provider ?? modelRuntime.info?.provider, host.currentReasoningEffort()),
         ...(route === undefined ? {} : { route: publicModelRoute(route) }),
       });
       return;
     }
     if (request.method === "POST" && url.pathname === "/v1/models") {
-      if (modelRuntime.selector === undefined) throw new HttpError(409, "model switching is not configured");
       const body = await readJson(request);
+      const reasoningEffort = body.reasoningEffort === undefined ? undefined : requireReasoningEffort(body.reasoningEffort);
+      const provider = identity === undefined ? modelRuntime.info?.provider : modelRuntime.routes.get(identity.tenantId)?.provider ?? modelRuntime.info?.provider;
+      if (reasoningEffort !== undefined) {
+        const capability = reasoningCapability(provider, host.currentReasoningEffort());
+        if (!capability.supported || !capability.options.some((option) => option.id === reasoningEffort)) throw new HttpError(400, "unsupported reasoning effort");
+        host.setReasoningEffort(reasoningEffort);
+      }
+      if (body.model === undefined) {
+        sendJson(response, 200, { reasoning: reasoningCapability(provider, host.currentReasoningEffort()) });
+        return;
+      }
+      if (modelRuntime.selector === undefined) throw new HttpError(409, "model switching is not configured");
       if (typeof body.model !== "string" || body.model.length === 0) throw new HttpError(400, "model is required");
       if (!modelRuntime.availableModels.includes(body.model)) throw new HttpError(400, "unsupported model");
       const requestedCredential = identity === undefined || body.credentialRef === undefined ? undefined : parseCredentialReference(body.credentialRef);
@@ -365,7 +377,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       if (identity === undefined) {
         host.setModel(selected.model);
         modelRuntime.info = selected.config;
-        sendJson(response, 200, { model: selected.config });
+        sendJson(response, 200, { model: selected.config, reasoning: reasoningCapability(selected.config.provider, host.currentReasoningEffort()) });
         return;
       }
       const route: ModelRouteRecord = {
@@ -380,7 +392,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const persisted = modelRuntime.routeBackend.upsertModelRoute(route);
       host.setTenantModel(identity.tenantId, selected.model, routeSelection(persisted));
       modelRuntime.routes.set(identity.tenantId, persisted);
-      sendJson(response, 200, { model: selected.config, route: publicModelRoute(persisted) });
+      sendJson(response, 200, { model: selected.config, route: publicModelRoute(persisted), reasoning: reasoningCapability(selected.config.provider, host.currentReasoningEffort()) });
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/tools") {
@@ -859,7 +871,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const body = await readJson(request);
         const content = body.content;
         if (typeof content !== "string") throw new HttpError(400, "content is required");
-        sendJson(response, 202, { turnId: await host.sendMessage(id, content, commandId(request, body)) });
+        const reasoningEffort = body.reasoningEffort === undefined ? undefined : requireReasoningEffort(body.reasoningEffort);
+        sendJson(response, 202, { turnId: await host.sendMessage(id, content, commandId(request, body), reasoningEffort === undefined ? undefined : { reasoningEffort }) });
         return;
       }
       if (request.method === "GET") {
@@ -1158,6 +1171,28 @@ function parsePageLimit(value: string | string[] | null | undefined): number | u
 function parsePermissionPreset(value: unknown): PermissionPreset {
   if (value === "read-only" || value === "workspace-write" || value === "ask-on-write" || value === "ask-on-execute" || value === "danger-full-access") return value;
   throw new HttpError(400, "permissionPreset must be read-only, workspace-write, ask-on-write, ask-on-execute, or danger-full-access");
+}
+
+function requireReasoningEffort(value: unknown): string {
+  if (typeof value !== "string") throw new HttpError(400, "reasoningEffort must be a string");
+  const normalized = value.trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9._-]*$/u.test(normalized) || normalized.length > 64) throw new HttpError(400, "reasoningEffort is invalid");
+  return normalized;
+}
+
+function reasoningCapability(provider: string | undefined, current: string | undefined): {
+  readonly supported: boolean;
+  readonly current?: string;
+  readonly options: readonly { readonly id: string; readonly label: string; readonly description: string }[];
+} {
+  const supported = provider === "deepseek";
+  const options = supported ? [
+    { id: "default", label: "Default", description: "Use the provider default" },
+    { id: "off", label: "Off", description: "Disable extra reasoning when supported" },
+    { id: "high", label: "High", description: "More deliberate work" },
+    { id: "max", label: "Max", description: "Highest available effort" },
+  ] : [];
+  return { supported, ...(current === undefined ? {} : { current }), options };
 }
 
 function parseGoalStatus(value: unknown): GoalStatus {

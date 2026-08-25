@@ -291,6 +291,23 @@ describe("AgentHost", () => {
     expect((await host.getSession(session.id))?.messages.at(-1)?.content).toBe("Echo: inspect this repository");
   });
 
+  it("persists provider-reported model usage on the assistant message", async () => {
+    const store = new InMemoryEventStore();
+    const model: ChatModel = {
+      async *stream(): AsyncIterable<ModelStreamPart> {
+        yield { type: "text_delta", text: "Measured." };
+        yield { type: "usage", usage: { inputTokens: 11, outputTokens: 5, cacheReadTokens: 2, reasoningTokens: 3 } };
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store, model });
+    const session = await host.createSession("D:/workspace");
+    const turn = await host.sendMessage(session.id, "measure usage");
+    await host.waitForTurn(turn);
+    const event = (await host.events(session.id)).find((item) => item.type === "assistant/message");
+    expect(event?.payload).toMatchObject({ usage: { inputTokens: 11, outputTokens: 5, cacheReadTokens: 2, reasoningTokens: 3 } });
+  });
+
   it("runs a model tool call, executes the tool, and continues with the tool result", async () => {
     const store = new InMemoryEventStore();
     const registry = new ToolRegistry();

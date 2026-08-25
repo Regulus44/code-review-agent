@@ -39,6 +39,11 @@ export interface ModelCatalogResponse {
   readonly current: string;
   readonly configured: boolean;
   readonly models: readonly string[];
+  readonly reasoning?: {
+    readonly supported: boolean;
+    readonly current?: string;
+    readonly options: readonly { readonly id: string; readonly label: string; readonly description?: string }[];
+  };
   readonly route?: {
     readonly provider: string;
     readonly model: string;
@@ -324,11 +329,11 @@ export class WebApiClient {
     return this.request("/v1/metrics");
   }
 
-  sendMessage(sessionId: SessionId, content: string, commandId?: string): Promise<{ readonly turnId: TurnId }> {
+  sendMessage(sessionId: SessionId, content: string, commandId?: string, reasoningEffort?: string): Promise<{ readonly turnId: TurnId }> {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}`, {
       method: "POST",
       commandId,
-      body: { content },
+      body: { content, ...(reasoningEffort === undefined || reasoningEffort === "default" ? {} : { reasoningEffort }) },
     });
   }
 
@@ -469,8 +474,8 @@ export class WebApiClient {
     return this.request("/v1/models");
   }
 
-  selectModel(model: string, commandId?: string, credentialRef?: McpCredentialReference): Promise<{ readonly model: Readonly<Record<string, unknown>>; readonly route?: ModelCatalogResponse["route"] }> {
-    return this.request("/v1/models", { method: "POST", commandId, body: { model, ...(credentialRef === undefined ? {} : { credentialRef }) } });
+  selectModel(model: string, commandId?: string, credentialRef?: McpCredentialReference, reasoningEffort?: string): Promise<{ readonly model: Readonly<Record<string, unknown>>; readonly route?: ModelCatalogResponse["route"]; readonly reasoning?: ModelCatalogResponse["reasoning"] }> {
+    return this.request("/v1/models", { method: "POST", commandId, body: { model, ...(credentialRef === undefined ? {} : { credentialRef }), ...(reasoningEffort === undefined || reasoningEffort === "default" ? {} : { reasoningEffort }) } });
   }
 
   listCredentials(): Promise<CredentialListResponse> {

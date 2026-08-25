@@ -8,8 +8,17 @@ describe("shell layout", () => {
     expect(presentShellLayout(state, "desktop").appClassName).toContain("sidebar-collapsed");
     state = reduceShellLayout(state, { type: "toggle-details" });
     const intent = presentShellLayout(state, "desktop");
-    expect(intent.detailsOpen).toBe(false);
-    expect(intent.appClassName).toContain("details-collapsed");
+    expect(intent.detailsOpen).toBe(true);
+    expect(intent.appClassName).toContain("details-open");
+  });
+
+  it("clamps a resizable sidebar to the desktop bounds", () => {
+    let state = createShellLayoutState();
+    state = reduceShellLayout(state, { type: "set-sidebar-width", widthPx: 999 });
+    expect(state.sidebarWidthPx).toBe(360);
+    state = reduceShellLayout(state, { type: "set-sidebar-width", widthPx: 100 });
+    expect(state.sidebarWidthPx).toBe(220);
+    expect(presentShellLayout(state, "desktop").sidebarWidthPx).toBe(220);
   });
 
   it("opens the sidebar as a mobile overlay and closes it on desktop", () => {

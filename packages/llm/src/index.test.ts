@@ -35,6 +35,39 @@ describe("EchoChatModel", () => {
     vi.unstubAllGlobals();
   });
 
+  it("parses usage-only SSE chunks without choices", async () => {
+    const modelFetch: typeof fetch = async () => new Response(
+      'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'
+        + 'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":7,"prompt_tokens_details":{"cached_tokens":3},"completion_tokens_details":{"reasoning_tokens":4}}}\n\n'
+        + "data: [DONE]\n\n",
+      { headers: { "content-type": "text/event-stream" } },
+    );
+    const parts = [];
+    for await (const part of new OpenAICompatibleChatModel({ baseUrl: "https://example.test/v1", model: "coder", fetch: modelFetch }).stream({ messages: [{ role: "user", content: "hi" }] })) {
+      parts.push(part);
+    }
+    expect(parts).toEqual([
+      { type: "text_delta", text: "ok" },
+      { type: "usage", usage: { inputTokens: 12, outputTokens: 7, cacheReadTokens: 3, reasoningTokens: 4 } },
+      { type: "done" },
+    ]);
+  });
+
+  it("passes provider reasoning effort through the wire request", async () => {
+    let requestInit: RequestInit | undefined;
+    const modelFetch: typeof fetch = async (_input, init) => {
+      requestInit = init;
+      return new Response("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]", { headers: { "content-type": "text/event-stream" } });
+    };
+    for await (const _part of new OpenAICompatibleChatModel({ baseUrl: "https://example.test", model: "coder", fetch: modelFetch }).stream({
+      messages: [{ role: "user", content: "hi" }],
+      reasoningEffort: "high",
+    })) {
+      // consume stream
+    }
+    expect(JSON.parse(String(requestInit?.body))).toMatchObject({ reasoning_effort: "high" });
+  });
+
   it("sends the API key only as an authorization header", async () => {
     let requestInit: RequestInit | undefined;
     const modelFetch: typeof fetch = async (_input, init) => {

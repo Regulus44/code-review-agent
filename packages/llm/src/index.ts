@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatModel, ModelRequest, ModelStreamPart, ModelToolCall } from "@code-review-agent/contracts";
+import type { ChatMessage, ChatModel, ModelRequest, ModelStreamPart, ModelToolCall, ModelUsage } from "@code-review-agent/contracts";
 
 export interface OpenAICompatibleOptions {
   readonly baseUrl: string;
@@ -94,6 +94,9 @@ export class OpenAICompatibleChatModel implements ChatModel {
               ? request.toolChoice
               : { type: "function", function: { name: request.toolChoice.name } },
           }),
+          ...(request.reasoningEffort === undefined || request.reasoningEffort === "default" || request.reasoningEffort === "off"
+            ? {}
+            : { reasoning_effort: request.reasoningEffort }),
         }),
         ...(request.signal === undefined ? {} : { signal: request.signal }),
       }, request.signal);
@@ -200,6 +203,7 @@ interface ParsedSseDelta {
   readonly text?: string;
   readonly toolCalls: readonly ParsedToolCallDelta[];
   readonly finishReason?: string;
+  readonly usage?: ModelUsage;
 }
 
 interface ParsedSseDone {
@@ -227,6 +231,7 @@ function partsForParsedSse(parsed: ParsedSse, openToolIndices: Set<number>): rea
   }
   const parts: ModelStreamPart[] = [];
   if (parsed.text !== undefined && parsed.text.length > 0) parts.push({ type: "text_delta", text: parsed.text });
+  if (parsed.usage !== undefined) parts.push({ type: "usage", usage: parsed.usage });
   for (const toolCall of parsed.toolCalls) {
     if (!openToolIndices.has(toolCall.index)) {
       openToolIndices.add(toolCall.index);
@@ -262,10 +267,11 @@ function publicBaseUrl(value: string): string {
 
 function extractDelta(value: unknown): ParsedSseDelta {
   if (typeof value !== "object" || value === null) return { kind: "delta", toolCalls: [] };
+  const usage = parseUsage((value as { usage?: unknown }).usage);
   const choices = (value as { choices?: unknown }).choices;
-  if (!Array.isArray(choices) || choices.length === 0) return { kind: "delta", toolCalls: [] };
+  if (!Array.isArray(choices) || choices.length === 0) return { kind: "delta", toolCalls: [], ...(usage === undefined ? {} : { usage }) };
   const first = choices[0];
-  if (typeof first !== "object" || first === null) return { kind: "delta", toolCalls: [] };
+  if (typeof first !== "object" || first === null) return { kind: "delta", toolCalls: [], ...(usage === undefined ? {} : { usage }) };
   const delta = (first as { delta?: unknown }).delta;
   const finishReason = (first as { finish_reason?: unknown }).finish_reason;
   const content = typeof delta === "object" && delta !== null ? (delta as { content?: unknown }).content : undefined;
@@ -288,7 +294,42 @@ function extractDelta(value: unknown): ParsedSseDelta {
     ...(typeof content === "string" ? { text: content } : {}),
     toolCalls,
     ...(typeof finishReason === "string" ? { finishReason } : {}),
+    ...(usage === undefined ? {} : { usage }),
   };
+}
+
+function parseUsage(value: unknown): ModelUsage | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const source = value as Record<string, unknown>;
+  const promptDetails = typeof source.prompt_tokens_details === "object" && source.prompt_tokens_details !== null
+    ? source.prompt_tokens_details as Record<string, unknown>
+    : undefined;
+  const completionDetails = typeof source.completion_tokens_details === "object" && source.completion_tokens_details !== null
+    ? source.completion_tokens_details as Record<string, unknown>
+    : undefined;
+  const inputTokens = finiteNonNegativeNumber(source.prompt_tokens ?? source.input_tokens);
+  const outputTokens = finiteNonNegativeNumber(source.completion_tokens ?? source.output_tokens);
+  const cacheReadTokens = finiteNonNegativeNumber(
+    source.prompt_cache_hit_tokens
+      ?? source.cache_read_tokens
+      ?? source.cached_tokens
+      ?? promptDetails?.cached_tokens,
+  );
+  const reasoningTokens = finiteNonNegativeNumber(
+    source.reasoning_tokens
+      ?? completionDetails?.reasoning_tokens,
+  );
+  if (inputTokens === undefined && outputTokens === undefined && cacheReadTokens === undefined && reasoningTokens === undefined) return undefined;
+  return {
+    ...(inputTokens === undefined ? {} : { inputTokens }),
+    ...(outputTokens === undefined ? {} : { outputTokens }),
+    ...(cacheReadTokens === undefined ? {} : { cacheReadTokens }),
+    ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+  };
+}
+
+function finiteNonNegativeNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 function toWireMessage(message: ChatMessage): unknown {

@@ -25,7 +25,7 @@
         --amber: #c78327;
         --red: #d54444;
         --shadow: 0 14px 40px rgba(30, 39, 55, 0.12);
-        --sidebar-width: 300px;
+        --sidebar-width: 252px;
         --details-width: 300px;
         --rail-width: 56px;
         --radius-lg: 22px;
@@ -39,12 +39,16 @@
       button { border: 0; cursor: pointer; color: inherit; }
       button:disabled { cursor: wait; opacity: 0.55; }
       .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-      .app-shell { display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--details-width); height: 100dvh; min-height: 0; transition: grid-template-columns 0.2s var(--ease); }
-      .app-shell.sidebar-collapsed { grid-template-columns: var(--rail-width) minmax(0, 1fr) var(--details-width); }
-      .app-shell.details-collapsed { grid-template-columns: var(--sidebar-width) minmax(0, 1fr) 0; }
-      .app-shell.sidebar-collapsed.details-collapsed { grid-template-columns: var(--rail-width) minmax(0, 1fr) 0; }
+      .app-shell { display: grid; grid-template-columns: var(--sidebar-width) 4px minmax(0, 1fr); height: 100dvh; min-height: 0; transition: grid-template-columns 0.2s var(--ease); }
+      .app-shell.sidebar-collapsed { grid-template-columns: var(--rail-width) 4px minmax(0, 1fr); }
+      .app-shell.details-collapsed { grid-template-columns: var(--sidebar-width) 4px minmax(0, 1fr); }
+      .app-shell.sidebar-collapsed.details-collapsed { grid-template-columns: var(--rail-width) 4px minmax(0, 1fr); }
       .sidebar, .details-panel { min-width: 0; overflow: hidden; background: var(--surface); }
       .sidebar { display: flex; flex-direction: column; border-right: 1px solid var(--border); }
+      .sidebar-resizer { position: relative; z-index: 4; width: 4px; cursor: col-resize; background: transparent; touch-action: none; }
+      .sidebar-resizer::after { content: ""; position: absolute; inset: 0 1px; background: var(--border); opacity: .7; transition: background .15s var(--ease), opacity .15s var(--ease); }
+      .sidebar-resizer:hover::after, .app-shell.resizing .sidebar-resizer::after { background: var(--blue); opacity: 1; }
+      .app-shell.resizing, .app-shell.resizing * { cursor: col-resize !important; user-select: none !important; }
       .sidebar-header { display: flex; align-items: center; gap: 10px; height: 60px; padding: 0 16px; }
       .brand { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; font-size: 14px; font-weight: 650; white-space: nowrap; }
       .brand-mark { display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; border-radius: 10px; color: #fff; background: var(--blue); font-weight: 800; font-size: 16px; box-shadow: 0 4px 10px rgba(65,118,230,.25); }
@@ -59,6 +63,14 @@
       .sidebar-collapsed .new-session { width: 36px; margin-inline: auto; font-size: 0; }
       .sidebar-collapsed .new-session .plus { font-size: 20px; }
       .section-label { margin: 16px 8px 8px; color: var(--text-tertiary); font-size: 11px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; }
+      .sidebar-secondary { margin: 8px 0; border-top: 1px solid var(--border); }
+      .sidebar-secondary summary { display: flex; align-items: center; justify-content: space-between; padding: 10px 8px 6px; color: var(--text-tertiary); cursor: pointer; list-style: none; font-size: 11px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; }
+      .sidebar-secondary summary::-webkit-details-marker { display: none; }
+      .sidebar-secondary summary::before { content: '›'; margin-right: 6px; color: var(--text-muted); font-size: 14px; transform: rotate(0deg); transition: transform .16s ease; }
+      .sidebar-secondary[open] summary::before { transform: rotate(90deg); }
+      .sidebar-secondary summary > span:first-of-type { flex: 1; }
+      .sidebar-secondary-count { min-width: 18px; color: var(--text-muted); font-variant-numeric: tabular-nums; text-align: right; }
+      .sidebar-collapsed .sidebar-secondary { display: none; }
       .sidebar-collapsed .section-label, .sidebar-collapsed .session-copy, .sidebar-collapsed .mcp-copy, .sidebar-collapsed .sidebar-footer-copy { display: none; }
       .session-list, .mcp-list { display: grid; gap: 4px; }
       .session { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 38px; padding: 8px 10px; border-radius: 10px; text-align: left; color: var(--text-secondary); background: transparent; font-size: 12px; transition: background .15s var(--ease), color .15s var(--ease); }
@@ -258,9 +270,19 @@
       .toolbar-spacer { flex: 1; }
       .model-trigger { max-width: 194px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .context-meter { color: var(--text-tertiary); font-size: 10px; }
+      .reasoning-trigger { max-width: 112px; }
+      .usage-meter { width: min(860px, 100%); margin: 7px auto 0; overflow: hidden; color: var(--text-tertiary); text-overflow: ellipsis; white-space: nowrap; font-size: 10px; line-height: 1.5; text-align: center; }
+      .usage-meter[hidden] { display: none; }
+      .usage-meter strong { color: var(--text-secondary); font-weight: 600; }
+      .usage-separator { padding: 0 7px; color: var(--border-strong); }
       .send-button { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; color: #fff; background: var(--blue); font-size: 15px; transition: background .15s var(--ease), transform .15s var(--ease); }
+      .send-button.stop { background: var(--red); font-size: 13px; }
+      .send-button.stopping { background: var(--amber); animation: send-pulse 1s ease-in-out infinite; }
       .send-button:hover { background: var(--blue-hover); transform: translateY(-1px); }
+      .send-button.stop:hover { background: #b92f2f; }
+      .send-button.stopping:hover { background: var(--amber); }
       .send-button:disabled { opacity: .5; transform: none; }
+      @keyframes send-pulse { 50% { opacity: .62; } }
       .steer-button { border: 1px solid rgba(190, 120, 35, .55); color: #8a5a16; background: #fff8e8; }
       .steer-button[hidden] { display: none; }
       .model-popover { position: absolute; right: 43px; bottom: 49px; z-index: 5; width: 250px; padding: 7px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface); box-shadow: var(--shadow); }
@@ -271,10 +293,10 @@
       .model-option.selected { color: var(--text); background: var(--blue-soft); }
       .model-check { width: 14px; color: var(--blue); font-weight: 700; }
       .model-meta { display: block; margin-top: 2px; color: var(--text-tertiary); font-size: 10px; }
-      .details-panel { display: flex; flex-direction: column; border-left: 1px solid var(--border); transition: opacity .2s var(--ease); }
-      .details-collapsed .details-panel { opacity: 0; pointer-events: none; }
-      .details-collapsed .details-panel { border-left: 0; }
-      .details-header { display: flex; align-items: center; justify-content: space-between; height: 60px; padding: 0 14px 0 18px; border-bottom: 1px solid var(--border); }
+      .details-panel { position: fixed; z-index: 10; inset: 0 0 0 auto; display: flex; flex-direction: column; width: min(var(--details-width), 92vw); border-left: 1px solid var(--border); box-shadow: -18px 0 44px rgba(30,39,55,.12); transform: translateX(100%); transition: transform .2s var(--ease); }
+      .details-open .details-panel { transform: translateX(0); }
+      .details-collapsed .details-panel { pointer-events: none; }
+      .details-header { display: flex; align-items: center; justify-content: space-between; flex: 0 0 60px; height: 60px; padding: 0 14px 0 18px; border-bottom: 1px solid var(--border); }
       .details-header strong { font-size: 13px; }
       .details-content { flex: 1; overflow: auto; padding: 14px; }
       .detail-section { padding: 12px 0; border-bottom: 1px solid var(--border); }
@@ -456,12 +478,12 @@
       .worktree-action:disabled { cursor: not-allowed; opacity: .55; }
       .worktree-create-row { display: flex; gap: 5px; margin-bottom: 7px; }
       .worktree-create-row input { min-width: 0; flex: 1; height: 28px; padding: 0 7px; border: 1px solid var(--border); border-radius: 7px; color: var(--text); background: var(--surface); font-size: 10px; }
-      @media (max-width: 1120px) { :root { --details-width: 260px; } }
+      @media (max-width: 1120px) { :root { --details-width: 320px; } }
       @media (max-width: 900px) {
         .app-shell,
         .app-shell.details-collapsed,
         .app-shell.sidebar-collapsed,
-        .app-shell.sidebar-collapsed.details-collapsed { grid-template-columns: var(--rail-width) minmax(0, 1fr) 0; }
+        .app-shell.sidebar-collapsed.details-collapsed { grid-template-columns: var(--rail-width) 4px minmax(0, 1fr); }
         .app-shell:not(.mobile-sidebar-open) .sidebar .section-label,
         .app-shell:not(.mobile-sidebar-open) .sidebar .session-copy,
         .app-shell:not(.mobile-sidebar-open) .sidebar .mcp-copy,
@@ -478,7 +500,7 @@
         .mobile-menu { display: grid; }
         .workspace-header { padding-inline: 12px; }
         .details-toggle { display: none; }
-        .app-shell.mobile-sidebar-open { grid-template-columns: minmax(240px, 78vw) minmax(0, 1fr) 0; }
+        .app-shell.mobile-sidebar-open { grid-template-columns: minmax(240px, 78vw) 4px minmax(0, 1fr); }
         .app-shell.mobile-sidebar-open .sidebar { display: flex; position: relative; z-index: 5; }
         .app-shell.mobile-sidebar-open .sidebar .brand { display: flex; }
         .app-shell.mobile-sidebar-open .sidebar .brand span:last-child,
@@ -502,7 +524,7 @@
         .context-meter { display: none; }
         .model-trigger { max-width: 150px; }
         .model-popover { right: 43px; bottom: 74px; }
-        .app-shell.mobile-sidebar-open { grid-template-columns: minmax(250px, 86vw) minmax(0, 1fr) 0; }
+        .app-shell.mobile-sidebar-open { grid-template-columns: minmax(250px, 86vw) 4px minmax(0, 1fr); }
         .app-shell.mobile-sidebar-open .sidebar { display: flex; }
         .app-shell.mobile-sidebar-open .workspace { visibility: hidden; }
       }
@@ -510,7 +532,7 @@
   </head>
   <body>
     <div id="app" class="app-shell">
-      <aside id="sidebar-panel" class="sidebar" aria-label="Sessions and MCP">
+      <aside id="sidebar-panel" class="sidebar" aria-label="Workspace and sessions">
         <div class="sidebar-header">
           <div class="brand"><span class="brand-mark">⌁</span><span>Code Review Agent</span></div>
           <button id="sidebar-toggle" class="icon-button" type="button" aria-label="Collapse sidebar" aria-controls="sidebar-panel" aria-expanded="true"><span class="collapse-symbol">‹</span></button>
@@ -522,13 +544,18 @@
             <div class="workspace-browser-toolbar"><span class="workspace-browser-title">Workspaces</span><select id="workspace-view-mode" class="workspace-view-control" aria-label="Workspace view"><option value="tree">Tree</option><option value="flat">Flat</option></select><select id="workspace-sort" class="workspace-view-control" aria-label="Workspace sort"><option value="recent">Recent</option><option value="name">Name</option><option value="path">Path</option></select><input id="session-search" class="workspace-search" type="search" placeholder="Search" aria-label="Search sessions" /></div>
             <div id="session-list" class="session-list"></div>
           </div>
-          <div class="section-label">MCP servers</div>
-          <div id="mcp-list" class="mcp-list"></div>
-          <div class="section-label">Child agents</div>
-          <div id="subagent-list" class="mcp-list"></div>
+          <details class="sidebar-secondary">
+            <summary><span>Integrations</span></summary>
+            <div id="mcp-list" class="mcp-list"></div>
+          </details>
+          <details class="sidebar-secondary">
+            <summary><span>Tasks</span></summary>
+            <div id="subagent-list" class="mcp-list"></div>
+          </details>
         </div>
         <div class="sidebar-footer"><button id="settings-button" type="button"><span>⚙</span><span class="sidebar-footer-copy">Workspace settings</span></button></div>
       </aside>
+      <div id="sidebar-resizer" class="sidebar-resizer" role="separator" aria-label="Resize sidebar" aria-orientation="vertical" aria-valuemin="220" aria-valuemax="360" aria-valuenow="252" tabindex="0"></div>
       <main class="workspace">
         <header class="workspace-header">
           <button id="mobile-menu" class="icon-button mobile-menu" type="button" aria-label="Open sidebar" aria-controls="sidebar-panel" aria-expanded="false">☰</button>
@@ -551,13 +578,16 @@
               <button id="mode-trigger" class="toolbar-button model-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">◉ Mode · Loading…</button>
               <span class="toolbar-spacer"></span>
               <button id="model-trigger" class="toolbar-button model-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">Model · Loading…</button>
+              <button id="reasoning-trigger" class="toolbar-button model-trigger reasoning-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" title="Reasoning effort">Effort · Default</button>
               <span id="context-meter" class="context-meter" title="Context budget and compaction status">Context · —</span>
               <button id="steer" class="toolbar-button steer-button" type="button" title="Send guidance to the running turn" hidden>↳ <span>Steer</span></button>
               <button id="send" class="send-button" type="submit" aria-label="Send message">↑</button>
             </div>
             <div id="model-popover" class="model-popover" hidden></div>
             <div id="mode-popover" class="model-popover" hidden></div>
+            <div id="reasoning-popover" class="model-popover" hidden></div>
           </form>
+          <div id="usage-meter" class="usage-meter" aria-live="polite" hidden></div>
         </footer>
       </main>
       <aside id="details-panel" class="details-panel" aria-label="Session details">
@@ -608,7 +638,7 @@
       (() => {
         const typedRuntime = window.CodeReviewAgentWeb;
         const typedConnection = typedRuntime?.connection || null;
-        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, workspaces: null, lastWorkspaceOrderSequence: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', details: 'open', mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', workspaceViewMode: 'tree', workspaceSort: 'recent', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
+        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, reasoningEffort: 'default', stoppingTurnId: null, workspaces: null, lastWorkspaceOrderSequence: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 252, details: 'closed', mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', workspaceViewMode: 'tree', workspaceSort: 'recent', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
         const app = document.querySelector('#app');
         const shellFrame = typedRuntime?.mountShellFrame ? typedRuntime.mountShellFrame(document) : null;
         const list = document.querySelector('#session-list');
@@ -628,6 +658,8 @@
         const modelPopover = document.querySelector('#model-popover');
         const modeTrigger = document.querySelector('#mode-trigger');
         const modePopover = document.querySelector('#mode-popover');
+        const reasoningTrigger = document.querySelector('#reasoning-trigger');
+        const reasoningPopover = document.querySelector('#reasoning-popover');
         const mobileMenu = document.querySelector('#mobile-menu');
         const sidebarToggle = document.querySelector('#sidebar-toggle');
         const detailsToggle = document.querySelector('#details-toggle');
@@ -635,6 +667,8 @@
         const goalBar = document.querySelector('#goal-bar');
         const planToggle = document.querySelector('#plan-toggle');
         const contextMeter = document.querySelector('#context-meter');
+        const usageMeter = document.querySelector('#usage-meter');
+        const sidebarResizer = document.querySelector('#sidebar-resizer');
          const renameTitle = document.querySelector('#rename-title');
          const renameDescription = document.querySelector('#rename-description');
          const renameLabel = document.querySelector('label[for="rename-input"]');
@@ -672,15 +706,17 @@
         const settingsFocusTrap = typedRuntime?.createFocusTrap && settingsDialog ? typedRuntime.createFocusTrap(settingsDialog) : null;
         const renameFocusTrap = typedRuntime?.createFocusTrap && renameDialog ? typedRuntime.createFocusTrap(renameDialog) : null;
         const applyOverlay = () => {
-          const intent = typedRuntime?.presentShellOverlay ? typedRuntime.presentShellOverlay(state.overlay) : { workspaceOpen: state.overlay.open === 'workspace', settingsOpen: state.overlay.open === 'settings', renameSessionOpen: state.overlay.open === 'rename-session', sessionMenuOpen: state.overlay.open === 'session-menu', modelPopoverOpen: state.overlay.open === 'model-popover', modePopoverOpen: state.overlay.open === 'mode-popover' };
+          const intent = typedRuntime?.presentShellOverlay ? typedRuntime.presentShellOverlay(state.overlay) : { workspaceOpen: state.overlay.open === 'workspace', settingsOpen: state.overlay.open === 'settings', renameSessionOpen: state.overlay.open === 'rename-session', sessionMenuOpen: state.overlay.open === 'session-menu', modelPopoverOpen: state.overlay.open === 'model-popover', modePopoverOpen: state.overlay.open === 'mode-popover', reasoningPopoverOpen: state.overlay.open === 'reasoning-popover' };
           workspaceModal.hidden = !intent.workspaceOpen;
           settingsModal.hidden = !intent.settingsOpen;
           renameModal.hidden = !intent.renameSessionOpen;
           sessionMenu.hidden = !intent.sessionMenuOpen;
           modelPopover.hidden = !intent.modelPopoverOpen;
           modePopover.hidden = !intent.modePopoverOpen;
+          reasoningPopover.hidden = !intent.reasoningPopoverOpen;
           modelTrigger.setAttribute('aria-expanded', String(intent.modelPopoverOpen));
           modeTrigger.setAttribute('aria-expanded', String(intent.modePopoverOpen));
+          reasoningTrigger.setAttribute('aria-expanded', String(intent.reasoningPopoverOpen));
         };
         const dispatchOverlay = (action) => {
           if (typedRuntime?.reduceShellOverlay) state.overlay = typedRuntime.reduceShellOverlay(state.overlay, action);
@@ -703,10 +739,12 @@
             if (shellFrame && typedRuntime.applyShellFrame) typedRuntime.applyShellFrame(shellFrame, intent);
             else {
               app.className = intent.appClassName;
+              app.style.setProperty('--sidebar-width', `${intent.sidebarWidthPx}px`);
               mobileMenu.hidden = !intent.mobileMenuVisible;
               mobileMenu.setAttribute('aria-expanded', String(intent.mobileSidebarOpen));
               mobileMenu.setAttribute('aria-label', intent.mobileSidebarOpen ? 'Close sidebar' : 'Open sidebar');
             }
+            sidebarResizer.setAttribute('aria-valuenow', String(intent.sidebarWidthPx));
             sidebarToggle.setAttribute('aria-expanded', String(!intent.sidebarCollapsed || intent.mobileSidebarOpen));
             sidebarToggle.setAttribute('aria-label', intent.mobileSidebarOpen ? 'Close sidebar' : 'Collapse sidebar');
             detailsToggle.setAttribute('aria-expanded', String(intent.detailsOpen));
@@ -715,6 +753,9 @@
           }
           app.classList.toggle('sidebar-collapsed', state.layout.sidebar === 'collapsed');
           app.classList.toggle('details-collapsed', state.layout.details === 'closed');
+          app.classList.toggle('details-open', state.layout.details === 'open');
+          app.style.setProperty('--sidebar-width', `${state.layout.sidebarWidthPx || 252}px`);
+          sidebarResizer.setAttribute('aria-valuenow', String(state.layout.sidebarWidthPx || 252));
           sidebarToggle.setAttribute('aria-expanded', String(state.layout.sidebar === 'expanded' || state.layout.mobileSidebarOpen));
           sidebarToggle.setAttribute('aria-label', state.layout.mobileSidebarOpen ? 'Close sidebar' : 'Collapse sidebar');
           detailsToggle.setAttribute('aria-expanded', String(state.layout.details === 'open'));
@@ -728,6 +769,43 @@
           if ((action.type === 'close-mobile-sidebar' || action.type === 'toggle-sidebar') && wasMobileSidebarOpen && !state.layout.mobileSidebarOpen) mobileMenu.focus();
         };
         window.addEventListener('resize', applyShellLayout, { passive: true });
+        const persistSidebarWidth = (widthPx) => {
+          try { window.localStorage.setItem('code-review-agent.sidebar-width', String(widthPx)); } catch { /* local UI preference is optional */ }
+        };
+        const setSidebarWidth = (widthPx) => {
+          if (typedRuntime?.reduceShellLayout) state.layout = typedRuntime.reduceShellLayout(state.layout, { type: 'set-sidebar-width', widthPx });
+          else state.layout = { ...state.layout, sidebarWidthPx: Math.min(360, Math.max(220, Math.round(widthPx))) };
+          persistSidebarWidth(state.layout.sidebarWidthPx);
+          applyShellLayout();
+        };
+        const restoreSidebarWidth = () => {
+          try {
+            const saved = Number(window.localStorage.getItem('code-review-agent.sidebar-width'));
+            if (Number.isFinite(saved) && saved > 0) setSidebarWidth(saved);
+          } catch { /* local UI preference is optional */ }
+        };
+        let resizeStart = null;
+        sidebarResizer.addEventListener('pointerdown', (event) => {
+          if (window.innerWidth <= 600 || state.layout.sidebar === 'collapsed') return;
+          resizeStart = { x: event.clientX, width: state.layout.sidebarWidthPx || 252 };
+          sidebarResizer.setPointerCapture?.(event.pointerId);
+          app.classList.add('resizing');
+          event.preventDefault();
+        });
+        sidebarResizer.addEventListener('pointermove', (event) => {
+          if (!resizeStart) return;
+          setSidebarWidth(resizeStart.width + event.clientX - resizeStart.x);
+        });
+        const finishResize = () => { resizeStart = null; app.classList.remove('resizing'); };
+        sidebarResizer.addEventListener('pointerup', finishResize);
+        sidebarResizer.addEventListener('pointercancel', finishResize);
+        sidebarResizer.addEventListener('keydown', (event) => {
+          const current = state.layout.sidebarWidthPx || 252;
+          if (event.key === 'ArrowLeft') { event.preventDefault(); setSidebarWidth(current - 8); }
+          else if (event.key === 'ArrowRight') { event.preventDefault(); setSidebarWidth(current + 8); }
+          else if (event.key === 'Home') { event.preventDefault(); setSidebarWidth(220); }
+          else if (event.key === 'End') { event.preventDefault(); setSidebarWidth(360); }
+        });
         const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
         const reduceBoot = (action) => {
           if (typedRuntime?.reduceShellBoot) { state.boot = typedRuntime.reduceShellBoot(state.boot, action); return; }
@@ -757,7 +835,7 @@
         const refreshWorktrees = async () => { if (!state.session || !typedRuntime?.api?.listWorktrees) { state.worktrees = []; return; } try { state.worktrees = (await typedRuntime.api.listWorktrees(state.session.id)).worktrees || []; } catch { state.worktrees = []; } };
          const setStatus = (text, connected = true) => { status.textContent = text; status.classList.toggle('disconnected', !connected); };
          const applyAttachmentCapability = () => { const capability = state.capabilities?.attachments; attach.disabled = capability?.enabled !== true; attach.title = capability?.enabled === true ? `Attach files (max ${Math.floor(capability.maxBytes / 1024)} KiB)` : capability?.reason || 'Attachments are unavailable'; attachmentInput.accept = capability?.enabled === true ? capability.allowedMediaTypes.filter((type) => capability.imagesEnabled || !type.startsWith('image/')).join(',') : ''; };
-         const refreshCapabilities = async () => { state.capabilities = typedRuntime?.api?.listCapabilities ? await typedRuntime.api.listCapabilities() : await api('/v1/capabilities'); applyAttachmentCapability(); renderDetails(); };
+         const refreshCapabilities = async () => { state.capabilities = typedRuntime?.api?.listCapabilities ? await typedRuntime.api.listCapabilities() : await api('/v1/capabilities'); applyAttachmentCapability(); renderDetails(); renderReasoning?.(); };
          const bytesToBase64 = (bytes) => { let result = ''; const chunkSize = 0x8000; for (let offset = 0; offset < bytes.length; offset += chunkSize) result += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length))); return btoa(result); };
          const renderConnectionBanner = (snapshot) => {
            if (!typedRuntime?.presentConnection || !connectionBanner || !connectionBannerMessage || !connectionRetry) return;
@@ -1099,6 +1177,59 @@
           contextMeter.textContent = intent.label;
           contextMeter.title = intent.detail;
           contextMeter.dataset.status = intent.status;
+        };
+        const activeTurn = (snapshot) => {
+          const turns = snapshot?.session?.turns || state.session?.turns || [];
+          return turns.find((turn) => turn.status === 'running') || turns.find((turn) => turn.status === 'queued');
+        };
+        const usageNumber = (value) => typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+        const formatCount = (value) => value === undefined ? '—' : value >= 1000000 ? `${(value / 1000000).toFixed(1)}M` : value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(Math.round(value));
+        const formatDuration = (milliseconds) => milliseconds === undefined || milliseconds < 0 ? '—' : milliseconds < 1000 ? `${Math.round(milliseconds)}ms` : `${(milliseconds / 1000).toFixed(1)}s`;
+        const readUsage = (payload) => {
+          const source = payload && typeof payload === 'object' ? payload : {};
+          const usage = source.usage && typeof source.usage === 'object' ? source.usage : source;
+          return {
+            input: usageNumber(usage.inputTokens ?? usage.input_tokens ?? usage.promptTokens ?? usage.prompt_tokens),
+            output: usageNumber(usage.outputTokens ?? usage.output_tokens ?? usage.completionTokens ?? usage.completion_tokens),
+            cache: usageNumber(usage.cacheReadTokens ?? usage.cache_read_tokens ?? usage.cachedTokens),
+          };
+        };
+        const renderUsageMeter = (snapshot) => {
+          if (!usageMeter) return;
+          const events = [...state.events.values()].sort((left, right) => left.sequence - right.sequence);
+          const steps = events.filter((event) => event.type === 'step/started').length;
+          const toolCalls = events.filter((event) => event.type === 'tool/call').length;
+          const current = activeTurn(snapshot);
+          const starts = events.filter((event) => event.type === 'turn/started' && (!current || event.turnId === current.id));
+          const ends = events.filter((event) => event.type === 'turn/ended' && (!current || event.turnId === current.id));
+          const startAt = starts.at(-1)?.createdAt ? Date.parse(starts.at(-1).createdAt) : undefined;
+          const endAt = ends.at(-1)?.createdAt ? Date.parse(ends.at(-1).createdAt) : Date.now();
+          const duration = startAt === undefined || !Number.isFinite(startAt) ? undefined : Math.max(0, endAt - startAt);
+          const usage = events.reduce((total, event) => {
+            const next = readUsage(event.payload);
+            return {
+              input: total.input === undefined ? next.input : next.input === undefined ? total.input : total.input + next.input,
+              output: total.output === undefined ? next.output : next.output === undefined ? total.output : total.output + next.output,
+              cache: total.cache === undefined ? next.cache : next.cache === undefined ? total.cache : total.cache + next.cache,
+            };
+          }, { input: undefined, output: undefined, cache: undefined });
+          usageMeter.hidden = events.length === 0 && (snapshot?.session?.turns?.length || 0) === 0;
+          usageMeter.innerHTML = `<strong>${steps || '—'} 步</strong><span class="usage-separator">·</span>LLM ${formatDuration(duration)}<span class="usage-separator">·</span>工具 ${toolCalls || '—'} 次<span class="usage-separator">·</span>输入 ${formatCount(usage.input)}<span class="usage-separator">·</span>输出 ${formatCount(usage.output)}<span class="usage-separator">·</span>缓存 ${formatCount(usage.cache)}`;
+          usageMeter.title = '指标只展示 host/provider 已报告的数据；未知 token 不用字符数估算。';
+        };
+        const renderComposerState = (snapshot) => {
+          if (!send) return;
+          const turn = activeTurn(snapshot);
+          const stopping = turn !== undefined && state.stoppingTurnId === turn.id;
+          const mode = stopping ? 'stopping' : turn === undefined ? 'send' : 'stop';
+          send.className = `send-button${mode === 'stop' ? ' stop' : mode === 'stopping' ? ' stopping' : ''}`;
+          send.textContent = mode === 'send' ? '↑' : mode === 'stop' ? '■' : '…';
+          send.setAttribute('aria-label', mode === 'send' ? 'Send message' : mode === 'stop' ? (turn?.status === 'queued' ? 'Stop queued turn' : 'Stop running turn') : 'Stopping turn');
+          send.title = mode === 'send' ? 'Send message' : mode === 'stop' ? 'Stop current turn' : 'Stopping current turn';
+          send.disabled = state.boot.status !== 'ready' || mode === 'stopping' || (mode === 'send' && !input.value.trim());
+          if (turn === undefined || (turn.status !== 'running' && turn.status !== 'queued')) state.stoppingTurnId = null;
+          const effectiveReasoning = state.reasoningEffort === 'default' ? (state.models?.reasoning?.current || 'default') : state.reasoningEffort;
+          if (reasoningTrigger) reasoningTrigger.textContent = `Effort · ${effectiveReasoning === 'default' ? 'Default' : effectiveReasoning}`;
         };
         const renderSettings = () => {
           if (!settingsContent) return;
@@ -1465,6 +1596,7 @@
         trajectoryDetailsObserver.observe(details, { childList: true });
         const render = () => {
           if (state.session) renderModes();
+          renderReasoning();
           if (!settingsModal.hidden) renderSettings();
           const shouldFollowTail = state.trajectoryFollow === true && isNearConversationTail();
           conversation.innerHTML = '';
@@ -1472,9 +1604,11 @@
           const runningTurn = typedSnapshot?.session?.turns.find((turn) => turn.status === 'running');
           steer.hidden = runningTurn === undefined;
           steer.disabled = runningTurn === undefined || !input.value.trim();
+          renderComposerState(typedSnapshot || { session: state.session });
           renderQueue(typedSnapshot || { session: state.session });
           renderGoalBar(typedSnapshot || { session: state.session });
           renderContextMeter(typedSnapshot || { session: state.session });
+          renderUsageMeter(typedSnapshot || { session: state.session });
           const typedProjection = typedSnapshot?.conversation;
           if (typedProjection && typedProjection.nodes.length > 0) {
             const typedBody = document.createElement('div');
@@ -1722,6 +1856,52 @@
         const renderMcp = () => { mcpList.innerHTML = ''; for (const server of state.mcp) { const name = server.config?.name || server.name; const scope = server.config?.scope || 'user'; const row = document.createElement('div'); row.className = 'mcp-row'; const label = document.createElement('span'); const unhealthy = ['disabled', 'failed', 'needs_auth'].includes(server.status); label.className = `mcp-copy mcp-status ${unhealthy ? 'error' : ''}`; label.title = `scope=${scope} · transport=${server.config?.transport || 'unknown'} · revision=${server.revision || 1} · generation=${server.generation || 0}${server.lastError ? ` · ${server.lastError}` : ''}`; label.textContent = `${name} · ${server.status} · ${scope} · r${server.revision || 1}`; const actions = document.createElement('span'); actions.className = 'mcp-actions'; const reconnect = document.createElement('button'); reconnect.type = 'button'; reconnect.textContent = '↻'; reconnect.title = 'Reconnect'; reconnect.onclick = async () => { reconnect.disabled = true; try { await api(`/v1/mcp/servers/${encodeURIComponent(name)}/reconnect`, { method: 'POST' }); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); renderDetails(); } finally { reconnect.disabled = false; } }; const toggle = document.createElement('button'); toggle.type = 'button'; toggle.textContent = server.status === 'disabled' ? '＋' : '−'; toggle.title = server.status === 'disabled' ? 'Enable' : 'Disable'; toggle.onclick = async () => { await api(`/v1/mcp/servers/${encodeURIComponent(name)}/${server.status === 'disabled' ? 'enable' : 'disable'}`, { method: 'POST' }); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); renderDetails(); }; actions.append(reconnect, toggle); row.append(label, actions); mcpList.append(row); } if (!state.mcp.length) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = 'No MCP servers configured.'; mcpList.append(empty); } };
         const renderModels = (payload) => { state.models = payload; modelTrigger.textContent = `Model · ${currentModel()}`; modelTrigger.disabled = state.modelStatus === 'loading'; modelPopover.innerHTML = '<div class="popover-label">Choose a model</div>'; for (const model of payload?.models || []) { const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${model === currentModel() ? 'selected' : ''}`; option.innerHTML = `<span class="model-check">${model === currentModel() ? '✓' : ''}</span><span>${esc(model)}<span class="model-meta">DeepSeek API</span></span>`; option.onclick = async () => { modelPopover.hidden = true; modelTrigger.setAttribute('aria-expanded', 'false'); modelTrigger.disabled = true; state.modelStatus = 'loading'; state.modelError = ''; renderSettings(); try { await api('/v1/models', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }) }); const payload = await api('/v1/models'); state.modelStatus = 'ready'; state.modelReceipt = `Selected ${model}`; renderModels(payload); await refreshCapabilities(); renderSettings(); setStatus(`Model · ${model}`); } catch (error) { state.modelStatus = 'error'; state.modelError = error instanceof Error ? error.message : String(error); renderSettings(); setStatus(state.modelError, false); } finally { modelTrigger.disabled = state.modelStatus === 'loading'; } }; modelPopover.append(option); } };
         const renderModes = () => { modeTrigger.textContent = `◉ Mode · ${modeLabels[currentMode()] || currentMode()}`; modePopover.innerHTML = '<div class="popover-label">Choose a work mode for this session</div>'; for (const [value, label] of Object.entries(modeLabels)) { const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${value === currentMode() ? 'selected' : ''}`; option.innerHTML = `<span class="model-check">${value === currentMode() ? '✓' : ''}</span><span>${label}<span class="model-meta">${value === 'read-only' ? 'Inspect without changing files' : value === 'danger-full-access' ? 'Run tools without approval' : 'Permission-controlled coding workflow'}</span></span>`; option.onclick = async () => { modePopover.hidden = true; modeTrigger.setAttribute('aria-expanded', 'false'); if (value === currentMode() || !state.session) return; modeTrigger.disabled = true; try { state.session = await api(`/v1/sessions/${encodeURIComponent(state.session.id)}/mode`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ permissionPreset: value }) }); renderModes(); renderDetails(); setStatus(`Mode · ${label}`); } catch (error) { setStatus(error.message, false); } finally { modeTrigger.disabled = false; } }; modePopover.append(option); } };
+        const renderReasoning = () => {
+          if (!reasoningPopover || !reasoningTrigger) return;
+          const capability = state.models?.reasoning;
+          const options = capability?.supported ? capability.options.map((option) => ({ value: option.id, label: option.label, detail: option.description || '' })) : [];
+          // The model catalog is the authoritative source for the effort that will
+          // be used on the next turn. Keep the local send path in sync whenever a
+          // model change or capability refresh returns a new current value.
+          const currentEffort = capability?.supported
+            ? (capability.current || state.reasoningEffort || 'default')
+            : 'default';
+          state.reasoningEffort = currentEffort;
+          if (!capability?.supported) reasoningTrigger.textContent = 'Effort · N/A';
+          else reasoningTrigger.textContent = `Effort · ${currentEffort === 'default' ? 'Default' : currentEffort}`;
+          reasoningPopover.innerHTML = '<div class="popover-label">Model and reasoning effort</div>';
+          if (!capability?.supported || options.length === 0) {
+            reasoningPopover.innerHTML += '<div class="empty-detail">This model does not expose reasoning effort controls.</div>';
+            reasoningTrigger.disabled = true;
+            return;
+          }
+          reasoningTrigger.disabled = false;
+          for (const optionData of options) {
+            const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${currentEffort === optionData.value ? 'selected' : ''}`;
+            option.innerHTML = `<span class="model-check">${currentEffort === optionData.value ? '✓' : ''}</span><span>${optionData.label}<span class="model-meta">${optionData.detail}</span></span>`;
+            option.onclick = () => {
+              const previousEffort = currentEffort;
+              state.reasoningEffort = optionData.value;
+              reasoningPopover.hidden = true;
+              dispatchOverlay({ type: 'close', overlay: 'reasoning-popover' });
+              void (async () => {
+                try {
+                  await api('/v1/models', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reasoningEffort: optionData.value }) });
+                  const payload = await api('/v1/models');
+                  state.models = payload;
+                  state.reasoningEffort = payload?.reasoning?.current || optionData.value;
+                  setStatus(`Effort · ${optionData.label} (next turn)`, true);
+                } catch (error) {
+                  state.reasoningEffort = previousEffort;
+                  setStatus(error instanceof Error ? error.message : String(error), false);
+                }
+                renderReasoning();
+                renderComposerState(typedConnection?.store.getSnapshot());
+              })();
+            };
+            reasoningPopover.append(option);
+          }
+        };
         const renderDetails = () => { const connected = state.mcp.filter((server) => !['disabled', 'failed', 'needs_auth'].includes(server.status)).length; const typedSnapshot = typedConnection?.store.getSnapshot(); const trajectory = typedSnapshot?.trajectory; const treeWarnings = typedSnapshot?.toolCallTree?.warnings || []; const pendingPermissions = typedSnapshot?.conversation?.nodes?.filter((node) => node.kind === 'permission' && node.status === 'pending').length || 0; const pendingInteractions = typedSnapshot?.conversation?.nodes?.filter((node) => node.kind === 'interaction' && node.status === 'pending').length || 0; const diagnostics = state.mcp.map((server) => { const name = server.config?.name || server.name; const catalog = Array.isArray(server.catalog) ? server.catalog : []; const disabled = catalog.filter((item) => item.enabled === false).length; const active = server.status === 'connected' ? catalog.length - disabled : 0; return `<div class="detail-line"><span>${esc(name)}</span><strong>${esc(server.status)} · g${server.generation || 0} · ${active}/${catalog.length} active</strong></div><div class="detail-line"><span>Auth</span><strong>${server.status === 'needs_auth' ? 'Needs authorization' : server.config?.credentialRef ? 'Credential reference configured' : 'No credential reference'}</strong></div>${server.retry?.nextAttemptAt ? `<div class="detail-line"><span>Next retry</span><strong>${esc(server.retry.nextAttemptAt)}</strong></div>` : ''}`; }).join(''); details.innerHTML = `<div class="detail-section"><div class="detail-label">Model</div><div class="detail-value">${esc(currentModel())}</div><div class="detail-line"><span>Provider</span><strong>${esc(state.models?.provider || 'DeepSeek-compatible')}</strong></div><div class="detail-line"><span>Default</span><strong>${esc(state.models?.defaultModel || 'deepseek-v4-flash')}</strong></div></div><div class="detail-section"><div class="detail-label">Session</div><div class="detail-line"><span>Status</span><span class="status-pill">Connected</span></div><div class="detail-line"><span>Events</span><strong>${state.events.size}</strong></div><div class="detail-line"><span>Workspace</span><strong title="${esc(state.session?.workspaceRoot || '.')}">${esc(state.session?.workspaceRoot || '.')}</strong></div></div><div class="detail-section"><div class="detail-label">Trajectory</div><div class="detail-line"><span>Records</span><strong>${trajectory?.records.length || 0} · seq ${trajectory?.lastSequence || 0}</strong></div><div class="detail-line"><span>Running</span><strong>${trajectory?.records.filter((record) => record.running).length || 0}</strong></div><div class="detail-line"><span>Lineage warnings</span><strong>${treeWarnings.length}</strong></div></div><div class="detail-section"><div class="detail-label">MCP diagnostics</div><div class="detail-line"><span>Servers</span><strong>${connected}/${state.mcp.length} connected</strong></div><div class="detail-line"><span>Tools</span><strong>${state.tools.size}</strong></div>${diagnostics || '<div class="empty-detail">No MCP servers configured.</div>'}</div><div class="detail-section"><div class="detail-label">Tools</div><div id="detail-tools" class="tool-list"></div></div><div class="detail-section"><div class="detail-label">Permissions</div><div class="detail-line"><span>Pending approvals</span><strong>${pendingPermissions}</strong></div><div class="detail-line"><span>Pending questions</span><strong>${pendingInteractions}</strong></div></div>`; const toolList = details.querySelector('#detail-tools'); const names = [...state.tools.keys()].slice(0, 8); if (!names.length) toolList.innerHTML = '<div class="empty-detail">No tools discovered.</div>'; else names.forEach((name) => { const row = document.createElement('div'); row.className = 'tool-list-item'; row.textContent = name; toolList.append(row); }); };
         const openSession = async (id) => {
            dispatchShellLayout({ type: 'close-mobile-sidebar' });
@@ -1792,7 +1972,7 @@
         renameCancel.onclick = () => closeRenameSession();
         renameModal.addEventListener('click', (event) => { if (event.target === renameModal) closeRenameSession(); });
         renameForm.addEventListener('submit', async (event) => { event.preventDefault(); const target = state.renameTarget; const nextTitle = renameInput.value.trim(); if (!target) return; if (!nextTitle) { renameError.textContent = target.kind === 'workspace' ? 'Enter a workspace label.' : 'Enter a session title.'; renameInput.focus(); return; } renameSave.disabled = true; renameError.textContent = ''; try { if (target.kind === 'workspace') { state.workspaces = await typedRuntime.api.renameWorkspace(target.key, nextTitle, commandKey()); closeRenameSession(); await refreshSessionList(); setStatus(`Workspace renamed · ${nextTitle}`, true); } else { const updated = typedRuntime?.api?.renameSession ? await typedRuntime.api.renameSession(target.id, nextTitle, commandKey()) : await api(`/v1/sessions/${encodeURIComponent(target.id)}/title`, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': commandKey() }, body: JSON.stringify({ title: nextTitle }) }); if (state.session?.id === target.id) { state.session = updated; title.textContent = updated.title || 'Coding session'; render(); } closeRenameSession(); await refreshSessionList(); } } catch (error) { renameError.textContent = error instanceof Error ? error.message : String(error); } finally { renameSave.disabled = false; } });
-        document.addEventListener('keydown', (event) => { if (event.key !== 'Escape') return; if (!settingsModal.hidden) closeSettings(); else if (!workspaceModal.hidden) closeWorkspacePicker(); else if (!renameModal.hidden) closeRenameSession(); else if (!sessionMenu.hidden) closeSessionMenu(); else if (!modelPopover.hidden) dispatchOverlay({ type: 'close', overlay: 'model-popover' }); else if (!modePopover.hidden) dispatchOverlay({ type: 'close', overlay: 'mode-popover' }); else dispatchOverlay({ type: 'escape' }); });
+        document.addEventListener('keydown', (event) => { if (event.key !== 'Escape') return; if (!settingsModal.hidden) closeSettings(); else if (!workspaceModal.hidden) closeWorkspacePicker(); else if (!renameModal.hidden) closeRenameSession(); else if (!sessionMenu.hidden) closeSessionMenu(); else if (!modelPopover.hidden) dispatchOverlay({ type: 'close', overlay: 'model-popover' }); else if (!modePopover.hidden) dispatchOverlay({ type: 'close', overlay: 'mode-popover' }); else if (!reasoningPopover.hidden) dispatchOverlay({ type: 'close', overlay: 'reasoning-popover' }); else dispatchOverlay({ type: 'escape' }); });
         archiveToggle.onclick = async () => { state.showArchived = !state.showArchived; try { await refreshSessionList(); } catch (error) { setStatus(error.message, false); } };
         sessionSearch.addEventListener('input', () => { state.sessionSearch = sessionSearch.value; showSessionsTree({ sessions: state.sidebarSessions }); });
         workspaceViewMode.addEventListener('change', () => { state.workspaceViewMode = workspaceViewMode.value === 'flat' ? 'flat' : 'tree'; showSessionsTree({ sessions: state.sidebarSessions }); });
@@ -1805,9 +1985,10 @@
         mobileMenu.onclick = () => { const viewport = typedRuntime?.shellViewport ? typedRuntime.shellViewport(window.innerWidth) : window.innerWidth <= 900 ? 'tablet' : 'desktop'; dispatchShellLayout({ type: viewport === 'desktop' ? 'toggle-sidebar' : state.layout.mobileSidebarOpen ? 'close-mobile-sidebar' : 'open-mobile-sidebar' }); };
         modelTrigger.onclick = () => { dispatchOverlay({ type: 'toggle', overlay: 'model-popover' }); };
         modeTrigger.onclick = () => { dispatchOverlay({ type: 'toggle', overlay: 'mode-popover' }); renderModes(); };
+        reasoningTrigger.onclick = () => { dispatchOverlay({ type: 'toggle', overlay: 'reasoning-popover' }); renderReasoning(); };
         if (planToggle) planToggle.onclick = () => { if (state.layout.details === 'closed') dispatchShellLayout({ type: 'toggle-details' }); renderPlanningPanel(typedConnection?.store.getSnapshot() || { session: state.session }); };
-        document.addEventListener('click', (event) => { if (!modelPopover.hidden && !modelPopover.contains(event.target) && event.target !== modelTrigger) dispatchOverlay({ type: 'close', overlay: 'model-popover' }); if (!modePopover.hidden && !modePopover.contains(event.target) && event.target !== modeTrigger) dispatchOverlay({ type: 'close', overlay: 'mode-popover' }); if (!sessionMenu.hidden && !sessionMenu.contains(event.target)) closeSessionMenu(); });
-        input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 220)}px`; const snapshot = typedConnection?.store.getSnapshot(); const runningTurn = snapshot?.session?.turns.find((turn) => turn.status === 'running'); steer.hidden = runningTurn === undefined; steer.disabled = runningTurn === undefined || !input.value.trim(); });
+        document.addEventListener('click', (event) => { if (!modelPopover.hidden && !modelPopover.contains(event.target) && event.target !== modelTrigger) dispatchOverlay({ type: 'close', overlay: 'model-popover' }); if (!modePopover.hidden && !modePopover.contains(event.target) && event.target !== modeTrigger) dispatchOverlay({ type: 'close', overlay: 'mode-popover' }); if (!reasoningPopover.hidden && !reasoningPopover.contains(event.target) && event.target !== reasoningTrigger) dispatchOverlay({ type: 'close', overlay: 'reasoning-popover' }); if (!sessionMenu.hidden && !sessionMenu.contains(event.target)) closeSessionMenu(); });
+        input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 220)}px`; const snapshot = typedConnection?.store.getSnapshot(); const runningTurn = snapshot?.session?.turns.find((turn) => turn.status === 'running'); steer.hidden = runningTurn === undefined; steer.disabled = runningTurn === undefined || !input.value.trim(); renderComposerState(snapshot || { session: state.session }); });
         steer.addEventListener('click', async () => {
           const snapshot = typedConnection?.store.getSnapshot();
           const runningTurn = snapshot?.session?.turns.find((turn) => turn.status === 'running');
@@ -1825,6 +2006,20 @@
             render();
           } finally { input.focus(); }
         });
+        const stopActiveTurn = async (turn) => {
+          if (!turn || !state.session || state.stoppingTurnId) return;
+          state.stoppingTurnId = turn.id;
+          renderComposerState(typedConnection?.store.getSnapshot() || { session: state.session });
+          try {
+            if (typedRuntime?.api?.cancelTurn) await typedRuntime.api.cancelTurn(state.session.id, turn.id, commandKey());
+            else await commandApi(`/v1/sessions/${encodeURIComponent(state.session.id)}/cancel`, { turnId: turn.id });
+            setStatus(turn.status === 'queued' ? 'Queued turn cancelled' : 'Stopping turn…', true);
+          } catch (error) {
+            state.stoppingTurnId = null;
+            setStatus(error instanceof Error ? error.message : String(error), false);
+            renderComposerState(typedConnection?.store.getSnapshot() || { session: state.session });
+          }
+        };
         input.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); document.querySelector('#composer').requestSubmit(); } });
         attach.addEventListener('click', () => { if (!attach.disabled) attachmentInput.click(); });
         attachmentInput.addEventListener('change', async () => {
@@ -1843,7 +2038,24 @@
           } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); }
           finally { applyAttachmentCapability(); input.focus(); }
         });
-        document.querySelector('#composer').addEventListener('submit', async (event) => { event.preventDefault(); const content = input.value.trim(); if (!content || !state.session) return; send.disabled = true; input.value = ''; input.style.height = 'auto'; try { await api(`/v1/sessions/${encodeURIComponent(state.session.id)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content }) }); } catch (error) { setStatus(error.message, false); } finally { send.disabled = false; input.focus(); } });
+        document.querySelector('#composer').addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const snapshot = typedConnection?.store.getSnapshot() || { session: state.session };
+          const turn = activeTurn(snapshot);
+          if (turn) { await stopActiveTurn(turn); return; }
+          const content = input.value.trim();
+          if (!content || !state.session) return;
+          send.disabled = true;
+          input.value = '';
+          input.style.height = 'auto';
+          try {
+            const requestedReasoning = state.models?.reasoning?.supported && state.reasoningEffort !== 'default' ? state.reasoningEffort : undefined;
+            if (typedRuntime?.api?.sendMessage) await typedRuntime.api.sendMessage(state.session.id, content, commandKey(), requestedReasoning);
+            else await commandApi(`/v1/sessions/${encodeURIComponent(state.session.id)}`, { content, ...(requestedReasoning === undefined ? {} : { reasoningEffort: requestedReasoning }) });
+          } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); }
+          finally { input.focus(); renderComposerState(typedConnection?.store.getSnapshot() || { session: state.session }); }
+        });
+        restoreSidebarWidth();
         applyShellLayout();
         applyOverlay();
         renderBootBoundary();
