@@ -1,5 +1,34 @@
 # Phase 8 开发日志
 
+## 2026-08-25：记录 DSH 三栏 Shell 与可调宽度实现指导
+
+本次工作属于 Phase 8.0 Web 对齐，先研究 D:\Develop\deepseek-harness-fork\packages\client\ui-layout 的三栏 AppFrame、纯列宽求解器、窄屏 auto-collapse 和双向 DragHandle，形成 [DSH 三栏 Shell 与可调宽度实现指导方案](../dsh-three-column-resizable-shell-implementation-guide.zh-CN.md)。本轮只新增指导文档，没有修改布局代码。
+
+### 任务七问
+
+1. **Phase**：Phase 8.0，Web Shell 三栏布局与可调宽度调研。
+2. **问题类型**：Shell 几何、Transient layout state、响应式让步、拖拽和无障碍。
+3. **契约影响**：不改变 Event、Tool、Task、Permission 或 Workspace contract。
+4. **DSH 参考**：ui-layout/src/client/columns.ts、AppFrame.tsx、AppFrame.module.css、stores.ts、service.ts 及 ui-layout/tests/*。
+5. **上游来源**：只做行为参考，没有复制 DSH 代码或资产；既有 DSH-003 登记覆盖本范围。
+6. **验收场景**：指导文档明确三栏 DOM、偏好/实际宽度分离、固定让步链、1024px auto-collapse、双向拖拽、滚动责任、测试矩阵和 3210 端口浏览器验证要求。
+7. **回滚**：本轮无运行时代码变更；后续实现保留当前 Shell fallback，可单独回滚布局 checkpoint，不影响 Runtime 和 EventStore。
+
+### 调研结论
+
+- DSH 使用 sidebar | center | details 固定树位置；Details 关闭是 0px track，子树继续挂载；当前项目的 Details 仍是 fixed overlay，需要在后续实现阶段迁移。
+- DSH 用 computeColumns() 固化 Center >= 640 → Details 缩小 → Details 派生关闭 → Center 最后承压的让步链；Sidebar/Details 偏好宽度和 frame 实际宽度分离。
+- DSH 的 Sidebar/Details DragHandle 使用 pointer capture、rAF 合帧、实际渲染宽度作为拖拽基准，并在拖拽期间暂停 grid transition；当前项目仅有 Sidebar 的逐 pointermove 写入。
+- 指导文档明确了当前项目的模块映射、阶段化实施、验收矩阵、回滚边界，以及不改 Event/Tool/Task/Permission/Workspace contract 的约束。
+
+### 验证
+
+    DSH columns/AppFrame/stores/service 源码核对       ✓
+    当前 apps/web Shell CSS/DOM/typed layout 核对       ✓
+    git diff --check                                   ✓（文档提交前）
+
+文档 checkpoint：本次 docs(phase8): add dsh three-column shell guide 提交。
+
 ## 2026-08-25：修复 ToolRow 集中堆叠到对话尾部
 
 本次工作属于 Phase 8.0 Web 对齐，目标是修复上一轮 ToolRow 改造后仍存在的 Conversation 时间线错误。问题记录见 [ToolRow 对话顺序问题记录](../ui-issue-tool-row-order.zh-CN.md)。实现继续依据 [DSH Web 前端对照文档](../dsh-frontend-reference.zh-CN.md) 的 stable node、keyed slot 和 tool-row timeline 规则。
