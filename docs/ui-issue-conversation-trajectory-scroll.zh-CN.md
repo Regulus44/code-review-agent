@@ -1,12 +1,12 @@
 # Conversation / Trajectory 视图切换后的滚动边界异常
 
-状态：`open`
+状态：`resolved (first implementation slice)`
 
 记录日期：2026-08-25
 
 范围：Phase 8 Web 收敛，UI 布局与滚动容器问题
 
-本记录只描述问题、证据和 DSH 对照实现。本轮不修改运行代码。
+本记录先描述问题、证据和 DSH 对照实现，随后记录第一轮布局修复与浏览器验收结果。
 
 ## 1. 用户观察到的现象
 
@@ -220,9 +220,31 @@ DSH 通过 per-session view store 保存当前 view id；Header 从 view ring �
 6. 将 Composer 的 sticky/overlay 和内容底部 clearance 纳入同一套布局；
 7. 后续再补充按 Session / view 保存阅读位置的恢复策略。
 
-本轮不直接修改以上代码，避免在没有浏览器 computed-layout 和滚动数据证据时盲目调整 CSS。
+## 6. 第一轮实现与验收结果
 
-## 6. 后续修复验收标准
+提交：`14d836d feat(phase8): align conversation trajectory scroll boundaries`
+
+已完成的实现切片：
+
+1. `workspace` 收敛为明确的 Header + `workspace-main` 两层布局，移除隐式 grid row；
+2. `session-view-tabs`、连接/队列/目标提示区位于内容滚动区之外；
+3. `#conversation` 成为稳定的外层 session scrollport，新增 `#conversation-content`，避免 render 清空时误删 Composer；
+4. Composer 保留在同一个 session body 内，并使用 sticky seat；
+5. Trajectory 根节点固定高度并裁剪，`.main-trajectory-scroll` 承担内部列表滚动；
+6. Conversation 与 Trajectory 只替换 active content，不替换外层 Session shell。
+
+在 `http://127.0.0.1:3210/` 重启服务后，浏览器验收结果：
+
+- Conversation → Trajectory → Conversation 连续切换 10 轮，两个标签始终保持可点击；
+- Conversation 的 scrollport 为 `#conversation`，`overflow-y: auto`；
+- Trajectory 的内部 scrollport 为 `.main-trajectory-scroll`，`overflow-y: auto`；
+- Tabs 始终位于内容区顶部，页面 `document` / `body` 没有额外滚动高度；
+- Composer 保持在底部 sticky seat；
+- 浏览器控制台无 warning/error。
+
+本轮仍未实现按 Session 保存 anchor/scrollTop、Trajectory overlay 的 ResizeObserver clearance，以及更完整的历史 prepend 恢复；这些属于后续 P2/P3 切片。
+
+## 7. 后续修复验收标准
 
 - Conversation 和 Trajectory 标签始终位于固定可见区域，并可重复点击；
 - 切换视图不会把内容顶到页面顶部覆盖标签；
@@ -235,11 +257,10 @@ DSH 通过 per-session view store 保存当前 view id；Header 从 view ring �
 - 浏览器检查不存在非预期的 body/document 滚动条或横向溢出；
 - 后续实现需在 `http://127.0.0.1:3210/` 重启服务后验证，并保留截图或浏览器证据。
 
-## 7. 暂不包含
+## 8. 暂不包含
 
-- 本轮不修改 `apps/web/index.html` 或其他运行代码；
+- 后续切片不应破坏本轮已建立的 `session-body` / active-view / Composer seat 边界；
 - 不继续改造 Planning 侧栏；
 - 不恢复 Reasoning / Effort 控件；
 - 不在本问题中扩展完整 Trajectory 诊断功能；
 - 不改变 Event、Tool、Task、Permission 或 Workspace contract。
-

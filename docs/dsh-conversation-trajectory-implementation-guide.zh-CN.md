@@ -327,7 +327,7 @@ workspace
 - banners、queue、goal 在布局上有明确的占位策略，不能依赖隐式 grid row；
 - 所有内容区域设置 `min-height: 0`，防止 Flex/Grid 最小内容尺寸撑破父容器。
 
-这部分是后续实现目标，不代表本轮已修改代码。
+当前实现状态：第一轮已按上述结构完成 P0 外层几何、P1 active view 切换，以及 Composer sticky seat 的基础落地。对应代码提交为 `14d836d`，浏览器证据记录在 [`ui-issue-conversation-trajectory-scroll.zh-CN.md`](ui-issue-conversation-trajectory-scroll.zh-CN.md)。按 Session 保存 anchor/scrollTop、Trajectory overlay 的实时 Composer clearance、历史 prepend 恢复和更完整的 per-view 阅读位置恢复仍属于后续 P2/P3 工作。
 
 ## 9. 推荐实现顺序
 
@@ -404,4 +404,3 @@ workspace
 - `packages/client/ui-trajectory/README.zh.md`。
 
 当前文档只记录结构和行为参考。若后续直接复制或大量改编 DSH 代码，必须同步更新 `docs/source-reuse-register.md`，保留许可证和版权声明，并单独提交。
-
