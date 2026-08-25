@@ -22,6 +22,21 @@
 | 独立 `composer-presenter.ts` / `usage-presenter.ts` | 已落地 | 纯函数 presenter 已接入浏览器 runtime；页面事件编排仍在 `apps/web/index.html` |
 | Usage drawer、TTFT、tok/s、cache hit 百分比 | 部分落地 | Usage drawer 已可展开；TTFT/LLM/工具耗时优先使用事件或 provider 字段，缺失时显示 `—` |
 
+### 1.2 现状问题诊断：为什么原界面显得杂乱
+
+原界面的主要问题不是单个控件不好看，而是信息架构、状态层级和视觉权重没有分开：
+
+| 问题 | 用户感受 | 改造原则 |
+|---|---|---|
+| 左栏、主区、详情同时争夺空间 | 对话区被压窄，视线来回跳 | 默认两栏，详情改为按需抽屉 |
+| 工具、轨迹、任务、MCP 信息同层出现 | “现在该看什么”不明确 | 主区只保留摘要行，原始细节进入抽屉 |
+| 发送和停止没有形成一个明确状态控制器 | 不确定 Agent 是否还在运行 | 按 durable turn projection 渲染 Send / Stop / Stopping |
+| Model、Effort、权限模式的语义边界弱 | 容易把高推理强度误认为高权限 | 权限独立，Model 与 Reasoning 统一入口但分级展示 |
+| Token 和耗时被放在不稳定的位置 | 运行成本不可见，或看起来像调试噪音 | Composer 下方弱化指标条，点击展开完整 Usage |
+| 状态主要依赖即时 DOM 或局部变量 | 刷新、断线后可能与事实不一致 | Event Store → projection → presenter → UI |
+
+因此，本次目标是建立清晰的“主任务路径”：选择 workspace/session → 输入消息 → 观察 turn 状态 → 查看工具摘要 → 在需要时查看 Usage/轨迹详情。
+
 ## 2. 参考材料与边界
 
 ### 2.1 用户提供的视觉参考
@@ -198,11 +213,13 @@ turn/ended { status: "stopped" }
 
 #### 概念拆分
 
-Composer 中需要并排展示三个独立控件：
+Composer 中需要保持三个独立语义；视觉上将模型与 reasoning effort 收敛到一个统一入口，权限模式继续单独展示：
 
 1. `权限模式`：Read only、Ask before changes、Workspace write、Full access；
 2. `模型`：provider + model，例如 `DeepSeek · V4 Flash`；
 3. `推理强度`：Low、Medium、High、Max，或 provider 能力返回的自定义档位。
+
+这三个语义不能混用，但不要求占用三个并排按钮。统一入口的根菜单展示当前模型和 reasoning 值，子菜单分别负责选择，能够降低 Composer 的横向噪音。
 
 当前 `mode-trigger` 对应权限 preset，不能直接改名为 Reasoning。否则会让用户误以为“High”代表高权限。
 
@@ -232,11 +249,23 @@ interface ModelCapability {
 
 切换规则：运行中的 turn 不被静默改写；控件提示“对下一次 turn 生效”。若产品未来支持中途 steering，应单独设计，不复用模型设置 mutation。
 
-#### Composer 展示
+#### 当前落地的 Composer 展示
+
+模型与推理强度已收敛为一个统一入口，避免底部同时出现两个相互竞争的按钮：
 
 ```text
-[＋] [🔒 Ask before changes ▾]                    [DeepSeek V4 Flash ▾] [High ▾] [■/↑]
+[＋] [🔒 Ask before changes ▾]                    [Model · deepseek-v4-flash · Default ▾] [■/↑]
 ```
+
+点击入口后进入两级菜单：
+
+```text
+Model and reasoning effort
+  Model       deepseek-v4-flash       ›
+  Reasoning   Default                  ›
+```
+
+再分别进入模型列表或 reasoning effort 列表。模型列表使用 `menuitemradio` 和 `aria-checked` 标记当前值；切换失败时保留原选择并显示错误。当前后端 `/v1/models` 只返回模型目录，没有返回 `reasoning` capability，因此实际页面会显示 `Reasoning · N/A` 且禁用该行。待 Host 声明能力后，前端无需改变入口结构即可显示可用档位。
 
 在窄屏下，模型和推理强度合并成一个 `Model · High` 菜单，权限模式仍单独保留。
 
@@ -443,6 +472,30 @@ git diff --check
 - `usage-presenter.test.ts`：token、duration、unknown、redaction；
 - `reasoning-capability.test.ts`：provider 能力、unsupported、receipt；
 - browser e2e：真实 turn cancel、reload replay、model/effort selection、responsive drawer。
+
+### 10.3 当前 checkpoint 验证证据
+
+本轮统一模型入口的真实浏览器检查结果：
+
+1. 页面启动状态为 `ready`，连接状态为 `Connected`。
+2. Composer 显示 `Model · deepseek-v4-flash · N/A`；`N/A` 来自当前 Host 未声明 reasoning capability。
+3. 点击入口后，根菜单包含 `Model` 和禁用的 `Reasoning` 两行。
+4. 点击 `Model` 后，模型子菜单包含三个 provider 返回的模型，并以 `aria-checked=true` 标记当前模型。
+5. Escape、点击菜单外部和返回按钮均能关闭或回到根菜单。
+6. API 实际返回的模型目录为 `deepseek-v4-flash`、`deepseek-v4-pro`、`deepseek-v4-flash-vision-exp`；没有 reasoning 能力时不显示虚假的档位。
+
+对应检查命令：
+
+```text
+pnpm typecheck
+pnpm build:web
+pnpm --filter @code-review-agent/web test
+pnpm test
+pnpm test:phase8:parity
+pnpm test:phase8:visual
+pnpm test:phase8:browser:evidence
+git diff --check
+```
 
 ## 11. 风险与处理
 

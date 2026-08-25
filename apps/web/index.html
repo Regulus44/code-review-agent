@@ -294,9 +294,17 @@
       @keyframes send-pulse { 50% { opacity: .62; } }
       .steer-button { border: 1px solid rgba(190, 120, 35, .55); color: #8a5a16; background: #fff8e8; }
       .steer-button[hidden] { display: none; }
-      .model-popover { position: absolute; right: 43px; bottom: 49px; z-index: 5; width: 250px; padding: 7px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface); box-shadow: var(--shadow); }
+      .model-popover { position: absolute; right: 43px; bottom: 49px; z-index: 5; width: 300px; max-width: min(320px, calc(100vw - 24px)); padding: 7px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface); box-shadow: var(--shadow); }
       .model-popover[hidden] { display: none; }
       .popover-label { padding: 7px 9px 6px; color: var(--text-tertiary); font-size: 10px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
+      .model-menu-row, .model-menu-back { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 42px; padding: 8px 9px; border-radius: 9px; background: transparent; text-align: left; }
+      .model-menu-row:hover, .model-menu-row:focus-visible, .model-menu-back:hover, .model-menu-back:focus-visible { background: var(--blue-soft); }
+      .model-menu-row:disabled { cursor: not-allowed; opacity: .55; }
+      .model-menu-row-copy { display: grid; min-width: 0; flex: 1; gap: 2px; }
+      .model-menu-row-copy strong { overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 650; }
+      .model-menu-row-copy span { overflow: hidden; color: var(--text-tertiary); text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+      .model-menu-chevron { color: var(--text-muted); font-size: 15px; }
+      .model-menu-back { color: var(--text-secondary); font-size: 11px; font-weight: 650; }
       .model-option { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px; border-radius: 9px; color: var(--text-secondary); background: transparent; text-align: left; font-size: 12px; }
       .model-option:hover { background: var(--surface-hover); color: var(--text); }
       .model-option.selected { color: var(--text); background: var(--blue-soft); }
@@ -586,8 +594,8 @@
               <button id="plan-toggle" class="toolbar-button" type="button" title="Show plan and todo">☷ <span>Plan</span></button>
               <button id="mode-trigger" class="toolbar-button model-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">◉ Mode · Loading…</button>
               <span class="toolbar-spacer"></span>
-              <button id="model-trigger" class="toolbar-button model-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">Model · Loading…</button>
-              <button id="reasoning-trigger" class="toolbar-button model-trigger reasoning-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" title="Reasoning effort">Effort · Default</button>
+              <button id="model-trigger" class="toolbar-button model-trigger" type="button" aria-haspopup="menu" aria-expanded="false">Model · Loading…</button>
+              <button id="reasoning-trigger" class="toolbar-button model-trigger reasoning-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" title="Reasoning effort" hidden>Effort · Default</button>
               <span id="context-meter" class="context-meter" title="Context budget and compaction status">Context · —</span>
               <button id="steer" class="toolbar-button steer-button" type="button" title="Send guidance to the running turn" hidden>↳ <span>Steer</span></button>
               <button id="send" class="send-button" type="submit" aria-label="Send message">↑</button>
@@ -650,6 +658,7 @@
         const typedConnection = typedRuntime?.connection || null;
         const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, reasoningEffort: 'default', stoppingTurnId: null, workspaces: null, lastWorkspaceOrderSequence: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 252, details: 'closed', mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', workspaceViewMode: 'tree', workspaceSort: 'recent', sidebarSessions: [], trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
         let usageDrawerOpen = false;
+        let modelMenuPane = 'root';
         const app = document.querySelector('#app');
         const shellFrame = typedRuntime?.mountShellFrame ? typedRuntime.mountShellFrame(document) : null;
         const list = document.querySelector('#session-list');
@@ -847,7 +856,7 @@
         const refreshWorktrees = async () => { if (!state.session || !typedRuntime?.api?.listWorktrees) { state.worktrees = []; return; } try { state.worktrees = (await typedRuntime.api.listWorktrees(state.session.id)).worktrees || []; } catch { state.worktrees = []; } };
          const setStatus = (text, connected = true) => { status.textContent = text; status.classList.toggle('disconnected', !connected); };
          const applyAttachmentCapability = () => { const capability = state.capabilities?.attachments; attach.disabled = capability?.enabled !== true; attach.title = capability?.enabled === true ? `Attach files (max ${Math.floor(capability.maxBytes / 1024)} KiB)` : capability?.reason || 'Attachments are unavailable'; attachmentInput.accept = capability?.enabled === true ? capability.allowedMediaTypes.filter((type) => capability.imagesEnabled || !type.startsWith('image/')).join(',') : ''; };
-         const refreshCapabilities = async () => { state.capabilities = typedRuntime?.api?.listCapabilities ? await typedRuntime.api.listCapabilities() : await api('/v1/capabilities'); applyAttachmentCapability(); renderDetails(); renderReasoning?.(); };
+          const refreshCapabilities = async () => { state.capabilities = typedRuntime?.api?.listCapabilities ? await typedRuntime.api.listCapabilities() : await api('/v1/capabilities'); applyAttachmentCapability(); renderDetails(); renderReasoning?.(); renderModelSeatMenu?.(); };
          const bytesToBase64 = (bytes) => { let result = ''; const chunkSize = 0x8000; for (let offset = 0; offset < bytes.length; offset += chunkSize) result += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length))); return btoa(result); };
          const renderConnectionBanner = (snapshot) => {
            if (!typedRuntime?.presentConnection || !connectionBanner || !connectionBannerMessage || !connectionRetry) return;
@@ -1287,6 +1296,7 @@
             const payload = await api('/v1/models');
             state.modelStatus = 'ready';
             renderModels(payload);
+            renderModelSeatMenu?.();
             renderSettings();
             return payload;
           } catch (error) {
@@ -1294,6 +1304,7 @@
             state.modelStatus = 'error';
             state.modelError = error instanceof Error ? error.message : String(error);
             renderModels(undefined);
+            renderModelSeatMenu?.();
             renderSettings();
             setStatus(`Model catalog unavailable · ${state.modelError}`, false);
             return null;
@@ -1604,6 +1615,7 @@
         const render = () => {
           if (state.session) renderModes();
           renderReasoning();
+          renderModelSeatMenu();
           if (!settingsModal.hidden) renderSettings();
           const shouldFollowTail = state.trajectoryFollow === true && isNearConversationTail();
           conversation.innerHTML = '';
@@ -1862,6 +1874,65 @@
         const renderSubagents = () => { subagentList.innerHTML = ''; if (!state.subagents.length) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = 'No child agents.'; subagentList.append(empty); return; } for (const entry of state.subagents) { const task = entry.task || {}; const row = document.createElement('div'); row.className = 'subagent-row'; const copy = document.createElement('span'); copy.className = 'subagent-copy'; const name = task.title || task.provider || 'Child agent'; copy.innerHTML = `<span class="subagent-name">${esc(name)}</span><span class="subagent-meta">${esc(entry.status || task.status || 'ready')} · ${esc(task.mode || 'one-shot')} · ${esc(task.id || '')}</span>`; row.append(copy); if (entry.live || task.status === 'running' || task.status === 'waiting') { const cancel = document.createElement('button'); cancel.className = 'subagent-cancel'; cancel.type = 'button'; cancel.textContent = '×'; cancel.title = 'Cancel child'; cancel.onclick = async () => { cancel.disabled = true; try { await api(`/v1/sessions/${encodeURIComponent(state.session.id)}/tasks/${encodeURIComponent(task.id)}/cancel`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); await refreshSubagents(); } catch (error) { setStatus(error.message, false); cancel.disabled = false; } }; row.append(cancel); } row.onclick = () => { if (task.childSessionId) openSession(task.childSessionId); }; subagentList.append(row); } };
         const renderMcp = () => { mcpList.innerHTML = ''; for (const server of state.mcp) { const name = server.config?.name || server.name; const scope = server.config?.scope || 'user'; const row = document.createElement('div'); row.className = 'mcp-row'; const label = document.createElement('span'); const unhealthy = ['disabled', 'failed', 'needs_auth'].includes(server.status); label.className = `mcp-copy mcp-status ${unhealthy ? 'error' : ''}`; label.title = `scope=${scope} · transport=${server.config?.transport || 'unknown'} · revision=${server.revision || 1} · generation=${server.generation || 0}${server.lastError ? ` · ${server.lastError}` : ''}`; label.textContent = `${name} · ${server.status} · ${scope} · r${server.revision || 1}`; const actions = document.createElement('span'); actions.className = 'mcp-actions'; const reconnect = document.createElement('button'); reconnect.type = 'button'; reconnect.textContent = '↻'; reconnect.title = 'Reconnect'; reconnect.onclick = async () => { reconnect.disabled = true; try { await api(`/v1/mcp/servers/${encodeURIComponent(name)}/reconnect`, { method: 'POST' }); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); renderDetails(); } finally { reconnect.disabled = false; } }; const toggle = document.createElement('button'); toggle.type = 'button'; toggle.textContent = server.status === 'disabled' ? '＋' : '−'; toggle.title = server.status === 'disabled' ? 'Enable' : 'Disable'; toggle.onclick = async () => { await api(`/v1/mcp/servers/${encodeURIComponent(name)}/${server.status === 'disabled' ? 'enable' : 'disable'}`, { method: 'POST' }); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); renderDetails(); }; actions.append(reconnect, toggle); row.append(label, actions); mcpList.append(row); } if (!state.mcp.length) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = 'No MCP servers configured.'; mcpList.append(empty); } };
         const renderModels = (payload) => { state.models = payload; modelTrigger.textContent = `Model · ${currentModel()}`; modelTrigger.disabled = state.modelStatus === 'loading'; modelPopover.innerHTML = '<div class="popover-label">Choose a model</div>'; for (const model of payload?.models || []) { const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${model === currentModel() ? 'selected' : ''}`; option.innerHTML = `<span class="model-check">${model === currentModel() ? '✓' : ''}</span><span>${esc(model)}<span class="model-meta">DeepSeek API</span></span>`; option.onclick = async () => { modelPopover.hidden = true; modelTrigger.setAttribute('aria-expanded', 'false'); modelTrigger.disabled = true; state.modelStatus = 'loading'; state.modelError = ''; renderSettings(); try { await api('/v1/models', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }) }); const payload = await api('/v1/models'); state.modelStatus = 'ready'; state.modelReceipt = `Selected ${model}`; renderModels(payload); await refreshCapabilities(); renderSettings(); setStatus(`Model · ${model}`); } catch (error) { state.modelStatus = 'error'; state.modelError = error instanceof Error ? error.message : String(error); renderSettings(); setStatus(state.modelError, false); } finally { modelTrigger.disabled = state.modelStatus === 'loading'; } }; modelPopover.append(option); } };
+        const renderModelSeatMenu = () => {
+          if (!modelPopover || !modelTrigger) return;
+          const capability = state.models?.reasoning;
+          const effort = capability?.supported ? (capability.current || state.reasoningEffort || 'default') : 'N/A';
+          const effortLabel = effort === 'default' ? 'Default' : effort;
+          modelTrigger.textContent = state.models ? `Model · ${currentModel()} · ${effortLabel}` : 'Model · Loading…';
+          modelTrigger.title = state.models ? `Model ${currentModel()} · Reasoning ${effortLabel}` : 'Model catalog loading';
+          modelPopover.setAttribute('role', 'menu');
+          modelPopover.setAttribute('aria-label', 'Model and reasoning effort');
+          modelPopover.innerHTML = '';
+          const appendBack = () => {
+            const back = document.createElement('button'); back.type = 'button'; back.className = 'model-menu-back'; back.textContent = '‹ Model and reasoning';
+            back.onclick = () => { modelMenuPane = 'root'; renderModelSeatMenu(); };
+            modelPopover.append(back);
+          };
+          const appendRow = (label, value, detail, action, disabled = false) => {
+            const row = document.createElement('button'); row.type = 'button'; row.className = 'model-menu-row'; row.setAttribute('role', 'menuitem'); row.disabled = disabled;
+            const copy = document.createElement('span'); copy.className = 'model-menu-row-copy'; const heading = document.createElement('strong'); heading.textContent = label; const meta = document.createElement('span'); meta.textContent = detail || value; copy.append(heading, meta);
+            const current = document.createElement('span'); current.className = 'model-menu-row-copy'; const currentValue = document.createElement('span'); currentValue.textContent = value; current.append(currentValue); const chevron = document.createElement('span'); chevron.className = 'model-menu-chevron'; chevron.textContent = '›'; row.append(copy, current, chevron);
+            if (action) row.onclick = action;
+            modelPopover.append(row);
+          };
+          if (state.modelError) { const error = document.createElement('div'); error.className = 'empty-detail'; error.textContent = state.modelError; modelPopover.append(error); }
+          if (modelMenuPane === 'models') {
+            appendBack();
+            const label = document.createElement('div'); label.className = 'popover-label'; label.textContent = 'Choose a model'; modelPopover.append(label);
+            for (const model of state.models?.models || []) {
+              const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${model === currentModel() ? 'selected' : ''}`; option.setAttribute('role', 'menuitemradio'); option.setAttribute('aria-checked', String(model === currentModel())); option.innerHTML = `<span class="model-check">${model === currentModel() ? '✓' : ''}</span><span>${esc(model)}<span class="model-meta">${esc(state.models?.provider || 'Host model catalog')}</span></span>`;
+              option.onclick = async () => {
+                modelPopover.hidden = true; dispatchOverlay({ type: 'close', overlay: 'model-popover' }); modelTrigger.disabled = true; state.modelStatus = 'loading'; state.modelError = ''; renderSettings();
+                try { await api('/v1/models', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }) }); const next = await api('/v1/models'); state.modelStatus = 'ready'; state.modelReceipt = `Selected ${model}`; renderModels(next); await refreshCapabilities(); renderSettings(); setStatus(`Model · ${model}`); }
+                catch (error) { state.modelStatus = 'error'; state.modelError = error instanceof Error ? error.message : String(error); renderModelSeatMenu(); renderSettings(); setStatus(state.modelError, false); }
+                finally { modelTrigger.disabled = state.modelStatus === 'loading'; renderModelSeatMenu(); }
+              };
+              modelPopover.append(option);
+            }
+            return;
+          }
+          if (modelMenuPane === 'effort') {
+            appendBack();
+            const label = document.createElement('div'); label.className = 'popover-label'; label.textContent = 'Choose reasoning effort'; modelPopover.append(label);
+            const options = capability?.supported ? capability.options : [];
+            if (!capability?.supported || options.length === 0) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = 'This model does not expose reasoning effort controls.'; modelPopover.append(empty); return; }
+            for (const optionData of options) {
+              const selected = effort === optionData.id; const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${selected ? 'selected' : ''}`; option.setAttribute('role', 'menuitemradio'); option.setAttribute('aria-checked', String(selected)); option.innerHTML = `<span class="model-check">${selected ? '✓' : ''}</span><span>${esc(optionData.label)}<span class="model-meta">${esc(optionData.description || '')}</span></span>`;
+              option.onclick = async () => {
+                const previousEffort = state.reasoningEffort; state.reasoningEffort = optionData.id; modelPopover.hidden = true; dispatchOverlay({ type: 'close', overlay: 'model-popover' });
+                try { await api('/v1/models', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reasoningEffort: optionData.id }) }); const next = await api('/v1/models'); state.models = next; state.reasoningEffort = next?.reasoning?.current || optionData.id; setStatus(`Effort · ${optionData.label} (next turn)`, true); }
+                catch (error) { state.reasoningEffort = previousEffort; setStatus(error instanceof Error ? error.message : String(error), false); }
+                renderModelSeatMenu(); renderComposerState(typedConnection?.store.getSnapshot());
+              };
+              modelPopover.append(option);
+            }
+            return;
+          }
+          const heading = document.createElement('div'); heading.className = 'popover-label'; heading.textContent = 'Model and reasoning effort'; modelPopover.append(heading);
+          appendRow('Model', currentModel(), 'Provider model selection', () => { modelMenuPane = 'models'; renderModelSeatMenu(); });
+          appendRow('Reasoning', capability?.supported ? effortLabel : 'N/A', capability?.supported ? 'Applies to the next turn' : 'Capability not reported', capability?.supported ? () => { modelMenuPane = 'effort'; renderModelSeatMenu(); } : undefined, !capability?.supported);
+        };
         const renderModes = () => { modeTrigger.textContent = `◉ Mode · ${modeLabels[currentMode()] || currentMode()}`; modePopover.innerHTML = '<div class="popover-label">Choose a work mode for this session</div>'; for (const [value, label] of Object.entries(modeLabels)) { const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${value === currentMode() ? 'selected' : ''}`; option.innerHTML = `<span class="model-check">${value === currentMode() ? '✓' : ''}</span><span>${label}<span class="model-meta">${value === 'read-only' ? 'Inspect without changing files' : value === 'danger-full-access' ? 'Run tools without approval' : 'Permission-controlled coding workflow'}</span></span>`; option.onclick = async () => { modePopover.hidden = true; modeTrigger.setAttribute('aria-expanded', 'false'); if (value === currentMode() || !state.session) return; modeTrigger.disabled = true; try { state.session = await api(`/v1/sessions/${encodeURIComponent(state.session.id)}/mode`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ permissionPreset: value }) }); renderModes(); renderDetails(); setStatus(`Mode · ${label}`); } catch (error) { setStatus(error.message, false); } finally { modeTrigger.disabled = false; } }; modePopover.append(option); } };
         const renderReasoning = () => {
           if (!reasoningPopover || !reasoningTrigger) return;
@@ -1991,7 +2062,12 @@
         workspaceModal.addEventListener('click', (event) => { if (event.target === workspaceModal) closeWorkspacePicker(); });
         workspaceForm.addEventListener('submit', async (event) => { event.preventDefault(); const workspaceRoot = workspaceInput.value.trim(); if (!workspaceRoot) { workspaceError.textContent = 'Enter a local folder path.'; return; } workspaceCreate.disabled = true; workspaceError.textContent = ''; try { await createSession(workspaceRoot); closeWorkspacePicker(); } catch (error) { workspaceError.textContent = error.message; } finally { workspaceCreate.disabled = false; } });
         mobileMenu.onclick = () => { const viewport = typedRuntime?.shellViewport ? typedRuntime.shellViewport(window.innerWidth) : window.innerWidth <= 900 ? 'tablet' : 'desktop'; dispatchShellLayout({ type: viewport === 'desktop' ? 'toggle-sidebar' : state.layout.mobileSidebarOpen ? 'close-mobile-sidebar' : 'open-mobile-sidebar' }); };
-        modelTrigger.onclick = () => { dispatchOverlay({ type: 'toggle', overlay: 'model-popover' }); };
+        modelTrigger.onclick = () => {
+          if (state.modelStatus === 'loading') return;
+          modelMenuPane = 'root';
+          renderModelSeatMenu();
+          dispatchOverlay({ type: 'toggle', overlay: 'model-popover' });
+        };
         modeTrigger.onclick = () => { dispatchOverlay({ type: 'toggle', overlay: 'mode-popover' }); renderModes(); };
         reasoningTrigger.onclick = () => { dispatchOverlay({ type: 'toggle', overlay: 'reasoning-popover' }); renderReasoning(); };
         usageMeter.onclick = () => { if (usageMeter.hidden) return; usageDrawerOpen = !usageDrawerOpen; renderUsageMeter(typedConnection?.store.getSnapshot() || { session: state.session }); };
