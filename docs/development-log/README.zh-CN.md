@@ -26,3 +26,4 @@
 - [M04：Claude Code 式 API Round、Message Normalize 与 Tool Pairing](m04-api-round-pairing.zh-CN.md)
 - [M05：Claude Code 式 Tool Result Budget 与 MicroCompact](m05-tool-result-microcompact.zh-CN.md)
 - [M06：Claude Code 式 Session Memory Compact](m06-session-memory-compact.zh-CN.md)
+- [M07：Claude Code 式 LLM Summary Compact](m07-summary-compact.zh-CN.md)

@@ -13,6 +13,8 @@ export { normalizeMessagesForAPI } from "./api-normalize.js";
 export { ensureToolResultPairing } from "./tool-pairing.js";
 export { applyToolResultBudget, DEFAULT_COMPACTABLE_TOOLS, DEFAULT_MICROCOMPACT_MESSAGE } from "./tool-result-budget.js";
 export { adjustIndexToPreserveAPIInvariants, calculateMessagesToKeepIndex, compactWithSessionMemory, DEFAULT_SESSION_MEMORY_COMPACT_CONFIG } from "./session-memory-compact.js";
+export { buildSummaryInput, ensureSummaryStartsWithUser } from "./summary-input.js";
+export { compactWithSummaryModel, truncateHeadForPtlRetry, DEFAULT_SUMMARY_COMPACT_CONFIG } from "./summary-compact.js";
 export {
   countContextTokens,
   createTokenCounter,
@@ -68,6 +70,18 @@ export type {
   SessionMemoryStore,
   SessionMemorySnapshot,
 } from "./session-memory-compact.js";
+export type {
+  SummaryInputOptions,
+} from "./summary-input.js";
+export type {
+  SummaryCompactConfig,
+  SummaryCompactOptions,
+  SummaryCompactReason,
+  SummaryCompactResult,
+  SummaryRequest,
+  SummaryResponse,
+  SummaryRunner,
+} from "./summary-compact.js";
 
 export type {
   ContextBudgetConfig,

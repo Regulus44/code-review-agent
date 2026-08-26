@@ -330,3 +330,21 @@ ID:
 明确未复用：Session Memory extraction/update、SessionStart hooks、文件路径解析、Project Memory、summary agent 和 provider cache edit 留给 M07/M08/M11；memory 原文不写入 EventStore receipt。
 
 新增测试：`packages/context/src/session-memory-compact.test.ts`、`packages/runtime/src/index.test.ts` 的 memory boundary、fallback、tool pair、streaming 和 projection 场景。
+
+### CC-008
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`src/services/compact/compact.ts:149-227,247-297,336-389,411-690,1159-1450`
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；本次没有复制 Claude Code 代码，只重新实现 summary input 清理、无工具 summary request、API-round PTL retry、summary usage 和结构化失败回退。
+
+本项目路径：`packages/context/src/summary-input.ts`、`packages/context/src/summary-compact.ts`、`packages/runtime/src/index.ts`、`packages/storage/src/index.ts`。
+
+范围：image/document marker、skill attachment 过滤、summary agent purpose/tool boundary、recent suffix、oldest API-round retry、synthetic user marker、summary compact receipts。
+
+明确未复用：forked-agent prompt-cache sharing、PreCompact/SessionStart hooks、compact boundary、post-compact attachments、provider-specific error APIs 和完整 Claude Code tool runtime。
+
+新增测试：`packages/context/src/summary-compact.test.ts`、`packages/runtime/src/index.test.ts` 的 summary request、PTL retry、usage 和 projection 场景。

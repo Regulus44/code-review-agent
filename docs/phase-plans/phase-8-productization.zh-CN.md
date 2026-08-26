@@ -219,6 +219,7 @@ git diff --check
 
 - token budget、tool result budget、microcompact、collapse、autocompact；
 - Session Memory Compact：复用已有会话摘要，按摘要边界保留近期消息，保持 tool pair/streaming response 完整，并在边界不可恢复时安全回退；
+- LLM Summary Compact：在 Session Memory 不可用时使用无工具摘要模型，清理摘要输入并对 prompt-too-long 执行有界 API-round 重试；
 - `tool_use/tool_result`、thinking、Task 和 Permission 状态的不可破坏边界；
 - 压缩前后的 durable summary、source sequence 和恢复 cursor；
 - Web Context meter、compaction status 和恢复诊断。

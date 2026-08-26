@@ -565,7 +565,7 @@ interface ToolResultContextView {
 | Claude Code 参考 | `D:/Develop/claude-code/src/services/compact/compact.ts:126-310,411-530,540-690,1159-1450` |
 | 关键函数 | `compactConversation()`、`streamCompactSummary()`、`stripImagesFromMessages()`、`truncateHeadForPTLRetry()`、`createCompactCanUseTool()` |
 | 子功能 | pre-compact hooks、媒体剥离、skill attachment 剥离、fork summary agent、PTL retry、summary usage、compaction result |
-| 本项目落点 | `packages/context/src/summary-input.ts`、`summary-compact.ts`、`summary-agent.ts`（拟建） |
+| 本项目落点 | `packages/context/src/summary-input.ts`、`summary-compact.ts`、`packages/runtime/src/index.ts` |
 | 直接仿照程度 | summary 状态机、无工具权限和 API-round oldest-drop 可直接仿照；prompt cache sharing 需 provider adapter |
 
 实现顺序应与 Claude Code 相同：
@@ -580,6 +580,21 @@ PreCompact hook
 ```
 
 `truncateHeadForPTLRetry()` 特别处理两点：至少保留一组消息供摘要；删除 group 0 后若第一条变成 assistant，插入 synthetic user marker，避免摘要请求因角色顺序再次失败。`createCompactCanUseTool()` 表明摘要 agent 不允许执行普通工具。
+
+### 14.6 M07 实施状态（2026-08-26）
+
+M07 已完成，详细代码对照记录见 [`claude-code-context-m07-implementation.zh-CN.md`](claude-code-context-m07-implementation.zh-CN.md)。实际入口如下：
+
+| 层次 | 实际入口 | 当前行为 |
+|---|---|---|
+| Summary input | `packages/context/src/summary-input.ts:buildSummaryInput()` | 克隆消息、移除内部 `messageId`、替换 image/document marker，并过滤 post-compact 会重新注入的 skill attachment |
+| Recent-window split | `packages/context/src/summary-compact.ts:findRecentStartIndex()` | 从尾部保留有界近期消息，调用 M06 invariant adjustment 保护 tool pair 和 streaming response |
+| Summary runner contract | `SummaryRequest` / `SummaryRunner` | 固定 `purpose=context_summary`、`tools=[]`、`toolChoice=none`；摘要请求与主 agent 请求分离 |
+| PTL recovery | `truncateHeadForPtlRetry()`、`compactWithSummaryModel()` | 按 API round 删除最老 group，必要时插入 synthetic user marker，最多配置次数，失败返回结构化 reason |
+| Runtime summary agent | `packages/runtime/src/index.ts:runSummaryModel()` | 复用当前 tenant model，但禁止普通工具；摘要 stream 的 usage 单独汇总，不写 assistant/chunk 事件 |
+| Durable events | contracts/storage/runtime | 追加 `context/summary_started`、`context/summary_retried`、`context/summary_compacted` 或失败事件；projection 标记 `kind=summary` |
+
+M07 在 M06 返回未压缩后才尝试；成功后替换 model-view 中的旧历史，失败则记录 summary failure 并回退现有 deterministic legacy compact。prompt cache sharing、SessionStart hook 和 post-compact attachments 留在 M08/provider adapter，不在本模块伪造。
 
 模块验收：摘要请求自身过大时能有限重试；摘要 agent 无权写 workspace、调用 MCP 或执行工具；summary usage 与主请求 usage 分开记录；摘要失败返回结构化 context error。
 

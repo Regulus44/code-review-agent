@@ -502,12 +502,12 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
     }
   }
 
-  if (event.type === "context/compacted" || event.type === "context/compaction_failed" || event.type === "context/session_memory_compacted" || event.type === "context/session_memory_compaction_failed") {
+  if (event.type === "context/compacted" || event.type === "context/compaction_failed" || event.type === "context/session_memory_compacted" || event.type === "context/session_memory_compaction_failed" || event.type === "context/summary_compacted" || event.type === "context/summary_compaction_failed") {
     const payload = event.payload;
     const summary = typeof payload["summary"] === "string" ? payload["summary"] : "";
     const projection: ContextCompactionProjection = {
-      status: event.type === "context/compacted" || event.type === "context/session_memory_compacted" ? "completed" : "failed",
-      ...(event.type === "context/session_memory_compacted" || event.type === "context/session_memory_compaction_failed" ? { kind: "session_memory" as const } : { kind: "legacy" as const }),
+      status: event.type === "context/compacted" || event.type === "context/session_memory_compacted" || event.type === "context/summary_compacted" ? "completed" : "failed",
+      ...(event.type === "context/session_memory_compacted" || event.type === "context/session_memory_compaction_failed" ? { kind: "session_memory" as const } : event.type === "context/summary_compacted" || event.type === "context/summary_compaction_failed" ? { kind: "summary" as const } : { kind: "legacy" as const }),
       sourceSequence: typeof payload["sourceSequence"] === "number" ? payload["sourceSequence"] : Math.max(0, event.sequence - 1),
       summary,
       originalMessageCount: typeof payload["originalMessageCount"] === "number" ? payload["originalMessageCount"] : 0,

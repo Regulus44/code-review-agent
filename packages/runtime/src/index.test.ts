@@ -568,6 +568,45 @@ describe("AgentHost", () => {
     expect(receipt?.payload).toMatchObject({ boundaryKnown: true, memoryChars: expect.any(Number), droppedMessages: expect.any(Number) });
   });
 
+  it("uses a tool-less summary model for M07 and records separate summary usage", async () => {
+    const store = new InMemoryEventStore();
+    const requests: ModelRequest[] = [];
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        requests.push(request);
+        if (request.purpose === "context_summary") {
+          expect(request.tools).toEqual([]);
+          expect(request.toolChoice).toBe("none");
+          yield { type: "usage", usage: { inputTokens: 12, outputTokens: 4 } };
+          yield { type: "text_delta", text: "Preserve the review goal and the unresolved test failure." };
+        } else {
+          yield { type: "text_delta", text: "summary-compact-ok" };
+        }
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({
+      store,
+      model,
+      contextPolicy: { contextWindowTokens: 10_000, autoCompactBufferTokens: 1_000 },
+      summaryCompact: { recentMessageTokens: 1, maxSummaryChars: 200, maxPtlRetries: 2 },
+    });
+    const session = await host.createSession("D:/m07-summary-fixture");
+    await store.append({ sessionId: session.id, type: "user/message", payload: { content: "old context " + "x".repeat(30_000) } });
+    await store.append({ sessionId: session.id, type: "assistant/message", payload: { content: "old answer " + "x".repeat(30_000), responseId: "old-response" } });
+    const turn = await host.sendMessage(session.id, "continue with summary");
+    await host.waitForTurn(turn);
+    const events = await host.events(session.id);
+    expect(requests[0]?.purpose).toBe("context_summary");
+    expect(requests[1]?.messages.some((message) => message.content.includes("<conversation-summary>"))).toBe(true);
+    expect(events.some((event) => event.type === "context/summary_started")).toBe(true);
+    expect(events.some((event) => event.type === "context/summary_compacted")).toBe(true);
+    expect(events.some((event) => event.type === "context/compacted")).toBe(false);
+    expect((await host.getSession(session.id))?.contextCompaction).toMatchObject({ kind: "summary", status: "completed" });
+    const receipt = events.find((event) => event.type === "context/summary_compacted");
+    expect(receipt?.payload).toMatchObject({ summaryUsage: { inputTokens: 12, outputTokens: 4 }, purpose: "context_summary" });
+  });
+
   it("pauses a turn for permission and resumes the same turn after approval", async () => {
     const store = new InMemoryEventStore();
     const registry = new ToolRegistry();

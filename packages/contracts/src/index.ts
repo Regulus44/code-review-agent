@@ -59,6 +59,10 @@ export type AgentEventType =
   | "context/microcompacted"
   | "context/session_memory_compacted"
   | "context/session_memory_compaction_failed"
+  | "context/summary_started"
+  | "context/summary_retried"
+  | "context/summary_compacted"
+  | "context/summary_compaction_failed"
   | "worktree/created"
   | "worktree/attached"
   | "worktree/switched"
@@ -368,7 +372,7 @@ export type ContextCompactionStatus = "completed" | "failed";
 
 export interface ContextCompactionProjection {
   readonly status: ContextCompactionStatus;
-  readonly kind?: "legacy" | "session_memory";
+  readonly kind?: "legacy" | "session_memory" | "summary";
   readonly sourceSequence: number;
   readonly summary: string;
   readonly originalMessageCount: number;
@@ -730,6 +734,8 @@ export interface ModelRequest {
   readonly toolChoice?: "auto" | "none" | "required" | { readonly type: "function"; readonly name: string };
   /** Provider-owned reasoning effort. Omitted means provider default. */
   readonly reasoningEffort?: string;
+  /** Distinguishes the normal agent request from a tool-less summary request. */
+  readonly purpose?: "agent" | "context_summary";
   readonly signal?: AbortSignal;
 }
 

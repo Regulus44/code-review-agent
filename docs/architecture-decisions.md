@@ -200,6 +200,22 @@ Session memory 以 `<session-memory>` 不可信历史上下文 wrapper 注入 mo
 
 回滚策略：移除 SessionMemoryStore 注入、M06 keep-window adapter、两个事件类型和 projection kind 即可恢复 M05 后的 legacy compact；`ChatMessage.messageId` 与新增字段均为可选，不要求旧事件迁移。
 
+## ADR-019：LLM Summary Compact 使用独立无工具请求和有界 PTL 重试
+
+状态：accepted（2026-08-26，M07）
+
+M07 位于 M06 Session Memory Compact 之后、legacy deterministic compact 之前。M06 未成功替换历史时，Runtime 使用当前 tenant model 发起独立的 `purpose=context_summary` 请求；该请求固定 `tools=[]`、`toolChoice=none`，不得进入普通 ToolRuntime，也不得产生主会话的 `assistant/chunk` 或 `assistant/message` 事件。摘要 usage 单独写入 summary receipt。
+
+摘要输入必须是与主 model view、EventStore transcript 分离的不可变副本。输入阶段移除内部 `messageId`，把 image/document 替换为 bounded marker，并去除压缩后会再次注入的 skill attachment。摘要输出以不可信历史上下文 wrapper 注入 model view，保留近期消息和 API pairing 边界。
+
+摘要请求返回 prompt-too-long、context length、413 或 too-many-tokens 时，按 API round 从头部删除完整 group；首条变为 assistant 时插入 synthetic user marker；retry marker 在下一次重试前移除，最多执行 `maxPtlRetries`（默认 3）次。非 PTL、空摘要或重试耗尽均记录结构化失败，并回退现有 legacy compact。
+
+Runtime 追加 `context/summary_started`、`context/summary_retried`、`context/summary_compacted` 和 `context/summary_compaction_failed`；Storage projection 将 summary compact 标记为 `kind=summary`。事件不得包含 provider body、完整摘要请求、工具输出或 memory 原文。
+
+M07 不实现 provider prompt-cache sharing、PreCompact/SessionStart 外部 hooks、compact boundary、post-compact attachments 和 reactive overflow recovery；这些能力必须在后续模块或 provider adapter 中单独决策。
+
+回滚策略：移除 summary input/compact 模块、Runtime summary gate、四类 summary 事件、`ModelRequest.purpose` 和 projection kind 即可恢复 M06 后的 compact 顺序；旧事件无需迁移。
+
 ## 参考代码入口
 
 - DSH Agent Loop：`D:/Develop/deepseek-harness-fork/packages/core/agent-loop/src/agent.ts`

@@ -38,7 +38,7 @@ import {
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { compactMessages, DEFAULT_CONTEXT_BUDGET, type ContextBudget } from "@code-review-agent/compaction";
-import { applyToolResultBudget, assembleContext, calculateContextWarningState, compactWithSessionMemory, countContextTokens, createTokenCounter, ensureToolResultPairing, estimateContextTokens, fallbackModelContextCapability, groupMessagesByApiRound, normalizeMessagesForAPI, resolveContextBudget, shouldCompactBeforeRequest, shouldUseExactTokenCount, type ApiRound, type ContextAssembly, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type SessionMemoryCompactConfig, type SessionMemoryStore, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport } from "@code-review-agent/context";
+import { applyToolResultBudget, assembleContext, calculateContextWarningState, compactWithSessionMemory, compactWithSummaryModel, countContextTokens, createTokenCounter, ensureToolResultPairing, estimateContextTokens, fallbackModelContextCapability, groupMessagesByApiRound, normalizeMessagesForAPI, resolveContextBudget, shouldCompactBeforeRequest, shouldUseExactTokenCount, type ApiRound, type ContextAssembly, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type SessionMemoryCompactConfig, type SessionMemoryStore, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport } from "@code-review-agent/context";
 import { randomUUID } from "node:crypto";
 import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModePolicySnapshot, type CodeModeSandbox, type ExecuteToolOutput, type JobSummary, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
 import type { SubagentRuntime } from "@code-review-agent/subagent";
@@ -73,6 +73,8 @@ export interface AgentHostOptions {
   /** Host-owned session memory used by M06; extraction/update is deferred to M11. */
   readonly sessionMemory?: SessionMemoryStore;
   readonly sessionMemoryCompact?: Partial<SessionMemoryCompactConfig>;
+  /** Claude Code-style tool-less LLM summary compact configuration (M07). */
+  readonly summaryCompact?: Partial<SummaryCompactConfig>;
   readonly quota?: ProductizationQuotaPolicy;
   readonly operations?: ProductizationOperationsPolicy;
 }
@@ -200,6 +202,7 @@ export class AgentHost {
   private readonly toolResultBudget: ToolResultBudgetPolicy | undefined;
   private readonly sessionMemory: SessionMemoryStore | undefined;
   private readonly sessionMemoryCompact: Partial<SessionMemoryCompactConfig> | undefined;
+  private readonly summaryCompact: Partial<SummaryCompactConfig> | undefined;
   private readonly quota: ProductizationQuotaPolicy | undefined;
   private readonly operations: ProductizationOperationsPolicy;
   private readonly quotaTails = new Map<string, Promise<void>>();
@@ -219,6 +222,7 @@ export class AgentHost {
     this.toolResultBudget = options.toolResultBudget;
     this.sessionMemory = options.sessionMemory;
     this.sessionMemoryCompact = options.sessionMemoryCompact;
+    this.summaryCompact = options.summaryCompact;
     this.quota = options.quota;
     this.operations = options.operations ?? { backup: "deferred", migration: "deferred", upgrade: "deferred" };
     this.customSystemPrompt = options.systemPrompt;
@@ -1702,7 +1706,7 @@ export class AgentHost {
       const beforeState = calculateContextWarningState(beforeUsage, budgetSnapshot, this.contextPolicyWithLegacyFallback());
       const autoCompactRecommended = shouldCompactBeforeRequest(beforeState, this.contextPolicyWithLegacyFallback());
       if (this.compactionEnabled && autoCompactRecommended) {
-        await this.compactTurnContext(sessionId, turnId, messages, budgetSnapshot, beforeUsage, beforeState);
+        await this.compactTurnContext(sessionId, turnId, messages, budgetSnapshot, beforeUsage, beforeState, controller.signal);
         assembly = await this.assembleTurnContext(sessionId, messages, recovery);
         prepared = this.prepareModelContext(assembly, protectedToolCallIds, toolResultTimestamps, alreadyClearedToolCallIds);
         await this.appendToolResultBudgetEvents(sessionId, turnId, prepared.toolResultBudget, this.toolResultBudgetWithLegacyFallback(), reportedBudgetToolCallIds, reportedMicrocompactToolCallIds, alreadyClearedToolCallIds);
@@ -1857,6 +1861,7 @@ export class AgentHost {
     budgetSnapshot?: ContextBudgetSnapshot,
     tokenUsage?: number,
     warningState?: ContextWarningState,
+    signal?: AbortSignal,
   ): Promise<void> {
     if (!this.compactionEnabled) return;
     const projection = await this.options.store.project(sessionId);
@@ -1865,6 +1870,8 @@ export class AgentHost {
       const resolved = budgetSnapshot ?? this.contextBudgetSnapshot(projection?.ownership?.tenantId);
       const sessionMemoryResult = await this.compactWithSessionMemory(sessionId, turnId, messages, protectedToolCallIds, resolved.autoCompactThreshold);
       if (sessionMemoryResult === true) return;
+      const summaryResult = await this.compactWithSummaryModel(sessionId, turnId, messages, protectedToolCallIds, signal);
+      if (summaryResult === true) return;
       const usage = tokenUsage ?? estimateContextTokens({ messages }).value;
       const predictive = warningState?.isPredictiveCompactRecommended === true && usage < resolved.autoCompactThreshold;
       const maxTokens = predictive ? Math.max(1, usage - 1) : resolved.autoCompactThreshold;
@@ -1986,6 +1993,105 @@ export class AgentHost {
     return true;
   }
 
+  private async compactWithSummaryModel(
+    sessionId: SessionId,
+    turnId: TurnId,
+    messages: ChatMessage[],
+    protectedToolCallIds: ReadonlySet<string>,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const projection = await this.options.store.project(sessionId);
+    const tenantId = projection?.ownership?.tenantId;
+    await this.options.store.append({
+      sessionId,
+      turnId,
+      type: "context/summary_started",
+      payload: {
+        purpose: "context_summary",
+        inputMessageCount: messages.length,
+        protectedToolCallCount: protectedToolCallIds.size,
+        ...(this.summaryCompact === undefined ? {} : { config: this.summaryCompact }),
+      },
+    });
+    const model = this.modelForTenant(tenantId);
+    const result = await compactWithSummaryModel(messages, {
+      runner: (request) => this.runSummaryModel(model, request),
+      ...(this.summaryCompact === undefined ? {} : { config: this.summaryCompact }),
+      protectedToolCallIds,
+      ...(signal === undefined ? {} : { signal }),
+    });
+    if (result.retries > 0) {
+      await this.options.store.append({
+        sessionId,
+        turnId,
+        type: "context/summary_retried",
+        payload: {
+          purpose: "context_summary",
+          attempts: result.retries,
+          remainingMessages: result.preservedMessageCount,
+        },
+      });
+    }
+    if (!result.didCompact) {
+      if (result.reason !== "nothing-to-compact") {
+        await this.options.store.append({
+          sessionId,
+          turnId,
+          type: "context/summary_compaction_failed",
+          payload: {
+            sourceSequence: (await this.options.store.project(sessionId))?.lastSequence ?? 0,
+            originalMessageCount: result.originalMessageCount,
+            compactedMessageCount: result.compactedMessageCount,
+            droppedMessages: result.droppedMessageCount,
+            reason: result.reason ?? "summary-failed",
+            retries: result.retries,
+            fallback: "legacy-summary-compact",
+            ...(result.error === undefined ? {} : { error: result.error }),
+          },
+        });
+      }
+      return false;
+    }
+    messages.splice(0, messages.length, ...result.messages);
+    await this.options.store.append({
+      sessionId,
+      turnId,
+      type: "context/summary_compacted",
+      payload: {
+        sourceSequence: (await this.options.store.project(sessionId))?.lastSequence ?? 0,
+        kind: "summary",
+        purpose: "context_summary",
+        originalMessageCount: result.originalMessageCount,
+        compactedMessageCount: result.compactedMessageCount,
+        estimatedTokens: result.estimatedTokens,
+        droppedMessages: result.droppedMessageCount,
+        preservedMessageCount: result.preservedMessageCount,
+        retries: result.retries,
+        ...(result.usage === undefined ? {} : { summaryUsage: result.usage }),
+      },
+    });
+    return true;
+  }
+
+  private async runSummaryModel(model: ChatModel, request: SummaryRequest): Promise<SummaryResponse> {
+    const textParts: string[] = [];
+    let usage: ModelUsage | undefined;
+    for await (const part of model.stream({
+      purpose: request.purpose,
+      messages: request.messages,
+      tools: [],
+      toolChoice: "none",
+      ...(request.signal === undefined ? {} : { signal: request.signal }),
+    })) {
+      if (request.signal?.aborted) throw request.signal.reason ?? new Error("Cancelled");
+      if (part.type === "text_delta") textParts.push(part.text);
+      else if (part.type === "usage") usage = mergeModelUsage(usage, part.usage);
+      else if (part.type === "tool_call_start" || part.type === "tool_call_delta") throw new Error("SUMMARY_TOOL_USE_DENIED: compaction summary requests cannot call tools");
+      else if (part.type === "error") throw new Error(`${part.code}: ${part.message}`);
+    }
+    return { text: textParts.join(""), ...(usage === undefined ? {} : { usage }) };
+  }
+
   private appendSteers(messages: ChatMessage[], turnId: TurnId): void {
     for (const steer of this.takeSteers(turnId)) messages.push({ role: "user", content: steer });
   }
@@ -2036,7 +2142,7 @@ export class AgentHost {
       const calls = new Map<number, { id?: string; name?: string; arguments: string }>();
       let usage: ModelUsage | undefined;
       try {
-        for await (const part of model.stream({ messages: view.messages, ...(view.tools === undefined ? {} : { tools: view.tools }), toolChoice: "auto", ...(reasoningEffort === undefined ? {} : { reasoningEffort }), signal: controller.signal })) {
+        for await (const part of model.stream({ purpose: "agent", messages: view.messages, ...(view.tools === undefined ? {} : { tools: view.tools }), toolChoice: "auto", ...(reasoningEffort === undefined ? {} : { reasoningEffort }), signal: controller.signal })) {
           if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
           if (part.type === "text_delta") {
             textParts.push(part.text);
