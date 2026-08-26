@@ -63,6 +63,10 @@ export type AgentEventType =
   | "context/session_memory_extraction_completed"
   | "context/session_memory_extraction_failed"
   | "context/session_memory_extraction_cancelled"
+  | "context/project_memory_loaded"
+  | "context/project_memory_recalled"
+  | "context/project_memory_stale"
+  | "context/project_memory_disabled"
   | "context/summary_started"
   | "context/summary_retried"
   | "context/summary_compacted"
@@ -379,6 +383,7 @@ export interface SessionProjection extends SessionSummary {
   readonly permissions: readonly PermissionProjection[];
   readonly contextCompaction?: ContextCompactionProjection;
   readonly contextSessionMemory?: ContextSessionMemoryProjection;
+  readonly contextProjectMemory?: ContextProjectMemoryProjection;
   readonly contextRecovery?: ContextRecoveryProjection;
   readonly contextTranscript?: ContextTranscriptSegment;
   readonly contextRestore?: ContextSessionRestoreProjection;
@@ -463,6 +468,26 @@ export interface ContextSessionMemoryProjection {
   readonly memoryChars?: number;
   readonly memoryUpdatedAt?: string;
   readonly error?: string;
+}
+
+export type ContextProjectMemoryStatus = "loaded" | "recalled" | "stale" | "disabled";
+
+/** Bounded projection for workspace/tenant-scoped Project Memory (M12). */
+export interface ContextProjectMemoryProjection {
+  readonly version: 1;
+  readonly status: ContextProjectMemoryStatus;
+  readonly scopeKey: string;
+  readonly entrypointName: "MEMORY.md";
+  readonly entrypointBytes: number;
+  readonly entrypointLines: number;
+  readonly truncated: boolean;
+  readonly topicCount: number;
+  readonly recalledTopicIds?: readonly string[];
+  readonly staleTopicIds?: readonly string[];
+  readonly ignored: boolean;
+  readonly reason?: string;
+  readonly updatedAt: string;
+  readonly lastSequence: number;
 }
 
 export type ContextRecoveryErrorClass =

@@ -177,6 +177,7 @@ Phase 7 的 DSH Web 调研与分步计划：
 - `packages/compaction` unit 3 项、Runtime 25 项、Storage 12 项、API 27 项、Web 98 项已通过；新增 `/v1/capabilities.context` budget metadata、Settings context capability、compaction failure continuation、SQLite restart replay 和 `scripts/phase8-compaction-gate.mjs`；
 - M10 Transcript/Boundary Replay/Session Restore 已完成：新增 durable `context/transcript_segment` 与 `context/session_restored` 事件、algorithm version、EventStore/SQLite replay builder、stale anchor 安全回退和 Host restart boundary restore；Runtime/Context/Storage 定向测试与 `pnpm typecheck` 通过。
 - M11 Session Memory Extraction 已完成：新增 Claude Code 式 token/tool/natural-break gate、session-scoped extraction projection、per-session 后台串行 scheduler、restricted extractor capabilities、exact-path memory guard、host-owned `SessionMemoryStore.save()`、失败/取消隔离和 restart 幂等恢复；Context/Runtime/Storage 定向测试与 `pnpm typecheck` 通过。
+- M12 Project Memory / memdir 已完成：新增 bounded `MEMORY.md` index、四类 memory taxonomy、query topic recall、path/symbol/flag stale validation、workspace/tenant host scope、显式忽略和 adapter fail-closed；新增 Project Memory metadata events/projection，正文不进入 EventStore；Context/Runtime/Storage 定向测试与 `pnpm typecheck` 通过。
 - `pnpm typecheck`、`pnpm build:web`、`pnpm test:phase8:compaction` 和 `git diff --check` 通过；8.1 的长上下文、预算可见性、失败恢复和重启回放退出条件已满足。
 
 ## Phase 8.2 Worktree（completed）

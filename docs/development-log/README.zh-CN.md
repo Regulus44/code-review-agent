@@ -31,3 +31,4 @@
 - [M09：Claude Code 式 Query Proactive 与 Reactive Recovery](m09-context-recovery.zh-CN.md)
 - [M10：Claude Code 式 Transcript、Boundary Replay 与 Session Restore](m10-transcript-session-restore.zh-CN.md)
 - [M11：Claude Code 式 Session Memory Extraction](m11-session-memory-extraction.zh-CN.md)
+- [M12：Claude Code 式 Project Memory / memdir](m12-project-memory.zh-CN.md)

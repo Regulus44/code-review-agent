@@ -272,6 +272,22 @@ Runtime 只在主 turn 成功完成后后台调度 extraction。`SessionMemoryEx
 
 回滚策略：停止注入 `sessionMemoryExtractor` 并移除 M11 scheduler/事件 projection，保留 M06 的只读 `SessionMemoryStore.get()` 和现有 compact boundary；已存在的 M11 metadata 事件作为未知扩展保留，memory store 正文不删除。
 
+## ADR-024：Project Memory 使用 bounded MEMORY.md 索引和 host-owned topic recall
+
+状态：accepted（2026-08-26，M12）
+
+M12 仿照 Claude Code `src/memdir/memdir.ts`、`findRelevantMemories.ts`、`memoryTypes.ts` 和 `memoryScan.ts`，将 `MEMORY.md` 定义为项目记忆的受限入口索引。Runtime 对入口执行 200 行和 25,000 UTF-8 bytes 上限；超限按自然换行截断并追加 warning。详细 topic 正文不写入入口，而由 `ProjectMemoryStore` 按 workspace/tenant scope 和当前 query 召回，最多注入 5 个 `kind: "memory"` attachment。
+
+Project Memory 只允许 user、feedback、project、reference 四类 taxonomy。topic 中声明的 path、symbol、flag 必须在进入 model view 前由 host validator 重新检查；验证为 stale 的 topic 被排除并追加 `context/project_memory_stale`。memory 一律作为历史、不可信数据处理，不能覆盖 system prompt、权限、workspace、工具或当前代码事实。
+
+`AgentHostOptions.projectMemory` 是 host-owned adapter，scope 由 active workspace root、tenant ownership 和 host 派生 scope key 构成。scope key 不由 memory 内容决定；默认值为 workspace/tenant 的 SHA-256 截断值。用户明确要求忽略 memory 时，Runtime 不读取 adapter、不注入 prompt/attachment，只追加 disabled receipt。adapter 读取失败采用 fail-closed，主 turn 继续执行但不使用 Project Memory。
+
+新增 `context/project_memory_loaded`、`context/project_memory_recalled`、`context/project_memory_stale` 和 `context/project_memory_disabled`。事件只保存 scope key、入口统计、topic id、状态、reason 和 sequence；完整入口/topic 正文只存在于 host-owned store 和当前请求的 model view，不进入 EventStore、SSE、projection 或 Web diagnostics。Storage 的 InMemory 与 SQLite 通过同一 reducer replay `ContextProjectMemoryProjection`。
+
+该决策参考 Claude Code 的 bounded entrypoint、taxonomy、相关性加载和 stale memory 行为，没有复制其源码、账户、遥测、文件布局或写入 agent。M12 不包含自动记忆写入、hooks、JSONL memory rotation、context diagnostics 或 Web inspector。
+
+回滚策略：停止配置 `AgentHostOptions.projectMemory` 即可禁用 M12；保留已存在的 metadata events 作为兼容未知扩展，不删除 host-owned memory 正文。
+
 ## 参考代码入口
 
 - DSH Agent Loop：`D:/Develop/deepseek-harness-fork/packages/core/agent-loop/src/agent.ts`

@@ -420,3 +420,21 @@ ID:
 明确未复用：Claude Code 文件路径实现、全局进程状态、`runForkedAgent()` 内部 prompt/cache/provider 代码、SessionStart/PreCompact hooks、账户/遥测、Project Memory 和主 Agent 工具权限。
 
 新增测试：`packages/context/src/session-memory.test.ts`、`packages/runtime/src/index.test.ts`、`packages/storage/src/index.test.ts` 的 gate、隔离、串行、保存、失败隔离、正文不入事件和 projection replay 场景。
+
+### CC-013
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`src/memdir/memdir.ts:34-315,419-470`、`src/memdir/findRelevantMemories.ts`、`src/memdir/memoryTypes.ts`、`src/memdir/memoryScan.ts`
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；本次没有复制 Claude Code 代码，只重新实现 bounded `MEMORY.md` index、四类 taxonomy、topic relevance、stale validation 和 host-owned scope adapter。
+
+本项目路径：`packages/context/src/project-memory.ts`、`packages/runtime/src/index.ts`、`packages/storage/src/index.ts`、`packages/contracts/src/index.ts`。
+
+范围：200 行/25,000 UTF-8 bytes 入口上限、自然换行 warning、user/feedback/project/reference 类型、最多五个 topic recall、already-surfaced 去重、path/symbol/flag 验证、workspace/tenant scope、Project Memory metadata events/projection。
+
+明确未复用：Claude Code 的账户/遥测、memory writer agent、JSONL/文件布局、feature flags、商业 provider、完整 prompt 文本和未经确认许可的实现代码；topic 正文不进入本项目 EventStore。
+
+新增测试：`packages/context/src/project-memory.test.ts`、`packages/runtime/src/index.test.ts`、`packages/storage/src/index.test.ts` 的 bounded index、相关性、stale、忽略、scope 和 SQLite replay 场景。

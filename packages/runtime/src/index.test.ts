@@ -1223,4 +1223,76 @@ describe("AgentHost", () => {
     expect(events.some((event) => event.type === "context/session_memory_extraction_failed")).toBe(true);
     expect(events.some((event) => event.type === "agent/error")).toBe(false);
   });
+
+  it("loads bounded Project Memory, recalls relevant topics, and records metadata without正文", async () => {
+    const store = new InMemoryEventStore();
+    const requests: string[] = [];
+    const modelRequests: ModelRequest[] = [];
+    const host = new AgentHost({
+      store,
+      model: {
+        async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+          modelRequests.push(request);
+          yield { type: "text_delta", text: "memory checked" };
+          yield { type: "done" };
+        },
+      },
+      projectMemory: {
+        async getEntrypoint(scope) { requests.push(`entry:${scope.scopeKey}`); return { content: "# Index\n- [Deploy](topics/deploy.md) — release procedure" }; },
+        async listTopics(scope) { requests.push(`list:${scope.scopeKey}`); return [{ id: "topics/deploy.md", path: "topics/deploy.md", title: "Deploy", description: "release procedure", type: "project", content: "Deploy with pnpm." }]; },
+        async readTopic(scope, id) { requests.push(`read:${scope.scopeKey}:${id}`); return id === "topics/deploy.md" ? { id, path: id, title: "Deploy", description: "release procedure", type: "project", content: "Deploy with pnpm." } : undefined; },
+      },
+    });
+    const session = await host.createSession("D:/m12-project-memory");
+    const turn = await host.sendMessage(session.id, "review the deploy release flow");
+    await host.waitForTurn(turn);
+    const events = await host.events(session.id);
+    expect(requests.some((value) => value.startsWith("entry:pm_"))).toBe(true);
+    expect(events.some((event) => event.type === "context/project_memory_loaded")).toBe(true);
+    expect(events.some((event) => event.type === "context/project_memory_recalled")).toBe(true);
+    expect(JSON.stringify(events.filter((event) => event.type.startsWith("context/project_memory")))).not.toContain("Deploy with pnpm.");
+    const system = modelRequests[0]?.messages.find((message) => message.role === "system")?.content ?? "";
+    expect(system).toContain("# Project Memory");
+    expect(modelRequests[0]?.messages.some((message) => message.content.includes("Deploy with pnpm."))).toBe(true);
+    expect((await host.getSession(session.id))?.contextProjectMemory).toMatchObject({ status: "recalled", recalledTopicIds: ["topics/deploy.md"], ignored: false });
+  });
+
+  it("does not load Project Memory when the user explicitly asks to ignore it", async () => {
+    const store = new InMemoryEventStore();
+    let calls = 0;
+    const host = new AgentHost({
+      store,
+      projectMemory: {
+        async getEntrypoint() { calls += 1; return { content: "memory" }; },
+        async listTopics() { calls += 1; return []; },
+        async readTopic() { calls += 1; return undefined; },
+      },
+    });
+    const session = await host.createSession("D:/m12-ignore");
+    const turn = await host.sendMessage(session.id, "ignore project memory and answer normally");
+    await host.waitForTurn(turn);
+    expect(calls).toBe(0);
+    const events = await host.events(session.id);
+    expect(events.some((event) => event.type === "context/project_memory_disabled")).toBe(true);
+    expect((await host.getSession(session.id))?.contextProjectMemory).toMatchObject({ status: "disabled", ignored: true, reason: "user_requested_ignore" });
+  });
+
+  it("validates recalled memory against the scoped workspace and excludes stale topics", async () => {
+    const store = new InMemoryEventStore();
+    const host = new AgentHost({
+      store,
+      projectMemory: {
+        async getEntrypoint() { return { content: "memory" }; },
+        async listTopics() { return [{ id: "old", path: "topics/old.md", title: "Deploy", description: "release", type: "feedback", content: "old advice", references: [{ kind: "path", value: "missing.ts" }] }]; },
+        async readTopic(_scope, id) { return id === "old" ? { id, path: "topics/old.md", title: "Deploy", description: "release", type: "feedback", content: "old advice", references: [{ kind: "path", value: "missing.ts" }] } : undefined; },
+      },
+      projectMemoryValidation: { pathExists: async () => false },
+    });
+    const session = await host.createSession("D:/m12-stale");
+    const turn = await host.sendMessage(session.id, "review deploy release");
+    await host.waitForTurn(turn);
+    const events = await host.events(session.id);
+    expect(events.some((event) => event.type === "context/project_memory_stale")).toBe(true);
+    expect(events.some((event) => event.type === "context/project_memory_recalled")).toBe(false);
+  });
 });

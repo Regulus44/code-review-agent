@@ -741,6 +741,16 @@ M11 已完成。`packages/context/src/session-memory.ts` 将 Claude Code 的进�
 
 模块验收：不同 workspace/tenant 的 memory 不互相泄露；超大索引自然截断并有 warning；用户要求忽略 memory 时 model view 不再注入；删除/过期 memory 可回放。
 
+#### M12 实施状态（2026-08-26）
+
+M12 已完成。`packages/context/src/project-memory.ts` 实现 200 行/25,000 UTF-8 bytes 的 `MEMORY.md` bounded index、自然换行截断 warning、safe topic link parser、user/feedback/project/reference taxonomy、最多 5 个 topic 的 query relevance、already-surfaced 去重以及 path/symbol/flag stale validator。
+
+`packages/runtime/src/index.ts` 通过 host-owned `ProjectMemoryStore` 在每个 turn 的 canonical `assembleTurnContext()` 中加载入口和 topic headers，按当前 user query 读取 topic 正文并以 untrusted `kind: "memory"` attachment 注入。scope 由 active workspace、tenant ownership 和 host-derived scope key 组成；用户明确忽略 memory 时不调用 adapter，adapter 失败或 reference stale 时 fail closed。turn-scoped state 防止 compact/retry 重新组装时重复追加事件。
+
+`packages/contracts/src/index.ts` 和 `packages/storage/src/index.ts` 新增 `context/project_memory_loaded/recalled/stale/disabled` 事件与 `ContextProjectMemoryProjection`。事件与 projection 只保存 scope key、入口统计、topic id、状态和 bounded reason，不保存 `MEMORY.md` 或 topic 正文；InMemory 与 SQLite 共用 replay reducer。
+
+对应实现说明：[claude-code-context-m12-implementation.zh-CN.md](claude-code-context-m12-implementation.zh-CN.md)；开发日志：[development-log/m12-project-memory.zh-CN.md](development-log/m12-project-memory.zh-CN.md)。
+
 ### M13：Context Diagnostics 与 Web Projection
 
 | 项目 | 内容 |

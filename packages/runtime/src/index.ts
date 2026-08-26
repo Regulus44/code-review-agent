@@ -40,8 +40,8 @@ import {
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { compactMessages, DEFAULT_CONTEXT_BUDGET, type ContextBudget } from "@code-review-agent/compaction";
-import { applyToolResultBudget, assembleContext, buildPostCompactMessages, calculateContextWarningState, classifyProviderContextError, compactWithSessionMemory, compactWithSummaryModel, ContextRecoveryGuard, countContextTokens, createSessionMemoryFileWriteGuard, createTokenCounter, ensureToolResultPairing, estimateContextTokens, extractContextAttachmentIds, fallbackModelContextCapability, fingerprintModelRequest, groupMessagesByApiRound, isReactiveContextError, normalizeMessagesForAPI, normalizeExtractionConfig, resolveContextBudget, restoreModelViewFromTranscript, selectPostCompactAttachments, SessionMemoryExtractionScheduler, sessionMemoryStats, shouldCompactBeforeRequest, shouldExtractSessionMemory, shouldUseExactTokenCount, type ApiRound, type ContextAssembly, type ContextAttachment, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type PostCompactAttachmentConfig, type PostCompactAttachmentProvider, type SessionMemoryCompactConfig, type SessionMemoryExtractionConfig, type SessionMemoryExtractionState, type SessionMemoryExtractor, type SessionMemoryStore, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport } from "@code-review-agent/context";
-import { randomUUID } from "node:crypto";
+import { applyToolResultBudget, assembleContext, buildPostCompactMessages, buildProjectMemoryPrompt, calculateContextWarningState, classifyProviderContextError, compactWithSessionMemory, compactWithSummaryModel, ContextRecoveryGuard, countContextTokens, createSessionMemoryFileWriteGuard, createTokenCounter, ensureToolResultPairing, estimateContextTokens, extractContextAttachmentIds, fallbackModelContextCapability, fingerprintModelRequest, groupMessagesByApiRound, isReactiveContextError, normalizeMessagesForAPI, normalizeExtractionConfig, recallRelevantProjectMemory, resolveContextBudget, restoreModelViewFromTranscript, selectPostCompactAttachments, SessionMemoryExtractionScheduler, sessionMemoryStats, shouldCompactBeforeRequest, shouldExtractSessionMemory, shouldUseExactTokenCount, truncateProjectMemoryEntrypoint, validateProjectMemoryTopic, type ApiRound, type ContextAssembly, type ContextAttachment, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type PostCompactAttachmentConfig, type PostCompactAttachmentProvider, type ProjectMemoryScope, type ProjectMemoryStore, type ProjectMemoryTopic, type SessionMemoryCompactConfig, type SessionMemoryExtractionConfig, type SessionMemoryExtractionState, type SessionMemoryExtractor, type SessionMemoryStore, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport } from "@code-review-agent/context";
+import { createHash, randomUUID } from "node:crypto";
 import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModePolicySnapshot, type CodeModeSandbox, type ExecuteToolOutput, type JobSummary, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
 import type { SubagentRuntime } from "@code-review-agent/subagent";
 import { GitWorktreeManager } from "@code-review-agent/workspace";
@@ -78,6 +78,16 @@ export interface AgentHostOptions {
   /** Optional isolated adapter used by the M11 background extractor. */
   readonly sessionMemoryExtractor?: SessionMemoryExtractor;
   readonly sessionMemoryExtraction?: Partial<SessionMemoryExtractionConfig>;
+  /** Claude Code-style workspace/tenant Project Memory adapter (M12). */
+  readonly projectMemory?: ProjectMemoryStore;
+  /** Host-owned fact validators used before a recalled memory enters model view. */
+  readonly projectMemoryValidation?: {
+    readonly pathExists?: (path: string, scope: ProjectMemoryScope) => Promise<boolean | undefined>;
+    readonly symbolExists?: (symbol: string, scope: ProjectMemoryScope) => Promise<boolean | undefined>;
+    readonly flagExists?: (flag: string, scope: ProjectMemoryScope) => Promise<boolean | undefined>;
+  };
+  /** Optional host-derived stable scope key; defaults to a SHA-256 workspace/tenant key. */
+  readonly projectMemoryScopeKey?: (input: { readonly workspaceRoot: string; readonly tenantId?: string }) => string;
   /** Claude Code-style tool-less LLM summary compact configuration (M07). */
   readonly summaryCompact?: Partial<SummaryCompactConfig>;
   /** Host-owned sources rebuilt after a compact boundary is created. */
@@ -218,6 +228,10 @@ export class AgentHost {
   private readonly sessionMemoryCompact: Partial<SessionMemoryCompactConfig> | undefined;
   private readonly sessionMemoryExtractor: SessionMemoryExtractor | undefined;
   private readonly sessionMemoryExtraction: Partial<SessionMemoryExtractionConfig> | undefined;
+  private readonly projectMemory: ProjectMemoryStore | undefined;
+  private readonly projectMemoryValidation: AgentHostOptions["projectMemoryValidation"];
+  private readonly projectMemoryScopeKey: AgentHostOptions["projectMemoryScopeKey"];
+  private readonly projectMemoryTurnStates = new Map<string, { readonly loaded: boolean; readonly surfacedIds: Set<string>; readonly staleIds: Set<string>; readonly cachedTopics: Map<string, ProjectMemoryTopic>; readonly disabled: boolean }>();
   private readonly sessionMemoryScheduler = new SessionMemoryExtractionScheduler();
   private readonly sessionMemoryScheduleTails = new Map<SessionId, Promise<void>>();
   private readonly summaryCompact: Partial<SummaryCompactConfig> | undefined;
@@ -245,6 +259,9 @@ export class AgentHost {
     this.sessionMemoryCompact = options.sessionMemoryCompact;
     this.sessionMemoryExtractor = options.sessionMemoryExtractor;
     this.sessionMemoryExtraction = options.sessionMemoryExtraction;
+    this.projectMemory = options.projectMemory;
+    this.projectMemoryValidation = options.projectMemoryValidation;
+    this.projectMemoryScopeKey = options.projectMemoryScopeKey;
     this.summaryCompact = options.summaryCompact;
     this.postCompactAttachmentProvider = options.postCompactAttachmentProvider;
     this.postCompactAttachmentConfig = options.postCompactAttachmentConfig;
@@ -1815,11 +1832,13 @@ export class AgentHost {
     sessionId: SessionId,
     history: readonly ChatMessage[],
     recovery = false,
+    turnId?: TurnId,
   ): Promise<ContextAssembly> {
     const projection = await this.options.store.project(sessionId);
     const tenantId = projection?.ownership?.tenantId;
     const tools = this.toolRuntime.listTools(sessionId, tenantId);
     const attachments = await this.postCompactAttachmentsForSession(sessionId, history, projection);
+    const projectMemory = await this.projectMemoryContext(sessionId, history, projection, turnId);
     return assembleContext({
       systemSections: buildAgentSystemPromptSections({
         workspaceRoot: projection === undefined ? "." : effectiveWorkspaceRoot(projection),
@@ -1827,12 +1846,138 @@ export class AgentHost {
         toolGuidance: this.toolPromptRegistry.assemble(tools),
         permissionPreset: projection?.permissionPreset ?? this.permissionPreset ?? "ask-on-write",
         ...(this.customSystemPrompt === undefined ? {} : { customInstructions: this.customSystemPrompt }),
+        ...(projectMemory.prompt === undefined ? {} : { projectMemoryPrompt: projectMemory.prompt }),
         ...(recovery ? { recovery: true } : {}),
       }),
       visibleTools: this.modelTools(sessionId, tenantId),
       history: history.filter((message) => message.role !== "system" || message.contextBoundary !== undefined),
-      ...(attachments.length === 0 ? {} : { attachments }),
+      ...(attachments.length === 0 && projectMemory.attachments.length === 0 ? {} : { attachments: [...attachments, ...projectMemory.attachments] }),
     });
+  }
+
+  private async projectMemoryContext(
+    sessionId: SessionId,
+    history: readonly ChatMessage[],
+    projection: SessionProjection | undefined,
+    turnId?: TurnId,
+  ): Promise<{ readonly prompt?: string; readonly attachments: readonly ContextAttachment[] }> {
+    if (this.projectMemory === undefined || projection === undefined) return { attachments: [] };
+    const query = latestProjectMemoryQuery(history);
+    const stateKey = `${String(sessionId)}:${turnId === undefined ? "system" : String(turnId)}`;
+    const current = this.projectMemoryTurnStates.get(stateKey) ?? { loaded: false, surfacedIds: new Set<string>(), staleIds: new Set<string>(), cachedTopics: new Map<string, ProjectMemoryTopic>(), disabled: false };
+    if (shouldIgnoreProjectMemory(query)) {
+      if (!current.disabled) {
+        await this.appendProjectMemoryEvent(sessionId, turnId, "context/project_memory_disabled", {
+          scopeKey: projectMemoryScope(projection, this.projectMemoryScopeKey),
+          entrypointName: "MEMORY.md",
+          ignored: true,
+          reason: "user_requested_ignore",
+        });
+        this.projectMemoryTurnStates.set(stateKey, { ...current, disabled: true });
+      }
+      return { attachments: [] };
+    }
+    if (current.disabled) return { attachments: [] };
+
+    const scope = createProjectMemoryScope(sessionId, projection, this.projectMemoryScopeKey);
+    let entrypoint;
+    let headers;
+    try {
+      [entrypoint, headers] = await Promise.all([
+        this.projectMemory.getEntrypoint(scope),
+        this.projectMemory.listTopics(scope),
+      ]);
+    } catch (error) {
+      await this.appendProjectMemoryEvent(sessionId, turnId, "context/project_memory_disabled", {
+        scopeKey: scope.scopeKey,
+        entrypointName: "MEMORY.md",
+        ignored: true,
+        reason: `load_failed:${boundedError(error)}`,
+      });
+      this.projectMemoryTurnStates.set(stateKey, { ...current, disabled: true });
+      return { attachments: [] };
+    }
+
+    const bounded = truncateProjectMemoryEntrypoint(entrypoint?.content ?? "");
+    if (!current.loaded) {
+      await this.appendProjectMemoryEvent(sessionId, turnId, "context/project_memory_loaded", {
+        scopeKey: scope.scopeKey,
+        entrypointName: "MEMORY.md",
+        entrypointBytes: bounded.byteCount,
+        entrypointLines: bounded.lineCount,
+        truncated: bounded.wasLineTruncated || bounded.wasByteTruncated,
+        topicCount: headers.length,
+        ignored: false,
+      });
+      this.projectMemoryTurnStates.set(stateKey, { ...current, loaded: true });
+    }
+
+    const recallOptions = {
+      alreadySurfacedIds: current.surfacedIds,
+      ...(this.projectMemoryValidation === undefined ? {} : { validate: (topic: Parameters<typeof validateProjectMemoryTopic>[0], scoped: ProjectMemoryScope) => validateProjectMemoryTopic(topic, this.projectMemoryValidation!, scoped) }),
+    };
+    const recall = await recallRelevantProjectMemory(this.projectMemory, scope, query, recallOptions);
+    const nextSurfaced = new Set(current.surfacedIds);
+    const nextCachedTopics = new Map(current.cachedTopics);
+    for (const topic of recall.topics) nextSurfaced.add(topic.id);
+    for (const topic of recall.topics) nextCachedTopics.set(topic.id, topic);
+    for (const topicId of recall.staleTopicIds) nextSurfaced.add(topicId);
+    const staleIds = new Set(current.staleIds);
+    const newStaleIds = recall.staleTopicIds.filter((topicId) => !staleIds.has(topicId));
+    for (const topicId of newStaleIds) staleIds.add(topicId);
+    const newTopicIds = recall.topics.map((topic) => topic.id).filter((topicId) => !current.surfacedIds.has(topicId));
+    if (newTopicIds.length > 0) {
+      await this.appendProjectMemoryEvent(sessionId, turnId, "context/project_memory_recalled", {
+        scopeKey: scope.scopeKey,
+        entrypointName: "MEMORY.md",
+        entrypointBytes: bounded.byteCount,
+        entrypointLines: bounded.lineCount,
+        truncated: bounded.wasLineTruncated || bounded.wasByteTruncated,
+        topicCount: headers.length,
+        recalledTopicIds: newTopicIds,
+        ignored: false,
+      });
+    }
+    if (newStaleIds.length > 0) {
+      await this.appendProjectMemoryEvent(sessionId, turnId, "context/project_memory_stale", {
+        scopeKey: scope.scopeKey,
+        entrypointName: "MEMORY.md",
+        entrypointBytes: bounded.byteCount,
+        entrypointLines: bounded.lineCount,
+        truncated: bounded.wasLineTruncated || bounded.wasByteTruncated,
+        topicCount: headers.length,
+        staleTopicIds: newStaleIds,
+        ignored: false,
+        reason: "references_not_found",
+      });
+    }
+    this.projectMemoryTurnStates.set(stateKey, { ...current, loaded: true, surfacedIds: nextSurfaced, staleIds, cachedTopics: nextCachedTopics });
+    return {
+      prompt: buildProjectMemoryPrompt({ scope, ...(entrypoint === undefined ? {} : { entrypoint }) }),
+      attachments: [...nextCachedTopics.values()].filter((topic) => !staleIds.has(topic.id)).map((topic) => ({
+        id: `project-memory:${scope.scopeKey}:${topic.id}`,
+        kind: "memory" as const,
+        content: `type=${topic.type ?? "project"}\ntitle=${topic.title}\npath=${topic.path}\n${topic.content}`,
+      })),
+    };
+  }
+
+  private async appendProjectMemoryEvent(
+    sessionId: SessionId,
+    turnId: TurnId | undefined,
+    type: "context/project_memory_loaded" | "context/project_memory_recalled" | "context/project_memory_stale" | "context/project_memory_disabled",
+    payload: Readonly<Record<string, unknown>>,
+  ): Promise<void> {
+    try {
+      await this.options.store.append({ sessionId, ...(turnId === undefined ? {} : { turnId }), type, payload });
+    } catch {
+      // Project Memory is optional context; an adapter/diagnostic write failure
+      // must not turn a normal user request into a failed turn.
+    }
+  }
+
+  private clearProjectMemoryTurnState(sessionId: SessionId, turnId: TurnId): void {
+    this.projectMemoryTurnStates.delete(`${String(sessionId)}:${String(turnId)}`);
   }
 
   private prepareModelContext(
@@ -1937,7 +2082,7 @@ export class AgentHost {
       const route = this.modelRouteForTenant(projection?.ownership?.tenantId);
       await this.options.store.append({ sessionId, turnId, type: "turn/started", payload: { traceId, ...(route === undefined ? {} : route), ...(reasoningEffort === undefined ? {} : { reasoningEffort }) } });
       await this.recordSessionRestore(sessionId, turnId, previousMessages);
-      const assembly = await this.assembleTurnContext(sessionId, [...previousMessages, { role: "user", content, ...(userMessageId === undefined ? { messageId: String(turnId) } : { messageId: userMessageId }) }]);
+      const assembly = await this.assembleTurnContext(sessionId, [...previousMessages, { role: "user", content, ...(userMessageId === undefined ? { messageId: String(turnId) } : { messageId: userMessageId }) }], false, turnId);
       const messages: ChatMessage[] = [...assembly.messages];
       await this.runSteps(sessionId, turnId, controller, messages, reasoningEffort);
       this.scheduleSessionMemoryExtraction(sessionId, turnId);
@@ -1945,6 +2090,7 @@ export class AgentHost {
       await this.finishTurnAfterError(sessionId, turnId, controller, error);
     } finally {
       this.turnTraces.delete(turnId);
+      this.clearProjectMemoryTurnState(sessionId, turnId);
     }
   }
 
@@ -1958,7 +2104,7 @@ export class AgentHost {
       await this.options.store.append({ sessionId, turnId, type: "agent/status", payload: { status: "running", reason: "permission_resolved_after_restart", traceId, ...(route === undefined ? {} : route) } });
       const previousMessages = await this.conversationMessages(sessionId);
       await this.recordSessionRestore(sessionId, turnId, previousMessages);
-      const assembly = await this.assembleTurnContext(sessionId, previousMessages, true);
+      const assembly = await this.assembleTurnContext(sessionId, previousMessages, true, turnId);
       const messages: ChatMessage[] = [...assembly.messages];
       await this.runSteps(sessionId, turnId, controller, messages, undefined, true);
       this.scheduleSessionMemoryExtraction(sessionId, turnId);
@@ -1966,6 +2112,7 @@ export class AgentHost {
       await this.finishTurnAfterError(sessionId, turnId, controller, error);
     } finally {
       this.turnTraces.delete(turnId);
+      this.clearProjectMemoryTurnState(sessionId, turnId);
     }
   }
 
@@ -1984,7 +2131,7 @@ export class AgentHost {
       const tenantId = projection?.ownership?.tenantId;
       const budgetSnapshot = this.contextBudgetSnapshot(tenantId);
       const primaryModel = this.modelForTenant(tenantId);
-      let assembly = await this.assembleTurnContext(sessionId, messages, recovery);
+      let assembly = await this.assembleTurnContext(sessionId, messages, recovery, turnId);
       const protectedToolCallIds = pendingToolCallIds(projection);
       const toolResultTimestamps = await this.toolResultTimestamps(sessionId);
       let prepared = this.prepareModelContext(assembly, protectedToolCallIds, toolResultTimestamps, alreadyClearedToolCallIds);
@@ -2039,7 +2186,7 @@ export class AgentHost {
             });
           }
         }
-        assembly = await this.assembleTurnContext(sessionId, messages, recovery);
+        assembly = await this.assembleTurnContext(sessionId, messages, recovery, turnId);
         prepared = this.prepareModelContext(assembly, protectedToolCallIds, toolResultTimestamps, alreadyClearedToolCallIds);
         await this.appendToolResultBudgetEvents(sessionId, turnId, prepared.toolResultBudget, this.toolResultBudgetWithLegacyFallback(), reportedBudgetToolCallIds, reportedMicrocompactToolCallIds, alreadyClearedToolCallIds);
       }
@@ -3096,6 +3243,48 @@ function stableWorktreeId(commandId: string): string {
 
 function effectiveWorkspaceRoot(projection: SessionProjection): string {
   return projection.activeWorkspaceRoot ?? projection.workspaceRoot;
+}
+
+function createProjectMemoryScope(
+  sessionId: SessionId,
+  projection: SessionProjection,
+  keyFactory: AgentHostOptions["projectMemoryScopeKey"],
+): ProjectMemoryScope {
+  const workspaceRoot = effectiveWorkspaceRoot(projection);
+  const tenantId = projection.ownership?.tenantId === undefined ? undefined : String(projection.ownership.tenantId);
+  return {
+    sessionId: String(sessionId),
+    workspaceRoot,
+    ...(tenantId === undefined ? {} : { tenantId }),
+    scopeKey: keyFactory?.({ workspaceRoot, ...(tenantId === undefined ? {} : { tenantId }) }) ?? projectMemoryScopeKey(workspaceRoot, tenantId),
+  };
+}
+
+function projectMemoryScope(projection: SessionProjection, keyFactory: AgentHostOptions["projectMemoryScopeKey"]): string {
+  const workspaceRoot = effectiveWorkspaceRoot(projection);
+  const tenantId = projection.ownership?.tenantId === undefined ? undefined : String(projection.ownership.tenantId);
+  return keyFactory?.({ workspaceRoot, ...(tenantId === undefined ? {} : { tenantId }) }) ?? projectMemoryScopeKey(workspaceRoot, tenantId);
+}
+
+function projectMemoryScopeKey(workspaceRoot: string, tenantId?: string): string {
+  return `pm_${createHash("sha256").update(`${tenantId ?? "local"}\n${workspaceRoot}`).digest("hex").slice(0, 24)}`;
+}
+
+function latestProjectMemoryQuery(history: readonly ChatMessage[]): string {
+  for (const message of [...history].reverse()) {
+    if (message.role !== "user" || message.content.trim().startsWith("<context-attachment")) continue;
+    return message.content;
+  }
+  return "";
+}
+
+function shouldIgnoreProjectMemory(query: string): boolean {
+  return /(?:ignore|without|don't use|do not use|不用|不要|忽略|跳过)[^\n]{0,40}(?:project\s+memory|memory|记忆)/iu.test(query)
+    || /(?:project\s+memory|memory|记忆)[^\n]{0,40}(?:ignore|without|don't use|do not use|不用|不要|忽略|跳过)/iu.test(query);
+}
+
+function boundedError(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).replace(/[\r\n]+/gu, " ").slice(0, 160);
 }
 
 function replayJobCommand(jobId: string, result: unknown): ToolResult {

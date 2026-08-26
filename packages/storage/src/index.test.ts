@@ -36,6 +36,34 @@ describe("InMemoryEventStore", () => {
     expect((await store.list(sessionId)).map((event) => event.type)).toEqual(["session/created", "context/session_memory_extraction_started", "context/session_memory_extraction_completed"]);
   });
 
+  it("replays bounded M12 Project Memory metadata without storing topic正文", async () => {
+    const store = new InMemoryEventStore();
+    const sessionId = await store.createSession("D:/m12");
+    await store.append({ sessionId, type: "context/project_memory_loaded", payload: { scopeKey: "pm_scope", entrypointName: "MEMORY.md", entrypointBytes: 120, entrypointLines: 4, truncated: false, topicCount: 2, ignored: false } });
+    const recalled = await store.append({ sessionId, type: "context/project_memory_recalled", payload: { scopeKey: "pm_scope", entrypointName: "MEMORY.md", entrypointBytes: 120, entrypointLines: 4, truncated: false, topicCount: 2, recalledTopicIds: ["topics/deploy.md"], ignored: false } });
+    const projection = await store.project(sessionId);
+    expect(projection?.contextProjectMemory).toMatchObject({ status: "recalled", scopeKey: "pm_scope", recalledTopicIds: ["topics/deploy.md"], lastSequence: recalled.sequence });
+    expect(JSON.stringify(projection?.contextProjectMemory)).not.toContain("topic body");
+    expect((await store.list(sessionId)).map((event) => event.type)).toEqual(["session/created", "context/project_memory_loaded", "context/project_memory_recalled"]);
+  });
+
+  it("persists M12 Project Memory projection across SQLite reopen", async () => {
+    const root = mkdtempSync(join(tmpdir(), "code-review-agent-m12-"));
+    const databasePath = join(root, "events.db");
+    try {
+      const first = new SqliteEventStore({ databasePath });
+      const sessionId = await first.createSession("D:/m12-sqlite");
+      await first.append({ sessionId, type: "context/project_memory_loaded", payload: { scopeKey: "pm_sqlite", entrypointName: "MEMORY.md", entrypointBytes: 10, entrypointLines: 1, truncated: true, topicCount: 1, ignored: false } });
+      await first.append({ sessionId, type: "context/project_memory_stale", payload: { scopeKey: "pm_sqlite", entrypointName: "MEMORY.md", staleTopicIds: ["old"], topicCount: 1, ignored: false, reason: "references_not_found" } });
+      first.close();
+      const second = new SqliteEventStore({ databasePath });
+      expect((await second.project(sessionId))?.contextProjectMemory).toMatchObject({ status: "stale", scopeKey: "pm_sqlite", staleTopicIds: ["old"], truncated: true });
+      second.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("serves bounded latest and older pages without changing the full replay contract", async () => {
     const store = new InMemoryEventStore();
     const sessionId = await store.createSession("D:/workspace");

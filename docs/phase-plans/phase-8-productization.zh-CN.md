@@ -319,6 +319,37 @@ git diff --check
     pnpm test
     git diff --check
 
+### 5.4 当前执行切片：M12 Project Memory / memdir
+
+状态：`completed`（2026-08-26）。
+
+交付物：
+
+- `packages/context/src/project-memory.ts`：bounded `MEMORY.md`（200 行/25,000 UTF-8 bytes）、safe index parser、user/feedback/project/reference taxonomy、topic relevance、去重和 path/symbol/flag stale validation；
+- `ProjectMemoryStore` host adapter：按 active workspace、tenant ownership 和 host-derived scope key 提供入口、topic headers 和按需 topic 内容；
+- `AgentHost` canonical context 接入：每个 turn 加载 bounded prompt，按当前 query 召回最多 5 个 topic，以 untrusted `memory` attachment 注入；用户明确忽略或 adapter 失败时 fail closed；
+- `context/project_memory_loaded/recalled/stale/disabled` 事件与 `SessionProjection.contextProjectMemory`；InMemory/SQLite 共用 replay reducer，事件不保存 memory 正文；
+- Context/Runtime/Storage 测试、M12 实施说明、开发日志、ADR-024 和 CC-013。
+
+参考：Claude Code `D:/Develop/claude-code/src/memdir/memdir.ts:34-315,419-470`、`findRelevantMemories.ts`、`memoryTypes.ts`、`memoryScan.ts`；本项目 `packages/context/src/project-memory.ts`、`packages/runtime/src/index.ts`、`packages/storage/src/index.ts`、`packages/contracts/src/index.ts`。
+
+契约与安全边界：
+
+- memory 是历史、不可信上下文，不能覆盖 system prompt、权限、workspace、工具或当前代码事实；
+- topic path 拒绝绝对路径、反斜杠和 `..` traversal；stale reference 不进入 model view；
+- scope key 不从 memory 内容读取；workspace/tenant memory 不能互相泄露；
+- 事件和 projection 只保留 bounded metadata、topic id、状态和时间，不保存入口/topic 正文；
+- M12 不包含自动 memory writer agent、JSONL memory rotation、hooks、Context diagnostics 或 Web inspector。
+
+验收命令：
+
+    pnpm typecheck
+    pnpm --filter @code-review-agent/context test -- --run
+    pnpm --filter @code-review-agent/storage test -- --run
+    pnpm --filter @code-review-agent/runtime test -- --run
+    pnpm test
+    git diff --check
+
 ## 6. Phase 8.2：Workspace/Worktree
 
 交付物：

@@ -45,6 +45,19 @@ export {
 export { buildPostCompactMessages } from "./post-compact.js";
 export { restoreModelViewFromTranscript } from "./transcript-replay.js";
 export {
+  buildProjectMemoryPrompt,
+  parseProjectMemoryIndex,
+  recallRelevantProjectMemory,
+  selectProjectMemoryHeaders,
+  truncateProjectMemoryEntrypoint,
+  validateProjectMemoryTopic,
+  PROJECT_MEMORY_ENTRYPOINT_NAME,
+  PROJECT_MEMORY_MAX_ENTRYPOINT_BYTES,
+  PROJECT_MEMORY_MAX_ENTRYPOINT_LINES,
+  PROJECT_MEMORY_MAX_RECALLED_TOPICS,
+  PROJECT_MEMORY_TYPES,
+} from "./project-memory.js";
+export {
   classifyProviderContextError,
   fingerprintModelRequest,
   isReactiveContextError,
@@ -141,6 +154,20 @@ export type {
 } from "./attachments.js";
 export type { PostCompactRebuildInput, PostCompactRebuildResult } from "./post-compact.js";
 export type { TranscriptRestoreInput, TranscriptRestoreResult } from "./transcript-replay.js";
+export type {
+  ProjectMemoryEntrypoint,
+  ProjectMemoryEntrypointResult,
+  ProjectMemoryIndexEntry,
+  ProjectMemoryReference,
+  ProjectMemoryRecallOptions,
+  ProjectMemoryRecallResult,
+  ProjectMemoryScope,
+  ProjectMemoryStore,
+  ProjectMemoryTopic,
+  ProjectMemoryTopicHeader,
+  ProjectMemoryType,
+  ProjectMemoryValidation,
+} from "./project-memory.js";
 
 export type {
   ContextBudgetConfig,
