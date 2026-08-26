@@ -41,7 +41,7 @@ export function normalizeMessagesForAPI(
     const message = messages[index];
     if (message === undefined) continue;
     if (message.role === "system") {
-      systemMessages.push(message);
+      systemMessages.push({ role: "system", content: message.content });
       continue;
     }
     if (message.role === "assistant") {
@@ -84,7 +84,7 @@ export function normalizeMessagesForAPI(
       continue;
     }
     if (message.role !== "tool") {
-      normalized.push(message);
+      normalized.push({ role: "user", content: message.content });
       continue;
     }
     const toolCallId = message.toolCallId.trim();

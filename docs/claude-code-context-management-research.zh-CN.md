@@ -498,6 +498,22 @@ M05 已完成，详细代码对照记录见 [`claude-code-context-m05-implementa
 
 当前明确不实现 `cachedMicrocompact.ts` 的 provider cache edit；该能力依赖 provider-specific cache state，留到后续 adapter 契约稳定后评估。M05 不包含 Session Memory、LLM summary、compact boundary 或 prompt-too-long recovery。
 
+### 14.5 M06 实施状态（2026-08-26）
+
+M06 已完成，详细代码对照记录见 [`claude-code-context-m06-implementation.zh-CN.md`](claude-code-context-m06-implementation.zh-CN.md)。实际入口如下：
+
+| 层次 | 实际入口 | 当前行为 |
+|---|---|---|
+| Session memory adapter | `packages/context/src/session-memory-compact.ts:SessionMemoryStore` | 由 Host 注入已有 session memory；M06 只读取，不负责 M11 extraction/update |
+| Boundary lookup | `compactWithSessionMemory()` | 优先使用 `lastSummarizedMessageId`；已知 ID 不存在时返回 `boundary-not-found`，不猜测边界 |
+| Keep-window calculator | `calculateMessagesToKeepIndex()` | 从摘要边界之后开始，向前扩展到 `minTokens`/`minTextBlockMessages`，并受 `maxTokens` 限制 |
+| API invariant adjustment | `adjustIndexToPreserveAPIInvariants()` | 向前补齐 kept range 中引用的 tool call，以及同一 `responseId` 的 streaming assistant 片段 |
+| Model-view replacement | `compactWithSessionMemory()` | 使用有界 `<session-memory>` 历史摘要替换旧消息，保留 system、最近消息和 protected tool pair |
+| Runtime fallback | `packages/runtime/src/index.ts:compactWithSessionMemory()` | memory 不可用、为空或边界不可靠时回退现有 legacy summary compact；读取异常追加失败事件 |
+| Durable metadata | contracts/storage/runtime | 追加 `context/session_memory_compacted` 或 `context/session_memory_compaction_failed`；projection 标记 `kind=session_memory` |
+
+当前 implementation 通过 `ChatMessage.messageId` 与 EventStore `eventId` 建立轻量边界关联；M04 provider normalize 会在请求前剥离该内部字段。M06 不调用摘要模型，不写 workspace，不执行工具，不实现 Session Memory extraction、Project Memory 或 summary compact。
+
 ### M05：Tool Result Budget 与 MicroCompact
 
 | 项目 | 内容 |
@@ -533,14 +549,14 @@ interface ToolResultContextView {
 | Claude Code 参考 | `D:/Develop/claude-code/src/services/compact/sessionMemoryCompact.ts:45-127,234-390,439-590` |
 | 关键函数 | `calculateMessagesToKeepIndex()`、`adjustIndexToPreserveAPIInvariants()`、`trySessionMemoryCompaction()` |
 | 子功能 | 已摘要 UUID、最小 token 窗口、最小文本消息数、最大保留窗口、tool pair/thinking 回溯、SessionStart hooks |
-| 本项目落点 | `packages/context/src/session-memory-compact.ts`（拟建），读取 host-owned SessionMemory store |
+| 本项目落点 | `packages/context/src/session-memory-compact.ts`、`packages/runtime/src/index.ts`，读取 host-owned SessionMemory store |
 | 直接仿照程度 | 保留窗口计算和 API invariant 调整可直接仿照；memory storage 与权限适配本项目 Session/tenant |
 
 `calculateMessagesToKeepIndex()` 从 `lastSummarizedMessageId` 后开始，若保留区不足，则向前扩展直到满足 `minTokens` 和 `minTextBlockMessages`，达到 `maxTokens` 时停止；最后调用 `adjustIndexToPreserveAPIInvariants()` 向前补齐匹配的 tool_use 和共享 message ID 的 thinking block。
 
 `trySessionMemoryCompaction()` 有两个恢复分支：正常会话知道最后摘要 UUID；重启会话只有 memory 内容却不知道边界时，先采用保守保留策略，无法确认边界则回退传统 summary compact。这个“边界未知时不猜”的行为应直接保留。
 
-模块验收：已有 session memory 时不必每次调用摘要模型；摘要边界未知不会静默丢历史；tool pair 和 thinking block 不被切开；Session Memory 失败能回退 summary compact。
+模块验收：已有 session memory 时不必每次调用摘要模型；摘要边界未知不会静默丢历史；tool pair 和 thinking block 不被切开；Session Memory 失败能回退 summary compact。M06 的详细入口和验证见 [`claude-code-context-m06-implementation.zh-CN.md`](claude-code-context-m06-implementation.zh-CN.md)。
 
 ### M07：LLM Summary Compact
 
@@ -1408,7 +1424,7 @@ packages/context/
 | M03 | `context.ts`、`prompts.ts`、system prompt builder | `packages/context/src/assembler.ts`、`runtime/src/system-prompt.ts` | M01、M02 | system/tools/history/attachments 稳定组装并可计数 |
 | M04 | `grouping.ts`、`messages.ts` | `api-round.ts`、`api-normalize.ts`、`tool-pairing.ts`（已实现） | M02、M03 | 所有 model request 通过 round/pairing gate |
 | M05 | `query.ts`、`microCompact.ts` | `tool-result-budget.ts`、micro receipt（已实现） | M02、M04 | 原文不变、model view 可释放旧工具结果 |
-| M06 | `sessionMemoryCompact.ts` | session-memory compact adapter、保留窗口和边界调整 | M02、M04、M05 | 已有 session summary 时可无摘要模型压缩 |
+| M06 | `sessionMemoryCompact.ts` | session-memory compact adapter、保留窗口和边界调整（已实现） | M02、M04、M05 | 已有 session summary 时可无摘要模型压缩 |
 | M07 | `compact.ts` | summary input、summary agent、PTL retry、summary usage | M02、M04、M06 | 摘要请求过大可有限重试并安全失败 |
 | M08 | `messages.ts`、`compact.ts` | boundary event、preserved segment、post-compact attachments | M05、M06、M07 | compact 后消息顺序、附件和 dedupe 稳定 |
 | M09 | `query.ts`、`autoCompact.ts`、`reactiveCompact.ts` | proactive/reactive recovery coordinator | M01–M08 | 400/413 恢复有 guard、transition 和 circuit breaker |

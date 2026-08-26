@@ -218,6 +218,7 @@ git diff --check
 交付物：
 
 - token budget、tool result budget、microcompact、collapse、autocompact；
+- Session Memory Compact：复用已有会话摘要，按摘要边界保留近期消息，保持 tool pair/streaming response 完整，并在边界不可恢复时安全回退；
 - `tool_use/tool_result`、thinking、Task 和 Permission 状态的不可破坏边界；
 - 压缩前后的 durable summary、source sequence 和恢复 cursor；
 - Web Context meter、compaction status 和恢复诊断。

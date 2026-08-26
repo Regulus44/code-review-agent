@@ -534,6 +534,40 @@ describe("AgentHost", () => {
     expect(JSON.stringify(durable)).toContain("durable-0-");
   });
 
+  it("uses existing session memory for M06 compaction and records a bounded receipt", async () => {
+    const store = new InMemoryEventStore();
+    const requests: ModelRequest[] = [];
+    let boundaryId = "";
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        requests.push(request);
+        yield { type: "text_delta", text: "session-memory-ok" };
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({
+      store,
+      model,
+      contextPolicy: { contextWindowTokens: 10_000, autoCompactBufferTokens: 1_000 },
+      sessionMemory: { get: async () => ({ content: "Goal: preserve the review plan", lastSummarizedMessageId: boundaryId }) },
+      sessionMemoryCompact: { minTokens: 1, minTextBlockMessages: 1, maxTokens: 1_000, maxMemoryChars: 200 },
+    });
+    const session = await host.createSession("D:/m06-session-memory-fixture");
+    await store.append({ sessionId: session.id, type: "user/message", payload: { content: "old context " + "x".repeat(30_000) } });
+    const summarized = await store.append({ sessionId: session.id, type: "assistant/message", payload: { content: "old answer " + "x".repeat(30_000) } });
+    boundaryId = summarized.eventId;
+    await store.append({ sessionId: session.id, type: "user/message", payload: { content: "recent context" } });
+    const turn = await host.sendMessage(session.id, "continue with memory");
+    await host.waitForTurn(turn);
+    const events = await host.events(session.id);
+    expect(requests[0]?.messages.some((message) => message.content.includes("<session-memory>"))).toBe(true);
+    expect(events.some((event) => event.type === "context/session_memory_compacted")).toBe(true);
+    expect(events.some((event) => event.type === "context/compacted")).toBe(false);
+    expect((await host.getSession(session.id))?.contextCompaction).toMatchObject({ kind: "session_memory", status: "completed" });
+    const receipt = events.find((event) => event.type === "context/session_memory_compacted");
+    expect(receipt?.payload).toMatchObject({ boundaryKnown: true, memoryChars: expect.any(Number), droppedMessages: expect.any(Number) });
+  });
+
   it("pauses a turn for permission and resumes the same turn after approval", async () => {
     const store = new InMemoryEventStore();
     const registry = new ToolRegistry();

@@ -312,3 +312,21 @@ ID:
 明确未复用：`cachedMicrocompact.ts` 的 provider-specific prompt-cache edit 暂不实现；本项目 transcript/model view 分离、EventStore 事件和 permission/workspace 安全边界均为自有实现。
 
 新增测试：`packages/context/src/tool-result-budget.test.ts` 和 `packages/runtime/src/index.test.ts` 的 M05 model-view、幂等、事件和原文保留场景。
+
+### CC-007
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`src/services/compact/sessionMemoryCompact.ts:45-127,234-390,439-590`、`src/services/SessionMemory/sessionMemoryUtils.ts`
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；本次没有复制 Claude Code 代码，只重新实现 session memory adapter、摘要边界查找、保留窗口、tool pair/stream 回溯和 legacy fallback。
+
+本项目路径：`packages/context/src/session-memory-compact.ts`、`packages/runtime/src/index.ts`、`packages/storage/src/index.ts`。
+
+范围：`SessionMemoryStore` 只读输入、`lastSummarizedMessageId`、minimum/maximum keep window、`adjustIndexToPreserveAPIInvariants()`、resumed-session 保守策略、边界缺失不猜测、`context/session_memory_compacted` 和失败 receipt。
+
+明确未复用：Session Memory extraction/update、SessionStart hooks、文件路径解析、Project Memory、summary agent 和 provider cache edit 留给 M07/M08/M11；memory 原文不写入 EventStore receipt。
+
+新增测试：`packages/context/src/session-memory-compact.test.ts`、`packages/runtime/src/index.test.ts` 的 memory boundary、fallback、tool pair、streaming 和 projection 场景。

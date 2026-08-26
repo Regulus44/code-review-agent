@@ -57,6 +57,8 @@ export type AgentEventType =
   | "context/tool_pairing_repaired"
   | "context/tool_results_budgeted"
   | "context/microcompacted"
+  | "context/session_memory_compacted"
+  | "context/session_memory_compaction_failed"
   | "worktree/created"
   | "worktree/attached"
   | "worktree/switched"
@@ -366,6 +368,7 @@ export type ContextCompactionStatus = "completed" | "failed";
 
 export interface ContextCompactionProjection {
   readonly status: ContextCompactionStatus;
+  readonly kind?: "legacy" | "session_memory";
   readonly sourceSequence: number;
   readonly summary: string;
   readonly originalMessageCount: number;
@@ -717,9 +720,9 @@ export interface ModelToolDefinition {
 }
 
 export type ChatMessage =
-  | { readonly role: "system" | "user"; readonly content: string }
-  | { readonly role: "assistant"; readonly content: string; readonly toolCalls?: readonly ModelToolCall[]; readonly responseId?: string }
-  | { readonly role: "tool"; readonly content: string; readonly toolCallId: string };
+  | { readonly role: "system" | "user"; readonly content: string; readonly messageId?: string }
+  | { readonly role: "assistant"; readonly content: string; readonly toolCalls?: readonly ModelToolCall[]; readonly responseId?: string; readonly messageId?: string }
+  | { readonly role: "tool"; readonly content: string; readonly toolCallId: string; readonly messageId?: string };
 
 export interface ModelRequest {
   readonly messages: readonly ChatMessage[];

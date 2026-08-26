@@ -184,6 +184,22 @@ Claude Code 的 `cachedMicrocompact.ts` 只作为行为参考，provider cache e
 
 回滚策略：移除 M05 budget gate、两个事件类型、step 诊断字段和对应测试，即可回到 M04 的合法消息 view；旧 `contextBudget.maxToolResultChars` 兼容映射不要求事件迁移。
 
+## ADR-018：Session Memory Compact 优先使用已有摘要，边界不可靠时回退
+
+状态：accepted（2026-08-26，M06）
+
+M06 在 M05 model-view reduction 和 legacy summary compact 之间增加只读的 SessionMemoryStore adapter。Store 只提供已有 memory 内容、可选 `lastSummarizedMessageId` 和更新时间；M06 不负责 memory extraction/update，后者留给 M11。Session memory 与 Project Memory 是不同边界，不能把项目级 `MEMORY.md` 当作本模块输入。
+
+已知边界时，保留窗口从 `lastSummarizedMessageId` 后开始；窗口不足 `minTokens` 或 `minTextBlockMessages` 时向前扩展，达到 `maxTokens` 后停止。无边界 ID 但 memory 有内容时采用 resumed-session 保守策略，从尾部向前扩展。已知 ID 不存在于当前 transcript 时不得猜测边界，必须追加 `context/session_memory_compaction_failed` 并回退 legacy `compactMessages()`。
+
+起点调整必须先于消息丢弃完成。保留区内的 tool result 会向前补齐对应 assistant tool call；保留区内 assistant 的 `responseId` 会向前补齐同一 streaming response 的旧片段。system message 和 pending/protected tool call 永远保留。M04 normalize/pairing 在随后 provider 请求前继续运行。
+
+Session memory 以 `<session-memory>` 不可信历史上下文 wrapper 注入 model view，并受 `maxMemoryChars` 限制。Runtime 请求与 token estimator 使用同一 compacted `prepared.view`。原始 transcript、memory store 内容和 compact receipt 分离；事件只保存 kind、边界是否可靠、计数、memory 长度、更新时间和 fallback 原因，不保存 memory 原文或 provider body。
+
+成功追加 `context/session_memory_compacted`，storage projection 将最近上下文压缩标记为 `kind=session_memory`；读取异常或边界缺失追加 `context/session_memory_compaction_failed`。M06 不实现摘要模型、Session Memory extraction、Project Memory、compact boundary、post-compact rebuild 或 reactive overflow recovery。
+
+回滚策略：移除 SessionMemoryStore 注入、M06 keep-window adapter、两个事件类型和 projection kind 即可恢复 M05 后的 legacy compact；`ChatMessage.messageId` 与新增字段均为可选，不要求旧事件迁移。
+
 ## 参考代码入口
 
 - DSH Agent Loop：`D:/Develop/deepseek-harness-fork/packages/core/agent-loop/src/agent.ts`

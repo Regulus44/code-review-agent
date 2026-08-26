@@ -55,7 +55,7 @@ export function ensureToolResultPairing(
           continue;
         }
       }
-      output.push(message);
+      output.push(message.role === "system" ? { role: "system", content: message.content } : { role: "user", content: message.content });
       continue;
     }
 

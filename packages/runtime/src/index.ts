@@ -38,7 +38,7 @@ import {
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { compactMessages, DEFAULT_CONTEXT_BUDGET, type ContextBudget } from "@code-review-agent/compaction";
-import { applyToolResultBudget, assembleContext, calculateContextWarningState, countContextTokens, createTokenCounter, ensureToolResultPairing, estimateContextTokens, fallbackModelContextCapability, groupMessagesByApiRound, normalizeMessagesForAPI, resolveContextBudget, shouldCompactBeforeRequest, shouldUseExactTokenCount, type ApiRound, type ContextAssembly, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport } from "@code-review-agent/context";
+import { applyToolResultBudget, assembleContext, calculateContextWarningState, compactWithSessionMemory, countContextTokens, createTokenCounter, ensureToolResultPairing, estimateContextTokens, fallbackModelContextCapability, groupMessagesByApiRound, normalizeMessagesForAPI, resolveContextBudget, shouldCompactBeforeRequest, shouldUseExactTokenCount, type ApiRound, type ContextAssembly, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type SessionMemoryCompactConfig, type SessionMemoryStore, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport } from "@code-review-agent/context";
 import { randomUUID } from "node:crypto";
 import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModePolicySnapshot, type CodeModeSandbox, type ExecuteToolOutput, type JobSummary, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
 import type { SubagentRuntime } from "@code-review-agent/subagent";
@@ -70,6 +70,9 @@ export interface AgentHostOptions {
   readonly messageValidationMode?: "repair" | "strict";
   /** Non-destructive model-view tool-result budget and microcompact policy. */
   readonly toolResultBudget?: ToolResultBudgetPolicy;
+  /** Host-owned session memory used by M06; extraction/update is deferred to M11. */
+  readonly sessionMemory?: SessionMemoryStore;
+  readonly sessionMemoryCompact?: Partial<SessionMemoryCompactConfig>;
   readonly quota?: ProductizationQuotaPolicy;
   readonly operations?: ProductizationOperationsPolicy;
 }
@@ -195,6 +198,8 @@ export class AgentHost {
   private readonly contextPolicy: Partial<ContextBudgetConfig> | undefined;
   private readonly messageValidationMode: "repair" | "strict";
   private readonly toolResultBudget: ToolResultBudgetPolicy | undefined;
+  private readonly sessionMemory: SessionMemoryStore | undefined;
+  private readonly sessionMemoryCompact: Partial<SessionMemoryCompactConfig> | undefined;
   private readonly quota: ProductizationQuotaPolicy | undefined;
   private readonly operations: ProductizationOperationsPolicy;
   private readonly quotaTails = new Map<string, Promise<void>>();
@@ -212,6 +217,8 @@ export class AgentHost {
     this.contextPolicy = options.contextPolicy;
     this.messageValidationMode = options.messageValidationMode ?? "repair";
     this.toolResultBudget = options.toolResultBudget;
+    this.sessionMemory = options.sessionMemory;
+    this.sessionMemoryCompact = options.sessionMemoryCompact;
     this.quota = options.quota;
     this.operations = options.operations ?? { backup: "deferred", migration: "deferred", upgrade: "deferred" };
     this.customSystemPrompt = options.systemPrompt;
@@ -1496,18 +1503,18 @@ export class AgentHost {
       if (beforeTurnId !== undefined && event.type === "user/message" && event.turnId === beforeTurnId) break;
       if (event.type === "user/message" || event.type === "turn/steered") {
         const content = event.payload["content"];
-        if (typeof content === "string") messages.push({ role: "user", content });
+        if (typeof content === "string") messages.push({ role: "user", content, messageId: event.eventId });
       } else if (event.type === "assistant/message") {
         const content = typeof event.payload["content"] === "string" ? event.payload["content"] as string : "";
         const toolCalls = parseModelToolCalls(event.payload["toolCalls"]);
         const responseId = typeof event.payload["responseId"] === "string" ? event.payload["responseId"] : undefined;
-        if (content.length > 0 || toolCalls.length > 0) messages.push({ role: "assistant", content, ...(toolCalls.length === 0 ? {} : { toolCalls }), ...(responseId === undefined ? {} : { responseId }) });
+        if (content.length > 0 || toolCalls.length > 0) messages.push({ role: "assistant", content, messageId: event.eventId, ...(toolCalls.length === 0 ? {} : { toolCalls }), ...(responseId === undefined ? {} : { responseId }) });
       } else if (event.type === "tool/result") {
         const rawToolCallId = event.payload["toolCallId"];
         if (typeof rawToolCallId !== "string") continue;
         const rawResult = event.payload["result"];
         const result = rawResult !== undefined ? rawResult as ToolResult : undefined;
-        messages.push({ role: "tool", toolCallId: rawToolCallId, content: modelToolResult({ toolCallId: brand<string, "ToolCallId">(rawToolCallId), status: event.payload["status"] === "completed" ? "completed" : event.payload["status"] === "cancelled" ? "cancelled" : event.payload["status"] === "denied" ? "denied" : "failed", ...(result === undefined ? {} : { result }) }) });
+        messages.push({ role: "tool", toolCallId: rawToolCallId, messageId: event.eventId, content: modelToolResult({ toolCallId: brand<string, "ToolCallId">(rawToolCallId), status: event.payload["status"] === "completed" ? "completed" : event.payload["status"] === "cancelled" ? "cancelled" : event.payload["status"] === "denied" ? "denied" : "failed", ...(result === undefined ? {} : { result }) }) });
       }
     }
     return messages;
@@ -1640,7 +1647,7 @@ export class AgentHost {
       const projection = await this.options.store.project(sessionId);
       const route = this.modelRouteForTenant(projection?.ownership?.tenantId);
       await this.options.store.append({ sessionId, turnId, type: "turn/started", payload: { traceId, ...(route === undefined ? {} : route), ...(reasoningEffort === undefined ? {} : { reasoningEffort }) } });
-      const assembly = await this.assembleTurnContext(sessionId, [...previousMessages, { role: "user", content }]);
+      const assembly = await this.assembleTurnContext(sessionId, [...previousMessages, { role: "user", content, messageId: String(turnId) }]);
       const messages: ChatMessage[] = [...assembly.messages];
       await this.runSteps(sessionId, turnId, controller, messages, reasoningEffort);
     } catch (error) {
@@ -1764,7 +1771,7 @@ export class AgentHost {
       const steersAfterResponse = this.takeSteers(turnId);
       if (response.toolCalls.length === 0) {
         if (steersAfterResponse.length > 0) {
-          messages.push({ role: "assistant", content: response.text, responseId: response.responseId });
+          messages.push({ role: "assistant", content: response.text, responseId: response.responseId, messageId: response.responseId });
           for (const steer of steersAfterResponse) messages.push({ role: "user", content: steer });
           await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "steered" } });
           continue;
@@ -1774,14 +1781,14 @@ export class AgentHost {
         this.metricCounters.turnsCompleted += 1;
         return;
       }
-      messages.push({ role: "assistant", content: response.text, toolCalls: response.toolCalls, responseId: response.responseId });
+      messages.push({ role: "assistant", content: response.text, toolCalls: response.toolCalls, responseId: response.responseId, messageId: response.responseId });
       for (const steer of steersAfterResponse) messages.push({ role: "user", content: steer });
       const outputs = await Promise.all(response.toolCalls.map((toolCall) => this.executeModelToolCall(sessionId, turnId, controller, toolCall)));
       for (let index = 0; index < outputs.length; index += 1) {
         const output = outputs[index];
         const toolCall = response.toolCalls[index];
         if (output === undefined || toolCall === undefined) throw new Error("TOOL_RESULT_MISMATCH: tool result count did not match tool call count");
-        messages.push({ role: "tool", toolCallId: toolCall.id, content: modelToolResult(output) });
+        messages.push({ role: "tool", toolCallId: toolCall.id, content: modelToolResult(output), messageId: toolCall.id });
       }
       await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "completed", toolCalls: response.toolCalls.length } });
     }
@@ -1856,6 +1863,8 @@ export class AgentHost {
     const protectedToolCallIds = pendingToolCallIds(projection);
     try {
       const resolved = budgetSnapshot ?? this.contextBudgetSnapshot(projection?.ownership?.tenantId);
+      const sessionMemoryResult = await this.compactWithSessionMemory(sessionId, turnId, messages, protectedToolCallIds, resolved.autoCompactThreshold);
+      if (sessionMemoryResult === true) return;
       const usage = tokenUsage ?? estimateContextTokens({ messages }).value;
       const predictive = warningState?.isPredictiveCompactRecommended === true && usage < resolved.autoCompactThreshold;
       const maxTokens = predictive ? Math.max(1, usage - 1) : resolved.autoCompactThreshold;
@@ -1898,6 +1907,83 @@ export class AgentHost {
         },
       });
     }
+  }
+
+  private async compactWithSessionMemory(
+    sessionId: SessionId,
+    turnId: TurnId,
+    messages: ChatMessage[],
+    protectedToolCallIds: ReadonlySet<string>,
+    autoCompactThreshold?: number,
+  ): Promise<boolean> {
+    if (this.sessionMemory === undefined) return false;
+    let memory;
+    try {
+      memory = await this.sessionMemory.get(String(sessionId));
+    } catch (error) {
+      await this.options.store.append({
+        sessionId,
+        turnId,
+        type: "context/session_memory_compaction_failed",
+        payload: {
+          sourceSequence: (await this.options.store.project(sessionId))?.lastSequence ?? 0,
+          originalMessageCount: messages.length,
+          compactedMessageCount: messages.length,
+          droppedMessages: 0,
+          reason: "memory-read-failed",
+          fallback: "legacy-summary-compact",
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+      return false;
+    }
+    const result = compactWithSessionMemory(messages, {
+      ...(memory === undefined ? {} : { memory }),
+      ...(this.sessionMemoryCompact === undefined ? {} : { config: this.sessionMemoryCompact }),
+      protectedToolCallIds,
+      ...(autoCompactThreshold === undefined ? {} : { maxPostCompactTokens: autoCompactThreshold }),
+    });
+    if (!result.didCompact) {
+      if (result.reason === "boundary-not-found") {
+        await this.options.store.append({
+          sessionId,
+          turnId,
+          type: "context/session_memory_compaction_failed",
+          payload: {
+            sourceSequence: (await this.options.store.project(sessionId))?.lastSequence ?? 0,
+            originalMessageCount: result.originalMessageCount,
+            compactedMessageCount: result.keptMessageCount,
+            droppedMessages: 0,
+            reason: result.reason,
+            fallback: "legacy-summary-compact",
+            ...(memory?.updatedAt === undefined ? {} : { memoryUpdatedAt: memory.updatedAt }),
+          },
+        });
+      }
+      return false;
+    }
+    messages.splice(0, messages.length, ...result.messages);
+    const projection = await this.options.store.project(sessionId);
+    await this.options.store.append({
+      sessionId,
+      turnId,
+      type: "context/session_memory_compacted",
+      payload: {
+        sourceSequence: projection?.lastSequence ?? 0,
+        kind: "session_memory",
+        originalMessageCount: result.originalMessageCount,
+        compactedMessageCount: result.messages.length,
+        estimatedTokens: result.estimatedTokens,
+        droppedMessages: result.droppedMessageCount,
+        protectedMessageCount: protectedToolCallIds.size,
+        memoryChars: result.memoryChars,
+        memoryTruncated: result.memoryTruncated,
+        boundaryKnown: result.boundaryKnown,
+        ...(memory?.lastSummarizedMessageId === undefined ? {} : { lastSummarizedMessageId: memory.lastSummarizedMessageId }),
+        ...(memory?.updatedAt === undefined ? {} : { memoryUpdatedAt: memory.updatedAt }),
+      },
+    });
+    return true;
   }
 
   private appendSteers(messages: ChatMessage[], turnId: TurnId): void {
