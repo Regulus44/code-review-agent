@@ -173,6 +173,7 @@ Phase 7 的 DSH Web 调研与分步计划：
 - `SessionProjection.contextCompaction` 和 Web `ContextMeter` 展示压缩状态、估算 token、丢弃消息数和失败原因；未配置 provider budget 时显示 `unknown`；
 - M06 Session Memory Compact 已接入：Runtime 优先读取 host-owned `SessionMemoryStore`，按已摘要边界计算保留窗口，保护 tool pair/streaming response，并在边界不可靠或读取失败时记录失败 receipt 后回退 legacy compact；
 - M07 LLM Summary Compact 已接入：M06 未命中时使用无工具 `context_summary` 请求，清理媒体/可重注入 skill，按 API round 有界处理 prompt-too-long，并记录独立 summary usage 与失败回退 receipt；
+- M08 Compact Boundary / Post-Compact Rebuild 已接入：M06/M07/legacy compact 成功后生成 durable boundary，记录 preserved head/anchor/tail，并按 bounded 数量/token budget 恢复 plan 与 host-provided 文件、skill、MCP、agent、hook attachments；重启时依据 projection boundary 重建 model-visible segment，重复附件按 ID 去重；
 - `packages/compaction` unit 3 项、Runtime 25 项、Storage 12 项、API 27 项、Web 98 项已通过；新增 `/v1/capabilities.context` budget metadata、Settings context capability、compaction failure continuation、SQLite restart replay 和 `scripts/phase8-compaction-gate.mjs`；
 - `pnpm typecheck`、`pnpm build:web`、`pnpm test:phase8:compaction` 和 `git diff --check` 通过；8.1 的长上下文、预算可见性、失败恢复和重启回放退出条件已满足。
 

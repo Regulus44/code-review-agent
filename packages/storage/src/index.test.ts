@@ -73,6 +73,41 @@ describe("InMemoryEventStore", () => {
     expect((await store.project(sessionId))?.contextCompaction).toMatchObject({ status: "failed", error: "fixture failure" });
   });
 
+  it("projects a durable compact boundary and bounded attachment metadata", async () => {
+    const store = new InMemoryEventStore();
+    const sessionId = await store.createSession("D:/boundary-replay");
+    await store.append({
+      sessionId,
+      type: "context/compact_boundary",
+      payload: {
+        boundary: {
+          version: 1,
+          id: "boundary_fixture",
+          kind: "summary",
+          trigger: "auto",
+          preCompactTokens: 900,
+          sourceSequence: 4,
+          messagesSummarized: 3,
+          preservedSegment: { headMessageId: "head", anchorMessageId: "boundary_fixture", tailMessageId: "tail" },
+          attachmentIds: ["plan:fixture"],
+          createdAt: "2026-08-26T00:00:00.000Z",
+        },
+        summary: "bounded summary",
+        originalMessageCount: 8,
+        compactedMessageCount: 5,
+        estimatedTokens: 200,
+        droppedMessages: 3,
+        attachments: [{ id: "plan:fixture", kind: "plan", tokenEstimate: 20 }],
+      },
+    });
+    expect((await store.project(sessionId))?.contextCompaction).toMatchObject({
+      status: "completed",
+      kind: "summary",
+      boundary: { id: "boundary_fixture", preservedSegment: { headMessageId: "head" } },
+      attachments: [{ id: "plan:fixture", tokenEstimate: 20 }],
+    });
+  });
+
   it("persists events, projections, commands, and schema across reopen", async () => {
     const directory = mkdtempSync(join(tmpdir(), "code-review-agent-"));
     const databasePath = join(directory, "agent.sqlite");

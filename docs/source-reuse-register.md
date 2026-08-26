@@ -348,3 +348,21 @@ ID:
 明确未复用：forked-agent prompt-cache sharing、PreCompact/SessionStart hooks、compact boundary、post-compact attachments、provider-specific error APIs 和完整 Claude Code tool runtime。
 
 新增测试：`packages/context/src/summary-compact.test.ts`、`packages/runtime/src/index.test.ts` 的 summary request、PTL retry、usage 和 projection 场景。
+
+### CC-009
+
+来源仓库：D:/Develop/claude-code
+
+来源路径：src/utils/messages.ts:4967-5093、src/services/compact/compact.ts:336-389,541-669,1467-1650
+
+复用方式：behavior-reference
+
+许可证/来源证据：本地快照未发现根 LICENSE；本次没有复制 Claude Code 实现代码，只重新实现 compact boundary、preserved segment、post-compact 附件顺序、附件预算和 projection replay。
+
+本项目路径：packages/context/src/boundary.ts、attachments.ts、post-compact.ts、packages/runtime/src/index.ts、packages/storage/src/index.ts。
+
+范围：compact/micro marker、最近 boundary lookup、head/anchor/tail、summary/preserved/attachment 顺序、最近文件/plan/skill/MCP/hook provider、数量与 token cap、ID 去重、context/compact_boundary 和 rebuild failure receipt。
+
+明确未复用：Claude Code 文件读取实现、SessionStart/PreCompact hook runtime、provider prompt-cache edit、完整 JSONL transcript loader、商业遥测和工具权限实现。
+
+新增测试：packages/context/src/post-compact.test.ts、packages/runtime/src/index.test.ts、packages/storage/src/index.test.ts 的 boundary、attachment budget、projection 和 replay 场景。

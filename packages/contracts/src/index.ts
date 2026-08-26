@@ -63,6 +63,8 @@ export type AgentEventType =
   | "context/summary_retried"
   | "context/summary_compacted"
   | "context/summary_compaction_failed"
+  | "context/compact_boundary"
+  | "context/post_compact_rebuild_failed"
   | "worktree/created"
   | "worktree/attached"
   | "worktree/switched"
@@ -370,6 +372,40 @@ export interface SessionProjection extends SessionSummary {
 
 export type ContextCompactionStatus = "completed" | "failed";
 
+export type ContextBoundaryKind = "legacy" | "session_memory" | "summary" | "micro";
+export type ContextBoundaryTrigger = "manual" | "auto";
+
+export interface ContextPreservedSegment {
+  readonly headMessageId?: string;
+  readonly anchorMessageId?: string;
+  readonly tailMessageId?: string;
+}
+
+/** Durable, bounded metadata used to rebuild the model-visible post-compact view. */
+export interface ContextBoundaryMetadata {
+  readonly version: 1;
+  readonly id: string;
+  readonly kind: ContextBoundaryKind;
+  readonly trigger: ContextBoundaryTrigger;
+  readonly preCompactTokens: number;
+  readonly sourceSequence: number;
+  readonly lastPreCompactMessageId?: string;
+  readonly messagesSummarized?: number;
+  readonly preservedSegment?: ContextPreservedSegment;
+  readonly preCompactDiscoveredTools?: readonly string[];
+  readonly attachmentIds?: readonly string[];
+  readonly tokensSaved?: number;
+  readonly compactedToolIds?: readonly string[];
+  readonly clearedAttachmentIds?: readonly string[];
+  readonly createdAt: string;
+}
+
+export interface ContextAttachmentProjection {
+  readonly id: string;
+  readonly kind: string;
+  readonly tokenEstimate: number;
+}
+
 export interface ContextCompactionProjection {
   readonly status: ContextCompactionStatus;
   readonly kind?: "legacy" | "session_memory" | "summary";
@@ -384,6 +420,8 @@ export interface ContextCompactionProjection {
   readonly updatedAt: string;
   readonly lastSequence: number;
   readonly error?: string;
+  readonly boundary?: ContextBoundaryMetadata;
+  readonly attachments?: readonly ContextAttachmentProjection[];
 }
 
 export type WorktreeStatus = "clean" | "dirty" | "conflicted" | "attached" | "removed" | "failed";
@@ -724,7 +762,8 @@ export interface ModelToolDefinition {
 }
 
 export type ChatMessage =
-  | { readonly role: "system" | "user"; readonly content: string; readonly messageId?: string }
+  | { readonly role: "system"; readonly content: string; readonly messageId?: string; readonly contextBoundary?: ContextBoundaryMetadata }
+  | { readonly role: "user"; readonly content: string; readonly messageId?: string }
   | { readonly role: "assistant"; readonly content: string; readonly toolCalls?: readonly ModelToolCall[]; readonly responseId?: string; readonly messageId?: string }
   | { readonly role: "tool"; readonly content: string; readonly toolCallId: string; readonly messageId?: string };
 

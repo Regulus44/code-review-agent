@@ -216,6 +216,20 @@ M07 不实现 provider prompt-cache sharing、PreCompact/SessionStart 外部 hoo
 
 回滚策略：移除 summary input/compact 模块、Runtime summary gate、四类 summary 事件、`ModelRequest.purpose` 和 projection kind 即可恢复 M06 后的 compact 顺序；旧事件无需迁移。
 
+## ADR-020：Compact Boundary 是 durable model-view 重建锚点
+
+状态：accepted（2026-08-26，M08）
+
+M08 在 M06/M07/legacy compact 成功后追加独立的 context/compact_boundary 事件。事件保存 version=1 的 ContextBoundaryMetadata、summary/preserved 统计、preserved segment 的 head/anchor/tail、pre-compact token 和附件 ID/kind/tokenEstimate。EventStore transcript 永远保留完整原始消息；boundary 只决定后续 model view 的重建范围。
+
+Post-compact model view 固定按 boundary → summary → preserved → bounded attachments 排列。附件通过 host-owned PostCompactAttachmentProvider 生成，默认只恢复当前 active/draft/approved plan；文件最多 5 个，总附件、单附件和 skill 分别受 token cap 限制。已有 attachment ID 和 preserved segment 中的 context-attachment 不重复注入。
+
+Runtime 重启或新 turn 时优先读取 projection boundary 的 preserved head，在完整 transcript 中找到该消息后截取后缀并重新插入 boundary/summary；head 缺失时走兼容完整历史，不猜测或静默丢弃消息。附件原文、完整工具输出、provider body、凭据和 secret 不进入 boundary 事件。
+
+context/post_compact_rebuild_failed 只记录 bounded provider error；附件重建失败不撤销已成功的 compact boundary，也不阻塞后续 turn。M08 不实现 reactive overflow recovery、provider prompt cache edit、完整 Session Restore、Session Memory extraction 或 Project Memory。
+
+回滚策略：移除 boundary/post-compact 模块、两个 M08 事件和 Runtime rebuild wiring，继续使用 M07/M06 compact result；既有 transcript 和旧 compact 事件无需迁移。
+
 ## 参考代码入口
 
 - DSH Agent Loop：`D:/Develop/deepseek-harness-fork/packages/core/agent-loop/src/agent.ts`

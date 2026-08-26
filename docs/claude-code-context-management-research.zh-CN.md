@@ -622,6 +622,22 @@ boundary marker
 
 模块验收：重复 compact 不重复注入附件；SQLite reopen 能从 boundary 得到相同 model view；最近编辑文件和 plan 在摘要后仍可用；附件预算不会让下一次请求立即再 compact。
 
+### 14.7 M08 实施状态（2026-08-26）
+
+M08 已完成，详细代码对照记录见 [claude-code-context-m08-implementation.zh-CN.md](claude-code-context-m08-implementation.zh-CN.md)。实际入口如下：
+
+| 层次 | 实际入口 | 当前行为 |
+|---|---|---|
+| Boundary metadata | packages/context/src/boundary.ts:createCompactBoundaryMessage() | 生成 version=1 的 compact/micro marker，记录 kind、trigger、pre-token、source sequence、原消息锚点和 discovered tools |
+| Preserved segment | annotateBoundaryWithPreservedSegment() | 为保留段写入 head/anchor/tail message ID；没有可定位 head 时恢复路径不猜测边界 |
+| Post-compact order | packages/context/src/post-compact.ts:buildPostCompactMessages() | 固定 boundary → summary → preserved → attachment 顺序，所有消息使用新对象 |
+| Attachment budget | packages/context/src/attachments.ts:selectPostCompactAttachments() | 最近文件最多 5 个、单附件/总附件/skill token cap、稳定排序、ID 去重和 bounded truncation |
+| Host rebuild | packages/runtime/src/index.ts:rebuildPostCompactView() | M06/M07/legacy 成功后统一建立 boundary；默认恢复 plan，可注入文件、skill、MCP、agent 和 hook provider |
+| Replay rebuild | packages/runtime/src/index.ts:conversationMessages() | 使用 projection boundary 的 preserved head 截取完整 transcript，重新插入 boundary/summary；assembler 再调用 attachment provider |
+| Durable projection | packages/contracts、packages/storage | 新增 context/compact_boundary 和 context/post_compact_rebuild_failed；projection 保存 boundary 与附件 ID/kind/tokenEstimate |
+
+M08 继续保持 transcript 与 model view 分离。boundary 事件只保存受限 metadata，不保存附件原文、完整工具结果、provider body 或凭据。M08 不实现 M09 reactive recovery、provider cache edit、M10 完整 transcript restore、M11 Session Memory extraction 和 M12 Project Memory。
+
 ### M09：Query Proactive 与 Reactive Recovery
 
 | 项目 | 内容 |

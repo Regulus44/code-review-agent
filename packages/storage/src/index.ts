@@ -50,6 +50,8 @@ import {
   type ModelRouteBackend,
   type ModelRouteRecord,
   type ContextCompactionProjection,
+  type ContextBoundaryMetadata,
+  type ContextAttachmentProjection,
   type WorktreeProjection,
   type WorktreeStatus,
   type SessionOwnership,
@@ -255,6 +257,50 @@ function toolCallStatus(value: unknown, fallback: ToolCallStatus): ToolCallStatu
 
 function permissionStatus(value: unknown, fallback: PermissionStatus): PermissionStatus {
   return value === "pending" || value === "approved" || value === "denied" || value === "cancelled" || value === "expired" ? value : fallback;
+}
+
+function contextBoundaryMetadata(value: unknown): ContextBoundaryMetadata | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  const kind = record["kind"];
+  const trigger = record["trigger"];
+  if (record["version"] !== 1 || typeof record["id"] !== "string" || (kind !== "legacy" && kind !== "session_memory" && kind !== "summary" && kind !== "micro") || (trigger !== "manual" && trigger !== "auto") || typeof record["preCompactTokens"] !== "number" || typeof record["sourceSequence"] !== "number" || typeof record["createdAt"] !== "string") return undefined;
+  const preservedRaw = record["preservedSegment"];
+  const preserved = typeof preservedRaw === "object" && preservedRaw !== null ? preservedRaw as Record<string, unknown> : undefined;
+  return {
+    version: 1,
+    id: record["id"],
+    kind,
+    trigger,
+    preCompactTokens: Math.max(0, Math.floor(record["preCompactTokens"])),
+    sourceSequence: Math.max(0, Math.floor(record["sourceSequence"])),
+    ...(typeof record["lastPreCompactMessageId"] === "string" ? { lastPreCompactMessageId: record["lastPreCompactMessageId"] } : {}),
+    ...(typeof record["messagesSummarized"] === "number" ? { messagesSummarized: Math.max(0, Math.floor(record["messagesSummarized"])) } : {}),
+    ...(preserved === undefined ? {} : {
+      preservedSegment: {
+        ...(typeof preserved["headMessageId"] === "string" ? { headMessageId: preserved["headMessageId"] } : {}),
+        ...(typeof preserved["anchorMessageId"] === "string" ? { anchorMessageId: preserved["anchorMessageId"] } : {}),
+        ...(typeof preserved["tailMessageId"] === "string" ? { tailMessageId: preserved["tailMessageId"] } : {}),
+      },
+    }),
+    ...(Array.isArray(record["preCompactDiscoveredTools"]) ? { preCompactDiscoveredTools: record["preCompactDiscoveredTools"].filter((item): item is string => typeof item === "string").slice(0, 256) } : {}),
+    ...(Array.isArray(record["attachmentIds"]) ? { attachmentIds: record["attachmentIds"].filter((item): item is string => typeof item === "string").slice(0, 256) } : {}),
+    ...(typeof record["tokensSaved"] === "number" ? { tokensSaved: Math.max(0, Math.floor(record["tokensSaved"])) } : {}),
+    ...(Array.isArray(record["compactedToolIds"]) ? { compactedToolIds: record["compactedToolIds"].filter((item): item is string => typeof item === "string").slice(0, 256) } : {}),
+    ...(Array.isArray(record["clearedAttachmentIds"]) ? { clearedAttachmentIds: record["clearedAttachmentIds"].filter((item): item is string => typeof item === "string").slice(0, 256) } : {}),
+    createdAt: record["createdAt"],
+  };
+}
+
+function contextAttachmentProjections(value: unknown): readonly ContextAttachmentProjection[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): ContextAttachmentProjection[] => {
+    if (typeof item !== "object" || item === null) return [];
+    const record = item as Record<string, unknown>;
+    return typeof record["id"] === "string" && typeof record["kind"] === "string" && typeof record["tokenEstimate"] === "number"
+      ? [{ id: record["id"], kind: record["kind"], tokenEstimate: Math.max(0, Math.floor(record["tokenEstimate"])) }]
+      : [];
+  }).slice(0, 256);
 }
 
 function deriveActiveStatus(projection: SessionProjection): SessionStatus {
@@ -521,6 +567,32 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
       ...(typeof payload["error"] === "string" ? { error: payload["error"] } : {}),
     };
     next = { ...next, contextCompaction: projection };
+  }
+
+  if (event.type === "context/compact_boundary") {
+    const payload = event.payload;
+    const boundary = contextBoundaryMetadata(payload["boundary"]);
+    if (boundary !== undefined) {
+      const previous = next.contextCompaction;
+      const summary = typeof payload["summary"] === "string" ? payload["summary"] : previous?.summary ?? "";
+      const projection: ContextCompactionProjection = {
+        status: "completed",
+        kind: boundary.kind === "session_memory" || boundary.kind === "summary" ? boundary.kind : previous?.kind ?? "legacy",
+        sourceSequence: boundary.sourceSequence,
+        summary,
+        originalMessageCount: typeof payload["originalMessageCount"] === "number" ? payload["originalMessageCount"] : previous?.originalMessageCount ?? 0,
+        compactedMessageCount: typeof payload["compactedMessageCount"] === "number" ? payload["compactedMessageCount"] : previous?.compactedMessageCount ?? 0,
+        estimatedTokens: typeof payload["estimatedTokens"] === "number" ? payload["estimatedTokens"] : previous?.estimatedTokens ?? 0,
+        droppedMessages: typeof payload["droppedMessages"] === "number" ? payload["droppedMessages"] : previous?.droppedMessages ?? 0,
+        ...(typeof payload["protectedMessageCount"] === "number" ? { protectedMessageCount: payload["protectedMessageCount"] } : previous?.protectedMessageCount === undefined ? {} : { protectedMessageCount: previous.protectedMessageCount }),
+        ...(previous?.truncatedToolResults === undefined ? {} : { truncatedToolResults: previous.truncatedToolResults }),
+        updatedAt: event.createdAt,
+        lastSequence: event.sequence,
+        boundary,
+        attachments: contextAttachmentProjections(payload["attachments"]),
+      };
+      next = { ...next, contextCompaction: projection };
+    }
   }
 
   if (event.type === "worktree/created" || event.type === "worktree/attached" || event.type === "worktree/switched" || event.type === "worktree/cleaned" || event.type === "worktree/failed") {

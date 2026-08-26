@@ -14,7 +14,7 @@ export interface SystemPromptSection {
   readonly cacheable?: boolean;
 }
 
-export type ContextAttachmentKind = "user-context" | "memory" | "recovery" | "file" | "plan" | "skill" | "other";
+export type ContextAttachmentKind = "user-context" | "memory" | "recovery" | "file" | "plan" | "skill" | "mcp" | "hook" | "agent" | "other";
 
 export interface ContextAttachment {
   readonly id: string;

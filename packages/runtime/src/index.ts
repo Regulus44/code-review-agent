@@ -35,10 +35,11 @@ import {
   type ContextBudgetSnapshot,
   type ContextWarningState,
   type ModelContextCapability,
+  type ContextBoundaryKind,
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { compactMessages, DEFAULT_CONTEXT_BUDGET, type ContextBudget } from "@code-review-agent/compaction";
-import { applyToolResultBudget, assembleContext, calculateContextWarningState, compactWithSessionMemory, compactWithSummaryModel, countContextTokens, createTokenCounter, ensureToolResultPairing, estimateContextTokens, fallbackModelContextCapability, groupMessagesByApiRound, normalizeMessagesForAPI, resolveContextBudget, shouldCompactBeforeRequest, shouldUseExactTokenCount, type ApiRound, type ContextAssembly, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type SessionMemoryCompactConfig, type SessionMemoryStore, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport } from "@code-review-agent/context";
+import { applyToolResultBudget, assembleContext, boundaryFromMetadata, buildPostCompactMessages, calculateContextWarningState, compactWithSessionMemory, compactWithSummaryModel, countContextTokens, createTokenCounter, ensureToolResultPairing, estimateContextTokens, extractContextAttachmentIds, fallbackModelContextCapability, groupMessagesByApiRound, normalizeMessagesForAPI, resolveContextBudget, selectPostCompactAttachments, shouldCompactBeforeRequest, shouldUseExactTokenCount, type ApiRound, type ContextAssembly, type ContextAttachment, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type PostCompactAttachmentConfig, type PostCompactAttachmentProvider, type SessionMemoryCompactConfig, type SessionMemoryStore, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport } from "@code-review-agent/context";
 import { randomUUID } from "node:crypto";
 import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModePolicySnapshot, type CodeModeSandbox, type ExecuteToolOutput, type JobSummary, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
 import type { SubagentRuntime } from "@code-review-agent/subagent";
@@ -75,6 +76,9 @@ export interface AgentHostOptions {
   readonly sessionMemoryCompact?: Partial<SessionMemoryCompactConfig>;
   /** Claude Code-style tool-less LLM summary compact configuration (M07). */
   readonly summaryCompact?: Partial<SummaryCompactConfig>;
+  /** Host-owned sources rebuilt after a compact boundary is created. */
+  readonly postCompactAttachmentProvider?: PostCompactAttachmentProvider;
+  readonly postCompactAttachmentConfig?: Partial<PostCompactAttachmentConfig>;
   readonly quota?: ProductizationQuotaPolicy;
   readonly operations?: ProductizationOperationsPolicy;
 }
@@ -203,6 +207,8 @@ export class AgentHost {
   private readonly sessionMemory: SessionMemoryStore | undefined;
   private readonly sessionMemoryCompact: Partial<SessionMemoryCompactConfig> | undefined;
   private readonly summaryCompact: Partial<SummaryCompactConfig> | undefined;
+  private readonly postCompactAttachmentProvider: PostCompactAttachmentProvider | undefined;
+  private readonly postCompactAttachmentConfig: Partial<PostCompactAttachmentConfig> | undefined;
   private readonly quota: ProductizationQuotaPolicy | undefined;
   private readonly operations: ProductizationOperationsPolicy;
   private readonly quotaTails = new Map<string, Promise<void>>();
@@ -223,6 +229,8 @@ export class AgentHost {
     this.sessionMemory = options.sessionMemory;
     this.sessionMemoryCompact = options.sessionMemoryCompact;
     this.summaryCompact = options.summaryCompact;
+    this.postCompactAttachmentProvider = options.postCompactAttachmentProvider;
+    this.postCompactAttachmentConfig = options.postCompactAttachmentConfig;
     this.quota = options.quota;
     this.operations = options.operations ?? { backup: "deferred", migration: "deferred", upgrade: "deferred" };
     this.customSystemPrompt = options.systemPrompt;
@@ -1521,7 +1529,19 @@ export class AgentHost {
         messages.push({ role: "tool", toolCallId: rawToolCallId, messageId: event.eventId, content: modelToolResult({ toolCallId: brand<string, "ToolCallId">(rawToolCallId), status: event.payload["status"] === "completed" ? "completed" : event.payload["status"] === "cancelled" ? "cancelled" : event.payload["status"] === "denied" ? "denied" : "failed", ...(result === undefined ? {} : { result }) }) });
       }
     }
-    return messages;
+    const projection = await this.options.store.project(sessionId);
+    const boundary = projection?.contextCompaction?.boundary;
+    if (boundary === undefined) return messages;
+    const headMessageId = boundary.preservedSegment?.headMessageId;
+    if (headMessageId === undefined) return messages;
+    const preservedIndex = messages.findIndex((message) => message.messageId === headMessageId);
+    if (preservedIndex < 0) return messages;
+    const summary = projection?.contextCompaction?.summary;
+    return [
+      boundaryFromMetadata(boundary),
+      ...(summary === undefined || summary.length === 0 ? [] : [{ role: "user" as const, content: summary }]),
+      ...messages.slice(preservedIndex),
+    ];
   }
 
   private async systemMessage(sessionId: SessionId, recovery = false): Promise<string> {
@@ -1537,6 +1557,7 @@ export class AgentHost {
     const projection = await this.options.store.project(sessionId);
     const tenantId = projection?.ownership?.tenantId;
     const tools = this.toolRuntime.listTools(sessionId, tenantId);
+    const attachments = await this.postCompactAttachmentsForSession(sessionId, history, projection);
     return assembleContext({
       systemSections: buildAgentSystemPromptSections({
         workspaceRoot: projection === undefined ? "." : effectiveWorkspaceRoot(projection),
@@ -1547,7 +1568,8 @@ export class AgentHost {
         ...(recovery ? { recovery: true } : {}),
       }),
       visibleTools: this.modelTools(sessionId, tenantId),
-      history: history.filter((message) => message.role !== "system"),
+      history: history.filter((message) => message.role !== "system" || message.contextBoundary !== undefined),
+      ...(attachments.length === 0 ? {} : { attachments }),
     });
   }
 
@@ -1868,11 +1890,19 @@ export class AgentHost {
     const protectedToolCallIds = pendingToolCallIds(projection);
     try {
       const resolved = budgetSnapshot ?? this.contextBudgetSnapshot(projection?.ownership?.tenantId);
+      const preCompactMessages = [...messages];
+      const preCompactTokens = tokenUsage ?? estimateContextTokens({ messages: preCompactMessages }).value;
       const sessionMemoryResult = await this.compactWithSessionMemory(sessionId, turnId, messages, protectedToolCallIds, resolved.autoCompactThreshold);
-      if (sessionMemoryResult === true) return;
+      if (sessionMemoryResult === true) {
+        await this.rebuildPostCompactView(sessionId, turnId, messages, preCompactMessages, "session_memory", preCompactTokens, projection, protectedToolCallIds);
+        return;
+      }
       const summaryResult = await this.compactWithSummaryModel(sessionId, turnId, messages, protectedToolCallIds, signal);
-      if (summaryResult === true) return;
-      const usage = tokenUsage ?? estimateContextTokens({ messages }).value;
+      if (summaryResult === true) {
+        await this.rebuildPostCompactView(sessionId, turnId, messages, preCompactMessages, "summary", preCompactTokens, projection, protectedToolCallIds);
+        return;
+      }
+      const usage = preCompactTokens;
       const predictive = warningState?.isPredictiveCompactRecommended === true && usage < resolved.autoCompactThreshold;
       const maxTokens = predictive ? Math.max(1, usage - 1) : resolved.autoCompactThreshold;
       const compactionBudget: ContextBudget = {
@@ -1898,6 +1928,7 @@ export class AgentHost {
           truncatedToolResults: result.truncatedToolResults,
         },
       });
+      await this.rebuildPostCompactView(sessionId, turnId, messages, preCompactMessages, "legacy", preCompactTokens, projection, protectedToolCallIds);
     } catch (error) {
       await this.options.store.append({
         sessionId,
@@ -1914,6 +1945,104 @@ export class AgentHost {
         },
       });
     }
+  }
+
+  private async rebuildPostCompactView(
+    sessionId: SessionId,
+    turnId: TurnId,
+    messages: ChatMessage[],
+    preCompactMessages: readonly ChatMessage[],
+    kind: ContextBoundaryKind,
+    preCompactTokens: number,
+    projection: SessionProjection | undefined,
+    protectedToolCallIds: ReadonlySet<string>,
+  ): Promise<void> {
+    const parts = splitCompactedMessages(messages);
+    const boundaryId = "boundary_" + randomUUID();
+    const discoveredTools = preCompactMessages.flatMap((message) => message.role === "assistant" ? (message.toolCalls ?? []).map((call) => call.name) : []);
+    const boundaryOptions = {
+      id: boundaryId,
+      kind,
+      trigger: "auto" as const,
+      preCompactTokens,
+      sourceSequence: projection?.lastSequence ?? 0,
+      ...(preCompactMessages.at(-1)?.messageId === undefined ? {} : { lastPreCompactMessageId: preCompactMessages.at(-1)!.messageId }),
+      messagesSummarized: Math.max(0, preCompactMessages.filter((message) => message.role !== "system").length - parts.preservedMessages.length),
+      preCompactDiscoveredTools: discoveredTools,
+    };
+    const defaultAttachments = defaultPostCompactAttachments(sessionId, projection);
+    let providerAttachments: readonly ContextAttachment[] = [];
+    if (this.postCompactAttachmentProvider !== undefined) {
+      try {
+        providerAttachments = await this.postCompactAttachmentProvider({
+          sessionId: String(sessionId),
+          boundaryId,
+          preservedMessages: parts.preservedMessages.map((message) => ({ role: message.role, content: message.content })),
+          existingAttachmentIds: extractContextAttachmentIds(parts.preservedMessages),
+        });
+      } catch (error) {
+        await this.options.store.append({
+          sessionId,
+          turnId,
+          type: "context/post_compact_rebuild_failed",
+          payload: { boundaryId, reason: "attachment-provider-failed", error: error instanceof Error ? error.message : String(error) },
+        });
+      }
+    }
+    const rebuilt = buildPostCompactMessages({
+      boundary: boundaryOptions,
+      summaryMessages: parts.summaryMessages,
+      preservedMessages: parts.preservedMessages,
+      attachments: [...defaultAttachments, ...providerAttachments],
+      ...(this.postCompactAttachmentConfig === undefined ? {} : { attachmentConfig: this.postCompactAttachmentConfig }),
+    });
+    messages.splice(0, messages.length, ...rebuilt.messages);
+    const boundary = rebuilt.boundary.contextBoundary;
+    await this.options.store.append({
+      sessionId,
+      turnId,
+      type: "context/compact_boundary",
+      payload: {
+        boundary,
+        kind,
+        summary: parts.summaryMessages.map((message) => message.content).join("\n\n"),
+        originalMessageCount: preCompactMessages.length,
+        compactedMessageCount: rebuilt.messages.length,
+        estimatedTokens: estimateContextTokens({ messages: rebuilt.messages }).value,
+        droppedMessages: Math.max(0, preCompactMessages.filter((message) => message.role !== "system").length - parts.preservedMessages.length - parts.summaryMessages.length),
+        protectedMessageCount: protectedToolCallIds.size,
+        attachments: rebuilt.attachmentMetadata,
+        droppedAttachmentIds: rebuilt.droppedAttachmentIds,
+      },
+    });
+  }
+
+  private async postCompactAttachmentsForSession(
+    sessionId: SessionId,
+    history: readonly ChatMessage[],
+    projection: SessionProjection | undefined,
+  ): Promise<readonly ContextAttachment[]> {
+    const boundary = projection?.contextCompaction?.boundary;
+    if (boundary === undefined || this.postCompactAttachmentProvider === undefined && projection?.plan.content.trim().length === 0) return [];
+    const existingIds = extractContextAttachmentIds(history);
+    const expectedAttachmentIds = boundary.attachmentIds ?? [];
+    if (expectedAttachmentIds.length > 0 && expectedAttachmentIds.every((id) => existingIds.has(id))) return [];
+    const preservedMessages = history.filter((message) => message.role !== "system");
+    const defaults = defaultPostCompactAttachments(sessionId, projection);
+    let provided: readonly ContextAttachment[] = [];
+    if (this.postCompactAttachmentProvider !== undefined) {
+      try {
+        provided = await this.postCompactAttachmentProvider({
+          sessionId: String(sessionId),
+          boundaryId: boundary.id,
+          preservedMessages: preservedMessages.map((message) => ({ role: message.role, content: message.content })),
+          existingAttachmentIds: existingIds,
+        });
+      } catch {
+        provided = [];
+      }
+    }
+    return selectPostCompactAttachments([...defaults, ...provided], this.postCompactAttachmentConfig, existingIds).attachments;
   }
 
   private async compactWithSessionMemory(
@@ -2450,6 +2579,34 @@ function publicToolResultBudget(
       ...(policy.timeBasedGapMs === undefined ? {} : { timeBasedGapMs: policy.timeBasedGapMs }),
     },
   };
+}
+
+function splitCompactedMessages(messages: readonly ChatMessage[]): {
+  readonly summaryMessages: readonly ChatMessage[];
+  readonly preservedMessages: readonly ChatMessage[];
+} {
+  const nonSystem = messages.filter((message) => message.role !== "system");
+  const summaryIndex = nonSystem.findIndex((message) => message.role === "user" && isCompactionSummary(message.content));
+  if (summaryIndex < 0) return { summaryMessages: [], preservedMessages: nonSystem };
+  return {
+    summaryMessages: [nonSystem[summaryIndex]!],
+    preservedMessages: nonSystem.slice(summaryIndex + 1),
+  };
+}
+
+function isCompactionSummary(content: string): boolean {
+  return content.startsWith("<session-memory>") || content.startsWith("<conversation-summary>") || content.startsWith("[Compacted context:");
+}
+
+function defaultPostCompactAttachments(sessionId: SessionId, projection: SessionProjection | undefined): readonly ContextAttachment[] {
+  const plan = projection?.plan;
+  if (plan === undefined || plan.status === "cleared" || plan.content.trim().length === 0) return [];
+  return [{
+    id: "plan:" + String(sessionId),
+    kind: "plan",
+    content: "Plan status: " + plan.status + "\n" + plan.content,
+    order: 10,
+  }];
 }
 
 function pendingToolCallIds(projection: SessionProjection | undefined): Set<string> {

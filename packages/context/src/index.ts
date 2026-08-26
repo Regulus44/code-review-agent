@@ -16,6 +16,22 @@ export { adjustIndexToPreserveAPIInvariants, calculateMessagesToKeepIndex, compa
 export { buildSummaryInput, ensureSummaryStartsWithUser } from "./summary-input.js";
 export { compactWithSummaryModel, truncateHeadForPtlRetry, DEFAULT_SUMMARY_COMPACT_CONFIG } from "./summary-compact.js";
 export {
+  annotateBoundaryWithPreservedSegment,
+  boundaryFromMetadata,
+  createCompactBoundaryMessage,
+  createMicrocompactBoundaryMessage,
+  findLastCompactBoundaryIndex,
+  getMessagesAfterCompactBoundary,
+  isCompactBoundaryMessage,
+} from "./boundary.js";
+export {
+  DEFAULT_POST_COMPACT_ATTACHMENT_CONFIG,
+  extractContextAttachmentIds,
+  renderContextAttachment,
+  selectPostCompactAttachments,
+} from "./attachments.js";
+export { buildPostCompactMessages } from "./post-compact.js";
+export {
   countContextTokens,
   createTokenCounter,
   estimateContextTokens,
@@ -82,6 +98,14 @@ export type {
   SummaryResponse,
   SummaryRunner,
 } from "./summary-compact.js";
+export type { CompactBoundaryMessage, CompactBoundaryOptions } from "./boundary.js";
+export type {
+  PostCompactAttachmentConfig,
+  PostCompactAttachmentInput,
+  PostCompactAttachmentProvider,
+  SelectedPostCompactAttachments,
+} from "./attachments.js";
+export type { PostCompactRebuildInput, PostCompactRebuildResult } from "./post-compact.js";
 
 export type {
   ContextBudgetConfig,

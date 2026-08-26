@@ -607,6 +607,50 @@ describe("AgentHost", () => {
     expect(receipt?.payload).toMatchObject({ summaryUsage: { inputTokens: 12, outputTokens: 4 }, purpose: "context_summary" });
   });
 
+  it("creates an M08 boundary, restores plan attachments, and replays the post-compact segment", async () => {
+    const store = new InMemoryEventStore();
+    const requests: ModelRequest[] = [];
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        requests.push(request);
+        if (request.purpose === "context_summary") {
+          yield { type: "text_delta", text: "M08 historical summary" };
+        } else {
+          yield { type: "text_delta", text: "M08 completed" };
+        }
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({
+      store,
+      model,
+      contextPolicy: { contextWindowTokens: 10_000, autoCompactBufferTokens: 1_000 },
+      summaryCompact: { recentMessageTokens: 1, maxSummaryChars: 200 },
+      postCompactAttachmentProvider: async () => [{ id: "file-recent", kind: "file", content: "recent file content" }],
+    });
+    const session = await host.createSession("D:/m08-boundary-fixture");
+    const drafted = await host.updatePlan(session.id, "Run tests after the review", "active");
+    expect(drafted.plan.status).toBe("active");
+    await store.append({ sessionId: session.id, type: "user/message", payload: { content: "old context " + "x".repeat(30_000) } });
+    await store.append({ sessionId: session.id, type: "assistant/message", payload: { content: "old answer", responseId: "old-response" } });
+    await store.append({ sessionId: session.id, type: "user/message", payload: { content: "recent context" } });
+    const turn = await host.sendMessage(session.id, "continue after compact");
+    await host.waitForTurn(turn);
+    const events = await host.events(session.id);
+    const boundaryEvent = events.find((event) => event.type === "context/compact_boundary");
+    expect(boundaryEvent?.payload["boundary"]).toMatchObject({ version: 1, kind: "summary", sourceSequence: expect.any(Number) });
+    expect(boundaryEvent?.payload["attachments"]).toEqual(expect.arrayContaining([expect.objectContaining({ id: "file-recent" }), expect.objectContaining({ id: "plan:" + session.id })]));
+    expect(requests[1]?.messages.some((message) => message.role === "system" && message.content === "Conversation compacted")).toBe(true);
+    expect(requests[1]?.messages.some((message) => message.content.includes("file-recent"))).toBe(true);
+    const restarted = new AgentHost({ store, model, postCompactAttachmentProvider: async () => [{ id: "file-recent", kind: "file", content: "recent file content" }] });
+    const replay = await restarted.getSession(session.id);
+    expect(replay?.contextCompaction?.boundary?.preservedSegment?.headMessageId).toBeDefined();
+    const resumedTurn = await restarted.sendMessage(session.id, "resume from the compact boundary");
+    await restarted.waitForTurn(resumedTurn);
+    expect(requests.at(-1)?.messages.some((message) => message.role === "system" && message.content === "Conversation compacted")).toBe(true);
+    expect(requests.at(-1)?.messages.some((message) => message.content.includes("file-recent"))).toBe(true);
+  });
+
   it("pauses a turn for permission and resumes the same turn after approval", async () => {
     const store = new InMemoryEventStore();
     const registry = new ToolRegistry();

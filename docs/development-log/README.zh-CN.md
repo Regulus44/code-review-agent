@@ -27,3 +27,4 @@
 - [M05：Claude Code 式 Tool Result Budget 与 MicroCompact](m05-tool-result-microcompact.zh-CN.md)
 - [M06：Claude Code 式 Session Memory Compact](m06-session-memory-compact.zh-CN.md)
 - [M07：Claude Code 式 LLM Summary Compact](m07-summary-compact.zh-CN.md)
+- [M08：Claude Code 式 Compact Boundary 与 Post-Compact Rebuild](m08-compact-boundary.zh-CN.md)

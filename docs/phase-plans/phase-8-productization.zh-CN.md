@@ -228,6 +228,34 @@ git diff --check
 
 验收：长上下文、工具结果超预算、pending approval、running Task、压缩失败和重启恢复均可回放。
 
+### 5.1 当前执行切片：M08 Compact Boundary 与 Post-Compact Rebuild
+
+交付物：
+
+- ContextBoundaryMetadata、compact/micro marker、preserved segment head/anchor/tail 和 context/compact_boundary durable event；
+- boundary → summary → preserved → attachments 的固定 model-view 顺序；
+- 最近文件最多 5 个、单附件/总附件/skill token cap、ID 去重和 bounded truncation；
+- host-owned postCompactAttachmentProvider，以及默认 active/draft/approved plan 恢复；
+- SQLite/InMemory projection replay：重启或新 turn 依据 preserved head 重建最近历史并重新注入缺失附件；
+- context/post_compact_rebuild_failed 的 fail-soft receipt。
+
+参考：Claude Code src/utils/messages.ts:4967-5093、src/services/compact/compact.ts:336-389,541-669,1467-1650；本项目 packages/context/src/{boundary,attachments,post-compact}.ts、packages/runtime/src/index.ts、packages/storage/src/index.ts。
+
+契约与安全边界：
+
+- EventStore transcript 永远保存完整原文，boundary 只保存 bounded metadata；附件原文、完整工具结果、provider body、凭据和 secret 不进入事件；
+- preserved head 无法在 transcript 中定位时不猜测边界，继续兼容完整历史；
+- attachment provider 失败不撤销已成功的 compact boundary；重复附件按 ID 去重；
+- M08 不包含 reactive overflow recovery、provider prompt-cache edit、完整 Session Restore、Session Memory extraction 或 Project Memory。
+
+验收命令：
+
+    pnpm typecheck
+    pnpm --filter @code-review-agent/context test -- --run
+    pnpm --filter @code-review-agent/storage test -- --run
+    pnpm --filter @code-review-agent/runtime test -- --run src/index.test.ts
+    git diff --check
+
 ## 6. Phase 8.2：Workspace/Worktree
 
 交付物：
