@@ -165,6 +165,29 @@ describe("SessionStore", () => {
     expect(snapshot.conversation?.nodes.filter((node) => node.kind === "user")).toHaveLength(1);
     expect(snapshot.conversation?.nodes.filter((node) => node.kind === "assistant")).toHaveLength(2);
     expect(snapshot.trajectory?.lastSequence).toBe(5);
+    expect(snapshot.history.baseSequence).toBe(1);
+    expect(snapshot.history.tailSequence).toBe(5);
+  });
+
+  it("rejects a non-contiguous older page and reports live gaps without mutating the window", () => {
+    const store = new SessionStore();
+    store.open(session(), [event(4, "assistant/message", { content: "tail" }, false)], { hasMoreBefore: true, oldestSequence: 4, newestSequence: 4 }, 7);
+
+    expect(store.prependHistory([event(1, "user/message", { content: "missing 2" }, false), event(3, "assistant/message", { content: "out of order" }, false)], { hasMoreBefore: true })).toBe(false);
+    expect(store.getSnapshot().events.map((item) => item.sequence)).toEqual([4]);
+    expect(store.getSnapshot().connectionGeneration).toBe(7);
+    expect(store.applyLive(event(6, "assistant/chunk", { text: "gap" }, false))).toBe("gap");
+    expect(store.getSnapshot().lastSequence).toBe(4);
+  });
+
+  it("appends a contiguous repair page and drains the live cursor", () => {
+    const store = new SessionStore();
+    store.open(session(), [event(1, "user/message", { content: "prompt" }), event(2, "assistant/chunk", { text: "answer" })], { newestSequence: 2 });
+
+    expect(store.appendHistory([event(3, "tool/call", { toolCallId: "tool", name: "read_file" }), event(4, "tool/result", { toolCallId: "tool", status: "completed" })], { hasMoreAfter: false })).toBe(true);
+    expect(store.getSnapshot().events.map((item) => item.sequence)).toEqual([1, 2, 3, 4]);
+    expect(store.getSnapshot().history.tailSequence).toBe(4);
+    expect(store.applyLive(event(6, "assistant/chunk", { text: "still missing 5" }))).toBe("gap");
   });
 
   it("clears a stale transport error after recovery", () => {

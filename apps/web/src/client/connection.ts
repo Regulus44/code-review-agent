@@ -1,98 +1,9 @@
-import type { AgentEvent, AgentEventType, SessionId } from "@code-review-agent/contracts";
+import { AGENT_EVENT_TYPES } from "@code-review-agent/contracts";
+import type { AgentEvent, SessionId } from "@code-review-agent/contracts";
 import { WebApiClient } from "./api.js";
 import { SessionStore } from "./store.js";
 
-export const AGENT_EVENT_TYPES: readonly AgentEventType[] = [
-  "session/created",
-  "session/updated",
-  "session/deleted",
-  "user/message",
-  "turn/steered",
-  "attachment/received",
-  "attachment/rejected",
-  "workspace/reordered",
-  "turn/queued",
-  "turn/started",
-  "step/started",
-  "step/ended",
-  "turn/ended",
-  "assistant/chunk",
-  "assistant/message",
-  "task/created",
-  "task/updated",
-  "task/input-required",
-  "task/report",
-  "task/artifact",
-  "task/ended",
-  "subagent/descriptor",
-  "subagent/start",
-  "subagent/end",
-  "subagent/inbox",
-  "subagent/settlement",
-  "goal/created",
-  "goal/updated",
-  "goal/ended",
-  "plan/updated",
-  "todo/updated",
-  "context/compacted",
-  "context/compaction_failed",
-  "context/messages_normalized",
-  "context/tool_pairing_repaired",
-  "context/tool_results_budgeted",
-  "context/microcompacted",
-  "context/session_memory_compacted",
-  "context/session_memory_compaction_failed",
-  "context/session_memory_extraction_started",
-  "context/session_memory_extraction_completed",
-  "context/session_memory_extraction_failed",
-  "context/session_memory_extraction_cancelled",
-  "context/project_memory_loaded",
-  "context/project_memory_recalled",
-  "context/project_memory_stale",
-  "context/project_memory_disabled",
-  "context/summary_started",
-  "context/summary_retried",
-  "context/summary_compacted",
-  "context/summary_compaction_failed",
-  "context/compact_boundary",
-  "context/post_compact_rebuild_failed",
-  "context/recovery_started",
-  "context/recovery_transition",
-  "context/recovery_succeeded",
-  "context/recovery_failed",
-  "context/recovery_circuit_open",
-  "context/transcript_segment",
-  "context/session_restored",
-  "worktree/created",
-  "worktree/attached",
-  "worktree/switched",
-  "worktree/cleaned",
-  "worktree/failed",
-  "tool/call",
-  "tool/progress",
-  "tool/result",
-  "diff/preview",
-  "patch/preview",
-  "patch/applied",
-  "patch/rejected",
-  "patch/rolled_back",
-  "lsp/server",
-  "lsp/request",
-  "permission/requested",
-  "permission/resolved",
-  "interaction/requested",
-  "interaction/resolved",
-  "terminal/session",
-  "job/started",
-  "job/output",
-  "job/ended",
-  "mcp/server",
-  "mcp/tool",
-  "mcp/resource",
-  "mcp/prompt",
-  "agent/status",
-  "agent/error",
-];
+export { AGENT_EVENT_TYPES };
 
 export interface EventSourceLike {
   readonly readyState?: number;
@@ -132,6 +43,8 @@ export class SessionConnectionController {
   private sessionId: SessionId | undefined;
   private reconnectAttempts = 0;
   private closed = true;
+  private gapRepairing = false;
+  private liveBuffer: AgentEvent[] = [];
 
   constructor(options: SessionConnectionOptions = {}) {
     this.api = options.api ?? new WebApiClient();
@@ -148,7 +61,10 @@ export class SessionConnectionController {
     this.sessionId = sessionId;
     const generation = ++this.generation;
     this.reconnectAttempts = 0;
+    this.gapRepairing = false;
+    this.liveBuffer = [];
     this.store.clear();
+    this.store.setConnectionGeneration(generation);
     this.store.setConnection("connecting");
 
     try {
@@ -158,7 +74,7 @@ export class SessionConnectionController {
       ]);
       if (!this.isCurrent(generation, sessionId)) return;
       if (session === undefined) throw new Error(`Session not found: ${sessionId}`);
-      this.store.open(session, history.events, history);
+      this.store.open(session, history.events, history, generation);
       this.connect(generation, sessionId);
     } catch (error) {
       if (!this.isCurrent(generation, sessionId)) return;
@@ -184,14 +100,13 @@ export class SessionConnectionController {
     const sessionId = this.sessionId;
     const snapshot = this.store.getSnapshot();
     const generation = this.generation;
-    const beforeSequence = snapshot.history.oldestSequence;
-    if (this.closed || sessionId === undefined || snapshot.sessionId !== sessionId || !snapshot.history.hasOlder || beforeSequence === undefined || snapshot.history.loadingOlder) return false;
+    const beforeSequence = snapshot.history.baseSequence ?? snapshot.history.oldestSequence;
+    if (this.closed || sessionId === undefined || snapshot.sessionId !== sessionId || !snapshot.history.hasMoreBefore || beforeSequence === undefined || snapshot.history.loadingOlder) return false;
     this.store.setHistoryLoading(true);
     try {
       const page = await this.api.listEventsPage(sessionId, { beforeSequence, limit });
       if (!this.isCurrent(generation, sessionId)) return false;
-      this.store.prependHistory(page.events, page);
-      return page.events.length > 0;
+      return this.store.prependHistory(page.events, page);
     } catch (error) {
       if (this.isCurrent(generation, sessionId)) {
         this.store.setHistoryLoading(false);
@@ -206,7 +121,7 @@ export class SessionConnectionController {
   private connect(generation: number, sessionId: SessionId): void {
     if (!this.isCurrent(generation, sessionId)) return;
     this.stopSource();
-    const url = this.api.eventsUrl(sessionId, this.store.getSnapshot().lastSequence);
+    const url = this.api.eventsUrl(sessionId, this.store.getSnapshot().history.tailSequence ?? this.store.getSnapshot().lastSequence);
     let source: EventSourceLike;
     try {
       source = this.eventSourceFactory(url);
@@ -237,9 +152,53 @@ export class SessionConnectionController {
       const parsed: unknown = JSON.parse(data);
       const candidate = isRecord(parsed) && isRecord(parsed["event"]) ? parsed["event"] : parsed;
       if (!isAgentEvent(candidate)) return;
-      this.store.apply(candidate);
+      const result = this.store.applyLive(candidate);
+      if (result === "gap") {
+        if (!this.liveBuffer.some((event) => event.sequence === candidate.sequence)) this.liveBuffer.push(candidate);
+        void this.repairGap(this.generation, sessionId);
+      }
     } catch (error) {
       this.store.setConnection("reconnecting", `Invalid event payload: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async repairGap(generation: number, sessionId: SessionId): Promise<void> {
+    if (this.gapRepairing || !this.isCurrent(generation, sessionId)) return;
+    this.gapRepairing = true;
+    this.store.setConnection("reconnecting", "Event stream gap detected; repairing history");
+    try {
+      while (this.isCurrent(generation, sessionId)) {
+        const tail = this.store.getSnapshot().history.tailSequence ?? this.store.getSnapshot().lastSequence;
+        const page = await this.api.listEventsPage(sessionId, { afterSequence: tail, limit: DEFAULT_HISTORY_PAGE_SIZE });
+        if (!this.isCurrent(generation, sessionId)) return;
+        if (page.events.length === 0) throw new Error(`History repair returned no events after sequence ${tail}`);
+        if (!this.store.appendHistory(page.events, page)) throw new Error(`History repair page is not contiguous after sequence ${tail}`);
+        this.liveBuffer.sort((left, right) => left.sequence - right.sequence);
+        let progressed = true;
+        while (progressed && this.liveBuffer.length > 0) {
+          progressed = false;
+          const next = this.liveBuffer[0];
+          if (next === undefined) break;
+          const result = this.store.applyLive(next, false);
+          if (result === "applied" || result === "duplicate" || result === "ignored") {
+            this.liveBuffer.shift();
+            progressed = true;
+          }
+        }
+        const next = this.liveBuffer[0];
+        const currentTail = this.store.getSnapshot().history.tailSequence ?? this.store.getSnapshot().lastSequence;
+        if (next === undefined || next.sequence === currentTail + 1) {
+          if (next === undefined) {
+            this.store.setConnection("connected");
+            return;
+          }
+          continue;
+        }
+      }
+    } catch (error) {
+      if (this.isCurrent(generation, sessionId)) this.handleFailure(generation, sessionId, error);
+    } finally {
+      this.gapRepairing = false;
     }
   }
 

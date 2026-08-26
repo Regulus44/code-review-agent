@@ -110,6 +110,32 @@ export type AgentEventType =
   | "agent/status"
   | "agent/error";
 
+/** Runtime registry used by transports (SSE, replay and adapters). Keep this
+ * list in lockstep with AgentEventType so a newly added event cannot silently
+ * disappear at the Web boundary. */
+export const AGENT_EVENT_TYPES: readonly AgentEventType[] = [
+  "session/created", "session/updated", "session/deleted", "workspace/updated", "workspace/reordered",
+  "user/message", "turn/steered", "attachment/received", "attachment/rejected", "turn/queued", "queue/changed",
+  "turn/started", "step/started", "step/ended", "turn/ended", "assistant/chunk", "assistant/message",
+  "task/created", "task/updated", "task/input-required", "task/report", "task/artifact", "task/ended",
+  "subagent/descriptor", "subagent/start", "subagent/end", "subagent/inbox", "subagent/settlement",
+  "goal/created", "goal/updated", "goal/ended", "plan/updated", "todo/updated",
+  "context/compacted", "context/compaction_failed", "context/messages_normalized", "context/tool_pairing_repaired",
+  "context/tool_results_budgeted", "context/microcompacted", "context/session_memory_compacted",
+  "context/session_memory_compaction_failed", "context/session_memory_extraction_started",
+  "context/session_memory_extraction_completed", "context/session_memory_extraction_failed",
+  "context/session_memory_extraction_cancelled", "context/project_memory_loaded", "context/project_memory_recalled",
+  "context/project_memory_stale", "context/project_memory_disabled", "context/summary_started", "context/summary_retried",
+  "context/summary_compacted", "context/summary_compaction_failed", "context/compact_boundary",
+  "context/post_compact_rebuild_failed", "context/recovery_started", "context/recovery_transition",
+  "context/recovery_succeeded", "context/recovery_failed", "context/recovery_circuit_open", "context/transcript_segment",
+  "context/session_restored", "worktree/created", "worktree/attached", "worktree/switched", "worktree/cleaned",
+  "worktree/failed", "tool/call", "tool/progress", "tool/result", "diff/preview", "patch/preview", "patch/applied",
+  "patch/rejected", "patch/rolled_back", "lsp/server", "lsp/request", "permission/requested", "permission/resolved",
+  "interaction/requested", "interaction/resolved", "terminal/session", "job/started", "job/output", "job/ended",
+  "mcp/server", "mcp/tool", "mcp/resource", "mcp/prompt", "agent/status", "agent/error",
+];
+
 export interface AgentEvent {
   readonly eventId: string;
   readonly sequence: number;

@@ -33,15 +33,29 @@ export interface SessionStoreSnapshot {
   readonly trajectory?: TrajectoryProjection;
   readonly history: SessionHistoryWindow;
   readonly lastSequence: number;
+  /** Monotonic session-connection generation; stale requests must not commit. */
+  readonly connectionGeneration: number;
   readonly connection: WebConnectionState;
   readonly error?: string;
 }
 
 export interface SessionHistoryWindow {
-  readonly hasOlder: boolean;
-  readonly hasNewer: boolean;
+  /** Generation that installed this window. */
+  readonly connectionGeneration: number;
+  /** First sequence currently installed in the bounded window. */
+  readonly baseSequence?: number;
+  /** Last sequence currently installed and used as the live cursor. */
+  readonly tailSequence?: number;
+  readonly hasMoreBefore: boolean;
+  readonly hasMoreAfter: boolean;
   readonly loadingOlder: boolean;
+  /** @deprecated Use hasMoreBefore/baseSequence/tailSequence. */
+  readonly hasOlder: boolean;
+  /** @deprecated Use hasMoreAfter. */
+  readonly hasNewer: boolean;
+  /** @deprecated Use baseSequence. */
   readonly oldestSequence?: number;
+  /** @deprecated Use tailSequence. */
   readonly newestSequence?: number;
 }
 
@@ -56,8 +70,9 @@ export type SessionStoreListener = (snapshot: SessionStoreSnapshot) => void;
 
 const EMPTY_SNAPSHOT: SessionStoreSnapshot = {
   events: [],
-  history: { hasOlder: false, hasNewer: false, loadingOlder: false },
+  history: { connectionGeneration: 0, hasMoreBefore: false, hasMoreAfter: false, hasOlder: false, hasNewer: false, loadingOlder: false },
   lastSequence: 0,
+  connectionGeneration: 0,
   connection: "idle",
 };
 
@@ -82,7 +97,7 @@ export class SessionStore {
     return () => this.listeners.delete(listener);
   }
 
-  open(session: SessionProjection, history: readonly AgentEvent[] = [], page: SessionHistoryPageMetadata = {}): void {
+  open(session: SessionProjection, history: readonly AgentEvent[] = [], page: SessionHistoryPageMetadata = {}, connectionGeneration = this.snapshot.connectionGeneration): void {
     const accepted = uniqueEvents(session.id, history);
     const lastSequence = page.newestSequence ?? Math.max(...accepted.map((event) => event.sequence), 0);
     this.sessionBaselineSequence = session.lastSequence;
@@ -105,13 +120,19 @@ export class SessionStore {
       toolCallTree: buildToolCallTree(conversation.tools),
       trajectory: snapshotTrajectory(this.trajectoryState),
       history: {
+        connectionGeneration,
+        hasMoreBefore: page.hasMoreBefore === true,
+        hasMoreAfter: page.hasMoreAfter === true,
         hasOlder: page.hasMoreBefore === true,
         hasNewer: page.hasMoreAfter === true,
         loadingOlder: false,
+        ...(oldestSequence === undefined ? {} : { baseSequence: oldestSequence }),
+        ...(newestSequence === undefined ? {} : { tailSequence: newestSequence }),
         ...(oldestSequence === undefined ? {} : { oldestSequence }),
         ...(newestSequence === undefined ? {} : { newestSequence }),
       },
       lastSequence,
+      connectionGeneration,
       connection: "connecting",
     });
   }
@@ -126,12 +147,50 @@ export class SessionStore {
     this.mergeHistory(events, {}, true);
   }
 
-  prependHistory(events: readonly AgentEvent[], page: SessionHistoryPageMetadata = {}): void {
-    this.mergeHistory(events, page, true);
+  prependHistory(events: readonly AgentEvent[], page: SessionHistoryPageMetadata = {}): boolean {
+    const sessionId = this.snapshot.sessionId;
+    const base = this.snapshot.history.baseSequence ?? this.snapshot.history.oldestSequence;
+    const accepted = sessionId === undefined ? [] : uniqueEvents(sessionId, events);
+    if (accepted.length === 0 || !isContiguous(accepted) || (base !== undefined && accepted.at(-1)!.sequence + 1 !== base)) return false;
+    const { hasMoreAfter: _ignoredHasMoreAfter, ...olderPage } = page;
+    this.mergeHistory(accepted, olderPage, true);
+    return true;
+  }
+
+  /** Install a contiguous page after the current live tail (gap repair). */
+  appendHistory(events: readonly AgentEvent[], page: SessionHistoryPageMetadata = {}): boolean {
+    const sessionId = this.snapshot.sessionId;
+    const tail = this.snapshot.history.tailSequence ?? this.snapshot.lastSequence;
+    const accepted = sessionId === undefined ? [] : uniqueEvents(sessionId, events);
+    if (sessionId === undefined || accepted.length === 0 || !isContiguous(accepted) || accepted[0]!.sequence !== tail + 1) return false;
+    for (const event of accepted) this.apply(event, false);
+    const history = this.snapshot.history;
+    this.commit({
+      ...this.snapshot,
+      history: {
+        ...history,
+        loadingOlder: false,
+        ...(page.hasMoreAfter === undefined ? {} : { hasMoreAfter: page.hasMoreAfter, hasNewer: page.hasMoreAfter }),
+      },
+    });
+    return true;
+  }
+
+  setConnectionGeneration(connectionGeneration: number): void {
+    this.commit({ ...this.snapshot, connectionGeneration, history: { ...this.snapshot.history, connectionGeneration } });
   }
 
   setHistoryLoading(loadingOlder: boolean): void {
     this.commit({ ...this.snapshot, history: { ...this.snapshot.history, loadingOlder } });
+  }
+
+  applyLive(event: AgentEvent, notify = true): "applied" | "duplicate" | "gap" | "ignored" {
+    const currentId = this.snapshot.sessionId;
+    if (currentId === undefined || event.sessionId !== currentId) return "ignored";
+    const tail = this.snapshot.history.tailSequence ?? this.snapshot.lastSequence;
+    if (event.sequence <= tail) return this.snapshot.events.some((item) => item.sequence === event.sequence) ? "duplicate" : "ignored";
+    if (event.sequence !== tail + 1) return "gap";
+    return this.apply(event, notify) ? "applied" : "duplicate";
   }
 
   apply(event: AgentEvent, notify = true): boolean {
@@ -151,7 +210,7 @@ export class SessionStore {
         conversation,
         toolCallTree: buildToolCallTree(conversation.tools),
         trajectory: snapshotTrajectory(this.trajectoryState as MutableTrajectoryProjection),
-        history: { ...this.snapshot.history, ...(oldestSequence === undefined ? {} : { oldestSequence }) },
+        history: { ...this.snapshot.history, ...(oldestSequence === undefined ? {} : { baseSequence: oldestSequence, oldestSequence }) },
       }, notify);
       return true;
     }
@@ -174,8 +233,8 @@ export class SessionStore {
       ...(this.trajectoryState === undefined ? {} : { trajectory: snapshotTrajectory(this.trajectoryState) }),
       history: {
         ...this.snapshot.history,
-        ...(events[0] === undefined ? {} : { oldestSequence: events[0].sequence }),
-        ...(event.sequence > (this.snapshot.history.newestSequence ?? 0) ? { newestSequence: event.sequence } : {}),
+        ...(events[0] === undefined ? {} : { baseSequence: events[0].sequence, oldestSequence: events[0].sequence }),
+        ...(event.sequence > (this.snapshot.history.newestSequence ?? 0) ? { tailSequence: event.sequence, newestSequence: event.sequence } : {}),
       },
       lastSequence: Math.max(this.snapshot.lastSequence, event.sequence),
     }, notify);
@@ -222,10 +281,10 @@ export class SessionStore {
       history: {
         ...this.snapshot.history,
         loadingOlder: false,
-        ...(page.hasMoreBefore === undefined ? {} : { hasOlder: page.hasMoreBefore }),
-        ...(page.hasMoreAfter === undefined ? {} : { hasNewer: page.hasMoreAfter }),
-        ...(first === undefined ? {} : { oldestSequence: first }),
-        ...(last === undefined ? {} : { newestSequence: last }),
+        ...(page.hasMoreBefore === undefined ? {} : { hasMoreBefore: page.hasMoreBefore, hasOlder: page.hasMoreBefore }),
+        ...(page.hasMoreAfter === undefined ? {} : { hasMoreAfter: page.hasMoreAfter, hasNewer: page.hasMoreAfter }),
+        ...(first === undefined ? {} : { baseSequence: first, oldestSequence: first }),
+        ...(last === undefined ? {} : { tailSequence: Math.max(this.snapshot.history.tailSequence ?? 0, last), newestSequence: Math.max(this.snapshot.history.newestSequence ?? 0, last) }),
       },
       lastSequence: Math.max(this.snapshot.lastSequence, last ?? 0),
     }, notify);
@@ -240,6 +299,13 @@ export class SessionStore {
       applyTrajectoryEvent(this.trajectoryState, event);
     }
   }
+}
+
+function isContiguous(events: readonly AgentEvent[]): boolean {
+  for (let index = 1; index < events.length; index += 1) {
+    if (events[index]!.sequence !== events[index - 1]!.sequence + 1) return false;
+  }
+  return true;
 }
 
 function uniqueEvents(sessionId: SessionId, events: readonly AgentEvent[]): readonly AgentEvent[] {
