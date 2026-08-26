@@ -8,9 +8,14 @@ export interface SessionMemorySnapshot {
   readonly updatedAt?: string;
 }
 
-/** Host-owned durable source for session memory; extraction is intentionally M11. */
+/** Host-owned durable source for session memory. The optional save operation is
+ * deliberately kept outside EventStore: memory content is tenant/session data,
+ * while the event stream only records bounded extraction metadata. */
 export interface SessionMemoryStore {
   readonly get: (sessionId: string) => Promise<SessionMemorySnapshot | undefined>;
+  readonly save?: (sessionId: string, snapshot: SessionMemorySnapshot) => Promise<void>;
+  /** Optional canonical path, used only to construct a write guard for an extractor. */
+  readonly memoryPath?: (sessionId: string) => Promise<string | undefined>;
 }
 
 export interface SessionMemoryCompactConfig {

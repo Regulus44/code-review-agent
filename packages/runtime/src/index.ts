@@ -40,7 +40,7 @@ import {
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { compactMessages, DEFAULT_CONTEXT_BUDGET, type ContextBudget } from "@code-review-agent/compaction";
-import { applyToolResultBudget, assembleContext, buildPostCompactMessages, calculateContextWarningState, classifyProviderContextError, compactWithSessionMemory, compactWithSummaryModel, ContextRecoveryGuard, countContextTokens, createTokenCounter, ensureToolResultPairing, estimateContextTokens, extractContextAttachmentIds, fallbackModelContextCapability, fingerprintModelRequest, groupMessagesByApiRound, isReactiveContextError, normalizeMessagesForAPI, resolveContextBudget, restoreModelViewFromTranscript, selectPostCompactAttachments, shouldCompactBeforeRequest, shouldUseExactTokenCount, type ApiRound, type ContextAssembly, type ContextAttachment, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type PostCompactAttachmentConfig, type PostCompactAttachmentProvider, type SessionMemoryCompactConfig, type SessionMemoryStore, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport } from "@code-review-agent/context";
+import { applyToolResultBudget, assembleContext, buildPostCompactMessages, calculateContextWarningState, classifyProviderContextError, compactWithSessionMemory, compactWithSummaryModel, ContextRecoveryGuard, countContextTokens, createSessionMemoryFileWriteGuard, createTokenCounter, ensureToolResultPairing, estimateContextTokens, extractContextAttachmentIds, fallbackModelContextCapability, fingerprintModelRequest, groupMessagesByApiRound, isReactiveContextError, normalizeMessagesForAPI, normalizeExtractionConfig, resolveContextBudget, restoreModelViewFromTranscript, selectPostCompactAttachments, SessionMemoryExtractionScheduler, sessionMemoryStats, shouldCompactBeforeRequest, shouldExtractSessionMemory, shouldUseExactTokenCount, type ApiRound, type ContextAssembly, type ContextAttachment, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type PostCompactAttachmentConfig, type PostCompactAttachmentProvider, type SessionMemoryCompactConfig, type SessionMemoryExtractionConfig, type SessionMemoryExtractionState, type SessionMemoryExtractor, type SessionMemoryStore, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport } from "@code-review-agent/context";
 import { randomUUID } from "node:crypto";
 import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModePolicySnapshot, type CodeModeSandbox, type ExecuteToolOutput, type JobSummary, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
 import type { SubagentRuntime } from "@code-review-agent/subagent";
@@ -72,9 +72,12 @@ export interface AgentHostOptions {
   readonly messageValidationMode?: "repair" | "strict";
   /** Non-destructive model-view tool-result budget and microcompact policy. */
   readonly toolResultBudget?: ToolResultBudgetPolicy;
-  /** Host-owned session memory used by M06; extraction/update is deferred to M11. */
+  /** Host-owned session memory used by M06 and M11. */
   readonly sessionMemory?: SessionMemoryStore;
   readonly sessionMemoryCompact?: Partial<SessionMemoryCompactConfig>;
+  /** Optional isolated adapter used by the M11 background extractor. */
+  readonly sessionMemoryExtractor?: SessionMemoryExtractor;
+  readonly sessionMemoryExtraction?: Partial<SessionMemoryExtractionConfig>;
   /** Claude Code-style tool-less LLM summary compact configuration (M07). */
   readonly summaryCompact?: Partial<SummaryCompactConfig>;
   /** Host-owned sources rebuilt after a compact boundary is created. */
@@ -213,6 +216,10 @@ export class AgentHost {
   private readonly toolResultBudget: ToolResultBudgetPolicy | undefined;
   private readonly sessionMemory: SessionMemoryStore | undefined;
   private readonly sessionMemoryCompact: Partial<SessionMemoryCompactConfig> | undefined;
+  private readonly sessionMemoryExtractor: SessionMemoryExtractor | undefined;
+  private readonly sessionMemoryExtraction: Partial<SessionMemoryExtractionConfig> | undefined;
+  private readonly sessionMemoryScheduler = new SessionMemoryExtractionScheduler();
+  private readonly sessionMemoryScheduleTails = new Map<SessionId, Promise<void>>();
   private readonly summaryCompact: Partial<SummaryCompactConfig> | undefined;
   private readonly postCompactAttachmentProvider: PostCompactAttachmentProvider | undefined;
   private readonly postCompactAttachmentConfig: Partial<PostCompactAttachmentConfig> | undefined;
@@ -236,6 +243,8 @@ export class AgentHost {
     this.toolResultBudget = options.toolResultBudget;
     this.sessionMemory = options.sessionMemory;
     this.sessionMemoryCompact = options.sessionMemoryCompact;
+    this.sessionMemoryExtractor = options.sessionMemoryExtractor;
+    this.sessionMemoryExtraction = options.sessionMemoryExtraction;
     this.summaryCompact = options.summaryCompact;
     this.postCompactAttachmentProvider = options.postCompactAttachmentProvider;
     this.postCompactAttachmentConfig = options.postCompactAttachmentConfig;
@@ -1437,6 +1446,18 @@ export class AgentHost {
     }
   }
 
+  /** Waits for the per-session background memory extractor without coupling it to a turn. */
+  async waitForSessionMemoryExtraction(sessionId: SessionId, timeoutMs?: number): Promise<void> {
+    await this.ready;
+    await (this.sessionMemoryScheduleTails.get(sessionId) ?? Promise.resolve());
+    await this.sessionMemoryScheduler.wait(String(sessionId), timeoutMs);
+  }
+
+  /** Cancels only the isolated memory extraction for a session. The main turn is unaffected. */
+  cancelSessionMemoryExtraction(sessionId: SessionId): boolean {
+    return this.sessionMemoryScheduler.cancel(String(sessionId));
+  }
+
   private async restoreQueuedTurns(): Promise<void> {
     for (const summary of await this.options.store.listSessions(true)) {
       let projection = await this.options.store.project(summary.id);
@@ -1469,7 +1490,222 @@ export class AgentHost {
         for (const permissionId of permissionIds) this.recoveredPermissionIndex.set(permissionId, turn.id);
         for (const interactionId of interactionIds) this.recoveredInteractionIndex.set(interactionId, turn.id);
       }
+      if (projection.contextSessionMemory?.status === "running" || projection.contextSessionMemory?.status === "queued") {
+        const resume = this.resumeSessionMemoryExtraction(summary.id).catch(() => undefined).finally(() => {
+          if (this.sessionMemoryScheduleTails.get(summary.id) === resume) this.sessionMemoryScheduleTails.delete(summary.id);
+        });
+        this.sessionMemoryScheduleTails.set(summary.id, resume);
+      }
     }
+  }
+
+  private async resumeSessionMemoryExtraction(sessionId: SessionId): Promise<void> {
+    if (this.sessionMemory === undefined || this.sessionMemoryExtractor === undefined || this.sessionMemory.save === undefined) return;
+    const projection = await this.options.store.project(sessionId);
+    const persisted = projection?.contextSessionMemory;
+    if (persisted === undefined || (persisted.status !== "running" && persisted.status !== "queued")) return;
+    const messages = await this.conversationMessages(sessionId);
+    let memory;
+    try {
+      memory = await this.sessionMemory.get(String(sessionId));
+    } catch (error) {
+      await this.recordSessionMemoryExtractionFailure(sessionId, undefined, error);
+      return;
+    }
+    const sourceSequence = persisted.sourceSequence ?? projection?.lastSequence ?? 0;
+    const sourceMessageId = persisted.sourceMessageId ?? persisted.lastExtractedMessageId;
+    const trigger = persisted.trigger ?? "threshold";
+    // If the process crashed after the host-owned save but before the durable
+    // completion receipt, do not invoke the extractor a second time.
+    if (memory?.lastSummarizedMessageId !== undefined && memory.lastSummarizedMessageId === persisted.sourceMessageId) {
+      const completedAt = memory.updatedAt ?? new Date().toISOString();
+      await this.options.store.append({
+        sessionId,
+        type: "context/session_memory_extraction_completed",
+        payload: {
+          initialized: true,
+          sourceSequence,
+          ...(sourceMessageId === undefined ? {} : { sourceMessageId }),
+          lastExtractedMessageId: memory.lastSummarizedMessageId,
+          lastExtractedTokens: Math.max(persisted.lastExtractedTokens, sessionMemoryStats(messages, sourceMessageId).estimatedTokens),
+          toolCallsSinceLastExtraction: persisted.toolCallsSinceLastExtraction,
+          trigger,
+          extractorSessionId: persisted.extractorSessionId ?? `memory_${randomUUID()}`,
+          completedAt,
+          memoryChars: memory.content.length,
+          memoryUpdatedAt: completedAt,
+          idempotentRecovery: true,
+        },
+      });
+      return;
+    }
+    const estimatedTokens = persisted.lastExtractedTokens > 0 ? persisted.lastExtractedTokens : sessionMemoryStats(messages, sourceMessageId).estimatedTokens;
+    const extractorSessionId = persisted.extractorSessionId ?? `memory_${randomUUID()}`;
+    void this.sessionMemoryScheduler.enqueue(String(sessionId), (signal) => this.executeSessionMemoryExtraction({
+      sessionId,
+      sourceSequence,
+      ...(sourceMessageId === undefined ? {} : { sourceMessageId }),
+      messages,
+      ...(memory === undefined ? {} : { memory }),
+      trigger,
+      estimatedTokens,
+      toolCallsSinceLastExtraction: persisted.toolCallsSinceLastExtraction,
+      extractorSessionId,
+      signal,
+    }));
+  }
+
+  private scheduleSessionMemoryExtraction(sessionId: SessionId, turnId: TurnId): void {
+    if (this.sessionMemory === undefined || this.sessionMemoryExtractor === undefined || this.sessionMemory.save === undefined) return;
+    const previous = this.sessionMemoryScheduleTails.get(sessionId) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(() => this.startSessionMemoryExtraction(sessionId, turnId)).catch(() => undefined).finally(() => {
+      if (this.sessionMemoryScheduleTails.get(sessionId) === next) this.sessionMemoryScheduleTails.delete(sessionId);
+    });
+    this.sessionMemoryScheduleTails.set(sessionId, next);
+  }
+
+  private async startSessionMemoryExtraction(sessionId: SessionId, turnId: TurnId): Promise<void> {
+    const projection = await this.options.store.project(sessionId);
+    if (projection === undefined || projection.contextSessionMemory?.status === "running" || projection.contextSessionMemory?.status === "queued") return;
+    const messages = await this.conversationMessages(sessionId);
+    let memory;
+    try {
+      memory = await this.sessionMemory!.get(String(sessionId));
+    } catch (error) {
+      await this.recordSessionMemoryExtractionFailure(sessionId, turnId, error);
+      return;
+    }
+    const persisted = projection.contextSessionMemory;
+    const stats = sessionMemoryStats(messages, memory?.lastSummarizedMessageId ?? persisted?.lastExtractedMessageId);
+    const state: SessionMemoryExtractionState = {
+      status: persisted?.status ?? "idle",
+      initialized: persisted?.initialized ?? false,
+      ...(persisted?.lastExtractedMessageId === undefined ? {} : { lastExtractedMessageId: persisted.lastExtractedMessageId }),
+      lastExtractedTokens: persisted?.lastExtractedTokens ?? 0,
+      toolCallsSinceLastExtraction: persisted?.toolCallsSinceLastExtraction ?? 0,
+    };
+    const decision = shouldExtractSessionMemory(state, stats, this.sessionMemoryExtraction);
+    if (!decision.shouldExtract || decision.trigger === undefined) return;
+    const extractorSessionId = `memory_${randomUUID()}`;
+    const startedAt = new Date().toISOString();
+    await this.options.store.append({
+      sessionId,
+      ...(turnId === undefined ? {} : { turnId }),
+      type: "context/session_memory_extraction_started",
+      payload: {
+        initialized: decision.initialized,
+        sourceSequence: projection.lastSequence,
+        ...(stats.lastMessageId === undefined ? {} : { sourceMessageId: stats.lastMessageId }),
+        trigger: decision.trigger,
+        estimatedTokens: stats.estimatedTokens,
+        lastExtractedTokens: state.lastExtractedTokens,
+        toolCallsSinceLastExtraction: decision.toolCallsSinceLastExtraction,
+        extractorSessionId,
+        startedAt,
+      },
+    });
+    void this.sessionMemoryScheduler.enqueue(String(sessionId), (signal) => this.executeSessionMemoryExtraction({
+      sessionId,
+      turnId,
+      sourceSequence: projection.lastSequence,
+      ...(stats.lastMessageId === undefined ? {} : { sourceMessageId: stats.lastMessageId }),
+      messages,
+      memory,
+      trigger: decision.trigger!,
+      estimatedTokens: stats.estimatedTokens,
+      toolCallsSinceLastExtraction: decision.toolCallsSinceLastExtraction,
+      extractorSessionId,
+      signal,
+    }));
+  }
+
+  private async executeSessionMemoryExtraction(input: {
+    readonly sessionId: SessionId;
+    readonly turnId?: TurnId;
+    readonly sourceSequence: number;
+    readonly sourceMessageId?: string;
+    readonly messages: readonly ChatMessage[];
+    readonly memory?: Awaited<ReturnType<NonNullable<SessionMemoryStore["get"]>>>;
+    readonly trigger: "initialization" | "threshold" | "natural_break";
+    readonly estimatedTokens: number;
+    readonly toolCallsSinceLastExtraction: number;
+    readonly extractorSessionId: string;
+    readonly signal: AbortSignal;
+  }): Promise<void> {
+    try {
+      const memoryPath = this.sessionMemory?.memoryPath === undefined ? undefined : await this.sessionMemory.memoryPath(String(input.sessionId));
+      const memoryFileGuard = memoryPath === undefined ? undefined : createSessionMemoryFileWriteGuard(memoryPath);
+      const result = await this.sessionMemoryExtractor!.extract({
+        sessionId: String(input.sessionId),
+        sourceSequence: input.sourceSequence,
+        ...(input.sourceMessageId === undefined ? {} : { sourceMessageId: input.sourceMessageId }),
+        messages: input.messages,
+        ...(input.memory === undefined ? {} : { currentMemory: input.memory }),
+        trigger: input.trigger,
+        estimatedTokens: input.estimatedTokens,
+        toolCallsSinceLastExtraction: input.toolCallsSinceLastExtraction,
+        signal: input.signal,
+        ...(memoryPath === undefined ? {} : { memoryPath }),
+        ...(memoryFileGuard === undefined ? {} : { memoryFileGuard }),
+        capabilities: { canReadSessionMemory: true, canWriteSessionMemory: true, canUseParentTools: false, canWriteWorkspace: false, canExecute: false },
+      });
+      if (input.signal.aborted) throw input.signal.reason ?? new Error("Session memory extraction cancelled");
+      const snapshot = result.snapshot;
+      if (snapshot === undefined || snapshot.content.trim().length === 0) throw new Error("SESSION_MEMORY_EXTRACTION_EMPTY");
+      const config = normalizeExtractionConfig(this.sessionMemoryExtraction);
+      const content = snapshot.content.length <= config.maxMemoryChars ? snapshot.content : snapshot.content.slice(0, config.maxMemoryChars);
+      const lastSummarizedMessageId = result.lastSummarizedMessageId ?? snapshot.lastSummarizedMessageId ?? input.sourceMessageId;
+      const updatedAt = new Date().toISOString();
+      await this.sessionMemory!.save!(String(input.sessionId), {
+        content,
+        ...(lastSummarizedMessageId === undefined ? {} : { lastSummarizedMessageId }),
+        updatedAt,
+      });
+      await this.options.store.append({
+        sessionId: input.sessionId,
+        ...(input.turnId === undefined ? {} : { turnId: input.turnId }),
+        type: "context/session_memory_extraction_completed",
+        payload: {
+          initialized: true,
+          sourceSequence: input.sourceSequence,
+          ...(input.sourceMessageId === undefined ? {} : { sourceMessageId: input.sourceMessageId }),
+          ...(lastSummarizedMessageId === undefined ? {} : { lastExtractedMessageId: lastSummarizedMessageId }),
+          lastExtractedTokens: result.tokensAtExtraction ?? input.estimatedTokens,
+          toolCallsSinceLastExtraction: input.toolCallsSinceLastExtraction,
+          trigger: input.trigger,
+          extractorSessionId: input.extractorSessionId,
+          completedAt: updatedAt,
+          memoryChars: content.length,
+          memoryUpdatedAt: updatedAt,
+        },
+      });
+    } catch (error) {
+      const cancelled = input.signal.aborted || (error instanceof Error && error.message.toLowerCase().includes("cancel"));
+      await this.options.store.append({
+        sessionId: input.sessionId,
+        ...(input.turnId === undefined ? {} : { turnId: input.turnId }),
+        type: cancelled ? "context/session_memory_extraction_cancelled" : "context/session_memory_extraction_failed",
+        payload: {
+          initialized: true,
+          sourceSequence: input.sourceSequence,
+          ...(input.sourceMessageId === undefined ? {} : { sourceMessageId: input.sourceMessageId }),
+          lastExtractedTokens: input.estimatedTokens,
+          toolCallsSinceLastExtraction: input.toolCallsSinceLastExtraction,
+          trigger: input.trigger,
+          extractorSessionId: input.extractorSessionId,
+          ...(cancelled ? {} : { error: (error instanceof Error ? error.message : String(error)).slice(0, 500) }),
+        },
+      });
+    }
+  }
+
+  private async recordSessionMemoryExtractionFailure(sessionId: SessionId, turnId: TurnId | undefined, error: unknown): Promise<void> {
+    await this.options.store.append({
+      sessionId,
+      ...(turnId === undefined ? {} : { turnId }),
+      type: "context/session_memory_extraction_failed",
+      payload: { initialized: true, lastExtractedTokens: 0, toolCallsSinceLastExtraction: 0, error: (error instanceof Error ? error.message : String(error)).slice(0, 500) },
+    });
   }
 
   private async maybeResumeRecoveredPermission(permissionId: PermissionId): Promise<void> {
@@ -1704,6 +1940,7 @@ export class AgentHost {
       const assembly = await this.assembleTurnContext(sessionId, [...previousMessages, { role: "user", content, ...(userMessageId === undefined ? { messageId: String(turnId) } : { messageId: userMessageId }) }]);
       const messages: ChatMessage[] = [...assembly.messages];
       await this.runSteps(sessionId, turnId, controller, messages, reasoningEffort);
+      this.scheduleSessionMemoryExtraction(sessionId, turnId);
     } catch (error) {
       await this.finishTurnAfterError(sessionId, turnId, controller, error);
     } finally {
@@ -1724,6 +1961,7 @@ export class AgentHost {
       const assembly = await this.assembleTurnContext(sessionId, previousMessages, true);
       const messages: ChatMessage[] = [...assembly.messages];
       await this.runSteps(sessionId, turnId, controller, messages, undefined, true);
+      this.scheduleSessionMemoryExtraction(sessionId, turnId);
     } catch (error) {
       await this.finishTurnAfterError(sessionId, turnId, controller, error);
     } finally {

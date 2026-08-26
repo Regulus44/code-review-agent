@@ -25,6 +25,17 @@ describe("InMemoryEventStore", () => {
     expect(await store.project(unknown)).toBeUndefined();
   });
 
+  it("replays bounded M11 session memory extraction metadata without storing memory text", async () => {
+    const store = new InMemoryEventStore();
+    const sessionId = await store.createSession("D:/memory");
+    await store.append({ sessionId, type: "context/session_memory_extraction_started", payload: { initialized: true, sourceSequence: 4, sourceMessageId: "evt_source", trigger: "natural_break", lastExtractedTokens: 0, toolCallsSinceLastExtraction: 3, extractorSessionId: "memory_child", startedAt: "2026-08-26T00:00:00.000Z" } });
+    const completed = await store.append({ sessionId, type: "context/session_memory_extraction_completed", payload: { initialized: true, sourceSequence: 4, sourceMessageId: "evt_source", lastExtractedMessageId: "evt_source", lastExtractedTokens: 12000, toolCallsSinceLastExtraction: 3, trigger: "natural_break", extractorSessionId: "memory_child", completedAt: "2026-08-26T00:00:01.000Z", memoryChars: 42, memoryUpdatedAt: "2026-08-26T00:00:01.000Z" } });
+    const projection = await store.project(sessionId);
+    expect(projection?.contextSessionMemory).toMatchObject({ status: "completed", lastExtractedMessageId: "evt_source", lastExtractedTokens: 12000, memoryChars: 42, lastSequence: completed.sequence });
+    expect(JSON.stringify(projection?.contextSessionMemory)).not.toContain("memory text");
+    expect((await store.list(sessionId)).map((event) => event.type)).toEqual(["session/created", "context/session_memory_extraction_started", "context/session_memory_extraction_completed"]);
+  });
+
   it("serves bounded latest and older pages without changing the full replay contract", async () => {
     const store = new InMemoryEventStore();
     const sessionId = await store.createSession("D:/workspace");

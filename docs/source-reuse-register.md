@@ -402,3 +402,21 @@ ID:
 明确未复用：Claude Code JSONL loader、文件轮转、context-collapse persistence、Session Memory extraction、Project Memory、hooks、商业遥测和账户/CLI 状态；本项目使用 EventStore、SQLite projection、Session/Tool/Permission contract 重新实现。
 
 新增测试：`packages/context/src/transcript-replay.test.ts`、`packages/runtime/src/index.test.ts` 的 Host restart/boundary replay 场景、`packages/storage/src/index.test.ts` 的 SQLite reopen/restore projection 场景。
+
+### CC-012
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`src/services/SessionMemory/sessionMemoryUtils.ts:16-210`、`src/services/SessionMemory/sessionMemory.ts:135-181,273-357`
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；本次没有复制 Claude Code 代码，只重新实现 extraction gate、状态迁移、后台串行调度、受限 fork adapter 和 exact-path memory guard。
+
+本项目路径：`packages/context/src/session-memory.ts`、`packages/context/src/session-memory-compact.ts`、`packages/runtime/src/index.ts`、`packages/storage/src/index.ts`、`packages/contracts/src/index.ts`。
+
+范围：10,000 初始 token、5,000 增长 token、3 次 tool call 默认门槛；自然 assistant break；per-session extraction scheduler；AbortSignal；host-owned `SessionMemoryStore.save()`；restricted capabilities；running extraction restart/idempotent completion；M11 extraction events/projection。
+
+明确未复用：Claude Code 文件路径实现、全局进程状态、`runForkedAgent()` 内部 prompt/cache/provider 代码、SessionStart/PreCompact hooks、账户/遥测、Project Memory 和主 Agent 工具权限。
+
+新增测试：`packages/context/src/session-memory.test.ts`、`packages/runtime/src/index.test.ts`、`packages/storage/src/index.test.ts` 的 gate、隔离、串行、保存、失败隔离、正文不入事件和 projection replay 场景。

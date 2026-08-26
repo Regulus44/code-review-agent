@@ -13,6 +13,18 @@ export { normalizeMessagesForAPI } from "./api-normalize.js";
 export { ensureToolResultPairing } from "./tool-pairing.js";
 export { applyToolResultBudget, DEFAULT_COMPACTABLE_TOOLS, DEFAULT_MICROCOMPACT_MESSAGE } from "./tool-result-budget.js";
 export { adjustIndexToPreserveAPIInvariants, calculateMessagesToKeepIndex, compactWithSessionMemory, DEFAULT_SESSION_MEMORY_COMPACT_CONFIG } from "./session-memory-compact.js";
+export {
+  createSessionMemoryFileWriteGuard,
+  markExtractionCancelled,
+  markExtractionCompleted,
+  markExtractionFailed,
+  markExtractionStarted,
+  normalizeExtractionConfig,
+  sessionMemoryStats,
+  shouldExtractSessionMemory,
+  SessionMemoryExtractionScheduler,
+  DEFAULT_SESSION_MEMORY_EXTRACTION_CONFIG,
+} from "./session-memory.js";
 export { buildSummaryInput, ensureSummaryStartsWithUser } from "./summary-input.js";
 export { compactWithSummaryModel, truncateHeadForPtlRetry, DEFAULT_SUMMARY_COMPACT_CONFIG } from "./summary-compact.js";
 export {
@@ -94,6 +106,20 @@ export type {
   SessionMemoryStore,
   SessionMemorySnapshot,
 } from "./session-memory-compact.js";
+export type {
+  SessionMemoryContextStats,
+  SessionMemoryExtractionCapabilities,
+  SessionMemoryExtractionConfig,
+  SessionMemoryExtractionDecision,
+  SessionMemoryExtractionRequest,
+  SessionMemoryExtractionResult,
+  SessionMemoryExtractionState,
+  SessionMemoryExtractionStatus,
+  SessionMemoryExtractionTrigger,
+  SessionMemoryExtractor,
+  SessionMemoryFileWriteGuard,
+  SessionMemorySnapshotLike,
+} from "./session-memory.js";
 export type {
   SummaryInputOptions,
 } from "./summary-input.js";

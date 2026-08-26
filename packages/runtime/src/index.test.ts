@@ -1165,4 +1165,62 @@ describe("AgentHost", () => {
       await rm(parent, { recursive: true, force: true });
     }
   }, 15_000);
+
+  it("runs M11 session memory extraction in an isolated background adapter", async () => {
+    const store = new InMemoryEventStore();
+    let saved: { content: string; lastSummarizedMessageId?: string; updatedAt?: string } | undefined;
+    const requests: Array<{ sessionId: string; canUseParentTools: false; canWriteWorkspace: false }> = [];
+    const model: ChatModel = {
+      async *stream(): AsyncIterable<ModelStreamPart> {
+        yield { type: "text_delta", text: "memory extraction trigger" };
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({
+      store,
+      model,
+      sessionMemory: {
+        get: async () => saved,
+        save: async (_sessionId, snapshot) => { saved = snapshot; },
+        memoryPath: async () => "D:/memory/session.md",
+      },
+      sessionMemoryExtraction: { minimumMessageTokensToInit: 1, minimumTokensBetweenUpdate: 1, toolCallsBetweenUpdates: 1 },
+      sessionMemoryExtractor: {
+        async extract(request) {
+          requests.push({ sessionId: request.sessionId, canUseParentTools: request.capabilities.canUseParentTools, canWriteWorkspace: request.capabilities.canWriteWorkspace });
+          return { snapshot: { content: "Preserve the current review goal", ...(request.sourceMessageId === undefined ? {} : { lastSummarizedMessageId: request.sourceMessageId }) }, tokensAtExtraction: request.estimatedTokens };
+        },
+      },
+    });
+    const session = await host.createSession("D:/m11-memory-fixture");
+    const turn = await host.sendMessage(session.id, "capture this session");
+    await host.waitForTurn(turn);
+    await host.waitForSessionMemoryExtraction(session.id);
+    const events = await host.events(session.id);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({ canUseParentTools: false, canWriteWorkspace: false });
+    expect(saved?.content).toContain("current review goal");
+    expect(events.some((event) => event.type === "context/session_memory_extraction_started")).toBe(true);
+    expect(events.some((event) => event.type === "context/session_memory_extraction_completed")).toBe(true);
+    expect((await host.getSession(session.id))?.contextSessionMemory).toMatchObject({ status: "completed", initialized: true });
+    expect(JSON.stringify(events.find((event) => event.type === "context/session_memory_extraction_completed"))).not.toContain("current review goal");
+  });
+
+  it("keeps the completed main turn successful when memory extraction fails", async () => {
+    const store = new InMemoryEventStore();
+    const host = new AgentHost({
+      store,
+      sessionMemory: { get: async () => undefined, save: async () => undefined },
+      sessionMemoryExtraction: { minimumMessageTokensToInit: 1, minimumTokensBetweenUpdate: 1 },
+      sessionMemoryExtractor: { async extract() { throw new Error("extractor offline"); } },
+    });
+    const session = await host.createSession("D:/m11-failure-fixture");
+    const turn = await host.sendMessage(session.id, "finish despite extraction failure");
+    await host.waitForTurn(turn);
+    await host.waitForSessionMemoryExtraction(session.id);
+    const events = await host.events(session.id);
+    expect(events.find((event) => event.type === "turn/ended")?.payload["status"]).toBe("completed");
+    expect(events.some((event) => event.type === "context/session_memory_extraction_failed")).toBe(true);
+    expect(events.some((event) => event.type === "agent/error")).toBe(false);
+  });
 });

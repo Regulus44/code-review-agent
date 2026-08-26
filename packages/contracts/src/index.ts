@@ -59,6 +59,10 @@ export type AgentEventType =
   | "context/microcompacted"
   | "context/session_memory_compacted"
   | "context/session_memory_compaction_failed"
+  | "context/session_memory_extraction_started"
+  | "context/session_memory_extraction_completed"
+  | "context/session_memory_extraction_failed"
+  | "context/session_memory_extraction_cancelled"
   | "context/summary_started"
   | "context/summary_retried"
   | "context/summary_compacted"
@@ -374,6 +378,7 @@ export interface SessionProjection extends SessionSummary {
   readonly toolCalls: readonly ToolCallProjection[];
   readonly permissions: readonly PermissionProjection[];
   readonly contextCompaction?: ContextCompactionProjection;
+  readonly contextSessionMemory?: ContextSessionMemoryProjection;
   readonly contextRecovery?: ContextRecoveryProjection;
   readonly contextTranscript?: ContextTranscriptSegment;
   readonly contextRestore?: ContextSessionRestoreProjection;
@@ -434,6 +439,30 @@ export interface ContextCompactionProjection {
   readonly error?: string;
   readonly boundary?: ContextBoundaryMetadata;
   readonly attachments?: readonly ContextAttachmentProjection[];
+}
+
+export type ContextSessionMemoryExtractionStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type ContextSessionMemoryExtractionTrigger = "initialization" | "threshold" | "natural_break";
+
+/** Bounded durable state for Claude Code-style background session-memory extraction. */
+export interface ContextSessionMemoryProjection {
+  readonly version: 1;
+  readonly status: ContextSessionMemoryExtractionStatus;
+  readonly initialized: boolean;
+  readonly sourceSequence?: number;
+  readonly sourceMessageId?: string;
+  readonly lastExtractedMessageId?: string;
+  readonly lastExtractedTokens: number;
+  readonly toolCallsSinceLastExtraction: number;
+  readonly trigger?: ContextSessionMemoryExtractionTrigger;
+  readonly extractorSessionId?: string;
+  readonly startedAt?: string;
+  readonly completedAt?: string;
+  readonly updatedAt: string;
+  readonly lastSequence: number;
+  readonly memoryChars?: number;
+  readonly memoryUpdatedAt?: string;
+  readonly error?: string;
 }
 
 export type ContextRecoveryErrorClass =

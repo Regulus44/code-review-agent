@@ -258,6 +258,20 @@ preserved segment 的 message ID 必须是 EventStore append 返回的 durable `
 
 回滚策略：停止追加 M10 两类事件并移除 replay builder/restore projection，回退到 M08 boundary slice；已存在的 M10 事件保留为未知扩展，原始 transcript 不删除。
 
+## ADR-023：Session Memory Extraction 使用 session-scoped 后台调度和受限 fork adapter
+
+状态：accepted（2026-08-26，M11）
+
+M11 仿照 Claude Code `SessionMemory/sessionMemoryUtils.ts` 与 `sessionMemory.ts` 的行为，但将进程级共享变量改为 EventStore projection 中的 session-scoped 状态。触发必须同时满足 token 门槛与自然断点/tool-call 门槛：初始化默认 10,000 tokens；后续每次增长默认 5,000 tokens；tool-call threshold 默认 3；token threshold 永远不能省略。`queued`/`running` extraction 由 per-session scheduler 串行化，不能影响其他 session 或主 Agent turn。
+
+Runtime 只在主 turn 成功完成后后台调度 extraction。`SessionMemoryExtractor` 是 host-owned adapter，输入为不可变 model-visible transcript、当前 memory、source cursor、AbortSignal 和固定 restricted capabilities；它不能使用父 Agent 工具、workspace write 或 execute 能力。若提供 memory path，adapter 必须使用 exact-path write guard。memory 正文只写入 `SessionMemoryStore.save()`，事件和 projection 只保存 cursor、长度、token/tool 统计、状态、extractor session id 和 bounded error。
+
+新增 `context/session_memory_extraction_started/completed/failed/cancelled` 事件和 `ContextSessionMemoryProjection`。主 turn extraction 失败只记录诊断，不追加 `agent/error`，也不改变已完成 turn。Host restart 读取 running/queued 状态；若 memory 已保存相同 source message id，则追加幂等 completed receipt，不重复调用 extractor。
+
+该决策参考 Claude Code `markExtractionStarted()`、`waitForSessionMemoryExtraction()`、`shouldExtractMemory()`、`runForkedAgent()` 和 `createMemoryFileCanUseTool()`，没有复制其文件、账户、遥测或 provider 代码。M11 不包含 Project Memory/memdir、JSONL transcript rotation、hooks 或 provider prompt-cache edit。
+
+回滚策略：停止注入 `sessionMemoryExtractor` 并移除 M11 scheduler/事件 projection，保留 M06 的只读 `SessionMemoryStore.get()` 和现有 compact boundary；已存在的 M11 metadata 事件作为未知扩展保留，memory store 正文不删除。
+
 ## 参考代码入口
 
 - DSH Agent Loop：`D:/Develop/deepseek-harness-fork/packages/core/agent-loop/src/agent.ts`

@@ -50,6 +50,7 @@ import {
   type ModelRouteBackend,
   type ModelRouteRecord,
   type ContextCompactionProjection,
+  type ContextSessionMemoryProjection,
   type ContextBoundaryMetadata,
   type ContextAttachmentProjection,
   type ContextRecoveryProjection,
@@ -307,6 +308,44 @@ function contextAttachmentProjections(value: unknown): readonly ContextAttachmen
       ? [{ id: record["id"], kind: record["kind"], tokenEstimate: Math.max(0, Math.floor(record["tokenEstimate"])) }]
       : [];
   }).slice(0, 256);
+}
+
+function contextSessionMemoryProjection(value: unknown, event: AgentEvent, previous?: ContextSessionMemoryProjection): ContextSessionMemoryProjection | undefined {
+  const payload = value as Record<string, unknown>;
+  const status = payload["status"];
+  if (status !== "queued" && status !== "running" && status !== "completed" && status !== "failed" && status !== "cancelled") return undefined;
+  const trigger = payload["trigger"];
+  const validTrigger = trigger === "initialization" || trigger === "threshold" || trigger === "natural_break";
+  const sourceSequence = typeof payload["sourceSequence"] === "number" ? Math.max(0, Math.floor(payload["sourceSequence"] as number)) : previous?.sourceSequence;
+  const sourceMessageId = typeof payload["sourceMessageId"] === "string" ? (payload["sourceMessageId"] as string).slice(0, 256) : previous?.sourceMessageId;
+  const lastExtractedMessageId = typeof payload["lastExtractedMessageId"] === "string" ? (payload["lastExtractedMessageId"] as string).slice(0, 256) : previous?.lastExtractedMessageId;
+  const extractorSessionId = typeof payload["extractorSessionId"] === "string" ? (payload["extractorSessionId"] as string).slice(0, 128) : previous?.extractorSessionId;
+  const startedAt = typeof payload["startedAt"] === "string" ? payload["startedAt"] as string : previous?.startedAt;
+  const completedAt = typeof payload["completedAt"] === "string" ? payload["completedAt"] as string : previous?.completedAt;
+  const lastExtractedTokens = typeof payload["lastExtractedTokens"] === "number" ? Math.max(0, Math.floor(payload["lastExtractedTokens"] as number)) : previous?.lastExtractedTokens ?? 0;
+  const toolCallsSinceLastExtraction = typeof payload["toolCallsSinceLastExtraction"] === "number" ? Math.max(0, Math.floor(payload["toolCallsSinceLastExtraction"] as number)) : previous?.toolCallsSinceLastExtraction ?? 0;
+  const memoryChars = typeof payload["memoryChars"] === "number" ? Math.max(0, Math.floor(payload["memoryChars"] as number)) : previous?.memoryChars;
+  const memoryUpdatedAt = typeof payload["memoryUpdatedAt"] === "string" ? payload["memoryUpdatedAt"] as string : previous?.memoryUpdatedAt;
+  const error = typeof payload["error"] === "string" ? (payload["error"] as string).slice(0, 500) : undefined;
+  return {
+    version: 1,
+    status,
+    initialized: payload["initialized"] === true || previous?.initialized === true,
+    ...(sourceSequence === undefined ? {} : { sourceSequence }),
+    ...(sourceMessageId === undefined ? {} : { sourceMessageId }),
+    ...(lastExtractedMessageId === undefined ? {} : { lastExtractedMessageId }),
+    lastExtractedTokens,
+    toolCallsSinceLastExtraction,
+    ...(validTrigger ? { trigger } : previous?.trigger === undefined ? {} : { trigger: previous.trigger }),
+    ...(extractorSessionId === undefined ? {} : { extractorSessionId }),
+    ...(startedAt === undefined ? {} : { startedAt }),
+    ...(completedAt === undefined ? {} : { completedAt }),
+    updatedAt: event.createdAt,
+    lastSequence: event.sequence,
+    ...(memoryChars === undefined ? {} : { memoryChars }),
+    ...(memoryUpdatedAt === undefined ? {} : { memoryUpdatedAt }),
+    ...(error === undefined ? {} : { error }),
+  };
 }
 
 function contextRecoveryErrorClass(value: unknown): ContextRecoveryErrorClass | undefined {
@@ -599,6 +638,16 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
       ...(typeof payload["error"] === "string" ? { error: payload["error"] } : {}),
     };
     next = { ...next, contextCompaction: projection };
+  }
+
+  if (event.type === "context/session_memory_extraction_started" || event.type === "context/session_memory_extraction_completed" || event.type === "context/session_memory_extraction_failed" || event.type === "context/session_memory_extraction_cancelled") {
+    const status = event.type === "context/session_memory_extraction_started"
+      ? "running"
+      : event.type === "context/session_memory_extraction_completed"
+        ? "completed"
+        : event.type === "context/session_memory_extraction_cancelled" ? "cancelled" : "failed";
+    const projected = contextSessionMemoryProjection({ ...event.payload, status }, event, next.contextSessionMemory);
+    if (projected !== undefined) next = { ...next, contextSessionMemory: projected };
   }
 
   if (event.type === "context/compact_boundary") {

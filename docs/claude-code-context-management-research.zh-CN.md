@@ -717,6 +717,16 @@ Claude Code 不在每个 turn 都提取 memory。初始化 token threshold、两
 
 模块验收：提取任务串行、可取消、不会共享父 agent 全部权限；主 turn 与 memory extraction 相互隔离；提取完成后更新 last summarized boundary；重启可恢复 extraction state。
 
+#### M11 实施状态（2026-08-26）
+
+M11 已完成。`packages/context/src/session-memory.ts` 将 Claude Code 的进程级门控改为 session-scoped pure state，默认保留 10,000 初始 token、5,000 增长 token和 3 次 tool call；token threshold 始终必需，tool threshold 与自然 assistant break 组合触发。`SessionMemoryExtractionScheduler` 为每个 session 建立串行尾部并提供 AbortSignal、等待和取消能力。
+
+`packages/runtime/src/index.ts` 在成功 `runTurn()`/`runRecoveredTurn()` 后异步调度 `SessionMemoryExtractor`。adapter 只收到不可变 transcript、当前 memory、source cursor 和 restricted capabilities（不能使用父工具、写 workspace 或执行命令）；memory path 由 host 提供时，使用 `createSessionMemoryFileWriteGuard()` 限制 exact path。主 turn 不等待 extraction，失败/取消只追加 bounded extraction event。
+
+`packages/contracts/src/index.ts` 与 `packages/storage/src/index.ts` 新增四类 extraction 事件和 `ContextSessionMemoryProjection`。EventStore 只保存状态、cursor、token/tool 统计、长度、时间和错误，不保存 memory 正文。Host restart 会恢复 running/queued extraction；发现 memory 已覆盖相同 source message id 时追加幂等 completed receipt，避免重复调用 extractor。
+
+对应实现说明：[claude-code-context-m11-implementation.zh-CN.md](claude-code-context-m11-implementation.zh-CN.md)；开发日志：[development-log/m11-session-memory-extraction.zh-CN.md](development-log/m11-session-memory-extraction.zh-CN.md)。
+
 ### M12：Project Memory / memdir
 
 | 项目 | 内容 |

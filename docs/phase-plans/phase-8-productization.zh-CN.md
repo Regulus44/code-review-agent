@@ -287,6 +287,38 @@ git diff --check
     pnpm test
     git diff --check
 
+### 5.3 当前执行切片：M11 Session Memory Extraction
+
+状态：`completed`（2026-08-26）。
+
+交付物：
+
+- `packages/context/src/session-memory.ts`：Claude Code 式初始化 token、token growth、tool-call/natural-break gate；session-scoped state migration；per-session serial scheduler；AbortSignal；exact-path memory write guard；
+- `SessionMemoryExtractor` host adapter：只接收不可变 transcript、当前 memory、source cursor 和 restricted capabilities，不继承父 Agent 工具、workspace write 或 execute 能力；
+- `SessionMemoryStore.save()`/`memoryPath()`：memory 正文由 host-owned store 持久化，EventStore 只保存 bounded extraction metadata；
+- `context/session_memory_extraction_started/completed/failed/cancelled` 事件和 `SessionProjection.contextSessionMemory`；InMemory/SQLite 共用 replay reducer；
+- Runtime 在成功 turn 后异步调度 extraction，主 turn 不等待；失败/取消不改变主 turn 结果；Host restart 恢复 running/queued extraction，并对已保存 source cursor 做幂等完成；
+- Context/Runtime/Storage 测试、M11 实施说明、开发日志、ADR-023 和 CC-012。
+
+参考：Claude Code `D:/Develop/claude-code/src/services/SessionMemory/sessionMemoryUtils.ts:16-210`、`sessionMemory.ts:135-181,273-357`；本项目 `packages/context/src/session-memory.ts`、`packages/runtime/src/index.ts`、`packages/storage/src/index.ts`、`packages/contracts/src/index.ts`。
+
+契约与安全边界：
+
+- token threshold 始终必需；tool threshold 不能单独触发 extraction；
+- memory extraction 与主 Agent 隔离，不能调用父工具、写 workspace 或执行命令；
+- memory 正文不进入 EventStore、SSE、projection 或 Web；事件只记录 cursor、长度、统计、状态和 bounded error；
+- extractor 失败不使主 turn 失败；`save` 成功但 receipt 丢失时重启不重复写入；
+- M11 不包含 Project Memory/memdir、JSONL transcript rotation、hooks、provider cache edit 或 Web context inspector。
+
+验收命令：
+
+    pnpm typecheck
+    pnpm --filter @code-review-agent/context test -- --run
+    pnpm --filter @code-review-agent/storage test -- --run
+    pnpm --filter @code-review-agent/runtime test -- --run
+    pnpm test
+    git diff --check
+
 ## 6. Phase 8.2：Workspace/Worktree
 
 交付物：
