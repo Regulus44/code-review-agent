@@ -11,6 +11,7 @@
     "build": "tsc -b",
     "build:web": "pnpm --filter @code-review-agent/web build && pnpm --filter @code-review-agent/web build:browser",
     "build:web:browser": "pnpm --filter @code-review-agent/web build:browser",
+    "test:phase5:browser": "pnpm typecheck && pnpm build:web && node scripts/phase5-browser-gate.mjs",
     "test:phase7:browser": "pnpm typecheck && pnpm build:web && node scripts/phase7-browser-gate.mjs",
     "test:phase8:worktree": "pnpm typecheck && pnpm build:web && node scripts/phase8-worktree-gate.mjs",
     "test:phase8:compaction": "pnpm typecheck && pnpm build:web && node scripts/phase8-compaction-gate.mjs",

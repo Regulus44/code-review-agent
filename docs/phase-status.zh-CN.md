@@ -18,6 +18,15 @@
 | Phase 7：DSH Web 前端收敛 | completed | 7.1–7.10 Web shell、连接与回放、Workspace/Session navigation、Conversation/Tool/Permission/Interaction、Trajectory、Task/Subagent/MCP、Settings/Deliverables、响应式与可访问性、五场景 browser/replay gate、Workspace reorder 与 Workspace rename/archive/delete lifecycle 已完成；`pnpm typecheck`、`pnpm test`、`pnpm test:phase7:browser` 和 `git diff --check` 通过；browser gate 总耗时 2.14s、trajectory full replay 19.03ms；独立 checkpoint `82326d6` |
 | Phase 8：高级能力与产品化 | in_progress（8.0/8.1/8.2/8.4 已完成，8.3/8.5 partial） | Phase 8.0 的 600/900/1024 visual/accessibility matrix、9 个 Web parity browser 场景和独立 checkpoint 已完成；最新 Web checkpoint `5e55084`（ToolRow）与 `b6a1cf7`（Trajectory scroll）；8.3/8.5 仍等待目标部署环境 smoke，不影响 8.0 关闭 |
 
+## Session replay/composer 参考第五阶段（completed，2026-08-26）
+
+该节对应 `docs/dsh-session-replay-and-composer-reference.zh-CN.md` 的第五阶段，独立于上表中历史的 Phase 5 Subagent。已新增真实 HTTP/SSE/SQLite 浏览器边界 fixture 和 8 组回归场景：连续 12 turn、200 条窗口冷启动回放、SSE 丢帧重连、terminal 清理 active turn、queue snapshot 清理、Composer 失败 draft、prepend 锚点、Trajectory bounded history 与全日志 stats。
+
+- 实现入口：[第五阶段浏览器验收实现记录](dsh-session-replay-phase5-browser-implementation.zh-CN.md)、`apps/web/tests`、`scripts/phase5-browser-gate.mjs`；
+- DSH 对照入口：`D:/Develop/deepseek-harness-fork/apps/web/tests/chat-continuous-conversation.e2e.ts`、`replay-round-trip.e2e.ts`、`lifecycle-chrome.e2e.ts`、`chat-scroll-contract.e2e.ts`、`trajectory-virtualization.e2e.ts`、`stats-paged-history.e2e.ts`；
+- 验证：`pnpm typecheck`、`pnpm build:web`、`pnpm test:phase5:browser`、`git diff --check` 通过；
+- 回滚：只移除本阶段 fixture、场景、package script 和文档，不影响 Event/Tool/Task/Permission/Workspace contract 或生产运行时。
+
 ## Phase 8 计划范围（accepted）
 
 - [Phase 8：高级能力、DSH Web 对齐与产品化](phase-plans/phase-8-productization.zh-CN.md) 已扩展为 8.0 Web 对齐、8.1 Context Compaction、8.2 Worktree、8.3 LSP/Code Mode、8.4 后台任务与可靠性、8.5 产品化；
