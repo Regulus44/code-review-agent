@@ -54,6 +54,9 @@ import {
   type ContextAttachmentProjection,
   type ContextRecoveryProjection,
   type ContextRecoveryErrorClass,
+  type ContextTranscriptSegment,
+  type ContextSessionRestoreProjection,
+  type ContextRestoreMode,
   type WorktreeProjection,
   type WorktreeStatus,
   type SessionOwnership,
@@ -291,6 +294,7 @@ function contextBoundaryMetadata(value: unknown): ContextBoundaryMetadata | unde
     ...(Array.isArray(record["compactedToolIds"]) ? { compactedToolIds: record["compactedToolIds"].filter((item): item is string => typeof item === "string").slice(0, 256) } : {}),
     ...(Array.isArray(record["clearedAttachmentIds"]) ? { clearedAttachmentIds: record["clearedAttachmentIds"].filter((item): item is string => typeof item === "string").slice(0, 256) } : {}),
     createdAt: record["createdAt"],
+    ...(typeof record["algorithmVersion"] === "string" ? { algorithmVersion: record["algorithmVersion"].slice(0, 64) } : {}),
   };
 }
 
@@ -309,6 +313,26 @@ function contextRecoveryErrorClass(value: unknown): ContextRecoveryErrorClass | 
   return value === "prompt_too_long" || value === "media_too_large" || value === "tool_pairing" || value === "schema" || value === "other"
     ? value
     : undefined;
+}
+
+function contextTranscriptSegment(value: unknown): ContextTranscriptSegment | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  if (record["version"] !== 1 || typeof record["boundaryId"] !== "string" || typeof record["algorithmVersion"] !== "string" || typeof record["sourceSequence"] !== "number" || typeof record["createdAt"] !== "string") return undefined;
+  return {
+    version: 1,
+    boundaryId: record["boundaryId"].slice(0, 128),
+    algorithmVersion: record["algorithmVersion"].slice(0, 64),
+    sourceSequence: Math.max(0, Math.floor(record["sourceSequence"])),
+    ...(typeof record["headMessageId"] === "string" ? { headMessageId: record["headMessageId"].slice(0, 256) } : {}),
+    ...(typeof record["anchorMessageId"] === "string" ? { anchorMessageId: record["anchorMessageId"].slice(0, 256) } : {}),
+    ...(typeof record["tailMessageId"] === "string" ? { tailMessageId: record["tailMessageId"].slice(0, 256) } : {}),
+    createdAt: record["createdAt"],
+  };
+}
+
+function contextRestoreMode(value: unknown): ContextRestoreMode | undefined {
+  return value === "boundary" || value === "legacy" ? value : undefined;
 }
 
 function deriveActiveStatus(projection: SessionProjection): SessionStatus {
@@ -632,6 +656,33 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
         ...(error === undefined ? {} : { error }),
       };
       next = { ...next, contextRecovery: recovery };
+    }
+  }
+
+  if (event.type === "context/transcript_segment") {
+    const segment = contextTranscriptSegment(event.payload["segment"]);
+    if (segment !== undefined) next = { ...next, contextTranscript: segment };
+  }
+
+  if (event.type === "context/session_restored") {
+    const mode = contextRestoreMode(event.payload["mode"]);
+    if (mode !== undefined) {
+      const boundaryId = typeof event.payload["boundaryId"] === "string" ? event.payload["boundaryId"].slice(0, 128) : undefined;
+      const algorithmVersion = typeof event.payload["algorithmVersion"] === "string" ? event.payload["algorithmVersion"].slice(0, 64) : undefined;
+      const sourceSequence = typeof event.payload["sourceSequence"] === "number" ? Math.max(0, Math.floor(event.payload["sourceSequence"])) : undefined;
+      const reason = typeof event.payload["reason"] === "string" ? event.payload["reason"].slice(0, 160) : "unknown";
+      const restore: ContextSessionRestoreProjection = {
+        version: 1,
+        status: mode === "boundary" ? "restored" : "fallback",
+        mode,
+        ...(boundaryId === undefined ? {} : { boundaryId }),
+        ...(algorithmVersion === undefined ? {} : { algorithmVersion }),
+        reason,
+        ...(sourceSequence === undefined ? {} : { sourceSequence }),
+        updatedAt: event.createdAt,
+        lastSequence: event.sequence,
+      };
+      next = { ...next, contextRestore: restore };
     }
   }
 

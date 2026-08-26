@@ -256,6 +256,37 @@ git diff --check
     pnpm --filter @code-review-agent/runtime test -- --run src/index.test.ts
     git diff --check
 
+### 5.2 当前执行切片：M10 Transcript、Boundary Replay 与 Session Restore
+
+状态：`completed`（2026-08-26）。
+
+交付物：
+
+- `context/transcript_segment` durable link：保存 boundaryId、algorithmVersion、sourceSequence 和 preserved head/anchor/tail；
+- `context/session_restored` restore receipt，以及 `SessionProjection.contextTranscript/contextRestore` replay projection；
+- `restoreModelViewFromTranscript()` 纯函数：从完整 EventStore transcript 重建 boundary → summary → preserved suffix；
+- Runtime `conversationMessages()`、queued turn restore 和 resumed turn 使用 durable eventId，避免把 Runtime-only turnId/responseId 当作跨重启锚点；
+- SQLite/InMemory close/reopen、Host restart、SSE replay 和 stale/mismatch anchor 的安全回退验证；
+- M08 旧 boundary（无 algorithmVersion）兼容读取，无法证明边界时回退完整 transcript。
+
+参考：Claude Code `src/services/sessionTranscript/`、`src/utils/sessionRestore.ts`、`src/utils/messages.ts:5043-5090`；本项目 `packages/context/src/transcript-replay.ts`、`packages/runtime/src/index.ts`、`packages/storage/src/index.ts`、`packages/contracts/src/index.ts`。
+
+契约与安全边界：
+
+- EventStore transcript 永远保存完整 user/assistant/tool 原文，M10 metadata 和 receipt 不复制消息正文；
+- segment 缺 boundary、boundary/segment linkage 不一致、head 缺失或 head 不在 transcript 中时，必须完整回退，不猜测 sequence；
+- replay builder 不修改 transcript，不重复追加 boundary 或 transcript segment；
+- M10 不包含 JSONL 文件轮转、context-collapse、Session Memory extraction、Project Memory、hooks 或 provider cache edit。
+
+验收命令：
+
+    pnpm typecheck
+    pnpm --filter @code-review-agent/context test -- --run
+    pnpm --filter @code-review-agent/storage test -- --run
+    pnpm --filter @code-review-agent/runtime test -- --run src/index.test.ts
+    pnpm test
+    git diff --check
+
 ## 6. Phase 8.2：Workspace/Worktree
 
 交付物：

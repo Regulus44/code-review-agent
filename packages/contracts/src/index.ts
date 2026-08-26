@@ -70,6 +70,8 @@ export type AgentEventType =
   | "context/recovery_succeeded"
   | "context/recovery_failed"
   | "context/recovery_circuit_open"
+  | "context/transcript_segment"
+  | "context/session_restored"
   | "worktree/created"
   | "worktree/attached"
   | "worktree/switched"
@@ -373,6 +375,8 @@ export interface SessionProjection extends SessionSummary {
   readonly permissions: readonly PermissionProjection[];
   readonly contextCompaction?: ContextCompactionProjection;
   readonly contextRecovery?: ContextRecoveryProjection;
+  readonly contextTranscript?: ContextTranscriptSegment;
+  readonly contextRestore?: ContextSessionRestoreProjection;
   readonly worktrees?: readonly WorktreeProjection[];
 }
 
@@ -404,6 +408,8 @@ export interface ContextBoundaryMetadata {
   readonly compactedToolIds?: readonly string[];
   readonly clearedAttachmentIds?: readonly string[];
   readonly createdAt: string;
+  /** Algorithm identifier used to rebuild model view after restart. */
+  readonly algorithmVersion?: string;
 }
 
 export interface ContextAttachmentProjection {
@@ -453,6 +459,33 @@ export interface ContextRecoveryProjection {
   readonly updatedAt: string;
   readonly lastSequence: number;
   readonly error?: string;
+}
+
+/** Durable link between a compact boundary and the original transcript segment. */
+export interface ContextTranscriptSegment {
+  readonly version: 1;
+  readonly boundaryId: string;
+  readonly algorithmVersion: string;
+  readonly sourceSequence: number;
+  readonly headMessageId?: string;
+  readonly anchorMessageId?: string;
+  readonly tailMessageId?: string;
+  readonly createdAt: string;
+}
+
+export type ContextRestoreMode = "boundary" | "legacy";
+
+/** Last deterministic restore decision projected from the event stream. */
+export interface ContextSessionRestoreProjection {
+  readonly version: 1;
+  readonly status: "restored" | "fallback";
+  readonly mode: ContextRestoreMode;
+  readonly boundaryId?: string;
+  readonly algorithmVersion?: string;
+  readonly reason: string;
+  readonly sourceSequence?: number;
+  readonly updatedAt: string;
+  readonly lastSequence: number;
 }
 
 export type WorktreeStatus = "clean" | "dirty" | "conflicted" | "attached" | "removed" | "failed";

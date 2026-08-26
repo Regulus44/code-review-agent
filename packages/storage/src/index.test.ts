@@ -108,6 +108,41 @@ describe("InMemoryEventStore", () => {
     });
   });
 
+  it("replays the M10 transcript segment and restore decision across SQLite reopen", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-m10-"));
+    const databasePath = join(directory, "agent.sqlite");
+    try {
+      const first = new SqliteEventStore({ databasePath });
+      const sessionId = await first.createSession("D:/m10-replay");
+      await first.append({
+        sessionId,
+        type: "context/transcript_segment",
+        payload: {
+          segment: {
+            version: 1,
+            boundaryId: "boundary-m10",
+            algorithmVersion: "m10.v1",
+            sourceSequence: 7,
+            headMessageId: "head-m10",
+            anchorMessageId: "boundary-m10",
+            tailMessageId: "tail-m10",
+            createdAt: "2026-08-26T00:00:00.000Z",
+          },
+        },
+      });
+      await first.append({ sessionId, type: "context/session_restored", payload: { mode: "boundary", boundaryId: "boundary-m10", algorithmVersion: "m10.v1", sourceSequence: 7, reason: "durable_boundary_replay" } });
+      first.close();
+      const second = new SqliteEventStore({ databasePath });
+      expect(await second.project(sessionId)).toMatchObject({
+        contextTranscript: { boundaryId: "boundary-m10", algorithmVersion: "m10.v1", headMessageId: "head-m10" },
+        contextRestore: { status: "restored", mode: "boundary", reason: "durable_boundary_replay", sourceSequence: 7 },
+      });
+      second.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("projects the latest M09 recovery status and keeps metadata bounded", async () => {
     const store = new InMemoryEventStore();
     const sessionId = await store.createSession("D:/recovery-replay");

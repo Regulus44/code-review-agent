@@ -99,6 +99,8 @@ Turn 的 `traceId` 在 `turn/started`、`agent/error` 和 `turn/ended` 边界中
 
 `context/compacted` 记录一次模型上下文压缩的 durable receipt：`sourceSequence`、bounded `summary`、原始/压缩后消息数、估算 token、丢弃数、受保护 tool 数和被 microcompact 的 tool result 数。`context/compaction_failed` 记录失败原因并保留原上下文，不能因为压缩失败而丢弃 pending permission、pending interaction、running task 或 tool-call/tool-result 边界。Web 只展示 receipt，不把摘要当作新的用户事实。
 
+M10 增加 `context/transcript_segment` 和 `context/session_restored`。前者保存 `{ version: 1, boundaryId, algorithmVersion, sourceSequence, headMessageId?, anchorMessageId?, tailMessageId?, createdAt }`，只作为 compact boundary 与完整 transcript 的 durable link，不保存消息正文。`headMessageId` 必须使用 EventStore append 返回的 `eventId`；Runtime-only 的 turnId/responseId 不能作为跨重启锚点。后者保存 `{ mode: "boundary" | "legacy", boundaryId?, algorithmVersion?, sourceSequence?, reason }`，表示本次 model view 恢复决定，不复制或修改 transcript。segment 缺 boundary、boundary ID 不匹配、head 缺失或 head 不在 transcript 中时，Runtime 必须回退完整 transcript，不猜测 sequence 或静默丢弃历史。
+
 `worktree/*` 记录 Git worktree 的发现、绑定、切换、清理和失败。payload 至少包含 `{ id, repoRoot, path, status }`，可选包含 `branch`、`commit`、`sessionId`、`taskId` 和 bounded `error`。`worktree/switched` 还使 Session projection 的 `activeWorktreeId` 与 `activeWorkspaceRoot` 指向该 worktree；工具、权限和 system prompt 使用 active root，但主仓库 root 仍保留为 Session 的 `workspaceRoot`。清理必须先检查 dirty/conflicted 状态，除非显式 force，否则不能删除未提交修改；主仓库 worktree 永远不能被清理。
 
 MCP 生命周期事件只携带 `serverName`、状态、动作和脱敏错误；env/header/token 等配置秘密不得进入 payload。MCP 工具调用本身仍使用公共 `tool/*` 和 `permission/*` 事件。`mcp/resource` / `mcp/prompt` 只记录 server、资源 URI 或 prompt name、动作、bounded bytes/truncated 和 trust marker，不记录远端原始内容。

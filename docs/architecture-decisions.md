@@ -244,6 +244,20 @@ Reactive compact 发生在 provider 已返回错误之后，成功后使用同�
 
 回滚策略：删除 `packages/context/src/recovery.ts`、Runtime recovery catch、LLM provider status 适配、五类 recovery 事件和 `contextRecovery` projection，即可回到 M08 compact 行为；既有 M01–M08 事件无需迁移。
 
+## ADR-022：Transcript 永久保留，Boundary Replay 只重建 model view
+
+状态：accepted（2026-08-26，M10）
+
+M10 将 EventStore transcript 与 model-visible context 明确分成两个 reducer。user/message、assistant/message、tool/result 等原始事件永久按 sequence 保留；`context/compact_boundary` 和 `context/transcript_segment` 只保存 boundary、算法版本和 preserved head/anchor/tail 的有界链接。重启、SSE replay 或跨进程打开时，Runtime 使用纯函数 replay builder 从完整 transcript 重建 boundary → summary → preserved suffix，不把压缩后的 view 写回 transcript。
+
+preserved segment 的 message ID 必须是 EventStore append 返回的 durable `eventId`。Runtime-only 的 turnId、responseId 或 toolCallId 只能作为兼容 fallback，不能作为跨进程边界锚点。segment 缺失 boundary、boundary ID 不一致、head 不存在或 projection 不完整时，必须返回完整 transcript，不得猜测 sequence 或静默丢弃历史。
+
+`context/session_restored` 是恢复诊断 receipt，保存 mode、boundary ID、algorithm version、source sequence 和 bounded reason；Storage 只投影最近一次决定，不能把 receipt 当作新的消息事实。M08 旧 boundary 没有 algorithmVersion 时按 `legacy-boundary-v1` 兼容读取。
+
+该决策直接参考 Claude Code `src/services/sessionTranscript/`、`src/utils/sessionRestore.ts` 和 `src/utils/messages.ts` 的 transcript/boundary/resume 分工；由于本地 sessionTranscript 文件为 stub，本项目不复制 JSONL loader，而使用已有 EventStore、SQLite projection replay 和本项目 Session/Tool/Permission contract 重新实现。
+
+回滚策略：停止追加 M10 两类事件并移除 replay builder/restore projection，回退到 M08 boundary slice；已存在的 M10 事件保留为未知扩展，原始 transcript 不删除。
+
 ## 参考代码入口
 
 - DSH Agent Loop：`D:/Develop/deepseek-harness-fork/packages/core/agent-loop/src/agent.ts`

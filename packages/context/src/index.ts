@@ -31,6 +31,7 @@ export {
   selectPostCompactAttachments,
 } from "./attachments.js";
 export { buildPostCompactMessages } from "./post-compact.js";
+export { restoreModelViewFromTranscript } from "./transcript-replay.js";
 export {
   classifyProviderContextError,
   fingerprintModelRequest,
@@ -113,6 +114,7 @@ export type {
   SelectedPostCompactAttachments,
 } from "./attachments.js";
 export type { PostCompactRebuildInput, PostCompactRebuildResult } from "./post-compact.js";
+export type { TranscriptRestoreInput, TranscriptRestoreResult } from "./transcript-replay.js";
 
 export type {
   ContextBudgetConfig,

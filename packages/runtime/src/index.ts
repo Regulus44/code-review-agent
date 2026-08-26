@@ -40,7 +40,7 @@ import {
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { compactMessages, DEFAULT_CONTEXT_BUDGET, type ContextBudget } from "@code-review-agent/compaction";
-import { applyToolResultBudget, assembleContext, boundaryFromMetadata, buildPostCompactMessages, calculateContextWarningState, classifyProviderContextError, compactWithSessionMemory, compactWithSummaryModel, ContextRecoveryGuard, countContextTokens, createTokenCounter, ensureToolResultPairing, estimateContextTokens, extractContextAttachmentIds, fallbackModelContextCapability, fingerprintModelRequest, groupMessagesByApiRound, isReactiveContextError, normalizeMessagesForAPI, resolveContextBudget, selectPostCompactAttachments, shouldCompactBeforeRequest, shouldUseExactTokenCount, type ApiRound, type ContextAssembly, type ContextAttachment, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type PostCompactAttachmentConfig, type PostCompactAttachmentProvider, type SessionMemoryCompactConfig, type SessionMemoryStore, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport } from "@code-review-agent/context";
+import { applyToolResultBudget, assembleContext, buildPostCompactMessages, calculateContextWarningState, classifyProviderContextError, compactWithSessionMemory, compactWithSummaryModel, ContextRecoveryGuard, countContextTokens, createTokenCounter, ensureToolResultPairing, estimateContextTokens, extractContextAttachmentIds, fallbackModelContextCapability, fingerprintModelRequest, groupMessagesByApiRound, isReactiveContextError, normalizeMessagesForAPI, resolveContextBudget, restoreModelViewFromTranscript, selectPostCompactAttachments, shouldCompactBeforeRequest, shouldUseExactTokenCount, type ApiRound, type ContextAssembly, type ContextAttachment, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type PostCompactAttachmentConfig, type PostCompactAttachmentProvider, type SessionMemoryCompactConfig, type SessionMemoryStore, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport } from "@code-review-agent/context";
 import { randomUUID } from "node:crypto";
 import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModePolicySnapshot, type CodeModeSandbox, type ExecuteToolOutput, type JobSummary, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
 import type { SubagentRuntime } from "@code-review-agent/subagent";
@@ -144,6 +144,7 @@ interface PendingTurn {
   readonly content: string;
   readonly reasoningEffort?: string;
   readonly previousMessages: readonly ChatMessage[];
+  readonly userMessageId?: string;
 }
 
 interface WorkspaceMetadata {
@@ -1188,20 +1189,22 @@ export class AgentHost {
       return turnIdFrom(savedTurnId);
     }
 
-    const pending: PendingTurn = {
-      sessionId,
-      turnId,
-      content,
-      ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
-      previousMessages: await this.conversationMessages(sessionId),
-    };
-    await this.options.store.append({
+    const pendingMessages = await this.conversationMessages(sessionId);
+    const userMessageEvent = await this.options.store.append({
       sessionId,
       turnId,
       correlationId: idempotencyKey,
       type: "user/message",
       payload: { content },
     });
+    const pending: PendingTurn = {
+      sessionId,
+      turnId,
+      content,
+      ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+      previousMessages: pendingMessages,
+      userMessageId: userMessageEvent.eventId,
+    };
     await this.options.store.append({
       sessionId,
       turnId,
@@ -1447,12 +1450,14 @@ export class AgentHost {
         .filter((item) => item.status === "queued" && item.userMessage !== undefined)
         .sort((left, right) => (left.queuePosition ?? Number.MAX_SAFE_INTEGER) - (right.queuePosition ?? Number.MAX_SAFE_INTEGER) || left.lastSequence - right.lastSequence)) {
         const restoredReasoningEffort = reasoningEffortForTurn(history, turn.id);
+        const restoredUserMessageId = history.find(event => event.type === "user/message" && event.turnId === turn.id)?.eventId;
         this.enqueue({
           sessionId: summary.id,
           turnId: turn.id,
           content: turn.userMessage as string,
           ...(restoredReasoningEffort === undefined ? {} : { reasoningEffort: restoredReasoningEffort }),
           previousMessages: await this.conversationMessages(summary.id, turn.id),
+          ...(restoredUserMessageId === undefined ? {} : { userMessageId: restoredUserMessageId }),
         });
       }
       for (const turn of projection.turns.filter((item) => item.status === "interrupted")) {
@@ -1538,18 +1543,31 @@ export class AgentHost {
       }
     }
     const projection = await this.options.store.project(sessionId);
-    const boundary = projection?.contextCompaction?.boundary;
-    if (boundary === undefined) return messages;
-    const headMessageId = boundary.preservedSegment?.headMessageId;
-    if (headMessageId === undefined) return messages;
-    const preservedIndex = messages.findIndex((message) => message.messageId === headMessageId);
-    if (preservedIndex < 0) return messages;
-    const summary = projection?.contextCompaction?.summary;
-    return [
-      boundaryFromMetadata(boundary),
-      ...(summary === undefined || summary.length === 0 ? [] : [{ role: "user" as const, content: summary }]),
-      ...messages.slice(preservedIndex),
-    ];
+    const restored = restoreModelViewFromTranscript({
+      transcript: messages,
+      ...(projection?.contextCompaction?.boundary === undefined ? {} : { boundary: projection.contextCompaction.boundary }),
+      ...(projection?.contextTranscript === undefined ? {} : { segment: projection.contextTranscript }),
+      ...(projection?.contextCompaction?.summary === undefined ? {} : { summary: projection.contextCompaction.summary }),
+    });
+    return restored.messages;
+  }
+
+  private async recordSessionRestore(sessionId: SessionId, turnId: TurnId, messages: readonly ChatMessage[]): Promise<void> {
+    const marker = messages.find((message) => message.role === "system" && message.contextBoundary !== undefined);
+    if (marker?.role !== "system" || marker.contextBoundary === undefined) return;
+    const boundary = marker.contextBoundary;
+    await this.options.store.append({
+      sessionId,
+      turnId,
+      type: "context/session_restored",
+      payload: {
+        mode: "boundary",
+        boundaryId: boundary.id,
+        ...(boundary.algorithmVersion === undefined ? { algorithmVersion: "legacy-boundary-v1" } : { algorithmVersion: boundary.algorithmVersion }),
+        sourceSequence: boundary.sourceSequence,
+        reason: "durable_boundary_replay",
+      },
+    });
   }
 
   private async systemMessage(sessionId: SessionId, recovery = false): Promise<string> {
@@ -1643,7 +1661,7 @@ export class AgentHost {
     this.activeTurns.set(sessionId, pending.turnId);
     this.controllers.set(pending.turnId, controller);
     await this.appendQueueChanged(sessionId, queue ?? [], undefined);
-    void this.runTurn(sessionId, pending.turnId, controller, pending.previousMessages, pending.content, pending.reasoningEffort).finally(() => {
+    void this.runTurn(sessionId, pending.turnId, controller, pending.previousMessages, pending.content, pending.reasoningEffort, pending.userMessageId).finally(() => {
       this.controllers.delete(pending.turnId);
       this.activeTurns.delete(sessionId);
       this.steerQueues.delete(pending.turnId);
@@ -1673,6 +1691,7 @@ export class AgentHost {
     previousMessages: readonly ChatMessage[],
     content: string,
     reasoningEffort?: string,
+    userMessageId?: string,
   ): Promise<void> {
     try {
       this.metricCounters.turnsStarted += 1;
@@ -1681,7 +1700,8 @@ export class AgentHost {
       const projection = await this.options.store.project(sessionId);
       const route = this.modelRouteForTenant(projection?.ownership?.tenantId);
       await this.options.store.append({ sessionId, turnId, type: "turn/started", payload: { traceId, ...(route === undefined ? {} : route), ...(reasoningEffort === undefined ? {} : { reasoningEffort }) } });
-      const assembly = await this.assembleTurnContext(sessionId, [...previousMessages, { role: "user", content, messageId: String(turnId) }]);
+      await this.recordSessionRestore(sessionId, turnId, previousMessages);
+      const assembly = await this.assembleTurnContext(sessionId, [...previousMessages, { role: "user", content, ...(userMessageId === undefined ? { messageId: String(turnId) } : { messageId: userMessageId }) }]);
       const messages: ChatMessage[] = [...assembly.messages];
       await this.runSteps(sessionId, turnId, controller, messages, reasoningEffort);
     } catch (error) {
@@ -1699,7 +1719,9 @@ export class AgentHost {
       const projection = await this.options.store.project(sessionId);
       const route = this.modelRouteForTenant(projection?.ownership?.tenantId);
       await this.options.store.append({ sessionId, turnId, type: "agent/status", payload: { status: "running", reason: "permission_resolved_after_restart", traceId, ...(route === undefined ? {} : route) } });
-      const assembly = await this.assembleTurnContext(sessionId, await this.conversationMessages(sessionId), true);
+      const previousMessages = await this.conversationMessages(sessionId);
+      await this.recordSessionRestore(sessionId, turnId, previousMessages);
+      const assembly = await this.assembleTurnContext(sessionId, previousMessages, true);
       const messages: ChatMessage[] = [...assembly.messages];
       await this.runSteps(sessionId, turnId, controller, messages, undefined, true);
     } catch (error) {
@@ -1911,11 +1933,11 @@ export class AgentHost {
         ...(response.toolCalls.length === 0 ? {} : { toolCalls: response.toolCalls }),
         ...(response.usage === undefined ? {} : { usage: response.usage }),
       };
-      await this.options.store.append({ sessionId, turnId, type: "assistant/message", payload: assistantPayload });
+      const assistantEvent = await this.options.store.append({ sessionId, turnId, type: "assistant/message", payload: assistantPayload });
       const steersAfterResponse = this.takeSteers(turnId);
       if (response.toolCalls.length === 0) {
         if (steersAfterResponse.length > 0) {
-          messages.push({ role: "assistant", content: response.text, responseId: response.responseId, messageId: response.responseId });
+          messages.push({ role: "assistant", content: response.text, responseId: response.responseId, messageId: assistantEvent.eventId });
           for (const steer of steersAfterResponse) messages.push({ role: "user", content: steer });
           await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "steered" } });
           continue;
@@ -1925,14 +1947,16 @@ export class AgentHost {
         this.metricCounters.turnsCompleted += 1;
         return;
       }
-      messages.push({ role: "assistant", content: response.text, toolCalls: response.toolCalls, responseId: response.responseId, messageId: response.responseId });
+      messages.push({ role: "assistant", content: response.text, toolCalls: response.toolCalls, responseId: response.responseId, messageId: assistantEvent.eventId });
       for (const steer of steersAfterResponse) messages.push({ role: "user", content: steer });
       const outputs = await Promise.all(response.toolCalls.map((toolCall) => this.executeModelToolCall(sessionId, turnId, controller, toolCall)));
+      const toolResultEvents = await this.options.store.list(sessionId);
       for (let index = 0; index < outputs.length; index += 1) {
         const output = outputs[index];
         const toolCall = response.toolCalls[index];
         if (output === undefined || toolCall === undefined) throw new Error("TOOL_RESULT_MISMATCH: tool result count did not match tool call count");
-        messages.push({ role: "tool", toolCallId: toolCall.id, content: modelToolResult(output), messageId: toolCall.id });
+        const resultEvent = [...toolResultEvents].reverse().find(event => event.turnId === turnId && event.type === "tool/result" && event.payload["toolCallId"] === toolCall.id);
+        messages.push({ role: "tool", toolCallId: toolCall.id, content: modelToolResult(output), messageId: resultEvent?.eventId ?? toolCall.id });
       }
       await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "completed", toolCalls: response.toolCalls.length } });
     }
@@ -2089,6 +2113,7 @@ export class AgentHost {
       ...(preCompactMessages.at(-1)?.messageId === undefined ? {} : { lastPreCompactMessageId: preCompactMessages.at(-1)!.messageId }),
       messagesSummarized: Math.max(0, preCompactMessages.filter((message) => message.role !== "system").length - parts.preservedMessages.length),
       preCompactDiscoveredTools: discoveredTools,
+      algorithmVersion: "m10.v1",
     };
     const defaultAttachments = defaultPostCompactAttachments(sessionId, projection);
     let providerAttachments: readonly ContextAttachment[] = [];
@@ -2135,6 +2160,17 @@ export class AgentHost {
         droppedAttachmentIds: rebuilt.droppedAttachmentIds,
       },
     });
+    const transcriptSegment = {
+      version: 1 as const,
+      boundaryId: boundary.id,
+      algorithmVersion: boundary.algorithmVersion ?? "m10.v1",
+      sourceSequence: boundary.sourceSequence,
+      ...(boundary.preservedSegment?.headMessageId === undefined ? {} : { headMessageId: boundary.preservedSegment.headMessageId }),
+      ...(boundary.preservedSegment?.anchorMessageId === undefined ? {} : { anchorMessageId: boundary.preservedSegment.anchorMessageId }),
+      ...(boundary.preservedSegment?.tailMessageId === undefined ? {} : { tailMessageId: boundary.preservedSegment.tailMessageId }),
+      createdAt: boundary.createdAt,
+    };
+    await this.options.store.append({ sessionId, turnId, type: "context/transcript_segment", payload: { segment: transcriptSegment } });
   }
 
   private async postCompactAttachmentsForSession(

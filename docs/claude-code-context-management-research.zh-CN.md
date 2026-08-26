@@ -679,9 +679,29 @@ M09 不复制 Claude Code 代码。`compactTurnContext()` 复用 M06/M07/M08 的
 | 本项目落点 | `packages/storage` EventStore、`packages/runtime/src/index.ts:conversationMessages()`、新增 Context projection/replay builder |
 | 直接仿照程度 | “原文永久保留、model view 按 boundary 重建”的原则直接仿照；Claude JSONL loader 改写为本项目 EventStore replay |
 
-当前本项目只记录 `context/compacted` receipt，重启后重新压缩。M10 要增加 boundary 的 durable record 和 algorithm version；恢复优先使用 boundary，旧历史没有 boundary 时才走兼容路径。必须验证 event replay 和 model-visible view 是两个不同 reducer。
+M10 已将 `context/compact_boundary` 扩展为带 algorithm version 的 durable record，并新增 transcript segment 与 session restore receipt；恢复优先使用 boundary，旧历史没有 boundary 或 head 无法定位时走完整 transcript 兼容路径。event replay 和 model-visible view 使用两个不同 reducer。
 
 模块验收：重启、SSE 断线、重复恢复和跨进程打开后，发送给模型的消息顺序和 boundary 一致；完整 tool result 仍能从 EventStore 查询；旧版本事件可迁移。
+
+### 14.9 M10 实施状态（2026-08-26）
+
+M10 已完成，详细代码对照记录见 [claude-code-context-m10-implementation.zh-CN.md](claude-code-context-m10-implementation.zh-CN.md)。实际入口如下：
+
+| 层次 | 实际入口 | 当前行为 |
+|---|---|---|
+| Durable transcript | `packages/storage/src/index.ts:EventStore.list()` | user/message、assistant/message、tool/result 原始事件永久保留，按 session sequence 回放 |
+| Boundary version | `packages/contracts/src/index.ts:ContextBoundaryMetadata`、`packages/runtime/src/index.ts:rebuildPostCompactView()` | 新 boundary 标记 `algorithmVersion=m10.v1`；M08 旧 boundary 按 `legacy-boundary-v1` 兼容读取 |
+| Transcript link | `packages/contracts/src/index.ts:ContextTranscriptSegment`、`context/transcript_segment` | 保存 boundaryId、sourceSequence 和 durable head/anchor/tail，不保存消息正文 |
+| Replay builder | `packages/context/src/transcript-replay.ts:restoreModelViewFromTranscript()` | 校验 boundary/segment linkage 和 head；成功时重建 boundary → summary → transcript suffix，失败时完整 transcript fallback |
+| Runtime restore | `packages/runtime/src/index.ts:conversationMessages()` | 从 EventStore eventId 构造完整 ChatMessage，再由 replay builder 生成 model view；附件继续由 M08 provider 重建 |
+| Session receipt | `packages/runtime/src/index.ts:recordSessionRestore()`、`context/session_restored` | boundary replay 在模型请求前追加 durable restore receipt，Storage 投影最近一次 restore mode/reason |
+| SQLite replay | `packages/storage/src/index.ts:applyEvent()` | InMemory/SQLite 使用同一 projection reducer；projection 损坏时从事件表重建 M10 字段 |
+
+M10 的身份边界是关键修复点：compact view 中不能把 Runtime-only `turnId` 或 `responseId` 当成 transcript anchor。`sendMessageInternal()` 使用 append 返回的 user eventId，assistant/tool model view 使用对应事件 eventId；这样 Host restart 后 preserved head 能在完整 transcript 中被确定性定位。
+
+M10 的安全回退条件包括：segment 没有关联 boundary、segment 的 boundaryId/sourceSequence/anchor/version 与 boundary 不一致、preserved head 缺失、head 不在 transcript 中或 projection 不完整。任何条件不满足都返回完整 transcript，不按猜测的 sequence 截断。
+
+模块验收已覆盖：Context replay 纯函数、stale/mismatch fallback、输入 transcript 不可变、Runtime Host restart 后 boundary/附件/restore receipt、SQLite close/reopen projection。M10 不实现 Claude Code JSONL 文件轮转、Session Memory extraction、Project Memory、context-collapse、hooks 或 provider cache edit。
 
 ### M11：Session Memory Extraction
 

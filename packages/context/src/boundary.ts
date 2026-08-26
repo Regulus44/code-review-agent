@@ -21,6 +21,7 @@ export interface CompactBoundaryOptions {
   readonly compactedToolIds?: readonly string[];
   readonly clearedAttachmentIds?: readonly string[];
   readonly createdAt?: string;
+  readonly algorithmVersion?: string;
 }
 
 export type CompactBoundaryMessage = Extract<ChatMessage, { role: "system" }> & {
@@ -44,6 +45,7 @@ export function createCompactBoundaryMessage(options: CompactBoundaryOptions): C
     ...(options.compactedToolIds === undefined ? {} : { compactedToolIds: [...new Set(options.compactedToolIds)].sort() }),
     ...(options.clearedAttachmentIds === undefined ? {} : { clearedAttachmentIds: [...new Set(options.clearedAttachmentIds)].sort() }),
     createdAt: options.createdAt ?? new Date().toISOString(),
+    ...(options.algorithmVersion === undefined ? {} : { algorithmVersion: options.algorithmVersion }),
   };
   return {
     role: "system",

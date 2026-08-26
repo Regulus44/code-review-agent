@@ -384,3 +384,21 @@ ID:
 明确未复用：Claude Code 的 context collapse、stop-hook runtime、provider prompt-cache edit、商业遥测、完整 JSONL transcript loader 和工具权限实现；provider body、凭据、完整 prompt 不写入本项目事件。
 
 新增测试：packages/context/src/recovery.test.ts、packages/runtime/src/index.test.ts 的 reactive retry/guard 场景、packages/storage/src/index.test.ts 的 recovery projection 场景。
+
+### CC-011
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`src/services/sessionTranscript/sessionTranscript.ts`、`src/utils/sessionRestore.ts:99-145,404-559`、`src/utils/messages.ts:5043-5090`
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；`sessionTranscript.ts` 当前为 auto-generated stub，本次没有复制 Claude Code 代码，只重新实现 transcript/boundary/resume 的职责分离。
+
+本项目路径：`packages/context/src/transcript-replay.ts`、`packages/runtime/src/index.ts:conversationMessages()`、`packages/storage/src/index.ts`、`packages/contracts/src/index.ts`。
+
+范围：完整 transcript 永久保留、compact boundary 的 durable head/anchor/tail、algorithm version、boundary replay、stale anchor fallback、SQLite/EventStore restore projection 和 `context/session_restored` receipt；Runtime message identity 使用 append 返回的 eventId，保证跨重启定位。
+
+明确未复用：Claude Code JSONL loader、文件轮转、context-collapse persistence、Session Memory extraction、Project Memory、hooks、商业遥测和账户/CLI 状态；本项目使用 EventStore、SQLite projection、Session/Tool/Permission contract 重新实现。
+
+新增测试：`packages/context/src/transcript-replay.test.ts`、`packages/runtime/src/index.test.ts` 的 Host restart/boundary replay 场景、`packages/storage/src/index.test.ts` 的 SQLite reopen/restore projection 场景。
