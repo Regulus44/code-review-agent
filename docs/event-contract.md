@@ -129,6 +129,14 @@ MCP config 的 durable record 可选包含 `tenantId`；schema v4 的 `mcp_serve
 
 Tenant model route 由 schema v5 的 `model_routes` durable backend 保存，键为 `tenantId`，记录 `provider`、`model`、可选 `baseUrl` 和 opaque `credentialRef`；credential material 不属于该记录。`GET/POST /v1/models` 在认证请求下只读取或更新调用者 tenant 的 route，跨租户 route 不出现在 catalog、capability 或 route receipt 中。route 选中后，`turn/started` 与重启恢复追加的 `agent/status` 会携带 provider/model 以及可选 baseUrl/credentialRef，供 replay、审计和后续诊断使用；payload 不得携带 API key、header、env 或其他 secret value。若持久 route 存在但 host 没有对应 model selector，恢复必须 fail closed；tenant mutation 在没有 durable routing backend 时返回配置错误。
 
+## 全日志统计 Projection（Phase 4）
+
+`SessionProjection.stats` 是由完整 Event Store 折叠得到的 whole-log usage projection；history page 只承载当前 Web 窗口，不能作为全局统计来源。统计 contract 包含 `version`、`sourceSequence`、`complete`、`latestPrompt`、turn/step/tool 数量、turn/LLM/tool duration、TTFT、provider token usage、total tokens、generation speed、cache hit 和当前 Session status。
+
+Storage 的 `baseProjection` 初始化 version `1` 的 stats，`applyEvent`/`replayProjection` 在每个 sequence 上使用公共 `reduceSessionStats` 更新；SQLite reopen 会从完整 events 表 rebuild，因此 projection、InMemory replay 与 SQLite 冷启动保持一致。为支持高 sequence tail replay，stats 同时保存受限的内部 fold cursor（turn/step/tool start time），不保存 prompt 之外的 transcript 或 provider secret。
+
+Web `SessionStore` 只将 stats 作为服务端全日志 baseline，并在无 gap 的实时高 sequence 事件上调用同一 reducer；prepend older history 不重复累计 stats。`sourceSequence` 必须单调，`complete=false` 只用于没有服务端 whole-log baseline 的旧 projection 兼容回退；usage presenter 在 projection 缺失时明确说明统计只覆盖当前窗口。
+
 ## 不变量
 
 - 任何到达模型请求的输入，都能从 Session 事件重建；

@@ -10,6 +10,7 @@ import {
   type SessionEventStore,
   type SessionId,
   type SessionProjection,
+  type SessionStatsProjection,
   type SessionSummary,
   type WorkspaceCatalog,
   type WorkspaceSummary,
@@ -807,6 +808,12 @@ export class AgentHost {
   async getSession(sessionId: SessionId): Promise<SessionProjection | undefined> {
     await this.ready;
     return this.options.store.project(sessionId);
+  }
+
+  /** Returns the complete-log stats projection without exposing a history page. */
+  async getSessionStats(sessionId: SessionId): Promise<SessionStatsProjection | undefined> {
+    await this.ready;
+    return (await this.options.store.project(sessionId))?.stats;
   }
 
   async setSessionPermissionPreset(sessionId: SessionId, permissionPreset: PermissionPreset): Promise<SessionProjection> {

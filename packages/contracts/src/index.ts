@@ -393,6 +393,220 @@ export interface InteractionProjection {
   readonly lastSequence: number;
 }
 
+/**
+ * Durable whole-log usage projection. The history page is only a transport
+ * window; this value is folded from the complete event log and therefore does
+ * not change when older pages are loaded in the Web client.
+ */
+export interface SessionStatsProjection {
+  readonly version: 1;
+  /** Highest event sequence included in this projection. */
+  readonly sourceSequence: number;
+  /** True when the value represents the complete event log. */
+  readonly complete: boolean;
+  readonly latestPrompt?: string;
+  readonly turnCount: number;
+  readonly stepCount: number;
+  readonly toolCallCount: number;
+  readonly turnDurationMs?: number;
+  readonly llmDurationMs?: number;
+  readonly toolDurationMs?: number;
+  readonly ttftMs?: number;
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  readonly cacheReadTokens?: number;
+  readonly reasoningTokens?: number;
+  readonly totalTokens?: number;
+  readonly outputTokensPerSecond?: number;
+  readonly cacheHitPercent?: number;
+  readonly status?: SessionStatus;
+  readonly updatedAt: string;
+  /** Internal fold cursors persisted with the projection for restart-safe tail replay. */
+  readonly folding?: SessionStatsFoldingState;
+}
+
+/** Internal cursors needed to fold durations from a high-sequence tail. */
+export interface SessionStatsFoldingState {
+  readonly turnIds: readonly string[];
+  readonly turnStarts: Readonly<Record<string, string>>;
+  readonly stepStarts: Readonly<Record<string, string>>;
+  readonly toolStarts: Readonly<Record<string, string>>;
+  readonly reportedTtftMs?: number;
+}
+
+export function createSessionStatsProjection(timestamp = new Date(0).toISOString(), complete = true): SessionStatsProjection {
+  return {
+    version: 1,
+    sourceSequence: 0,
+    complete,
+    turnCount: 0,
+    stepCount: 0,
+    toolCallCount: 0,
+    status: "idle",
+    updatedAt: timestamp,
+    folding: { turnIds: [], turnStarts: {}, stepStarts: {}, toolStarts: {} },
+  };
+}
+
+/**
+ * Folds one ordered event into the whole-log usage projection. It is kept in
+ * contracts so the durable Storage projection and the Web live-tail reducer
+ * share the same semantics.
+ */
+export function reduceSessionStats(previous: SessionStatsProjection, event: AgentEvent, complete = previous.complete): SessionStatsProjection {
+  if (event.sequence <= previous.sourceSequence) return previous;
+  const folding = previous.version === 1 && previous.folding !== undefined
+    ? previous.folding
+    : createSessionStatsProjection(previous.updatedAt, complete).folding!;
+  const turnIds = new Set(folding.turnIds);
+  const turnStarts = { ...folding.turnStarts };
+  const stepStarts = { ...folding.stepStarts };
+  const toolStarts = { ...folding.toolStarts };
+  let reportedTtftMs = folding.reportedTtftMs;
+  const payload = event.payload;
+  const turnId = event.turnId === undefined ? undefined : String(event.turnId);
+  const timestamp = Date.parse(event.createdAt);
+  const eventMs = Number.isFinite(timestamp) ? timestamp : undefined;
+  let turnDurationMs = previous.turnDurationMs;
+  let llmDurationMs = previous.llmDurationMs;
+  let toolDurationMs = previous.toolDurationMs;
+  let ttftMs = previous.ttftMs;
+  let inputTokens = previous.inputTokens;
+  let outputTokens = previous.outputTokens;
+  let cacheReadTokens = previous.cacheReadTokens;
+  let reasoningTokens = previous.reasoningTokens;
+  let latestPrompt = previous.latestPrompt;
+  let status = previous.status;
+  const explicitTtft = finiteStatsNumber(payload["ttftMs"] ?? payload["ttft_ms"]);
+  if (explicitTtft !== undefined && reportedTtftMs === undefined) reportedTtftMs = explicitTtft;
+
+  if (turnId !== undefined) turnIds.add(turnId);
+  if ((event.type === "user/message" || event.type === "turn/steered") && typeof payload["content"] === "string") latestPrompt = payload["content"];
+  if (event.type === "turn/started") {
+    status = "running";
+  }
+  if (event.type === "turn/started" && turnId !== undefined && eventMs !== undefined) {
+    turnStarts[turnId] = event.createdAt;
+  }
+  if (event.type === "turn/queued" && status !== "running") status = "queued";
+  if (event.type === "step/started") {
+    const key = `${turnId ?? "_"}:${String(payload["step"] ?? event.sequence)}`;
+    stepStarts[key] = event.createdAt;
+  }
+  if (event.type === "assistant/chunk" || event.type === "assistant/message") {
+    if (turnId !== undefined && eventMs !== undefined) {
+      const startedAt = turnStarts[turnId];
+      const startedMs = startedAt === undefined ? undefined : Date.parse(startedAt);
+      if (startedMs !== undefined && Number.isFinite(startedMs)) {
+        const candidate = Math.max(0, eventMs - startedMs);
+        ttftMs = ttftMs === undefined ? candidate : Math.min(ttftMs, candidate);
+      }
+    }
+    if (event.type === "assistant/message") {
+      const usage = statsUsage(payload["usage"] ?? payload);
+      inputTokens = addStatsOptional(inputTokens, usage.inputTokens);
+      outputTokens = addStatsOptional(outputTokens, usage.outputTokens);
+      cacheReadTokens = addStatsOptional(cacheReadTokens, usage.cacheReadTokens);
+      reasoningTokens = addStatsOptional(reasoningTokens, usage.reasoningTokens);
+      if (turnId !== undefined && eventMs !== undefined) {
+        const key = Object.keys(stepStarts).find((candidate) => candidate.startsWith(`${turnId}:`));
+        const startedAt = key === undefined ? undefined : stepStarts[key];
+        const startedMs = startedAt === undefined ? undefined : Date.parse(startedAt);
+        if (startedMs !== undefined && Number.isFinite(startedMs) && eventMs >= startedMs) llmDurationMs = (llmDurationMs ?? 0) + eventMs - startedMs;
+        if (startedMs === undefined) {
+          const explicitDuration = finiteStatsNumber(payload["durationMs"] ?? payload["duration_ms"]);
+          if (explicitDuration !== undefined) llmDurationMs = (llmDurationMs ?? 0) + explicitDuration;
+        }
+        if (key !== undefined) delete stepStarts[key];
+      }
+    }
+  }
+  if (event.type === "tool/call") {
+    const toolCallId = String(payload["toolCallId"] ?? payload["id"] ?? event.sequence);
+    toolStarts[toolCallId] = event.createdAt;
+  }
+  if (event.type === "tool/result") {
+    const toolCallId = String(payload["toolCallId"] ?? payload["id"] ?? "");
+    const startedAt = toolStarts[toolCallId];
+    const startedMs = startedAt === undefined ? undefined : Date.parse(startedAt);
+    if (startedMs !== undefined && Number.isFinite(startedMs) && eventMs !== undefined && eventMs >= startedMs) toolDurationMs = (toolDurationMs ?? 0) + eventMs - startedMs;
+    if (startedMs === undefined) {
+      const explicitDuration = finiteStatsNumber(payload["durationMs"] ?? payload["duration_ms"]);
+      if (explicitDuration !== undefined) toolDurationMs = (toolDurationMs ?? 0) + explicitDuration;
+    }
+    delete toolStarts[toolCallId];
+  }
+  if (event.type === "turn/ended") {
+    status = statsSessionStatus(payload["status"]);
+    if (turnId !== undefined) {
+      const startedAt = turnStarts[turnId];
+      const startedMs = startedAt === undefined ? undefined : Date.parse(startedAt);
+      if (startedMs !== undefined && Number.isFinite(startedMs) && eventMs !== undefined && eventMs >= startedMs) turnDurationMs = (turnDurationMs ?? 0) + eventMs - startedMs;
+      delete turnStarts[turnId];
+    }
+  }
+  if (event.type === "agent/status") {
+    const nextStatus = statsSessionStatus(payload["status"]);
+    if (nextStatus !== undefined) status = nextStatus;
+  }
+  if (event.type === "agent/error") status = "failed";
+  const totalTokens = inputTokens === undefined || outputTokens === undefined ? undefined : inputTokens + outputTokens;
+  const outputTokensPerSecond = outputTokens === undefined || llmDurationMs === undefined || llmDurationMs <= 0 ? undefined : outputTokens / (llmDurationMs / 1000);
+  const cacheHitPercent = inputTokens === undefined || inputTokens <= 0 || cacheReadTokens === undefined ? undefined : Math.min(100, cacheReadTokens / inputTokens * 100);
+  const effectiveTtftMs = reportedTtftMs ?? ttftMs;
+  return {
+    version: 1,
+    sourceSequence: event.sequence,
+    complete,
+    ...(latestPrompt === undefined ? {} : { latestPrompt }),
+    turnCount: turnIds.size,
+    stepCount: previous.stepCount + (event.type === "step/started" ? 1 : 0),
+    toolCallCount: previous.toolCallCount + (event.type === "tool/call" ? 1 : 0),
+    ...(turnDurationMs === undefined ? {} : { turnDurationMs }),
+    ...(llmDurationMs === undefined ? {} : { llmDurationMs }),
+    ...(toolDurationMs === undefined ? {} : { toolDurationMs }),
+    ...(effectiveTtftMs === undefined ? {} : { ttftMs: effectiveTtftMs }),
+    ...(inputTokens === undefined ? {} : { inputTokens }),
+    ...(outputTokens === undefined ? {} : { outputTokens }),
+    ...(cacheReadTokens === undefined ? {} : { cacheReadTokens }),
+    ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+    ...(totalTokens === undefined ? {} : { totalTokens }),
+    ...(outputTokensPerSecond === undefined ? {} : { outputTokensPerSecond }),
+    ...(cacheHitPercent === undefined ? {} : { cacheHitPercent }),
+    ...(status === undefined ? {} : { status }),
+    updatedAt: event.createdAt,
+    folding: { turnIds: [...turnIds], turnStarts, stepStarts, toolStarts, ...(reportedTtftMs === undefined ? {} : { reportedTtftMs }) },
+  };
+}
+
+function finiteStatsNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function addStatsOptional(previous: number | undefined, next: number | undefined): number | undefined {
+  return next === undefined ? previous : previous === undefined ? next : previous + next;
+}
+
+function statsUsage(value: unknown): { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; reasoningTokens?: number } {
+  if (typeof value !== "object" || value === null) return {};
+  const source = value as Record<string, unknown>;
+  const inputTokens = finiteStatsNumber(source["inputTokens"] ?? source["input_tokens"] ?? source["promptTokens"] ?? source["prompt_tokens"]);
+  const outputTokens = finiteStatsNumber(source["outputTokens"] ?? source["output_tokens"] ?? source["completionTokens"] ?? source["completion_tokens"]);
+  const cacheReadTokens = finiteStatsNumber(source["cacheReadTokens"] ?? source["cache_read_tokens"] ?? source["cachedTokens"] ?? source["cached_tokens"] ?? source["promptCacheHitTokens"] ?? source["prompt_cache_hit_tokens"]);
+  const reasoningTokens = finiteStatsNumber(source["reasoningTokens"] ?? source["reasoning_tokens"]);
+  return {
+    ...(inputTokens === undefined ? {} : { inputTokens }),
+    ...(outputTokens === undefined ? {} : { outputTokens }),
+    ...(cacheReadTokens === undefined ? {} : { cacheReadTokens }),
+    ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+  };
+}
+
+function statsSessionStatus(value: unknown): SessionStatus | undefined {
+  if (value === "completed") return "idle";
+  return value === "idle" || value === "queued" || value === "running" || value === "stopped" || value === "failed" || value === "interrupted" ? value : undefined;
+}
+
 export interface SessionProjection extends SessionSummary {
   readonly messages: readonly {
     readonly role: "user" | "assistant";
@@ -415,6 +629,8 @@ export interface SessionProjection extends SessionSummary {
   readonly contextTranscript?: ContextTranscriptSegment;
   readonly contextRestore?: ContextSessionRestoreProjection;
   readonly worktrees?: readonly WorktreeProjection[];
+  /** Whole-log projection; absent only for legacy projection JSON. */
+  readonly stats?: SessionStatsProjection;
 }
 
 export type ContextCompactionStatus = "completed" | "failed";

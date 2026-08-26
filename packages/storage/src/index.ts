@@ -1,5 +1,7 @@
 import {
   brand,
+  createSessionStatsProjection,
+  reduceSessionStats,
   type AgentEvent,
   type AgentEventType,
   type AppendEventInput,
@@ -20,6 +22,7 @@ import {
   type SessionEventStore,
   type SessionId,
   type SessionProjection,
+  type SessionStatsProjection,
   type SessionStatus,
   type SessionSummary,
   type PermissionPreset,
@@ -148,6 +151,7 @@ function baseProjection(id: SessionId, workspaceRoot: string, permissionPreset: 
     interactions: [],
     toolCalls: [],
     permissions: [],
+    stats: createSessionStatsProjection(timestamp, true),
     ...(metadata === undefined ? {} : {
       parentSessionId: metadata.parentSessionId,
       ...(metadata.parentTaskId === undefined ? {} : { parentTaskId: metadata.parentTaskId }),
@@ -539,6 +543,7 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
     todos: projection.todos ?? [],
     goals: projection.goals ?? [],
     interactions: projection.interactions ?? [],
+    stats: projection.stats ?? createSessionStatsProjection(projection.updatedAt, true),
     updatedAt: event.createdAt,
     lastSequence: event.sequence,
   };
@@ -1080,7 +1085,8 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
     }
   }
 
-  return next;
+  const stats = next.stats as SessionStatsProjection;
+  return { ...next, stats: reduceSessionStats(stats, event, true) };
 }
 
 /** Rebuilds the read model from an ordered event fixture. */

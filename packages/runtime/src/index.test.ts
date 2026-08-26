@@ -42,6 +42,12 @@ describe("AgentHost", () => {
     });
   });
 
+  it("exposes whole-log stats separately from the history window", async () => {
+    const host = new AgentHost({ store: new InMemoryEventStore() });
+    const session = await host.createSession("D:/stats-runtime");
+    expect(await host.getSessionStats(session.id)).toMatchObject({ version: 1, complete: true, sourceSequence: session.lastSequence, turnCount: 0, stepCount: 0 });
+  });
+
   it("exposes configured backup and migration operations without claiming upgrade support", () => {
     const host = new AgentHost({ store: new InMemoryEventStore(), operations: { backup: "available", migration: "available", upgrade: "deferred" } });
     expect(host.productizationSettings().operations).toEqual({ status: "configured", backup: "available", migration: "available", upgrade: "deferred" });

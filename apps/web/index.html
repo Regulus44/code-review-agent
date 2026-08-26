@@ -1647,10 +1647,13 @@
           }
           usageDrawer.append(header, grid);
         };
-        const renderUsageMeter = () => {
+        const renderUsageMeter = (snapshot) => {
           if (!usageMeter) return;
           const events = [...state.events.values()].sort((left, right) => left.sequence - right.sequence);
-          const intent = typedRuntime?.presentUsage ? typedRuntime.presentUsage(events) : { compactLabel: 'Usage · —', title: 'Usage presenter unavailable.', hasData: events.length > 0, details: [] };
+          const stats = snapshot?.session?.stats;
+          const intent = typedRuntime?.presentUsage
+            ? typedRuntime.presentUsage(stats || events)
+            : { compactLabel: 'Usage · —', title: 'Usage presenter unavailable.', hasData: events.length > 0, details: [], source: 'events', complete: false };
           usageMeter.hidden = !intent.hasData;
           usageMeter.innerHTML = `<strong>${esc(intent.compactLabel.split(' · ')[0])}</strong>${intent.compactLabel.split(' · ').slice(1).map((part) => `<span class="usage-separator">·</span>${esc(part)}`).join('')}`;
           usageMeter.title = intent.title;

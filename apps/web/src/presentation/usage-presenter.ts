@@ -1,3 +1,5 @@
+import type { SessionStatsProjection } from "@code-review-agent/contracts";
+
 export interface UsageSummary {
   readonly turnCount: number;
   readonly stepCount: number;
@@ -14,6 +16,7 @@ export interface UsageSummary {
   readonly outputTokensPerSecond?: number;
   readonly cacheHitPercent?: number;
   readonly status?: string;
+  readonly latestPrompt?: string;
 }
 
 export interface UsageDetail {
@@ -28,6 +31,8 @@ export interface UsageRenderIntent {
   readonly hasData: boolean;
   readonly summary: UsageSummary;
   readonly details: readonly UsageDetail[];
+  readonly source: "projection" | "events";
+  readonly complete: boolean;
 }
 
 export interface UsageEvent {
@@ -38,9 +43,10 @@ export interface UsageEvent {
   readonly payload: Readonly<Record<string, unknown>>;
 }
 
-export function presentUsage(events: readonly UsageEvent[]): UsageRenderIntent {
-  const ordered = [...events].sort((left, right) => left.sequence - right.sequence);
-  const summary = summarizeUsage(ordered);
+export function presentUsage(source: readonly UsageEvent[] | SessionStatsProjection): UsageRenderIntent {
+  const projection = isSessionStatsProjection(source) ? source : undefined;
+  const ordered = projection === undefined ? [...(source as readonly UsageEvent[])].sort((left, right) => left.sequence - right.sequence) : [];
+  const summary = projection === undefined ? summarizeUsage(ordered) : summarizeStats(projection);
   const compactLabel = [
     `${summary.stepCount || "—"} 步`,
     `LLM ${formatDuration(summary.llmDurationMs)}`,
@@ -62,16 +68,57 @@ export function presentUsage(events: readonly UsageEvent[]): UsageRenderIntent {
     { label: "Reasoning tokens", value: formatTokens(summary.reasoningTokens) },
     { label: "Generation speed", value: summary.outputTokensPerSecond === undefined ? "—" : `${formatDecimal(summary.outputTokensPerSecond)} tok/s` },
     { label: "Cache hit", value: summary.cacheHitPercent === undefined ? "—" : `${formatDecimal(summary.cacheHitPercent)}%` },
+    { label: "Latest prompt", value: summary.latestPrompt === undefined ? "—" : truncatePrompt(summary.latestPrompt) },
     { label: "Status", value: summary.status ?? "unknown" },
   ];
-  const hasData = ordered.some((event) => ["turn/queued", "turn/started", "step/started", "assistant/chunk", "assistant/message", "tool/call", "tool/result", "turn/ended"].includes(event.type));
+  const hasData = projection === undefined
+    ? ordered.some((event) => ["turn/queued", "turn/started", "step/started", "assistant/chunk", "assistant/message", "tool/call", "tool/result", "turn/ended"].includes(event.type))
+    : projection.turnCount > 0 || projection.stepCount > 0 || projection.toolCallCount > 0 || projection.totalTokens !== undefined;
   return {
     compactLabel,
-    title: "Runtime usage and timing. Unknown provider values are shown as —.",
+    title: projection === undefined
+      ? "Runtime usage and timing from the currently loaded history window. Unknown provider values are shown as —."
+      : `Runtime usage and timing from the complete session log through sequence ${projection.sourceSequence}. Unknown provider values are shown as —.`,
     hasData,
     summary,
     details,
+    source: projection === undefined ? "events" : "projection",
+    complete: projection?.complete === true,
   };
+}
+
+export function presentUsageProjection(projection: SessionStatsProjection): UsageRenderIntent {
+  return presentUsage(projection);
+}
+
+function summarizeStats(projection: SessionStatsProjection): UsageSummary {
+  return {
+    turnCount: projection.turnCount,
+    stepCount: projection.stepCount,
+    toolCallCount: projection.toolCallCount,
+    ...(projection.turnDurationMs === undefined ? {} : { turnDurationMs: projection.turnDurationMs }),
+    ...(projection.llmDurationMs === undefined ? {} : { llmDurationMs: projection.llmDurationMs }),
+    ...(projection.toolDurationMs === undefined ? {} : { toolDurationMs: projection.toolDurationMs }),
+    ...(projection.ttftMs === undefined ? {} : { ttftMs: projection.ttftMs }),
+    ...(projection.inputTokens === undefined ? {} : { inputTokens: projection.inputTokens }),
+    ...(projection.outputTokens === undefined ? {} : { outputTokens: projection.outputTokens }),
+    ...(projection.cacheReadTokens === undefined ? {} : { cacheReadTokens: projection.cacheReadTokens }),
+    ...(projection.reasoningTokens === undefined ? {} : { reasoningTokens: projection.reasoningTokens }),
+    ...(projection.totalTokens === undefined ? {} : { totalTokens: projection.totalTokens }),
+    ...(projection.outputTokensPerSecond === undefined ? {} : { outputTokensPerSecond: projection.outputTokensPerSecond }),
+    ...(projection.cacheHitPercent === undefined ? {} : { cacheHitPercent: projection.cacheHitPercent }),
+    ...(projection.status === undefined ? {} : { status: projection.status }),
+    ...(projection.latestPrompt === undefined ? {} : { latestPrompt: projection.latestPrompt }),
+  };
+}
+
+function isSessionStatsProjection(value: readonly UsageEvent[] | SessionStatsProjection): value is SessionStatsProjection {
+  return !Array.isArray(value) && typeof value === "object" && value !== null && "version" in value && value.version === 1 && "turnCount" in value && "sourceSequence" in value;
+}
+
+function truncatePrompt(value: string): string {
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  return normalized.length > 80 ? `${normalized.slice(0, 77)}…` : normalized;
 }
 
 export function summarizeUsage(events: readonly UsageEvent[]): UsageSummary {

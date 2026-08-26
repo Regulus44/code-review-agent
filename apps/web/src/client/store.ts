@@ -7,6 +7,7 @@ import type {
   TurnId,
   TurnProjection,
 } from "@code-review-agent/contracts";
+import { createSessionStatsProjection, reduceSessionStats } from "@code-review-agent/contracts";
 import {
   applyConversationEvent,
   createConversationProjection,
@@ -317,6 +318,12 @@ function uniqueEvents(sessionId: SessionId, events: readonly AgentEvent[]): read
 }
 
 function foldProjection(session: SessionProjection, event: AgentEvent): SessionProjection {
+  const baseline = session.stats ?? createSessionStatsProjection(session.updatedAt, false);
+  const stats = reduceSessionStats(baseline, event, baseline.complete);
+  return { ...foldProjectionCore(session, event), stats };
+}
+
+function foldProjectionCore(session: SessionProjection, event: AgentEvent): SessionProjection {
   const payload = event.payload;
   switch (event.type) {
     case "session/updated":

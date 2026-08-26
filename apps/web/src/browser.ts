@@ -26,7 +26,7 @@ import { presentWorktrees } from "./presentation/worktree-presenter.js";
 import { presentLspTool } from "./presentation/lsp-presenter.js";
 import { presentComposerSubmit } from "./presentation/composer-presenter.js";
 import { beginComposerSubmit, createComposerState, releaseComposerError, settleComposerSubmit, type ComposerState } from "./presentation/composer-state.js";
-import { presentUsage } from "./presentation/usage-presenter.js";
+import { presentUsage, presentUsageProjection } from "./presentation/usage-presenter.js";
 import { createShellLayoutState, presentShellLayout, reduceShellLayout, shellViewport } from "./shell/layout.js";
 import { createShellBootState, normalizeBootError, presentShellBoot, reduceShellBoot } from "./shell/boot.js";
 import { createShellOverlayState, presentShellOverlay, reduceShellOverlay } from "./shell/overlay.js";
@@ -76,6 +76,7 @@ export interface BrowserWebRuntime {
   readonly settleComposerSubmit: typeof settleComposerSubmit;
   readonly releaseComposerError: typeof releaseComposerError;
   readonly presentUsage: typeof presentUsage;
+  readonly presentUsageProjection: typeof presentUsageProjection;
   readonly createShellLayoutState: typeof createShellLayoutState;
   readonly reduceShellLayout: typeof reduceShellLayout;
   readonly presentShellLayout: typeof presentShellLayout;
@@ -140,6 +141,7 @@ const runtime: BrowserWebRuntime = {
   settleComposerSubmit,
   releaseComposerError,
   presentUsage,
+  presentUsageProjection,
   createShellLayoutState,
   reduceShellLayout,
   presentShellLayout,

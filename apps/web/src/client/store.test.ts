@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { brand, type AgentEvent, type SessionProjection } from "@code-review-agent/contracts";
+import { brand, createSessionStatsProjection, reduceSessionStats, type AgentEvent, type SessionProjection } from "@code-review-agent/contracts";
 import { SessionStore } from "./store.js";
 
 const sessionId = brand<string, "SessionId">("ses_test");
@@ -75,6 +75,20 @@ describe("SessionStore", () => {
     ]);
     expect(store.getSnapshot().session?.status).toBe("idle");
     expect(store.getSnapshot().session?.turns).toMatchObject([{ id: turnId, status: "completed", userMessage: "hello", assistantMessage: "hi" }]);
+  });
+
+  it("updates whole-log stats on a live tail without recounting older-page events", () => {
+    const store = new SessionStore();
+    const initialStats = reduceSessionStats(createSessionStatsProjection("2026-08-23T00:00:00.000Z"), event(1, "user/message", { content: "older" }));
+    store.open({ ...session(), stats: initialStats }, [event(1, "user/message", { content: "older" })], { hasMoreBefore: true, oldestSequence: 1, newestSequence: 1 });
+    const baseline = store.getSnapshot().session?.stats;
+    store.apply(event(2, "turn/started", {}));
+    store.apply(event(3, "step/started", { step: 1 }));
+    store.apply(event(4, "assistant/message", { content: "answer", usage: { inputTokens: 4, outputTokens: 2 } }));
+    store.apply(event(5, "turn/ended", { status: "completed" }));
+    const stats = store.getSnapshot().session?.stats;
+    expect(baseline?.turnCount).toBe(1);
+    expect(stats).toMatchObject({ complete: true, sourceSequence: 5, turnCount: 1, stepCount: 1, inputTokens: 4, outputTokens: 2, totalTokens: 6, latestPrompt: "older" });
   });
 
   it("keeps a newly queued turn visible to the queue presenter without a refetch", () => {

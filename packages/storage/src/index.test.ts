@@ -18,6 +18,47 @@ describe("InMemoryEventStore", () => {
     expect((await store.project(sessionId))?.messages.map((message) => message.content)).toEqual(["hello", "hi"]);
   });
 
+  it("keeps whole-log stats stable when history is paged", async () => {
+    const store = new InMemoryEventStore();
+    const sessionId = await store.createSession("D:/stats");
+    for (let index = 0; index < 12; index += 1) {
+      const turnId = brand<string, "TurnId">(`turn_${index}`);
+      await store.append({ sessionId, turnId, type: "user/message", payload: { content: `prompt ${index}` } });
+      await store.append({ sessionId, turnId, type: "turn/started", payload: {} });
+      await store.append({ sessionId, turnId, type: "step/started", payload: { step: 1 } });
+      await store.append({ sessionId, turnId, type: "assistant/message", payload: { content: `answer ${index}`, usage: { inputTokens: 10, outputTokens: 4 } } });
+      await store.append({ sessionId, turnId, type: "turn/ended", payload: { status: "completed" } });
+    }
+    const full = await store.project(sessionId);
+    const page = await store.listPage!(sessionId, { limit: 10 });
+    expect(page.hasMoreBefore).toBe(true);
+    expect(full?.stats).toMatchObject({ complete: true, sourceSequence: full?.lastSequence, turnCount: 12, stepCount: 12, inputTokens: 120, outputTokens: 48, totalTokens: 168, latestPrompt: "prompt 11" });
+    expect((await store.project(sessionId))?.stats).toEqual(full?.stats);
+  });
+
+  it("rebuilds whole-log stats after SQLite reopen", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-stats-"));
+    const databasePath = join(directory, "agent.sqlite");
+    try {
+      const first = new SqliteEventStore({ databasePath });
+      const sessionId = await first.createSession("D:/stats-sqlite");
+      const turnId = brand<string, "TurnId">("turn_sqlite_stats");
+      await first.append({ sessionId, turnId, type: "user/message", payload: { content: "persisted prompt" } });
+      await first.append({ sessionId, turnId, type: "turn/started", payload: {} });
+      await first.append({ sessionId, turnId, type: "step/started", payload: { step: 1 } });
+      await first.append({ sessionId, turnId, type: "assistant/message", payload: { content: "persisted answer", usage: { inputTokens: 7, outputTokens: 3, cachedTokens: 2 } } });
+      await first.append({ sessionId, turnId, type: "turn/ended", payload: { status: "completed" } });
+      const before = (await first.project(sessionId))?.stats;
+      first.close();
+      const second = new SqliteEventStore({ databasePath });
+      expect((await second.project(sessionId))?.stats).toEqual(before);
+      expect((await second.project(sessionId))?.stats).toMatchObject({ complete: true, turnCount: 1, stepCount: 1, inputTokens: 7, outputTokens: 3, cacheReadTokens: 2, totalTokens: 10, latestPrompt: "persisted prompt" });
+      second.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("isolates unknown sessions", async () => {
     const store = new InMemoryEventStore();
     const unknown = brand<string, "SessionId">("missing");
