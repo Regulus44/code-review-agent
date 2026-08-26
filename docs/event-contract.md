@@ -111,6 +111,8 @@ M13 的 compact 事件（`context/compacted`、`context/microcompacted`、`conte
 
 M13 事件和 projection 不得保存完整 prompt、transcript、工具原文、provider response body、credential、header 或 secret。旧事件缺少 diagnostics 时，客户端可以使用明确标记为 estimate 的兼容 ContextMeter；不能把本地估算冒充 provider usage。
 
+M14 当前只暴露 `ContextCollapseCapability` 元数据，不追加 `context/collapse_*` 事件。capability 包含 version、enabled、`deferred/unavailable` status、bounded reason，以及 read-time projection、background collapse、overflow drain、snip 四项布尔 feature；不包含 prompt、transcript、工具结果、provider body、凭据或 workspace 内容。`deferred` 表示 Claude Code 集成点已识别但本地快照核心仍为 stub，`unavailable` 表示 host 没有暴露 capability。完整 collapse 事件只有在独立 ADR 接受算法和 replay contract 后才允许新增。
+
 `worktree/*` 记录 Git worktree 的发现、绑定、切换、清理和失败。payload 至少包含 `{ id, repoRoot, path, status }`，可选包含 `branch`、`commit`、`sessionId`、`taskId` 和 bounded `error`。`worktree/switched` 还使 Session projection 的 `activeWorktreeId` 与 `activeWorkspaceRoot` 指向该 worktree；工具、权限和 system prompt 使用 active root，但主仓库 root 仍保留为 Session 的 `workspaceRoot`。清理必须先检查 dirty/conflicted 状态，除非显式 force，否则不能删除未提交修改；主仓库 worktree 永远不能被清理。
 
 MCP 生命周期事件只携带 `serverName`、状态、动作和脱敏错误；env/header/token 等配置秘密不得进入 payload。MCP 工具调用本身仍使用公共 `tool/*` 和 `permission/*` 事件。`mcp/resource` / `mcp/prompt` 只记录 server、资源 URI 或 prompt name、动作、bounded bytes/truncated 和 trust marker，不记录远端原始内容。

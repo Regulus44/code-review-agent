@@ -35,6 +35,7 @@ import {
   type ContextBudgetSnapshot,
   type ContextWarningState,
   type ModelContextCapability,
+  type ContextCollapseCapability,
   type ContextBoundaryKind,
   type ContextRecoveryErrorClass,
 } from "@code-review-agent/contracts";
@@ -119,6 +120,8 @@ export interface ContextSettings {
   readonly budget?: Partial<ContextBudget>;
   readonly capability?: ModelContextCapability;
   readonly budgetSnapshot?: ContextBudgetSnapshot;
+  /** M14 capability boundary; disabled until a real collapse implementation is accepted. */
+  readonly collapse: ContextCollapseCapability;
 }
 
 export interface CodeModeSettings {
@@ -322,6 +325,18 @@ export class AgentHost {
       ...(this.contextBudget === undefined ? {} : { budget: { ...this.contextBudget } }),
       capability: snapshot.capability,
       budgetSnapshot: snapshot,
+      collapse: {
+        version: 1,
+        enabled: false,
+        status: "deferred",
+        reason: "Context Collapse is deferred until M01-M13 pass real-provider model-view, boundary, recovery and replay validation; the Claude Code snapshot exposes this integration as a stub.",
+        features: {
+          readTimeProjection: false,
+          backgroundCollapse: false,
+          overflowDrain: false,
+          snip: false,
+        },
+      },
     };
   }
 

@@ -68,4 +68,21 @@ describe("presentSettings", () => {
     const selected = presentSettings(session, { provider: "deepseek", current: "deepseek-v4-pro", configured: true, models: ["deepseek-v4-pro"] }, [], [], { modelState: { status: "ready", receipt: "Selected deepseek-v4-pro" } });
     expect(selected.model).toMatchObject({ status: "ready", receipt: "Selected deepseek-v4-pro" });
   });
+
+  it("shows deferred Context Collapse metadata without implying availability", () => {
+    const view = presentSettings(session, undefined, [], [], {
+      contextCapability: {
+        enabled: true,
+        configured: true,
+        collapse: {
+          version: 1,
+          enabled: false,
+          status: "deferred",
+          reason: "Context Collapse is deferred pending validation.",
+          features: { readTimeProjection: false, backgroundCollapse: false, overflowDrain: false, snip: false },
+        },
+      },
+    });
+    expect(view.capabilities.find((capability) => capability.key === "context-collapse")).toMatchObject({ status: "deferred", detail: expect.stringContaining("deferred") });
+  });
 });

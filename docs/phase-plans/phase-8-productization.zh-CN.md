@@ -380,6 +380,35 @@ git diff --check
     pnpm test
     git diff --check
 
+### 5.6 当前执行切片：M14 Context Collapse Capability Boundary
+
+状态：`deferred`（能力边界已实现，完整算法等待真实场景触发）
+
+交付物：
+
+- `ContextCollapseCapability` 公共契约，明确 `deferred/unavailable`、reason 和 read-time projection、background collapse、overflow drain、snip 四项 feature；
+- Runtime `ContextSettings.collapse`、API typed capability 和 Web Settings `context-collapse` capability 行；
+- M14 实施说明、开发日志、ADR-026、事件契约和 CC-015 来源登记；
+- Runtime/Web 测试覆盖 deferred metadata、feature 全 false 和旧 API 缺失字段 fallback。
+
+参考：Claude Code `D:/Develop/claude-code/src/services/contextCollapse/index.ts`、`operations.ts`、`persist.ts`、`docs/features/context-collapse.md` 和 `src/query.ts` collapse 集成点；本项目 `packages/contracts/src/index.ts`、`packages/runtime/src/index.ts`、`apps/web/src/client/api.ts`、`apps/web/src/presentation/settings-presenter.ts`。
+
+契约与边界：
+
+- Claude Code 本地快照的 contextCollapse 核心仍是 stub，M14 不将目录或恒等 `projectView()` 伪装成可用算法；
+- 不新增 `context/collapse_*` 事件，不改变 EventStore transcript、M05–M13 model view/compact/recovery/replay；
+- Web 只展示 host capability，不能触发 collapse、overflow drain、snip 或 recovery；
+- 只有真实 provider 场景证明 M01–M13 不足后，才另立 ADR 开发 `packages/context-collapse`。
+
+验收命令：
+
+    pnpm typecheck
+    pnpm --filter @code-review-agent/web test -- --run src/presentation/settings-presenter.test.ts
+    pnpm --filter @code-review-agent/runtime test -- --run src/index.test.ts
+    pnpm test
+    pnpm build:web
+    git diff --check
+
 ## 6. Phase 8.2：Workspace/Worktree
 
 交付物：

@@ -958,6 +958,20 @@ export interface ModelContextCapability {
   readonly source?: "provider" | "estimate" | "hybrid";
 }
 
+/** Host-owned status for the optional Claude Code-style historical collapse layer. */
+export interface ContextCollapseCapability {
+  readonly version: 1;
+  readonly enabled: boolean;
+  readonly status: "deferred" | "unavailable";
+  readonly reason: string;
+  readonly features: {
+    readonly readTimeProjection: boolean;
+    readonly backgroundCollapse: boolean;
+    readonly overflowDrain: boolean;
+    readonly snip: boolean;
+  };
+}
+
 /** Host policy knobs for Claude Code-style context budgeting. */
 export interface ContextBudgetConfig {
   /** Fallback input window when the adapter does not expose capability metadata. */

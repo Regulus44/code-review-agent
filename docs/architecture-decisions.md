@@ -304,6 +304,20 @@ M13 仿照 Claude Code `src/components/TokenWarning.tsx`、`src/utils/analyzeCon
 
 回滚策略：停止写入 `contextDiagnostics` 和 Web 增量 fold 即可回到 M12 projection；已有 M13 事件作为兼容扩展保留，模型请求和原始 transcript 不受影响。
 
+## ADR-026：Context Collapse 先建立能力边界，算法保持 deferred
+
+状态：accepted（2026-08-26，M14）
+
+Claude Code 本地快照的 `src/services/contextCollapse/index.ts`、`operations.ts` 和 `persist.ts` 提供了集成入口，但核心 `projectView()` 与恢复逻辑仍为 stub。`docs/features/context-collapse.md` 所列 read-time projection、后台折叠摘要、collapse commit log、overflow drain 和 snip 不能仅凭入口存在就视为生产能力。
+
+M14 因此新增 host-backed `ContextCollapseCapability`，由 `ContextSettings.collapse` 和 API/Web typed capability 暴露。默认状态为 `enabled: false`、`status: "deferred"`，四项 feature 全为 false，并以 bounded reason 解释必须先完成 M01–M13 的真实 provider model-view、boundary、recovery 和 replay 验收。旧 API 缺少该字段时 Web 使用 `unavailable` fallback。
+
+M14 不追加虚假的 `context/collapse_*` 事件，不改变 EventStore transcript、M05–M10 context pipeline 或 M13 diagnostics。Web 只展示状态，不触发 collapse、drain、snip 或 recovery 副作用。只有真实场景证明 M01–M13 不足时，才另立 ADR 设计 `packages/context-collapse` 的纯 projection、append-only commit log、幂等 overflow drain、snip 保护清单和恢复测试。
+
+该决策参考 Claude Code 的接口和 query 集成点，没有复制其源码、账户、遥测或商业服务。由于本地快照未发现根许可证，复用登记为 `behavior-reference`。
+
+回滚策略：停止返回 `ContextSettings.collapse` 并移除 Web Settings capability 行即可；保留可选客户端字段和既有 compact/boundary/recovery 事件，模型请求、权限、transcript 和恢复不受影响。
+
 ## 参考代码入口
 
 - DSH Agent Loop：`D:/Develop/deepseek-harness-fork/packages/core/agent-loop/src/agent.ts`

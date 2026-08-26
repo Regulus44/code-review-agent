@@ -384,6 +384,17 @@ describe("AgentHost", () => {
     expect((await host.getSession(session.id))?.contextDiagnostics).toMatchObject({ tokenUsage: 123, tokenSource: "provider", tokenConfidence: "exact", effectiveWindowTokens: expect.any(Number) });
   });
 
+  it("exposes Context Collapse as an explicit deferred capability", () => {
+    const host = new AgentHost({ store: new InMemoryEventStore() });
+    expect(host.contextSettings().collapse).toEqual({
+      version: 1,
+      enabled: false,
+      status: "deferred",
+      reason: expect.stringContaining("M01-M13"),
+      features: { readTimeProjection: false, backgroundCollapse: false, overflowDrain: false, snip: false },
+    });
+  });
+
   it("builds the prompt from the permission-filtered tool set and preserves custom instructions", async () => {
     const requests: ModelRequest[] = [];
     const store = new InMemoryEventStore();

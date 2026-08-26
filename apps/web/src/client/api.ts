@@ -85,6 +85,18 @@ export interface ContextCapability {
     readonly maxToolResultChars?: number;
     readonly maxSummaryChars?: number;
   };
+  readonly collapse?: {
+    readonly version: 1;
+    readonly enabled: boolean;
+    readonly status: "deferred" | "unavailable";
+    readonly reason: string;
+    readonly features: {
+      readonly readTimeProjection: boolean;
+      readonly backgroundCollapse: boolean;
+      readonly overflowDrain: boolean;
+      readonly snip: boolean;
+    };
+  };
 }
 
 export interface CodeModeCapability {

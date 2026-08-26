@@ -456,3 +456,21 @@ ID:
 明确未复用：Claude Code 的 React 组件实现、账户/遥测、provider-specific UI、完整 context inspector、context collapse、prompt-cache edit 和商业服务。
 
 新增测试：`apps/web/src/presentation/context-presenter.test.ts`、`apps/web/src/client/store.test.ts`、`packages/runtime/src/index.test.ts`、`packages/storage/src/index.test.ts` 的 diagnostics、replay、SQLite reopen 和 bounded chain 场景。
+
+### CC-015
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`src/services/contextCollapse/index.ts`、`src/services/contextCollapse/operations.ts`、`src/services/contextCollapse/persist.ts`、`docs/features/context-collapse.md`、`src/query.ts` 的 collapse 集成点
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；contextCollapse 核心为 stub，本次没有复制源码或算法，只记录接口、职责和 query 集成顺序。
+
+本项目路径：`packages/contracts/src/index.ts`、`packages/runtime/src/index.ts`、`apps/web/src/client/api.ts`、`apps/web/src/presentation/settings-presenter.ts`。
+
+范围：host-backed `ContextCollapseCapability`、deferred/unavailable 状态、read-time projection/background collapse/overflow drain/snip 的 feature metadata 和 Web Settings 展示。
+
+明确未复用：Claude Code 的 collapse 算法、commit log、persist 实现、snip、后台折叠、账户/遥测、provider cache edit 或商业服务；M14 不追加虚假 collapse 事件。
+
+新增测试：`packages/runtime/src/index.test.ts` 和 `apps/web/src/presentation/settings-presenter.test.ts` 的 deferred capability、feature 全 false 与缺失 metadata fallback。
