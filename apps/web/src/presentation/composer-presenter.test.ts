@@ -20,4 +20,8 @@ describe("presentComposerSubmit", () => {
   it("returns to Send when the durable projection contains only a terminal turn", () => {
     expect(presentComposerSubmit({ bootReady: true, inputHasContent: true, turn: turn("completed"), stoppingTurnId: "turn_1" })).toMatchObject({ mode: "send", icon: "↑", disabled: false });
   });
+
+  it("renders an explicit submitting phase while host admission is pending", () => {
+    expect(presentComposerSubmit({ bootReady: true, inputHasContent: true, pendingSubmit: true })).toMatchObject({ mode: "submitting", disabled: true, ariaLabel: "Sending message" });
+  });
 });

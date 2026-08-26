@@ -1,4 +1,4 @@
-export type ComposerSubmitMode = "send" | "stop" | "stopping";
+export type ComposerSubmitMode = "send" | "stop" | "stopping" | "submitting";
 
 export interface ComposerTurnLike {
   readonly id: string;
@@ -10,6 +10,7 @@ export interface ComposerSubmitInput {
   readonly stoppingTurnId?: string | null;
   readonly inputHasContent: boolean;
   readonly bootReady: boolean;
+  readonly pendingSubmit?: boolean;
 }
 
 export interface ComposerSubmitView {
@@ -21,6 +22,9 @@ export interface ComposerSubmitView {
 }
 
 export function presentComposerSubmit(input: ComposerSubmitInput): ComposerSubmitView {
+  if (input.pendingSubmit) {
+    return { mode: "submitting", icon: "…", disabled: true, ariaLabel: "Sending message", title: "Sending message" };
+  }
   const turn = input.turn?.status === "queued" || input.turn?.status === "running" ? input.turn : undefined;
   const stopping = turn !== undefined && input.stoppingTurnId === turn.id;
   const mode: ComposerSubmitMode = stopping ? "stopping" : turn === undefined ? "send" : "stop";

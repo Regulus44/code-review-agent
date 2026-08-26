@@ -797,7 +797,7 @@
       (() => {
         const typedRuntime = window.CodeReviewAgentWeb;
         const typedConnection = typedRuntime?.connection || null;
-        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, stoppingTurnId: null, requestActions: typedRuntime?.createRequestActionGate?.() || null, workspaces: null, lastWorkspaceOrderSequence: 0, conversationScrollTop: 0, trajectoryScrollTop: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 280, details: 'closed', detailsWidthPx: 0, narrow: false, narrowExpanded: false, mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sessionView: 'conversation', trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
+        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, stoppingTurnId: null, composer: typedRuntime?.createComposerState?.() || { phase: 'idle', attemptId: 0 }, composerEpoch: 0, requestActions: typedRuntime?.createRequestActionGate?.() || null, workspaces: null, lastWorkspaceOrderSequence: 0, conversationScrollTop: 0, trajectoryScrollTop: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 280, details: 'closed', detailsWidthPx: 0, narrow: false, narrowExpanded: false, mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sessionView: 'conversation', trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
         let usageDrawerOpen = false;
         let renderedSessionView = state.sessionView;
         let modelMenuPane = 'root';
@@ -1688,18 +1688,19 @@
         const renderComposerState = (snapshot) => {
           if (!send) return;
           const takeover = renderComposerTakeover(snapshot);
-          if (takeover) { send.disabled = true; return; }
+          if (takeover) { send.disabled = true; input.disabled = true; return; }
           const turn = activeTurn(snapshot);
           if (turn === undefined) state.stoppingTurnId = null;
           const submitView = typedRuntime?.presentComposerSubmit
-            ? typedRuntime.presentComposerSubmit({ turn, stoppingTurnId: state.stoppingTurnId, inputHasContent: Boolean(input.value.trim()), bootReady: state.boot.status === 'ready' })
+            ? typedRuntime.presentComposerSubmit({ turn, stoppingTurnId: state.stoppingTurnId, inputHasContent: Boolean(input.value.trim()), bootReady: state.boot.status === 'ready', pendingSubmit: state.composer?.phase === 'submitting' })
             : { mode: state.stoppingTurnId === turn?.id ? 'stopping' : turn === undefined ? 'send' : 'stop', icon: state.stoppingTurnId === turn?.id ? '…' : turn === undefined ? '↑' : '■', disabled: state.boot.status !== 'ready' || (turn === undefined && !input.value.trim()), ariaLabel: 'Send message', title: 'Send message' };
           const mode = submitView.mode;
-          send.className = `send-button${mode === 'stop' ? ' stop' : mode === 'stopping' ? ' stopping' : ''}`;
+          send.className = `send-button${mode === 'stop' ? ' stop' : mode === 'stopping' ? ' stopping' : mode === 'submitting' ? ' submitting' : ''}`;
           send.textContent = submitView.icon;
           send.setAttribute('aria-label', submitView.ariaLabel);
           send.title = submitView.title;
           send.disabled = submitView.disabled;
+          input.disabled = state.boot.status !== 'ready' || state.composer?.phase === 'submitting';
         };
         const renderSettings = () => {
           if (!settingsContent) return;
@@ -2461,6 +2462,8 @@
         const renderDetails = () => { const connected = state.mcp.filter((server) => !['disabled', 'failed', 'needs_auth'].includes(server.status)).length; const typedSnapshot = typedConnection?.store.getSnapshot(); const trajectory = typedSnapshot?.trajectory; const treeWarnings = typedSnapshot?.toolCallTree?.warnings || []; const pendingPermissions = typedSnapshot?.conversation?.nodes?.filter((node) => node.kind === 'permission' && node.status === 'pending').length || 0; const pendingInteractions = typedSnapshot?.conversation?.nodes?.filter((node) => node.kind === 'interaction' && node.status === 'pending').length || 0; const diagnostics = state.mcp.map((server) => { const name = server.config?.name || server.name; const catalog = Array.isArray(server.catalog) ? server.catalog : []; const disabled = catalog.filter((item) => item.enabled === false).length; const active = server.status === 'connected' ? catalog.length - disabled : 0; return `<div class="detail-line"><span>${esc(name)}</span><strong>${esc(server.status)} · g${server.generation || 0} · ${active}/${catalog.length} active</strong></div><div class="detail-line"><span>Auth</span><strong>${server.status === 'needs_auth' ? 'Needs authorization' : server.config?.credentialRef ? 'Credential reference configured' : 'No credential reference'}</strong></div>${server.retry?.nextAttemptAt ? `<div class="detail-line"><span>Next retry</span><strong>${esc(server.retry.nextAttemptAt)}</strong></div>` : ''}`; }).join(''); details.innerHTML = `<div class="detail-section"><div class="detail-label">Model</div><div class="detail-value">${esc(currentModel())}</div><div class="detail-line"><span>Provider</span><strong>${esc(state.models?.provider || 'DeepSeek-compatible')}</strong></div><div class="detail-line"><span>Default</span><strong>${esc(state.models?.defaultModel || 'deepseek-v4-flash')}</strong></div></div><div class="detail-section"><div class="detail-label">Session</div><div class="detail-line"><span>Status</span><span class="status-pill">Connected</span></div><div class="detail-line"><span>Events</span><strong>${state.events.size}</strong></div><div class="detail-line"><span>Workspace</span><strong title="${esc(state.session?.workspaceRoot || '.')}">${esc(state.session?.workspaceRoot || '.')}</strong></div></div><div class="detail-section"><div class="detail-label">Trajectory</div><div class="detail-line"><span>Records</span><strong>${trajectory?.records.length || 0} · seq ${trajectory?.lastSequence || 0}</strong></div><div class="detail-line"><span>Running</span><strong>${trajectory?.records.filter((record) => record.running).length || 0}</strong></div><div class="detail-line"><span>Lineage warnings</span><strong>${treeWarnings.length}</strong></div></div><div class="detail-section"><div class="detail-label">MCP diagnostics</div><div class="detail-line"><span>Servers</span><strong>${connected}/${state.mcp.length} connected</strong></div><div class="detail-line"><span>Tools</span><strong>${state.tools.size}</strong></div>${diagnostics || '<div class="empty-detail">No MCP servers configured.</div>'}</div><div class="detail-section"><div class="detail-label">Tools</div><div id="detail-tools" class="tool-list"></div></div><div class="detail-section"><div class="detail-label">Permissions</div><div class="detail-line"><span>Pending approvals</span><strong>${pendingPermissions}</strong></div><div class="detail-line"><span>Pending questions</span><strong>${pendingInteractions}</strong></div></div>`; const toolList = details.querySelector('#detail-tools'); const names = [...state.tools.keys()].slice(0, 8); if (!names.length) toolList.innerHTML = '<div class="empty-detail">No tools discovered.</div>'; else names.forEach((name) => { const row = document.createElement('div'); row.className = 'tool-list-item'; row.textContent = name; toolList.append(row); }); };
         const openSession = async (id) => {
            dispatchShellLayout({ type: 'close-mobile-sidebar' });
+          state.composerEpoch += 1;
+          state.composer = typedRuntime?.createComposerState?.() || { phase: 'idle', attemptId: 0 };
           usageDrawerOpen = false;
           state.sessionView = 'conversation';
           state.conversationScrollTop = 0;
@@ -2613,19 +2616,38 @@
         });
         document.querySelector('#composer').addEventListener('submit', async (event) => {
           event.preventDefault();
+          if (state.composer?.phase === 'submitting') return;
           const snapshot = typedConnection?.store.getSnapshot() || { session: state.session };
           const turn = activeTurn(snapshot);
           if (turn) { await stopActiveTurn(turn); return; }
           const content = input.value.trim();
           if (!content || !state.session) return;
+          const composerEpoch = state.composerEpoch;
+          const started = typedRuntime?.beginComposerSubmit
+            ? typedRuntime.beginComposerSubmit(state.composer, content)
+            : (() => { const attemptId = (state.composer?.attemptId || 0) + 1; return { state: { phase: 'submitting', draft: content, attemptId }, attempt: { id: attemptId, draft: content } }; })();
+          if (!started.attempt) return;
+          state.composer = started.state;
           send.disabled = true;
-          input.value = '';
-          input.style.height = 'auto';
+          renderComposerState(typedConnection?.store.getSnapshot() || { session: state.session });
           try {
             if (typedRuntime?.api?.sendMessage) await typedRuntime.api.sendMessage(state.session.id, content, commandKey());
             else await commandApi(`/v1/sessions/${encodeURIComponent(state.session.id)}`, { content });
-          } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); }
-          finally { input.focus(); renderComposerState(typedConnection?.store.getSnapshot() || { session: state.session }); }
+            if (composerEpoch === state.composerEpoch) {
+              state.composer = typedRuntime?.settleComposerSubmit
+                ? typedRuntime.settleComposerSubmit(state.composer, started.attempt, 'committed')
+                : { phase: 'idle', attemptId: state.composer.attemptId };
+              if (input.value.trim() === started.attempt.draft) { input.value = ''; input.style.height = 'auto'; }
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (composerEpoch === state.composerEpoch) {
+              state.composer = typedRuntime?.settleComposerSubmit
+                ? typedRuntime.settleComposerSubmit(state.composer, started.attempt, 'failed', message)
+                : { phase: 'error', draft: started.attempt.draft, error: message, attemptId: state.composer.attemptId };
+              setStatus(message, false);
+            }
+          } finally { input.focus(); renderComposerState(typedConnection?.store.getSnapshot() || { session: state.session }); }
         });
         applyShellLayout();
         applyOverlay();
