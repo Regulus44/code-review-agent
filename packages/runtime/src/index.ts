@@ -36,10 +36,11 @@ import {
   type ContextWarningState,
   type ModelContextCapability,
   type ContextBoundaryKind,
+  type ContextRecoveryErrorClass,
 } from "@code-review-agent/contracts";
 import { EchoChatModel } from "@code-review-agent/llm";
 import { compactMessages, DEFAULT_CONTEXT_BUDGET, type ContextBudget } from "@code-review-agent/compaction";
-import { applyToolResultBudget, assembleContext, boundaryFromMetadata, buildPostCompactMessages, calculateContextWarningState, compactWithSessionMemory, compactWithSummaryModel, countContextTokens, createTokenCounter, ensureToolResultPairing, estimateContextTokens, extractContextAttachmentIds, fallbackModelContextCapability, groupMessagesByApiRound, normalizeMessagesForAPI, resolveContextBudget, selectPostCompactAttachments, shouldCompactBeforeRequest, shouldUseExactTokenCount, type ApiRound, type ContextAssembly, type ContextAttachment, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type PostCompactAttachmentConfig, type PostCompactAttachmentProvider, type SessionMemoryCompactConfig, type SessionMemoryStore, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport } from "@code-review-agent/context";
+import { applyToolResultBudget, assembleContext, boundaryFromMetadata, buildPostCompactMessages, calculateContextWarningState, classifyProviderContextError, compactWithSessionMemory, compactWithSummaryModel, ContextRecoveryGuard, countContextTokens, createTokenCounter, ensureToolResultPairing, estimateContextTokens, extractContextAttachmentIds, fallbackModelContextCapability, fingerprintModelRequest, groupMessagesByApiRound, isReactiveContextError, normalizeMessagesForAPI, resolveContextBudget, selectPostCompactAttachments, shouldCompactBeforeRequest, shouldUseExactTokenCount, type ApiRound, type ContextAssembly, type ContextAttachment, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type PostCompactAttachmentConfig, type PostCompactAttachmentProvider, type SessionMemoryCompactConfig, type SessionMemoryStore, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport } from "@code-review-agent/context";
 import { randomUUID } from "node:crypto";
 import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModePolicySnapshot, type CodeModeSandbox, type ExecuteToolOutput, type JobSummary, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
 import type { SubagentRuntime } from "@code-review-agent/subagent";
@@ -79,6 +80,11 @@ export interface AgentHostOptions {
   /** Host-owned sources rebuilt after a compact boundary is created. */
   readonly postCompactAttachmentProvider?: PostCompactAttachmentProvider;
   readonly postCompactAttachmentConfig?: Partial<PostCompactAttachmentConfig>;
+  /** Per-turn M09 reactive recovery and compact failure limits. */
+  readonly contextRecovery?: {
+    readonly maxReactiveAttempts?: number;
+    readonly maxConsecutiveCompactionFailures?: number;
+  };
   readonly quota?: ProductizationQuotaPolicy;
   readonly operations?: ProductizationOperationsPolicy;
 }
@@ -209,6 +215,7 @@ export class AgentHost {
   private readonly summaryCompact: Partial<SummaryCompactConfig> | undefined;
   private readonly postCompactAttachmentProvider: PostCompactAttachmentProvider | undefined;
   private readonly postCompactAttachmentConfig: Partial<PostCompactAttachmentConfig> | undefined;
+  private readonly contextRecovery: AgentHostOptions["contextRecovery"];
   private readonly quota: ProductizationQuotaPolicy | undefined;
   private readonly operations: ProductizationOperationsPolicy;
   private readonly quotaTails = new Map<string, Promise<void>>();
@@ -231,6 +238,7 @@ export class AgentHost {
     this.summaryCompact = options.summaryCompact;
     this.postCompactAttachmentProvider = options.postCompactAttachmentProvider;
     this.postCompactAttachmentConfig = options.postCompactAttachmentConfig;
+    this.contextRecovery = options.contextRecovery;
     this.quota = options.quota;
     this.operations = options.operations ?? { backup: "deferred", migration: "deferred", upgrade: "deferred" };
     this.customSystemPrompt = options.systemPrompt;
@@ -1705,6 +1713,10 @@ export class AgentHost {
     const alreadyClearedToolCallIds = new Set<string>();
     const reportedBudgetToolCallIds = new Set<string>();
     const reportedMicrocompactToolCallIds = new Set<string>();
+    const recoveryGuard = new ContextRecoveryGuard(
+      this.contextRecovery?.maxReactiveAttempts ?? 1,
+      this.contextRecovery?.maxConsecutiveCompactionFailures ?? 3,
+    );
     for (let step = 1; step <= this.maxSteps; step += 1) {
       if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
       this.appendSteers(messages, turnId);
@@ -1727,8 +1739,46 @@ export class AgentHost {
       const beforeUsage = tokenCount.value;
       const beforeState = calculateContextWarningState(beforeUsage, budgetSnapshot, this.contextPolicyWithLegacyFallback());
       const autoCompactRecommended = shouldCompactBeforeRequest(beforeState, this.contextPolicyWithLegacyFallback());
-      if (this.compactionEnabled && autoCompactRecommended) {
-        await this.compactTurnContext(sessionId, turnId, messages, budgetSnapshot, beforeUsage, beforeState, controller.signal);
+      if (this.compactionEnabled && autoCompactRecommended && !recoveryGuard.isCircuitOpen()) {
+        const proactiveRequestHash = fingerprintModelRequest({ purpose: "agent", messages: prepared.view.messages, tools: prepared.view.tools, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) });
+        const proactiveAttempt = recoveryGuard.snapshot().consecutiveCompactionFailures + 1;
+        await this.appendContextRecoveryEvent(sessionId, turnId, "context/recovery_started", {
+          requestHash: proactiveRequestHash,
+          errorClass: "other" as ContextRecoveryErrorClass,
+          attempt: proactiveAttempt,
+          attemptedModules: ["proactive_compact"],
+          transitionReason: "proactive_compact",
+        });
+        const compacted = await this.compactTurnContext(sessionId, turnId, messages, budgetSnapshot, beforeUsage, beforeState, controller.signal);
+        if (compacted) {
+          recoveryGuard.recordCompactionSuccess("proactive_compact");
+          await this.appendContextRecoveryEvent(sessionId, turnId, "context/recovery_succeeded", {
+            requestHash: proactiveRequestHash,
+            errorClass: "other" as ContextRecoveryErrorClass,
+            attempt: proactiveAttempt,
+            attemptedModules: recoveryGuard.snapshot().attemptedModules,
+            transitionReason: "proactive_compact",
+          });
+        } else {
+          const circuitOpen = recoveryGuard.recordCompactionFailure("proactive_compact");
+          await this.appendContextRecoveryEvent(sessionId, turnId, "context/recovery_failed", {
+            requestHash: proactiveRequestHash,
+            errorClass: "other" as ContextRecoveryErrorClass,
+            attempt: proactiveAttempt,
+            attemptedModules: recoveryGuard.snapshot().attemptedModules,
+            transitionReason: "proactive_compact_failed",
+            error: "Context compaction did not produce a smaller model view",
+          });
+          if (circuitOpen) {
+            await this.appendContextRecoveryEvent(sessionId, turnId, "context/recovery_circuit_open", {
+              requestHash: proactiveRequestHash,
+              errorClass: "other" as ContextRecoveryErrorClass,
+              attempt: proactiveAttempt,
+              attemptedModules: recoveryGuard.snapshot().attemptedModules,
+              transitionReason: "compact_failure_circuit_open",
+            });
+          }
+        }
         assembly = await this.assembleTurnContext(sessionId, messages, recovery);
         prepared = this.prepareModelContext(assembly, protectedToolCallIds, toolResultTimestamps, alreadyClearedToolCallIds);
         await this.appendToolResultBudgetEvents(sessionId, turnId, prepared.toolResultBudget, this.toolResultBudgetWithLegacyFallback(), reportedBudgetToolCallIds, reportedMicrocompactToolCallIds, alreadyClearedToolCallIds);
@@ -1784,7 +1834,75 @@ export class AgentHost {
           ...(autoCompactRecommended ? { autoCompactRecommended: true } : {}),
         },
       });
-      const response = await this.collectModelResponse(sessionId, turnId, controller, prepared.view, tenantId, modelRequestId, reasoningEffort);
+      let response: CollectedModelResponse;
+      try {
+        response = await this.collectModelResponse(sessionId, turnId, controller, prepared.view, tenantId, modelRequestId, reasoningEffort);
+      } catch (error) {
+        const classified = classifyProviderContextError(error);
+        const requestHash = fingerprintModelRequest({ purpose: "agent", messages: prepared.view.messages, tools: prepared.view.tools, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) });
+        const partialOutput = typeof error === "object" && error !== null && "partialOutput" in error && (error as { partialOutput?: unknown }).partialOutput === true;
+        if (isReactiveContextError(error) && !partialOutput && this.compactionEnabled && !recoveryGuard.isCircuitOpen()) {
+          const attempt = recoveryGuard.beginReactive("reactive_compact");
+          if (attempt !== undefined) {
+            await this.appendContextRecoveryEvent(sessionId, turnId, "context/recovery_started", {
+              requestHash,
+              errorClass: classified.errorClass,
+              ...(classified.status === undefined ? {} : { providerStatus: classified.status }),
+              ...((classified.providerCode ?? classified.code) === undefined ? {} : { providerCode: classified.providerCode ?? classified.code }),
+              attempt,
+              attemptedModules: recoveryGuard.snapshot().attemptedModules,
+              transitionReason: "reactive_compact_retry",
+            });
+            const compacted = await this.compactTurnContext(sessionId, turnId, messages, budgetSnapshot, beforeUsage, beforeState, controller.signal);
+            if (compacted) {
+              recoveryGuard.recordCompactionSuccess("reactive_compact");
+              await this.appendContextRecoveryEvent(sessionId, turnId, "context/recovery_transition", {
+                requestHash,
+                errorClass: classified.errorClass,
+                ...(classified.status === undefined ? {} : { providerStatus: classified.status }),
+                ...((classified.providerCode ?? classified.code) === undefined ? {} : { providerCode: classified.providerCode ?? classified.code }),
+                attempt,
+                attemptedModules: recoveryGuard.snapshot().attemptedModules,
+                transitionReason: "reactive_compact_retry",
+              });
+              await this.appendContextRecoveryEvent(sessionId, turnId, "context/recovery_succeeded", {
+                requestHash,
+                errorClass: classified.errorClass,
+                ...(classified.status === undefined ? {} : { providerStatus: classified.status }),
+                ...((classified.providerCode ?? classified.code) === undefined ? {} : { providerCode: classified.providerCode ?? classified.code }),
+                attempt,
+                attemptedModules: recoveryGuard.snapshot().attemptedModules,
+                transitionReason: "reactive_compact_retry",
+              });
+              await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "recovered", recovery: "reactive_compact" } });
+              continue;
+            }
+            const circuitOpen = recoveryGuard.recordCompactionFailure("reactive_compact");
+            await this.appendContextRecoveryEvent(sessionId, turnId, "context/recovery_failed", {
+              requestHash,
+              errorClass: classified.errorClass,
+              ...(classified.status === undefined ? {} : { providerStatus: classified.status }),
+              ...((classified.providerCode ?? classified.code) === undefined ? {} : { providerCode: classified.providerCode ?? classified.code }),
+              attempt,
+              attemptedModules: recoveryGuard.snapshot().attemptedModules,
+              transitionReason: "reactive_compact_failed",
+              error: "Reactive context compaction did not recover the request",
+            });
+            if (circuitOpen) {
+              await this.appendContextRecoveryEvent(sessionId, turnId, "context/recovery_circuit_open", {
+                requestHash,
+                errorClass: classified.errorClass,
+                ...(classified.status === undefined ? {} : { providerStatus: classified.status }),
+                ...((classified.providerCode ?? classified.code) === undefined ? {} : { providerCode: classified.providerCode ?? classified.code }),
+                attempt,
+                attemptedModules: recoveryGuard.snapshot().attemptedModules,
+                transitionReason: "compact_failure_circuit_open",
+              });
+            }
+          }
+        }
+        throw error;
+      }
       if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
       const assistantPayload = {
         content: response.text,
@@ -1884,8 +2002,8 @@ export class AgentHost {
     tokenUsage?: number,
     warningState?: ContextWarningState,
     signal?: AbortSignal,
-  ): Promise<void> {
-    if (!this.compactionEnabled) return;
+  ): Promise<boolean> {
+    if (!this.compactionEnabled) return false;
     const projection = await this.options.store.project(sessionId);
     const protectedToolCallIds = pendingToolCallIds(projection);
     try {
@@ -1895,12 +2013,12 @@ export class AgentHost {
       const sessionMemoryResult = await this.compactWithSessionMemory(sessionId, turnId, messages, protectedToolCallIds, resolved.autoCompactThreshold);
       if (sessionMemoryResult === true) {
         await this.rebuildPostCompactView(sessionId, turnId, messages, preCompactMessages, "session_memory", preCompactTokens, projection, protectedToolCallIds);
-        return;
+        return true;
       }
       const summaryResult = await this.compactWithSummaryModel(sessionId, turnId, messages, protectedToolCallIds, signal);
       if (summaryResult === true) {
         await this.rebuildPostCompactView(sessionId, turnId, messages, preCompactMessages, "summary", preCompactTokens, projection, protectedToolCallIds);
-        return;
+        return true;
       }
       const usage = preCompactTokens;
       const predictive = warningState?.isPredictiveCompactRecommended === true && usage < resolved.autoCompactThreshold;
@@ -1911,7 +2029,7 @@ export class AgentHost {
         maxTokens,
       };
       const result = compactMessages(messages, { budget: compactionBudget, protectedToolCallIds });
-      if (!result.didCompact) return;
+      if (!result.didCompact) return false;
       messages.splice(0, messages.length, ...result.messages);
       await this.options.store.append({
         sessionId,
@@ -1929,6 +2047,7 @@ export class AgentHost {
         },
       });
       await this.rebuildPostCompactView(sessionId, turnId, messages, preCompactMessages, "legacy", preCompactTokens, projection, protectedToolCallIds);
+      return true;
     } catch (error) {
       await this.options.store.append({
         sessionId,
@@ -1944,6 +2063,7 @@ export class AgentHost {
           error: error instanceof Error ? error.message : String(error),
         },
       });
+      return false;
     }
   }
 
@@ -2240,9 +2360,25 @@ export class AgentHost {
     } else {
       this.metricCounters.turnsFailed += 1;
       const message = error instanceof Error ? error.message : String(error);
-      await this.options.store.append({ sessionId, turnId, type: "agent/error", payload: { message, ...(traceId === undefined ? {} : { traceId }) } });
+      const classified = classifyProviderContextError(error);
+      await this.options.store.append({ sessionId, turnId, type: "agent/error", payload: {
+        message,
+        errorClass: classified.errorClass,
+        ...(classified.status === undefined ? {} : { providerStatus: classified.status }),
+        ...((classified.providerCode ?? classified.code) === undefined ? {} : { providerCode: classified.providerCode ?? classified.code }),
+        ...(traceId === undefined ? {} : { traceId }),
+      } });
       await this.options.store.append({ sessionId, turnId, type: "turn/ended", payload: { status: "failed", message, ...(traceId === undefined ? {} : { traceId }) } });
     }
+  }
+
+  private async appendContextRecoveryEvent(
+    sessionId: SessionId,
+    turnId: TurnId,
+    type: "context/recovery_started" | "context/recovery_transition" | "context/recovery_succeeded" | "context/recovery_failed" | "context/recovery_circuit_open",
+    payload: Readonly<Record<string, unknown>>,
+  ): Promise<void> {
+    await this.options.store.append({ sessionId, turnId, type, payload });
   }
 
   private modelTools(sessionId: SessionId, tenantId?: string): readonly ModelToolDefinition[] {
@@ -2285,7 +2421,13 @@ export class AgentHost {
           } else if (part.type === "usage") {
             usage = mergeModelUsage(usage, part.usage);
           } else if (part.type === "error") {
-            throw new Error(`${part.code}: ${part.message}`);
+            const providerError = new Error(`${part.code}: ${part.message}`);
+            Object.assign(providerError, {
+              code: part.code,
+              ...(part.status === undefined ? {} : { status: part.status }),
+              ...(part.providerCode === undefined ? {} : { providerCode: part.providerCode }),
+            });
+            throw providerError;
           }
         }
         const toolCalls: ModelToolCall[] = [];
@@ -2296,7 +2438,8 @@ export class AgentHost {
         return { text: textParts.join(""), toolCalls, responseId: `response_${requestId.replace(/^request_/u, "")}`, ...(usage === undefined ? {} : { usage }) };
       } catch (error) {
         lastError = error;
-        if (controller.signal.aborted || textParts.length > 0 || modelIndex >= candidates.length - 1) throw error;
+        if (textParts.length > 0 && typeof error === "object" && error !== null) Object.assign(error, { partialOutput: true });
+        if (controller.signal.aborted || textParts.length > 0 || isReactiveContextError(error) || modelIndex >= candidates.length - 1) throw error;
         this.metricCounters.modelFallbacks += 1;
         await this.options.store.append({ sessionId, turnId, type: "agent/error", payload: { code: "MODEL_FALLBACK", message: error instanceof Error ? error.message : String(error), failedModelIndex: modelIndex, fallbackModelIndex: modelIndex + 1 } });
       }

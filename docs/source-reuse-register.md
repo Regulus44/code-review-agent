@@ -366,3 +366,21 @@ ID:
 明确未复用：Claude Code 文件读取实现、SessionStart/PreCompact hook runtime、provider prompt-cache edit、完整 JSONL transcript loader、商业遥测和工具权限实现。
 
 新增测试：packages/context/src/post-compact.test.ts、packages/runtime/src/index.test.ts、packages/storage/src/index.test.ts 的 boundary、attachment budget、projection 和 replay 场景。
+
+### CC-010
+
+来源仓库：D:/Develop/claude-code
+
+来源路径：src/query.ts:584-888,1041-1124,1349-1470,1582-1587；src/services/compact/autoCompact.ts:52-60,270-380；src/services/compact/reactiveCompact.ts
+
+复用方式：behavior-reference
+
+许可证/来源证据：本地快照未发现根 LICENSE；本次没有复制 Claude Code 实现代码，只重新实现主动/反应式 compact 状态机、provider overflow 分类、per-turn guard、retry transition 和 bounded circuit breaker。
+
+本项目路径：packages/context/src/recovery.ts、packages/runtime/src/index.ts、packages/llm/src/index.ts、packages/storage/src/index.ts、packages/contracts/src/index.ts。
+
+范围：请求前 proactive recovery、prompt-too-long/413/media 错误分类、reactive compact retry、同一 turn 的 attempt 上限、连续 compact 失败熔断、request hash、recovery 事件和 projection replay。
+
+明确未复用：Claude Code 的 context collapse、stop-hook runtime、provider prompt-cache edit、商业遥测、完整 JSONL transcript loader 和工具权限实现；provider body、凭据、完整 prompt 不写入本项目事件。
+
+新增测试：packages/context/src/recovery.test.ts、packages/runtime/src/index.test.ts 的 reactive retry/guard 场景、packages/storage/src/index.test.ts 的 recovery projection 场景。

@@ -65,6 +65,11 @@ export type AgentEventType =
   | "context/summary_compaction_failed"
   | "context/compact_boundary"
   | "context/post_compact_rebuild_failed"
+  | "context/recovery_started"
+  | "context/recovery_transition"
+  | "context/recovery_succeeded"
+  | "context/recovery_failed"
+  | "context/recovery_circuit_open"
   | "worktree/created"
   | "worktree/attached"
   | "worktree/switched"
@@ -367,6 +372,7 @@ export interface SessionProjection extends SessionSummary {
   readonly toolCalls: readonly ToolCallProjection[];
   readonly permissions: readonly PermissionProjection[];
   readonly contextCompaction?: ContextCompactionProjection;
+  readonly contextRecovery?: ContextRecoveryProjection;
   readonly worktrees?: readonly WorktreeProjection[];
 }
 
@@ -422,6 +428,31 @@ export interface ContextCompactionProjection {
   readonly error?: string;
   readonly boundary?: ContextBoundaryMetadata;
   readonly attachments?: readonly ContextAttachmentProjection[];
+}
+
+export type ContextRecoveryErrorClass =
+  | "prompt_too_long"
+  | "media_too_large"
+  | "tool_pairing"
+  | "schema"
+  | "other";
+
+export type ContextRecoveryStatus = "started" | "succeeded" | "failed" | "circuit_open";
+
+/** Bounded diagnostic metadata for one proactive/reactive context recovery attempt. */
+export interface ContextRecoveryProjection {
+  readonly version: 1;
+  readonly status: ContextRecoveryStatus;
+  readonly requestHash: string;
+  readonly errorClass: ContextRecoveryErrorClass;
+  readonly providerStatus?: number;
+  readonly providerCode?: string;
+  readonly attempt: number;
+  readonly attemptedModules: readonly string[];
+  readonly transitionReason: string;
+  readonly updatedAt: string;
+  readonly lastSequence: number;
+  readonly error?: string;
 }
 
 export type WorktreeStatus = "clean" | "dirty" | "conflicted" | "attached" | "removed" | "failed";
@@ -839,7 +870,7 @@ export type ModelStreamPart =
   | { readonly type: "tool_call_delta"; readonly index: number; readonly arguments: string }
   | { readonly type: "tool_call_end"; readonly index: number }
   | { readonly type: "usage"; readonly usage: ModelUsage }
-  | { readonly type: "error"; readonly code: string; readonly message: string }
+  | { readonly type: "error"; readonly code: string; readonly message: string; readonly status?: number; readonly providerCode?: string }
   | { readonly type: "done" };
 
 export interface ModelUsage {

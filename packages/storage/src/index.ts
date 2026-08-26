@@ -52,6 +52,8 @@ import {
   type ContextCompactionProjection,
   type ContextBoundaryMetadata,
   type ContextAttachmentProjection,
+  type ContextRecoveryProjection,
+  type ContextRecoveryErrorClass,
   type WorktreeProjection,
   type WorktreeStatus,
   type SessionOwnership,
@@ -301,6 +303,12 @@ function contextAttachmentProjections(value: unknown): readonly ContextAttachmen
       ? [{ id: record["id"], kind: record["kind"], tokenEstimate: Math.max(0, Math.floor(record["tokenEstimate"])) }]
       : [];
   }).slice(0, 256);
+}
+
+function contextRecoveryErrorClass(value: unknown): ContextRecoveryErrorClass | undefined {
+  return value === "prompt_too_long" || value === "media_too_large" || value === "tool_pairing" || value === "schema" || value === "other"
+    ? value
+    : undefined;
 }
 
 function deriveActiveStatus(projection: SessionProjection): SessionStatus {
@@ -592,6 +600,38 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
         attachments: contextAttachmentProjections(payload["attachments"]),
       };
       next = { ...next, contextCompaction: projection };
+    }
+  }
+
+  if (event.type === "context/recovery_started" || event.type === "context/recovery_transition" || event.type === "context/recovery_succeeded" || event.type === "context/recovery_failed" || event.type === "context/recovery_circuit_open") {
+    const payload = event.payload;
+    const previous = next.contextRecovery;
+    const requestHash = typeof payload["requestHash"] === "string" ? payload["requestHash"] : previous?.requestHash;
+    const errorClass = contextRecoveryErrorClass(payload["errorClass"]) ?? previous?.errorClass;
+    if (requestHash !== undefined && errorClass !== undefined) {
+      const attemptedModules = Array.isArray(payload["attemptedModules"])
+        ? payload["attemptedModules"].filter((item): item is string => typeof item === "string").slice(0, 16)
+        : previous?.attemptedModules ?? [];
+      const providerStatus = typeof payload["providerStatus"] === "number" ? payload["providerStatus"] : previous?.providerStatus;
+      const providerCode = typeof payload["providerCode"] === "string" ? payload["providerCode"].slice(0, 120) : previous?.providerCode;
+      const attempt = typeof payload["attempt"] === "number" ? Math.max(0, Math.floor(payload["attempt"])) : previous?.attempt ?? 0;
+      const transitionReason = typeof payload["transitionReason"] === "string" ? payload["transitionReason"].slice(0, 120) : previous?.transitionReason ?? "unknown";
+      const error = typeof payload["error"] === "string" ? payload["error"].slice(0, 500) : undefined;
+      const recovery: ContextRecoveryProjection = {
+        version: 1,
+        status: event.type === "context/recovery_succeeded" ? "succeeded" : event.type === "context/recovery_failed" ? "failed" : event.type === "context/recovery_circuit_open" ? "circuit_open" : "started",
+        requestHash,
+        errorClass,
+        ...(providerStatus === undefined ? {} : { providerStatus }),
+        ...(providerCode === undefined ? {} : { providerCode }),
+        attempt,
+        attemptedModules,
+        transitionReason,
+        updatedAt: event.createdAt,
+        lastSequence: event.sequence,
+        ...(error === undefined ? {} : { error }),
+      };
+      next = { ...next, contextRecovery: recovery };
     }
   }
 

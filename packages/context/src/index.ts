@@ -32,6 +32,13 @@ export {
 } from "./attachments.js";
 export { buildPostCompactMessages } from "./post-compact.js";
 export {
+  classifyProviderContextError,
+  fingerprintModelRequest,
+  isReactiveContextError,
+  ContextRecoveryGuard,
+} from "./recovery.js";
+export type { ProviderContextError, RecoveryGuardSnapshot } from "./recovery.js";
+export {
   countContextTokens,
   createTokenCounter,
   estimateContextTokens,

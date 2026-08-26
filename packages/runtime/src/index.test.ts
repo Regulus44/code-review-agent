@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { brand, type AttachmentReceipt, type ChatModel, type InteractionId, type ModelRequest, type ModelStreamPart, type PermissionId, type ToolDefinition } from "@code-review-agent/contracts";
 import { InMemoryEventStore, SqliteEventStore } from "@code-review-agent/storage";
+import { ContextRecoveryGuard } from "@code-review-agent/context";
 import { createBuiltinTools, DefaultPermissionPolicy, ToolRegistry, ToolRuntime } from "@code-review-agent/tools";
 import { GitWorktreeManager } from "@code-review-agent/workspace";
 import { AgentHost } from "./index.js";
@@ -1081,6 +1082,58 @@ describe("AgentHost", () => {
       await rm(parent, { recursive: true, force: true });
     }
   }, 15_000);
+
+  it("reactively compacts once after a provider prompt-too-long and retries the same turn", async () => {
+    const store = new InMemoryEventStore();
+    const requests: ModelRequest[] = [];
+    let agentAttempts = 0;
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        requests.push(request);
+        if (request.purpose === "context_summary") {
+          yield { type: "text_delta", text: "Keep the review goal and unresolved findings." };
+          yield { type: "done" };
+          return;
+        }
+        agentAttempts += 1;
+        if (agentAttempts === 1) {
+          const error = new Error("context_length_exceeded") as Error & { status?: number; code?: string };
+          error.status = 413;
+          error.code = "context_length_exceeded";
+          throw error;
+        }
+        yield { type: "text_delta", text: "Recovered after compact." };
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({
+      store,
+      model,
+      contextPolicy: { autoCompactEnabled: false, contextWindowTokens: 10_000 },
+      summaryCompact: { recentMessageTokens: 1, maxSummaryChars: 200 },
+    });
+    const session = await host.createSession("D:/m09-reactive-fixture");
+    await store.append({ sessionId: session.id, type: "user/message", payload: { content: "old context " + "x".repeat(30_000) } });
+    await store.append({ sessionId: session.id, type: "assistant/message", payload: { content: "old answer", responseId: "old-response" } });
+    const turn = await host.sendMessage(session.id, "continue after overflow");
+    await host.waitForTurn(turn);
+    const events = await host.events(session.id);
+    expect((await host.getSession(session.id))?.messages.at(-1)?.content).toBe("Recovered after compact.");
+    expect(requests.filter((request) => request.purpose === "context_summary")).toHaveLength(1);
+    expect(events.some((event) => event.type === "context/recovery_started" && event.payload["transitionReason"] === "reactive_compact_retry")).toBe(true);
+    expect(events.some((event) => event.type === "context/recovery_transition")).toBe(true);
+    expect(events.some((event) => event.type === "context/recovery_succeeded")).toBe(true);
+    expect(events.find((event) => event.type === "context/recovery_succeeded")?.payload).toMatchObject({ errorClass: "prompt_too_long", providerStatus: 413, attempt: 1, requestHash: expect.stringMatching(/^ctxreq_[0-9a-f]{16}$/u) });
+  });
+
+  it("keeps recovery guard state isolated between turns", async () => {
+    const first = new ContextRecoveryGuard(1, 3);
+    const second = new ContextRecoveryGuard(1, 3);
+    expect(first.beginReactive()).toBe(1);
+    expect(second.beginReactive()).toBe(1);
+    expect(first.snapshot().reactiveAttempts).toBe(1);
+    expect(second.snapshot().reactiveAttempts).toBe(1);
+  });
 
   it("serializes concurrent creates and never projects duplicate paths", async () => {
     try { await execFileAsync("git", ["--version"]); } catch { return; }

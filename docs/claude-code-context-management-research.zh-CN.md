@@ -654,6 +654,21 @@ Claude Code 的主动路径在模型请求前运行；反应式路径在 provide
 
 模块验收：主动 compact 和 reactive compact 不互相递归；同一 request 最多执行规定次数；连续失败会熔断；provider 400 能区分 context overflow、tool pairing、schema 和其他错误。
 
+### 14.8 M09 实施状态（2026-08-26）
+
+M09 已完成，详细代码对照记录见 [claude-code-context-m09-implementation.zh-CN.md](claude-code-context-m09-implementation.zh-CN.md)。实际入口如下：
+
+| 层次 | 实际入口 | 当前行为 |
+|---|---|---|
+| Provider error adapter | packages/llm/src/index.ts:ModelProviderError | 保留非 2xx status，从错误 body 只提取 bounded message/code；stream error 支持 status/providerCode |
+| 分类与 fingerprint | packages/context/src/recovery.ts | 区分 prompt_too_long、media_too_large、tool_pairing、schema、other；为 model-visible request 生成稳定 ctxreq hash |
+| Guard | ContextRecoveryGuard | 每个 runSteps turn 独立；默认一次 reactive attempt，连续三次 compact 失败打开 circuit |
+| Proactive path | packages/runtime/src/index.ts:runSteps() | 请求前 compact；成功重建 M08 view，失败计入 guard 和 recovery 事件 |
+| Reactive path | runSteps() 的 collectModelResponse catch | provider 413/PTL/media 后执行一次 compact，成功 continue 原 query loop，失败暴露原错误 |
+| Durable projection | packages/contracts、packages/storage | 新增五类 context/recovery_* 事件与 contextRecovery projection，保存 hash/status/class/attempt/transition bounded metadata |
+
+M09 不复制 Claude Code 代码。`compactTurnContext()` 复用 M06/M07/M08 的 compact、summary、boundary 和 attachment rebuild；reactive recovery 不重新进入 `runSteps()`，避免 proactive/reactive 互相递归。已有 text delta 后才失败的 provider stream 标记 partialOutput 并跳过 reactive compact，避免把不完整输出误当作可恢复响应。
+
 ### M10：Transcript、Boundary Replay 与 Session Restore
 
 | 项目 | 内容 |

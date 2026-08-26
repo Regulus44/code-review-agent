@@ -230,6 +230,20 @@ context/post_compact_rebuild_failed 只记录 bounded provider error；附件重
 
 回滚策略：移除 boundary/post-compact 模块、两个 M08 事件和 Runtime rebuild wiring，继续使用 M07/M06 compact result；既有 transcript 和旧 compact 事件无需迁移。
 
+## ADR-021：主动与反应式上下文恢复使用请求级状态机和熔断
+
+状态：accepted（2026-08-26，M09）
+
+M09 在每个 `runSteps()` turn 内创建独立的 `ContextRecoveryGuard`，将请求前主动 compact 与 provider overflow 后的 reactive compact 纳入同一条可重放诊断链。guard 不使用全局布尔值：同一 turn 默认最多一次 reactive attempt，连续三次 compact 无有效缩减时打开 circuit；compact 成功清零连续失败计数。不同 session/turn 的 guard 互不共享。
+
+Provider error 必须先经过 provider-neutral 分类。HTTP 413、prompt/context too long、too many tokens 归入 `prompt_too_long`；带 image/media/document/attachment 语义的容量错误归入 `media_too_large`；tool pairing、schema 和普通网络错误不触发 M09 compact。分类器只读取 status/code/providerCode 和 bounded message，不能把 provider body、凭据或完整 prompt 写入事件。
+
+Reactive compact 发生在 provider 已返回错误之后，成功后使用同一 `turnId` 重新进入 query loop；失败直接暴露原错误，不创建新的 transcript message，也不继续执行可能注入更多上下文的 stop hook。请求 hash 对发送给 provider 的 model-visible messages/tools 做稳定 SHA-256 指纹，用于关联 recovery_started、transition、succeeded、failed 和 circuit_open 事件。
+
+新增事件类型为 `context/recovery_started`、`context/recovery_transition`、`context/recovery_succeeded`、`context/recovery_failed` 和 `context/recovery_circuit_open`。Storage 只投影最近一次 `ContextRecoveryProjection`；EventStore transcript 和 M08 boundary 仍是事实来源。M09 不实现 context collapse、provider cache edit、hooks、Session Memory extraction 或完整 transcript restore。
+
+回滚策略：删除 `packages/context/src/recovery.ts`、Runtime recovery catch、LLM provider status 适配、五类 recovery 事件和 `contextRecovery` projection，即可回到 M08 compact 行为；既有 M01–M08 事件无需迁移。
+
 ## 参考代码入口
 
 - DSH Agent Loop：`D:/Develop/deepseek-harness-fork/packages/core/agent-loop/src/agent.ts`

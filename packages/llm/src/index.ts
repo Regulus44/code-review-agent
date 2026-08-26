@@ -38,6 +38,19 @@ export class ModelConfigurationError extends Error {
   readonly code = "MODEL_CONFIGURATION_ERROR";
 }
 
+/** Provider response failure with bounded metadata used by M09 recovery. */
+export class ModelProviderError extends Error {
+  readonly status: number;
+  readonly providerCode?: string;
+
+  constructor(message: string, status: number, providerCode?: string) {
+    super(message);
+    this.name = "ModelProviderError";
+    this.status = status;
+    if (providerCode !== undefined) this.providerCode = providerCode;
+  }
+}
+
 /** Deterministic model used by local smoke tests and development without an API key. */
 export class EchoChatModel implements ChatModel {
   async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
@@ -109,7 +122,12 @@ export class OpenAICompatibleChatModel implements ChatModel {
       throw new Error(`LLM request failed before receiving a response from ${url}: ${describeNetworkError(error)}`);
     }
     if (!response.ok) {
-      throw new Error(`LLM request failed with HTTP ${response.status}`);
+      const detail = await readProviderErrorDetail(response);
+      throw new ModelProviderError(
+        "LLM request failed with HTTP " + response.status + (detail.message === undefined ? "" : ": " + detail.message),
+        response.status,
+        detail.code,
+      );
     }
     if (response.body === null) {
       throw new Error("LLM response did not contain a body");
@@ -137,6 +155,25 @@ export class OpenAICompatibleChatModel implements ChatModel {
     }
     for (const index of openToolIndices) yield { type: "tool_call_end", index };
     yield { type: "done" };
+  }
+}
+
+async function readProviderErrorDetail(response: Response): Promise<{ readonly message?: string; readonly code?: string }> {
+  try {
+    const raw = await response.text();
+    if (raw.trim().length === 0) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return { message: raw.slice(0, 300) };
+    const root = parsed as Record<string, unknown>;
+    const nested = typeof root["error"] === "object" && root["error"] !== null ? root["error"] as Record<string, unknown> : undefined;
+    const message = typeof nested?.["message"] === "string" ? nested["message"] : typeof root["message"] === "string" ? root["message"] : undefined;
+    const code = typeof nested?.["code"] === "string" ? nested["code"] : typeof root["code"] === "string" ? root["code"] : undefined;
+    return {
+      ...(message === undefined ? {} : { message: message.slice(0, 300) }),
+      ...(code === undefined ? {} : { code: code.slice(0, 120) }),
+    };
+  } catch {
+    return {};
   }
 }
 

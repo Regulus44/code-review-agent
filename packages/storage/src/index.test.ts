@@ -108,6 +108,15 @@ describe("InMemoryEventStore", () => {
     });
   });
 
+  it("projects the latest M09 recovery status and keeps metadata bounded", async () => {
+    const store = new InMemoryEventStore();
+    const sessionId = await store.createSession("D:/recovery-replay");
+    const base = { requestHash: "ctxreq_0123456789abcdef", errorClass: "prompt_too_long", providerStatus: 413, providerCode: "context_length_exceeded", attempt: 1, attemptedModules: ["reactive_compact"], transitionReason: "reactive_compact_retry" };
+    await store.append({ sessionId, type: "context/recovery_started", payload: base });
+    await store.append({ sessionId, type: "context/recovery_succeeded", payload: base });
+    expect((await store.project(sessionId))?.contextRecovery).toMatchObject({ version: 1, status: "succeeded", requestHash: base.requestHash, errorClass: "prompt_too_long", providerStatus: 413, attempt: 1 });
+  });
+
   it("persists events, projections, commands, and schema across reopen", async () => {
     const directory = mkdtempSync(join(tmpdir(), "code-review-agent-"));
     const databasePath = join(directory, "agent.sqlite");
