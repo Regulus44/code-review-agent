@@ -216,6 +216,8 @@
       .session-body::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 50% 20%, rgba(65,118,230,.07), transparent 38%); opacity: .75; }
       .conversation-content { position: relative; display: flex; min-width: 0; min-height: 100%; flex: 1 0 auto; flex-direction: column; }
       .conversation-body { position: relative; width: min(748px, calc(100% - 40px)); min-height: 100%; margin: 0 auto; padding: 34px 0 28px; }
+      .conversation-history-controls { display: flex; justify-content: center; min-height: 30px; margin: -12px 0 22px; }
+      .conversation-load-older { min-width: 146px; }
       .hero { display: grid; place-items: center; min-height: calc(100% - 20px); padding: 9vh 0 26vh; text-align: center; }
       .hero-inner { width: min(560px, 100%); }
       .hero-mark { display: grid; place-items: center; width: 52px; height: 52px; margin: 0 auto 16px; border-radius: 17px; color: #fff; background: var(--blue); font-size: 25px; font-weight: 800; box-shadow: 0 10px 24px rgba(65,118,230,.22); }
@@ -896,6 +898,29 @@
         const scrollPortForView = (view) => view === 'trajectory' ? trajectoryScrollPort() || conversation : conversation;
         const activeScrollPort = () => scrollPortForView(state.sessionView);
         const isNearScrollTail = (scrollport) => !scrollport || scrollport.scrollHeight === 0 || scrollport.scrollHeight - scrollport.scrollTop - scrollport.clientHeight <= 64;
+        let conversationOlderRequest = false;
+        const loadOlderWithAnchor = async (view = 'conversation') => {
+          if (!typedRuntime?.loadOlder) return false;
+          const scrollport = scrollPortForView(view);
+          const heightBefore = scrollport?.scrollHeight || 0;
+          const topBefore = scrollport?.scrollTop || 0;
+          const loaded = await typedRuntime.loadOlder(200);
+          requestAnimationFrame(() => {
+            const nextScrollport = scrollPortForView(view);
+            if (nextScrollport) nextScrollport.scrollTop = topBefore + (nextScrollport.scrollHeight - heightBefore);
+          });
+          return loaded;
+        };
+        const maybeLoadConversationOlder = () => {
+          if (state.sessionView !== 'conversation' || conversationOlderRequest || !typedConnection) return;
+          const snapshot = typedConnection.store.getSnapshot();
+          if (snapshot.history.hasMoreBefore !== true || snapshot.history.loadingOlder || conversation.scrollTop > 48) return;
+          conversationOlderRequest = true;
+          void loadOlderWithAnchor('conversation').catch((error) => setStatus(error instanceof Error ? error.message : String(error), false)).finally(() => {
+            conversationOlderRequest = false;
+            renderComposerState(typedConnection?.store.getSnapshot() || { session: state.session });
+          });
+        };
         const updateScrollPosition = (view, scrollport) => {
           if (!scrollport) return;
           if (view === 'trajectory') state.trajectoryScrollTop = scrollport.scrollTop;
@@ -915,6 +940,7 @@
           if (state.sessionView !== 'conversation') return;
           updateScrollPosition('conversation', conversation);
           state.trajectoryFollow = isNearScrollTail(conversation);
+          maybeLoadConversationOlder();
         }, { passive: true });
         const api = async (url, options) => { const response = await fetch(url, options); if (!response.ok) throw new Error(await response.text()); return response.json(); };
         const commandKey = () => globalThis.crypto?.randomUUID?.() || `web_${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -1322,8 +1348,30 @@
           const body = ensureDetailsGroup(groupId);
           if (body && !body.contains(section)) body.append(section);
         };
+        const renderConversationHistoryControls = (body, snapshot) => {
+          const history = snapshot?.history;
+          if (!history || history.hasMoreBefore !== true) return;
+          const controls = document.createElement('div');
+          controls.className = 'conversation-history-controls';
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'toolbar-button conversation-load-older';
+          button.textContent = history.loadingOlder ? 'Loading older…' : 'Load older messages';
+          button.disabled = history.loadingOlder || conversationOlderRequest;
+          button.addEventListener('click', async () => {
+            if (conversationOlderRequest || history.loadingOlder) return;
+            conversationOlderRequest = true;
+            button.disabled = true;
+            try { await loadOlderWithAnchor('conversation'); }
+            catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); }
+            finally { conversationOlderRequest = false; renderComposerState(typedConnection?.store.getSnapshot() || { session: state.session }); }
+          });
+          controls.append(button);
+          body.append(controls);
+        };
         const renderTypedConversation = (projection, body, snapshot) => {
-          if (!projection || !Array.isArray(projection.nodes) || projection.nodes.length === 0) return false;
+          if (!projection || !Array.isArray(projection.nodes)) return false;
+          renderConversationHistoryControls(body, snapshot);
           const assistant = new Map();
           const toolRows = new Map();
           const toolTreeNodes = new Map((snapshot?.toolCallTree?.nodes || []).map((node) => [node.call.id, node]));
@@ -1381,19 +1429,10 @@
             const loadOlder = document.createElement('button'); loadOlder.type = 'button'; loadOlder.className = 'toolbar-button trajectory-load-older'; loadOlder.textContent = 'Load older'; loadOlder.setAttribute('aria-label', 'Load older trajectory records');
             loadOlder.addEventListener('click', async () => {
               if (!typedRuntime?.loadOlder) return;
-              const snapshotBefore = typedConnection?.store.getSnapshot();
-              const scrollportBefore = activeScrollPort();
-              const heightBefore = scrollportBefore?.scrollHeight || 0;
-              const topBefore = scrollportBefore?.scrollTop || 0;
               loadOlder.disabled = true;
-              try {
-                await typedRuntime.loadOlder(200);
-                requestAnimationFrame(() => {
-                  const scrollport = activeScrollPort();
-                  if (scrollport) scrollport.scrollTop = topBefore + (scrollport.scrollHeight - heightBefore);
-                });
-              } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); }
-              finally { loadOlder.disabled = snapshotBefore?.history.loadingOlder === true; refresh(); }
+              try { await loadOlderWithAnchor('trajectory'); }
+              catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); }
+              finally { loadOlder.disabled = typedConnection?.store.getSnapshot().history.loadingOlder === true; refresh(); }
             });
             controls.append(search, running, follow, loadOlder); section.append(controls);
             const meta = document.createElement('div'); meta.className = 'trajectory-meta'; meta.id = 'trajectory-meta'; section.append(meta);
@@ -1415,7 +1454,7 @@
           const currentSnapshot = typedConnection?.store.getSnapshot();
           if (loadOlder) {
             loadOlder.textContent = currentSnapshot?.history.loadingOlder ? 'Loading…' : 'Load older';
-            loadOlder.toggleAttribute('hidden', currentSnapshot?.history.hasOlder !== true);
+            loadOlder.toggleAttribute('hidden', currentSnapshot?.history.hasMoreBefore !== true);
             loadOlder.toggleAttribute('disabled', currentSnapshot?.history.loadingOlder === true);
           }
           const meta = section.querySelector('#trajectory-meta');
@@ -1428,7 +1467,7 @@
             return;
           }
           const view = typedRuntime.queryTrajectory(projection, { query: state.trajectoryQuery || '', runningOnly: state.trajectoryRunningOnly === true, limit: 200 });
-          meta.textContent = `${view.matchedRecords} matched · ${view.records.length} shown · sequence ${view.lastSequence}${view.truncated ? ' · more available' : ''}${currentSnapshot?.history.hasOlder ? ' · older history available' : ''}`;
+          meta.textContent = `${view.matchedRecords} matched · ${view.records.length} shown · sequence ${view.lastSequence}${view.truncated ? ' · more available' : ''}${currentSnapshot?.history.hasMoreBefore ? ' · older history available' : ''}`;
           if (!view.records.length) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = state.trajectoryQuery || state.trajectoryRunningOnly ? 'No trajectory records match this filter.' : 'No trajectory records yet.'; lanes.append(empty); return; }
           const selected = view.records.find((record) => record.key === state.trajectorySelectedKey) || view.records[0];
           state.trajectorySelectedKey = selected.key;
@@ -1491,7 +1530,18 @@
           const search = document.createElement('input'); search.className = 'trajectory-search'; search.type = 'search'; search.placeholder = 'Filter records'; search.setAttribute('aria-label', 'Filter trajectory records'); search.value = state.trajectoryQuery || '';
           const running = document.createElement('label'); running.className = 'trajectory-running'; const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.checked = state.trajectoryRunningOnly === true; checkbox.setAttribute('aria-label', 'Show running records only'); running.append(checkbox, document.createTextNode('Running'));
           const openDetails = document.createElement('button'); openDetails.type = 'button'; openDetails.className = 'main-trajectory-open-details'; openDetails.textContent = 'Open details'; openDetails.onclick = () => { dispatchShellLayout({ type: 'open-details' }); renderTrajectoryPanel(typedConnection?.store.getSnapshot()?.trajectory); details.querySelector('#trajectory-inspector-panel')?.scrollIntoView({ block: 'start' }); };
-          controls.append(search, running, openDetails); body.append(controls);
+          const loadOlder = document.createElement('button'); loadOlder.type = 'button'; loadOlder.className = 'toolbar-button main-trajectory-load-older'; loadOlder.textContent = 'Load older'; loadOlder.setAttribute('aria-label', 'Load older trajectory records');
+          const trajectorySnapshot = typedConnection?.store.getSnapshot();
+          loadOlder.hidden = trajectorySnapshot?.history.hasMoreBefore !== true;
+          loadOlder.disabled = trajectorySnapshot?.history.loadingOlder === true;
+          loadOlder.onclick = async () => {
+            if (loadOlder.disabled || !typedRuntime?.loadOlder) return;
+            loadOlder.disabled = true;
+            try { await loadOlderWithAnchor('trajectory'); }
+            catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); }
+            finally { loadOlder.disabled = typedConnection?.store.getSnapshot().history.loadingOlder === true; }
+          };
+          controls.append(search, running, loadOlder, openDetails); body.append(controls);
           const scrollRegion = document.createElement('div');
           scrollRegion.className = 'main-trajectory-scroll';
           scrollRegion.dataset.trajectoryScroll = '';
@@ -1502,7 +1552,7 @@
           body.append(scrollRegion);
           if (!projection || !typedRuntime?.queryTrajectory) { meta.textContent = 'Projection unavailable'; const empty = document.createElement('div'); empty.className = 'main-trajectory-empty'; empty.textContent = 'Trajectory data will appear after the session receives events.'; scrollRegion.append(empty); return; }
           const view = typedRuntime.queryTrajectory(projection, { query: state.trajectoryQuery || '', runningOnly: state.trajectoryRunningOnly === true, limit: 200 });
-          meta.textContent = `${view.matchedRecords} matched · ${view.records.length} shown · sequence ${view.lastSequence}${view.truncated ? ' · more available' : ''}`;
+          meta.textContent = `${view.matchedRecords} matched · ${view.records.length} shown · sequence ${view.lastSequence}${view.truncated ? ' · more available' : ''}${trajectorySnapshot?.history.hasMoreBefore ? ' · older history available' : ''}`;
           search.addEventListener('input', () => { state.trajectoryQuery = search.value; render(); });
           checkbox.addEventListener('change', () => { state.trajectoryRunningOnly = checkbox.checked; render(); });
           if (!view.records.length) { const empty = document.createElement('div'); empty.className = 'main-trajectory-empty'; empty.textContent = state.trajectoryQuery || state.trajectoryRunningOnly ? 'No trajectory records match this filter.' : 'No trajectory records yet.'; scrollRegion.append(empty); return; }
@@ -2209,7 +2259,7 @@
           const hasActivity = ordered.some((event) => event.type !== 'session/created');
           if (!hasMessage && !hasActivity) { const hero = document.createElement('div'); hero.className = 'hero'; hero.innerHTML = `<div class="hero-inner"><div class="hero-mark">⌁</div><h1>Ready to review your code</h1><p>Ask the agent to inspect a repository, explain a file, or plan the next change.</p><span class="workspace-chip">${esc(state.session?.workspaceRoot || '.')}</span></div>`; conversationContent.append(hero); }
           else {
-            const body = document.createElement('div'); body.className = 'conversation-body'; conversationContent.append(body); const assistant = new Map(); const permissions = new Map(); const interactions = new Map(); const toolRows = new Map();
+            const body = document.createElement('div'); body.className = 'conversation-body'; conversationContent.append(body); renderConversationHistoryControls(body, typedSnapshot); const assistant = new Map(); const permissions = new Map(); const interactions = new Map(); const toolRows = new Map();
             const upsertTool = (id, name, input, output, statusText, summaryOverride) => { const key = id || `${name}-${toolRows.size}`; const model = fallbackToolIntent(name || 'tool', input, output, statusText || 'Completed'); if (summaryOverride) model.summary = summaryOverride; let card = toolRows.get(key); if (!card) { card = appendTool(body, name || 'tool', model); toolRows.set(key, card); } else card.update(model); return card; };
             for (const event of ordered) {
               if (event.type === 'user/message' || event.type === 'turn/steered') appendMessage(body, 'user', event.payload?.content || '');
