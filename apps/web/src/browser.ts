@@ -37,6 +37,7 @@ export interface BrowserWebRuntime {
   readonly store: SessionStore;
   readonly connection: SessionConnectionController;
   readonly loadOlder: SessionConnectionController["loadOlder"];
+  readonly sendMessage: SessionConnectionController["sendMessage"];
   readonly projectConversation: typeof projectConversation;
   readonly projectTrajectory: typeof projectTrajectory;
   readonly queryTrajectory: typeof queryTrajectory;
@@ -100,6 +101,7 @@ const runtime: BrowserWebRuntime = {
   store,
   connection,
   loadOlder: (limit?: number) => connection.loadOlder(limit),
+  sendMessage: (content: string, commandId?: string, reasoningEffort?: string) => connection.sendMessage(content, commandId, reasoningEffort),
   projectConversation,
   projectTrajectory,
   queryTrajectory,

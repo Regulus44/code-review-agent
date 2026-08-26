@@ -1,5 +1,5 @@
 import { AGENT_EVENT_TYPES } from "@code-review-agent/contracts";
-import type { AgentEvent, SessionId } from "@code-review-agent/contracts";
+import type { AgentEvent, SessionId, TurnId } from "@code-review-agent/contracts";
 import { WebApiClient } from "./api.js";
 import { SessionStore } from "./store.js";
 
@@ -93,6 +93,15 @@ export class SessionConnectionController {
   dispose(): void {
     this.close();
     this.store.clear();
+  }
+
+  /** Host admission entry point for Composer submissions. */
+  async sendMessage(content: string, commandId?: string, reasoningEffort?: string): Promise<{ readonly turnId: TurnId }> {
+    const sessionId = this.sessionId;
+    if (this.closed || sessionId === undefined) throw new Error("No active session");
+    const normalized = content.trim();
+    if (!normalized) throw new Error("Message cannot be empty");
+    return this.api.sendMessage(sessionId, normalized, commandId, reasoningEffort);
   }
 
   /** Prepend one bounded page without affecting the live SSE cursor. */

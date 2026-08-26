@@ -195,4 +195,24 @@ describe("SessionConnectionController", () => {
     expect(controller.store.getSnapshot().history.connectionGeneration).toBe(2);
     controller.close();
   });
+
+  it("routes Composer admission through the active connection session", async () => {
+    const calls: string[] = [];
+    const client = new WebApiClient({
+      baseUrl: "http://localhost:4317",
+      fetcher: async (input, init) => {
+        const url = String(input);
+        calls.push(url);
+        if (url.includes("/events?")) return new Response(JSON.stringify({ events: [], hasMoreBefore: false, hasMoreAfter: false }), { status: 200, headers: { "content-type": "application/json" } });
+        if ((init?.method ?? "GET") === "GET") return new Response(JSON.stringify({ ...session(0), id: sessionId }), { status: 200, headers: { "content-type": "application/json" } });
+        return new Response(JSON.stringify({ turnId: "turn_admitted" }), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+    const controller = new SessionConnectionController({ api: client, eventSourceFactory: (url) => new FakeEventSource(url), reconnectDelayMs: 0 });
+    await expect(controller.sendMessage("hello")).rejects.toThrow("No active session");
+    await controller.open(sessionId);
+    await expect(controller.sendMessage("  hello  ", "cmd_composer")).resolves.toEqual({ turnId: "turn_admitted" });
+    expect(calls.some((url) => url === `http://localhost:4317/v1/sessions/${sessionId}`)).toBe(true);
+    controller.close();
+  });
 });

@@ -2631,7 +2631,8 @@
           send.disabled = true;
           renderComposerState(typedConnection?.store.getSnapshot() || { session: state.session });
           try {
-            if (typedRuntime?.api?.sendMessage) await typedRuntime.api.sendMessage(state.session.id, content, commandKey());
+            if (typedRuntime?.sendMessage) await typedRuntime.sendMessage(content, commandKey());
+            else if (typedRuntime?.api?.sendMessage) await typedRuntime.api.sendMessage(state.session.id, content, commandKey());
             else await commandApi(`/v1/sessions/${encodeURIComponent(state.session.id)}`, { content });
             if (composerEpoch === state.composerEpoch) {
               state.composer = typedRuntime?.settleComposerSubmit
