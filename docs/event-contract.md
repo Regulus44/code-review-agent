@@ -105,6 +105,12 @@ M11 增加 `context/session_memory_extraction_started`、`context/session_memory
 
 M12 增加 `context/project_memory_loaded`、`context/project_memory_recalled`、`context/project_memory_stale` 和 `context/project_memory_disabled`。事件 payload 只允许保存 `scopeKey`、`entrypointName: "MEMORY.md"`、bounded `entrypointBytes`/`entrypointLines`、`truncated`、`topicCount`、最多 5 个 `recalledTopicIds` 或 `staleTopicIds`、`ignored`、`reason` 和由 EventStore 生成的 sequence。`MEMORY.md` 正文和 topic 正文不得写入 EventStore、SSE、projection 或 Web diagnostics；正文由 host-owned `ProjectMemoryStore` 在当前 model view 中按需提供。`SessionProjection.contextProjectMemory` 由四类事件 replay 得到，InMemory 与 SQLite 使用相同 reducer。用户明确忽略 memory 或 adapter 读取失败时使用 disabled receipt；stale reference topic 不进入 model view。
 
+M13 的 `step/started` payload 可以携带 `contextBudget`、`contextWarning`、`tokenCount` 和 `modelRequestId`。其中 `tokenCount` 只允许 value、source、confidence、stale/exactAttempted 标志和有限 breakdown；`contextBudget` 只允许 provider/model capability、effective window、reserved output、四类 threshold、source 等无秘密字段；`contextWarning` 只允许 token usage、percent left 和 warning/error/auto-compact/blocking/predictive 布尔状态。Storage 将这些字段投影为 `SessionProjection.contextDiagnostics`，Web 优先消费该 projection。
+
+M13 的 compact 事件（`context/compacted`、`context/microcompacted`、`context/session_memory_compacted`、`context/summary_compacted`、`context/compact_boundary` 及对应失败事件）可携带 `preCompactTokens`、`postCompactTokens` 和 `tokensSaved`。microcompact 通常只提供 `tokensSaved`；这些字段只表示 model-visible view 的 bounded 计数，不替代完整 transcript。recovery 事件可投影为最多 16 项 `{ status, attempt, errorClass?, transitionReason?, providerStatus?, lastSequence }`，用于诊断和回放，不允许客户端直接驱动恢复。
+
+M13 事件和 projection 不得保存完整 prompt、transcript、工具原文、provider response body、credential、header 或 secret。旧事件缺少 diagnostics 时，客户端可以使用明确标记为 estimate 的兼容 ContextMeter；不能把本地估算冒充 provider usage。
+
 `worktree/*` 记录 Git worktree 的发现、绑定、切换、清理和失败。payload 至少包含 `{ id, repoRoot, path, status }`，可选包含 `branch`、`commit`、`sessionId`、`taskId` 和 bounded `error`。`worktree/switched` 还使 Session projection 的 `activeWorktreeId` 与 `activeWorkspaceRoot` 指向该 worktree；工具、权限和 system prompt 使用 active root，但主仓库 root 仍保留为 Session 的 `workspaceRoot`。清理必须先检查 dirty/conflicted 状态，除非显式 force，否则不能删除未提交修改；主仓库 worktree 永远不能被清理。
 
 MCP 生命周期事件只携带 `serverName`、状态、动作和脱敏错误；env/header/token 等配置秘密不得进入 payload。MCP 工具调用本身仍使用公共 `tool/*` 和 `permission/*` 事件。`mcp/resource` / `mcp/prompt` 只记录 server、资源 URI 或 prompt name、动作、bounded bytes/truncated 和 trust marker，不记录远端原始内容。

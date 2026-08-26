@@ -175,4 +175,32 @@ describe("SessionStore", () => {
     store.setConnection("connected");
     expect(store.getSnapshot().error).toBeUndefined();
   });
+
+  it("folds live context diagnostics, compaction receipts, and bounded recovery events", () => {
+    const store = new SessionStore();
+    store.open(session());
+    store.apply(event(1, "step/started", {
+      step: 2,
+      contextBudget: { effectiveWindowTokens: 10_000, warningThreshold: 7_000, errorThreshold: 8_000, autoCompactThreshold: 9_000, blockingThreshold: 9_800 },
+      contextWarning: { percentLeft: 4, isAboveWarningThreshold: true, isAboveErrorThreshold: true, isAboveAutoCompactThreshold: true, isAtBlockingLimit: false },
+      tokenCount: { value: 9_600, source: "provider", confidence: "exact", breakdown: { messages: 9_000, tools: 600 } },
+      modelRequestId: "request_live",
+    }));
+    store.apply(event(2, "context/recovery_started", { attempt: 1, errorClass: "prompt_too_long", transitionReason: "reactive_compact_retry", providerStatus: 413 }));
+    store.apply(event(3, "context/summary_compacted", { kind: "summary", preCompactTokens: 9_600, postCompactTokens: 3_200, estimatedTokens: 3_200 }));
+    store.apply(event(4, "context/recovery_succeeded", { attempt: 1, transitionReason: "reactive_compact_retry" }));
+    store.apply(event(5, "context/microcompacted", { tokensSaved: 321 }));
+
+    const diagnostics = store.getSnapshot().session?.contextDiagnostics;
+    expect(diagnostics).toMatchObject({
+      tokenUsage: 9_600,
+      tokenSource: "provider",
+      tokenConfidence: "exact",
+      level: "auto_compact",
+      lastStep: 2,
+      lastRequestId: "request_live",
+      lastCompaction: { status: "completed", kind: "micro", tokensSaved: 321 },
+    });
+    expect(diagnostics?.recoveryChain).toHaveLength(2);
+  });
 });

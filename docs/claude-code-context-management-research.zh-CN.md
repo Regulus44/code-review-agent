@@ -760,6 +760,14 @@ M12 已完成。`packages/context/src/project-memory.ts` 实现 200 行/25,000 U
 | 本项目落点 | `packages/contracts/src/index.ts:ContextCompactionProjection`、Runtime events、`apps/web` ContextMeter/diagnostic presenter |
 | 直接仿照程度 | 状态类别和诊断维度直接仿照；Web 只能消费 durable projection，不自行猜测 token 事实 |
 
+#### M13 实施状态（2026-08-26）
+
+M13 已完成。`packages/runtime/src/index.ts` 在每个 `step/started` 记录与实际 `prepared.view` 一致的 token count、预算阈值、剩余百分比、source/confidence、breakdown 和 model request cursor；legacy、microcompact、Session Memory、Summary 与 compact boundary receipt 同时携带 compact 前后 token 或节省量。
+
+`packages/contracts/src/index.ts` 新增 `ContextDiagnosticsProjection`；`packages/storage/src/index.ts` 的 InMemory/SQLite reducer 投影 step、compact、boundary 和 recovery 诊断，recovery chain 最多 16 项，compact/recovery 早到时使用 unknown baseline。`apps/web/src/presentation/context-presenter.ts`、`apps/web/src/client/store.ts` 和 `apps/web/src/client/connection.ts` 让 ContextMeter、diagnostics inspector 与 SSE replay 优先消费 durable projection；没有 projection 的历史 session 继续显示明确的 estimate fallback。
+
+对应实现说明：[claude-code-context-m13-implementation.zh-CN.md](claude-code-context-m13-implementation.zh-CN.md)；开发日志：[development-log/m13-context-diagnostics.zh-CN.md](development-log/m13-context-diagnostics.zh-CN.md)。
+
 模块验收：UI 能区分 estimate/provider exact；能显示最近 boundary、microcompact 节省和失败原因；刷新、SSE replay 和 API restart 后诊断状态一致。
 
 ### M14：Context Collapse（最后评估）

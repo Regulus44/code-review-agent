@@ -350,6 +350,36 @@ git diff --check
     pnpm test
     git diff --check
 
+### 5.5 当前执行切片：M13 Context Diagnostics 与 Web Projection
+
+状态：`completed`（2026-08-26）。
+
+交付物：
+
+- `ContextDiagnosticsProjection`：token usage/source/confidence、effective window、warning/error/auto-compact/blocking threshold、percent left、最近 step/request、有限 breakdown；
+- Runtime 每个 `step/started` 追加与实际 model view 一致的 token/预算诊断；legacy、microcompact、Session Memory、Summary 和 boundary compact receipt 记录 compact 前后 token 或 tokensSaved；
+- Storage InMemory/SQLite 共用 reducer，支持 compact/recovery 先到的 unknown baseline、最近 compact receipt 和最多 16 项 recovery chain；
+- Web ContextMeter/diagnostics presenter 优先消费 durable projection，SSE store 增量 fold，旧 session 保留明确的 estimate fallback；
+- M13 合同、Runtime、Storage、Web 测试，实施说明、开发日志、ADR-025 和 CC-014。
+
+参考：Claude Code `D:/Develop/claude-code/src/components/TokenWarning.tsx`、`src/utils/analyzeContext.ts`、`src/query.ts`；本项目 `packages/contracts/src/index.ts`、`packages/runtime/src/index.ts`、`packages/storage/src/index.ts`、`apps/web/src/presentation/context-presenter.ts`、`apps/web/src/client/store.ts`。
+
+契约与安全边界：
+
+- diagnostics 只保存 bounded 数值、枚举、request/error/reason 摘要和 sequence，不保存 prompt、transcript、工具原文、provider body、凭据或 secret；
+- Web 不对已有 durable diagnostics 重新估算，也不能直接触发 recovery；
+- recovery chain 最多 16 项，breakdown 最多 16 个数值字段；
+- M13 不包含 context collapse、provider cache edit、完整 inspector UI 或账户/遥测。
+
+验收命令：
+
+    pnpm typecheck
+    pnpm --filter @code-review-agent/web test -- --run
+    pnpm --filter @code-review-agent/storage test -- --run
+    pnpm --filter @code-review-agent/runtime test -- --run
+    pnpm test
+    git diff --check
+
 ## 6. Phase 8.2：Workspace/Worktree
 
 交付物：

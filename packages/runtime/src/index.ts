@@ -2450,6 +2450,9 @@ export class AgentHost {
           originalMessageCount: result.originalMessageCount,
           compactedMessageCount: result.compactedMessageCount,
           estimatedTokens: result.estimatedTokens,
+          preCompactTokens,
+          postCompactTokens: result.estimatedTokens,
+          tokensSaved: Math.max(0, preCompactTokens - result.estimatedTokens),
           droppedMessages: result.droppedMessages,
           protectedMessageCount: result.protectedMessageCount,
           truncatedToolResults: result.truncatedToolResults,
@@ -2539,6 +2542,9 @@ export class AgentHost {
         originalMessageCount: preCompactMessages.length,
         compactedMessageCount: rebuilt.messages.length,
         estimatedTokens: estimateContextTokens({ messages: rebuilt.messages }).value,
+        preCompactTokens,
+        postCompactTokens: estimateContextTokens({ messages: rebuilt.messages }).value,
+        tokensSaved: Math.max(0, preCompactTokens - estimateContextTokens({ messages: rebuilt.messages }).value),
         droppedMessages: Math.max(0, preCompactMessages.filter((message) => message.role !== "system").length - parts.preservedMessages.length - parts.summaryMessages.length),
         protectedMessageCount: protectedToolCallIds.size,
         attachments: rebuilt.attachmentMetadata,
@@ -2639,6 +2645,7 @@ export class AgentHost {
       }
       return false;
     }
+    const preCompactTokenEstimate = estimateContextTokens({ messages }).value;
     messages.splice(0, messages.length, ...result.messages);
     const projection = await this.options.store.project(sessionId);
     await this.options.store.append({
@@ -2651,6 +2658,9 @@ export class AgentHost {
         originalMessageCount: result.originalMessageCount,
         compactedMessageCount: result.messages.length,
         estimatedTokens: result.estimatedTokens,
+        preCompactTokens: preCompactTokenEstimate,
+        postCompactTokens: result.estimatedTokens,
+        tokensSaved: Math.max(0, preCompactTokenEstimate - result.estimatedTokens),
         droppedMessages: result.droppedMessageCount,
         protectedMessageCount: protectedToolCallIds.size,
         memoryChars: result.memoryChars,
@@ -2722,6 +2732,7 @@ export class AgentHost {
       }
       return false;
     }
+    const preCompactTokenEstimate = estimateContextTokens({ messages }).value;
     messages.splice(0, messages.length, ...result.messages);
     await this.options.store.append({
       sessionId,
@@ -2734,6 +2745,9 @@ export class AgentHost {
         originalMessageCount: result.originalMessageCount,
         compactedMessageCount: result.compactedMessageCount,
         estimatedTokens: result.estimatedTokens,
+        preCompactTokens: preCompactTokenEstimate,
+        postCompactTokens: result.estimatedTokens,
+        tokensSaved: Math.max(0, preCompactTokenEstimate - result.estimatedTokens),
         droppedMessages: result.droppedMessageCount,
         preservedMessageCount: result.preservedMessageCount,
         retries: result.retries,

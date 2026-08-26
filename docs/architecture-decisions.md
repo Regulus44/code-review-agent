@@ -288,6 +288,22 @@ Project Memory 只允许 user、feedback、project、reference 四类 taxonomy�
 
 回滚策略：停止配置 `AgentHostOptions.projectMemory` 即可禁用 M12；保留已存在的 metadata events 作为兼容未知扩展，不删除 host-owned memory 正文。
 
+## ADR-025：Context Diagnostics 由 EventStore 投影并优先服务 Web
+
+状态：accepted（2026-08-26，M13）
+
+M13 仿照 Claude Code `src/components/TokenWarning.tsx`、`src/utils/analyzeContext.ts` 和 `src/query.ts` 的 context 状态/compact 进度职责，将每个模型 step 的 token、预算阈值、剩余百分比、来源和 confidence 作为 durable diagnostics。Runtime 使用与 provider 请求完全相同的 `prepared.view` 计数，并在 `step/started` 追加 bounded 诊断；Web 不再对已有诊断重新估算。
+
+`ContextDiagnosticsProjection` 是 SessionProjection 的附加字段，由 InMemory 与 SQLite 共用 reducer 生成。`context/compacted`、Session Memory、Summary、compact boundary 和 recovery 事件只更新最近 compact receipt 或最多 16 条 recovery metadata。compact/recovery 早于首个 step 时建立 unknown baseline，后续 step 补齐真实事实，保证 replay 不依赖事件恰好按 UI 顺序到达。
+
+诊断只允许 token 数、阈值、枚举、有限 breakdown、request id、bounded error/reason 和 sequence；完整 prompt、transcript、工具结果、provider body、凭据和 secret 不得进入 diagnostics、SSE 或 Web。recovery projection 只用于观察和排障，Web 不能直接触发 recovery 副作用。
+
+状态级别固定为 `unknown`、`healthy`、`warning`、`error`、`auto_compact`、`blocking`；token source 固定为 `provider`、`estimate`、`stale_usage`。旧事件或旧 projection 没有 diagnostics 时，Web 保留旧 ContextMeter 的兼容 message estimate，并明确展示 unknown/estimated，不伪造 provider 事实。
+
+该决策仅参考 Claude Code 的行为和模块边界，没有复制其源码、CLI、账户、遥测或 provider UI。M13 不实现 context collapse、provider cache edit、完整 inspector 页面或恢复控制。
+
+回滚策略：停止写入 `contextDiagnostics` 和 Web 增量 fold 即可回到 M12 projection；已有 M13 事件作为兼容扩展保留，模型请求和原始 transcript 不受影响。
+
 ## 参考代码入口
 
 - DSH Agent Loop：`D:/Develop/deepseek-harness-fork/packages/core/agent-loop/src/agent.ts`

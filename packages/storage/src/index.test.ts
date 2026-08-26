@@ -191,6 +191,64 @@ describe("InMemoryEventStore", () => {
     expect((await store.project(sessionId))?.contextRecovery).toMatchObject({ version: 1, status: "succeeded", requestHash: base.requestHash, errorClass: "prompt_too_long", providerStatus: 413, attempt: 1 });
   });
 
+  it("replays M13 diagnostics from step, compact, and recovery events", async () => {
+    const store = new InMemoryEventStore();
+    const sessionId = await store.createSession("D:/m13-diagnostics");
+    await store.append({ sessionId, type: "step/started", payload: {
+      step: 1,
+      modelRequestId: "request_m13",
+      contextBudget: { effectiveWindowTokens: 10_000, warningThreshold: 7_000, errorThreshold: 8_000, autoCompactThreshold: 9_000, blockingThreshold: 9_800 },
+      contextWarning: { percentLeft: 5, isAboveWarningThreshold: true, isAboveErrorThreshold: true, isAboveAutoCompactThreshold: true, isAtBlockingLimit: false },
+      tokenCount: { value: 9_500, source: "provider", confidence: "exact", breakdown: { messages: 8_000, tools: 1_500 } },
+    } });
+    await store.append({ sessionId, type: "context/compact_boundary", payload: {
+      boundary: { version: 1, id: "boundary_m13", kind: "summary", trigger: "auto", preCompactTokens: 9_500, sourceSequence: 2, createdAt: "2026-08-26T00:00:00.000Z" },
+      estimatedTokens: 2_000,
+      preCompactTokens: 9_500,
+      postCompactTokens: 2_000,
+      tokensSaved: 7_500,
+      originalMessageCount: 4,
+      compactedMessageCount: 2,
+      droppedMessages: 2,
+    } });
+    for (let index = 0; index < 20; index += 1) {
+      await store.append({ sessionId, type: "context/recovery_transition", payload: { attempt: index, transitionReason: `step-${index}` } });
+    }
+    const projection = await store.project(sessionId);
+    expect(projection?.contextDiagnostics).toMatchObject({
+      tokenUsage: 9_500,
+      tokenSource: "provider",
+      tokenConfidence: "exact",
+      level: "auto_compact",
+      lastRequestId: "request_m13",
+      lastCompaction: { status: "completed", kind: "summary", preCompactTokens: 9_500, postCompactTokens: 2_000, tokensSaved: 7_500 },
+    });
+    expect(projection?.contextDiagnostics?.recoveryChain).toHaveLength(16);
+    expect(projection?.contextCompaction).toMatchObject({ preCompactTokens: 9_500, postCompactTokens: 2_000, tokensSaved: 7_500 });
+    await store.append({ sessionId, type: "context/microcompacted", payload: { tokensSaved: 321, clearedToolCallIds: ["tool_old"] } });
+    expect((await store.project(sessionId))?.contextDiagnostics?.lastCompaction).toMatchObject({ status: "completed", kind: "micro", tokensSaved: 321 });
+  });
+
+  it("persists M13 diagnostics across SQLite reopen", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-m13-"));
+    const databasePath = join(directory, "agent.sqlite");
+    try {
+      const first = new SqliteEventStore({ databasePath });
+      const sessionId = await first.createSession("D:/m13-sqlite");
+      await first.append({ sessionId, type: "step/started", payload: {
+        contextBudget: { effectiveWindowTokens: 5_000, warningThreshold: 3_000, errorThreshold: 3_500, autoCompactThreshold: 4_000, blockingThreshold: 4_800 },
+        contextWarning: { percentLeft: 20, isAboveWarningThreshold: false, isAboveErrorThreshold: false, isAboveAutoCompactThreshold: false, isAtBlockingLimit: false },
+        tokenCount: { value: 4_000, source: "stale_usage", confidence: "low" },
+      } });
+      first.close();
+      const second = new SqliteEventStore({ databasePath });
+      expect((await second.project(sessionId))?.contextDiagnostics).toMatchObject({ tokenUsage: 4_000, tokenSource: "stale_usage", tokenConfidence: "low", effectiveWindowTokens: 5_000 });
+      second.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("persists events, projections, commands, and schema across reopen", async () => {
     const directory = mkdtempSync(join(tmpdir(), "code-review-agent-"));
     const databasePath = join(directory, "agent.sqlite");

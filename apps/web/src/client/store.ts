@@ -1,5 +1,6 @@
 import type {
   AgentEvent,
+  ContextDiagnosticRecovery,
   SessionId,
   SessionProjection,
   SessionStatus,
@@ -365,7 +366,7 @@ function foldProjection(session: SessionProjection, event: AgentEvent): SessionP
       };
     }
     default:
-      return { ...session, updatedAt: event.createdAt, lastSequence: Math.max(session.lastSequence, event.sequence) };
+      return foldContextDiagnostics(session, event) ?? { ...session, updatedAt: event.createdAt, lastSequence: Math.max(session.lastSequence, event.sequence) };
   }
 }
 
@@ -422,4 +423,117 @@ function stringValue(value: unknown): string | undefined {
 
 function booleanValue(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
+}
+
+function foldContextDiagnostics(session: SessionProjection, event: AgentEvent): SessionProjection | undefined {
+  const previous = session.contextDiagnostics;
+  if (event.type === "step/started") {
+    const budget = recordValue(event.payload["contextBudget"]);
+    const warning = recordValue(event.payload["contextWarning"]);
+    const tokenCount = recordValue(event.payload["tokenCount"]);
+    if (budget === undefined || warning === undefined || tokenCount === undefined) return undefined;
+    const tokenUsage = numberValue(tokenCount["value"], previous?.tokenUsage ?? 0);
+    const effectiveWindowTokens = numberValue(budget["effectiveWindowTokens"], previous?.effectiveWindowTokens ?? 0);
+    const level = warning["isAtBlockingLimit"] === true ? "blocking" : warning["isAboveAutoCompactThreshold"] === true ? "auto_compact" : warning["isAboveErrorThreshold"] === true ? "error" : warning["isAboveWarningThreshold"] === true ? "warning" : effectiveWindowTokens > 0 ? "healthy" : "unknown";
+    const source = tokenCount["source"] === "provider" || tokenCount["source"] === "stale_usage" ? tokenCount["source"] : "estimate";
+    const confidence = tokenCount["confidence"] === "exact" || tokenCount["confidence"] === "high" || tokenCount["confidence"] === "low" ? tokenCount["confidence"] : "medium";
+    const breakdown = recordValue(tokenCount["breakdown"]);
+    const normalizedBreakdown = breakdown === undefined ? previous?.breakdown : Object.fromEntries(Object.entries(breakdown).filter(([, item]) => typeof item === "number").slice(0, 16)) as Readonly<Record<string, number>>;
+    return {
+      ...session,
+      contextDiagnostics: {
+        version: 1,
+        tokenUsage,
+        tokenSource: source,
+        tokenConfidence: confidence,
+        effectiveWindowTokens,
+        warningThreshold: numberValue(budget["warningThreshold"], previous?.warningThreshold ?? 0),
+        errorThreshold: numberValue(budget["errorThreshold"], previous?.errorThreshold ?? 0),
+        autoCompactThreshold: numberValue(budget["autoCompactThreshold"], previous?.autoCompactThreshold ?? 0),
+        blockingThreshold: numberValue(budget["blockingThreshold"], previous?.blockingThreshold ?? 0),
+        percentLeft: numberValue(warning["percentLeft"], previous?.percentLeft ?? 0),
+        level,
+        ...(typeof event.payload["step"] === "number" ? { lastStep: Math.max(0, Math.floor(event.payload["step"] as number)) } : {}),
+        ...(event.turnId === undefined ? {} : { lastTurnId: event.turnId }),
+        ...(typeof event.payload["modelRequestId"] === "string" ? { lastRequestId: (event.payload["modelRequestId"] as string).slice(0, 128) } : {}),
+        ...(normalizedBreakdown === undefined ? {} : { breakdown: normalizedBreakdown }),
+        ...(previous?.lastCompaction === undefined ? {} : { lastCompaction: previous.lastCompaction }),
+        recoveryChain: previous?.recoveryChain ?? [],
+        updatedAt: event.createdAt,
+        lastSequence: event.sequence,
+      },
+      updatedAt: event.createdAt,
+      lastSequence: event.sequence,
+    };
+  }
+  if (event.type === "context/recovery_started" || event.type === "context/recovery_transition" || event.type === "context/recovery_succeeded" || event.type === "context/recovery_failed" || event.type === "context/recovery_circuit_open") {
+    const baseline = previous ?? emptyContextDiagnostics(event);
+    const status: ContextDiagnosticRecovery["status"] = event.type === "context/recovery_started"
+      ? "started"
+      : event.type === "context/recovery_transition"
+        ? "transition"
+        : event.type === "context/recovery_succeeded"
+          ? "succeeded"
+          : event.type === "context/recovery_circuit_open" ? "circuit_open" : "failed";
+    return {
+      ...session,
+      contextDiagnostics: {
+        ...baseline,
+        recoveryChain: [...baseline.recoveryChain, { status, attempt: numberValue(event.payload["attempt"], 0), ...(typeof event.payload["errorClass"] === "string" ? { errorClass: event.payload["errorClass"] as string } : {}), ...(typeof event.payload["transitionReason"] === "string" ? { transitionReason: event.payload["transitionReason"] as string } : {}), ...(typeof event.payload["providerStatus"] === "number" ? { providerStatus: event.payload["providerStatus"] as number } : {}), lastSequence: event.sequence } satisfies ContextDiagnosticRecovery].slice(-16),
+        updatedAt: event.createdAt,
+        lastSequence: event.sequence,
+      },
+      updatedAt: event.createdAt,
+      lastSequence: event.sequence,
+    };
+  }
+  if (event.type === "context/compacted" || event.type === "context/compaction_failed" || event.type === "context/microcompacted" || event.type === "context/session_memory_compacted" || event.type === "context/session_memory_compaction_failed" || event.type === "context/summary_compacted" || event.type === "context/summary_compaction_failed" || event.type === "context/compact_boundary") {
+    const baseline = previous ?? emptyContextDiagnostics(event);
+    const post = numberValue(event.payload["postCompactTokens"], numberValue(event.payload["estimatedTokens"], 0));
+    const pre = event.payload["preCompactTokens"] === undefined ? undefined : numberValue(event.payload["preCompactTokens"], 0);
+    const explicitSaved = typeof event.payload["tokensSaved"] === "number" ? numberValue(event.payload["tokensSaved"], 0) : undefined;
+    const boundary = event.type === "context/compact_boundary" ? recordValue(event.payload["boundary"]) : undefined;
+    const rawKind = event.payload["kind"] ?? boundary?.["kind"] ?? (event.type === "context/microcompacted" ? "micro" : undefined);
+    const kind = rawKind === "legacy" || rawKind === "session_memory" || rawKind === "summary" || rawKind === "micro" ? rawKind : undefined;
+    return {
+      ...session,
+      contextDiagnostics: {
+        ...baseline,
+        lastCompaction: { status: event.type.endsWith("failed") ? "failed" : "completed", ...(kind === undefined ? {} : { kind }), ...(pre === undefined ? {} : { preCompactTokens: pre }), ...(post === 0 ? {} : { postCompactTokens: post }), ...(pre === undefined ? explicitSaved === undefined ? {} : { tokensSaved: explicitSaved } : { tokensSaved: Math.max(0, pre - post) }), sequence: event.sequence, ...(typeof event.payload["error"] === "string" ? { error: event.payload["error"] as string } : {}) },
+        updatedAt: event.createdAt,
+        lastSequence: event.sequence,
+      },
+      updatedAt: event.createdAt,
+      lastSequence: event.sequence,
+    };
+  }
+  return undefined;
+}
+
+function emptyContextDiagnostics(event: AgentEvent): NonNullable<SessionProjection["contextDiagnostics"]> {
+  return {
+    version: 1,
+    tokenUsage: 0,
+    tokenSource: "estimate",
+    tokenConfidence: "low",
+    effectiveWindowTokens: 0,
+    warningThreshold: 0,
+    errorThreshold: 0,
+    autoCompactThreshold: 0,
+    blockingThreshold: 0,
+    percentLeft: 0,
+    level: "unknown",
+    ...(event.turnId === undefined ? {} : { lastTurnId: event.turnId }),
+    recoveryChain: [],
+    updatedAt: event.createdAt,
+    lastSequence: event.sequence,
+  };
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function numberValue(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : fallback;
 }

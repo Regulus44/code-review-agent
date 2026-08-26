@@ -21,7 +21,7 @@ import { presentGoalBar } from "./presentation/goal-presenter.js";
 import { presentPlan } from "./presentation/plan-presenter.js";
 import { presentTodoPanel } from "./presentation/todo-presenter.js";
 import { presentQuestionBatch } from "./presentation/question-presenter.js";
-import { presentContextMeter } from "./presentation/context-presenter.js";
+import { presentContextDiagnostics, presentContextMeter } from "./presentation/context-presenter.js";
 import { presentWorktrees } from "./presentation/worktree-presenter.js";
 import { presentLspTool } from "./presentation/lsp-presenter.js";
 import { presentComposerSubmit } from "./presentation/composer-presenter.js";
@@ -65,6 +65,7 @@ export interface BrowserWebRuntime {
   readonly presentTodoPanel: typeof presentTodoPanel;
   readonly presentQuestionBatch: typeof presentQuestionBatch;
   readonly presentContextMeter: typeof presentContextMeter;
+  readonly presentContextDiagnostics: typeof presentContextDiagnostics;
   readonly presentWorktrees: typeof presentWorktrees;
   readonly presentLspTool: typeof presentLspTool;
   readonly presentComposerSubmit: typeof presentComposerSubmit;
@@ -123,6 +124,7 @@ const runtime: BrowserWebRuntime = {
   presentTodoPanel,
   presentQuestionBatch,
   presentContextMeter,
+  presentContextDiagnostics,
   presentWorktrees,
   presentLspTool,
   presentComposerSubmit,

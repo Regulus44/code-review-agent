@@ -438,3 +438,21 @@ ID:
 明确未复用：Claude Code 的账户/遥测、memory writer agent、JSONL/文件布局、feature flags、商业 provider、完整 prompt 文本和未经确认许可的实现代码；topic 正文不进入本项目 EventStore。
 
 新增测试：`packages/context/src/project-memory.test.ts`、`packages/runtime/src/index.test.ts`、`packages/storage/src/index.test.ts` 的 bounded index、相关性、stale、忽略、scope 和 SQLite replay 场景。
+
+### CC-014
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`src/components/TokenWarning.tsx`、`src/utils/analyzeContext.ts`、`src/query.ts` 的 compact progress/log events
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；本次没有复制 Claude Code 代码，只重新实现 durable token diagnostics、compact receipt、recovery chain 和 Web presenter projection。
+
+本项目路径：`packages/contracts/src/index.ts`、`packages/runtime/src/index.ts`、`packages/storage/src/index.ts`、`apps/web/src/presentation/context-presenter.ts`、`apps/web/src/client/store.ts`。
+
+范围：token source/confidence、warning/error/auto-compact/blocking 状态、percent left、compact 前后 token、tokens saved、recovery metadata、SSE replay 和旧 projection fallback。
+
+明确未复用：Claude Code 的 React 组件实现、账户/遥测、provider-specific UI、完整 context inspector、context collapse、prompt-cache edit 和商业服务。
+
+新增测试：`apps/web/src/presentation/context-presenter.test.ts`、`apps/web/src/client/store.test.ts`、`packages/runtime/src/index.test.ts`、`packages/storage/src/index.test.ts` 的 diagnostics、replay、SQLite reopen 和 bounded chain 场景。

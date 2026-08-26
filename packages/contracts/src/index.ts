@@ -384,6 +384,7 @@ export interface SessionProjection extends SessionSummary {
   readonly contextCompaction?: ContextCompactionProjection;
   readonly contextSessionMemory?: ContextSessionMemoryProjection;
   readonly contextProjectMemory?: ContextProjectMemoryProjection;
+  readonly contextDiagnostics?: ContextDiagnosticsProjection;
   readonly contextRecovery?: ContextRecoveryProjection;
   readonly contextTranscript?: ContextTranscriptSegment;
   readonly contextRestore?: ContextSessionRestoreProjection;
@@ -436,6 +437,9 @@ export interface ContextCompactionProjection {
   readonly originalMessageCount: number;
   readonly compactedMessageCount: number;
   readonly estimatedTokens: number;
+  readonly preCompactTokens?: number;
+  readonly postCompactTokens?: number;
+  readonly tokensSaved?: number;
   readonly droppedMessages: number;
   readonly protectedMessageCount?: number;
   readonly truncatedToolResults?: number;
@@ -486,6 +490,50 @@ export interface ContextProjectMemoryProjection {
   readonly staleTopicIds?: readonly string[];
   readonly ignored: boolean;
   readonly reason?: string;
+  readonly updatedAt: string;
+  readonly lastSequence: number;
+}
+
+export type ContextDiagnosticLevel = "unknown" | "healthy" | "warning" | "error" | "auto_compact" | "blocking";
+export type ContextDiagnosticTokenSource = "provider" | "estimate" | "stale_usage";
+export type ContextDiagnosticTokenConfidence = "exact" | "high" | "medium" | "low";
+
+export interface ContextDiagnosticRecovery {
+  readonly status: "started" | "transition" | "succeeded" | "failed" | "circuit_open";
+  readonly attempt: number;
+  readonly errorClass?: string;
+  readonly transitionReason?: string;
+  readonly providerStatus?: number;
+  readonly lastSequence: number;
+}
+
+/** Durable, bounded M13 context diagnostics consumed by API/Web presenters. */
+export interface ContextDiagnosticsProjection {
+  readonly version: 1;
+  readonly tokenUsage: number;
+  readonly tokenSource: ContextDiagnosticTokenSource;
+  readonly tokenConfidence: ContextDiagnosticTokenConfidence;
+  readonly effectiveWindowTokens: number;
+  readonly warningThreshold: number;
+  readonly errorThreshold: number;
+  readonly autoCompactThreshold: number;
+  readonly blockingThreshold: number;
+  readonly percentLeft: number;
+  readonly level: ContextDiagnosticLevel;
+  readonly lastStep?: number;
+  readonly lastTurnId?: TurnId;
+  readonly lastRequestId?: string;
+  readonly breakdown?: Readonly<Record<string, number>>;
+  readonly lastCompaction?: {
+    readonly status: "completed" | "failed";
+    readonly kind?: "legacy" | "session_memory" | "summary" | "micro";
+    readonly preCompactTokens?: number;
+    readonly postCompactTokens?: number;
+    readonly tokensSaved?: number;
+    readonly sequence: number;
+    readonly error?: string;
+  };
+  readonly recoveryChain: readonly ContextDiagnosticRecovery[];
   readonly updatedAt: string;
   readonly lastSequence: number;
 }

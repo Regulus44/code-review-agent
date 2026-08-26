@@ -297,6 +297,8 @@ describe("AgentHost", () => {
     const events = await host.events(session.id);
     expect(events.some((event) => event.type === "context/compacted")).toBe(true);
     expect((await host.getSession(session.id))?.contextCompaction).toMatchObject({ status: "completed", droppedMessages: expect.any(Number) });
+    expect((await host.getSession(session.id))?.contextDiagnostics).toMatchObject({ tokenSource: "estimate", tokenConfidence: "medium", effectiveWindowTokens: expect.any(Number), lastCompaction: { status: "completed", preCompactTokens: expect.any(Number), postCompactTokens: expect.any(Number), tokensSaved: expect.any(Number) } });
+    expect(events.find((event) => event.type === "context/compacted")?.payload).toMatchObject({ preCompactTokens: expect.any(Number), postCompactTokens: expect.any(Number), tokensSaved: expect.any(Number) });
     expect(requests[0]?.messages.some((message) => message.content.includes("Compacted context"))).toBe(true);
   });
 
@@ -352,6 +354,7 @@ describe("AgentHost", () => {
       source: "provider",
     });
     expect(step?.payload["contextWarning"]).toMatchObject({ isAboveAutoCompactThreshold: false });
+    expect((await host.getSession(session.id))?.contextDiagnostics).toMatchObject({ tokenSource: "estimate", tokenConfidence: "medium", effectiveWindowTokens: 108_000, level: "healthy", lastStep: 1 });
   });
 
   it("uses an exact model counter near the boundary and records its provenance", async () => {
@@ -378,6 +381,7 @@ describe("AgentHost", () => {
     await host.waitForTurn(turn);
     const step = (await host.events(session.id)).find((event) => event.type === "step/started");
     expect(step?.payload["tokenCount"]).toMatchObject({ value: 123, source: "provider", confidence: "exact", exactAttempted: true });
+    expect((await host.getSession(session.id))?.contextDiagnostics).toMatchObject({ tokenUsage: 123, tokenSource: "provider", tokenConfidence: "exact", effectiveWindowTokens: expect.any(Number) });
   });
 
   it("builds the prompt from the permission-filtered tool set and preserves custom instructions", async () => {
