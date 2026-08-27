@@ -386,6 +386,13 @@
       .model-option:hover { background: var(--surface-hover); color: var(--text); }
       .model-option.selected { color: var(--text); background: var(--blue-soft); }
       .model-provider-group + .model-provider-group { margin-top: 5px; padding-top: 4px; border-top: 1px solid var(--border); }
+      .model-command-search { width: calc(100% - 10px); margin: 5px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 9px; color: var(--text); background: var(--surface-raised); font: inherit; }
+      .model-command-search:focus { border-color: var(--blue); outline: 2px solid var(--blue-soft); }
+      .model-command-list { max-height: 260px; overflow-y: auto; }
+      .model-command-option.active { color: var(--text); background: var(--blue-soft); }
+      .model-command-status { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 9px; color: var(--text-tertiary); font-size: 10px; }
+      .model-command-status.error { color: var(--red); }
+      .model-command-retry { padding: 4px 7px; border-radius: 7px; color: var(--blue); background: var(--blue-soft); font-size: 10px; }
       .model-check { width: 14px; color: var(--blue); font-weight: 700; }
       .model-meta { display: block; margin-top: 2px; color: var(--text-tertiary); font-size: 10px; }
       .details-panel { position: relative; z-index: 3; display: flex; grid-column: 3; min-width: 0; width: auto; flex-direction: column; overflow: hidden; border-left: 1px solid var(--border); box-shadow: none; transform: none; transition: none; }
@@ -801,7 +808,9 @@
         const typedRuntime = window.CodeReviewAgentWeb;
         const typedConnection = typedRuntime?.connection || null;
         const modelDirectory = typedRuntime?.createModelDirectory?.() || null;
+        const modelPopup = typedRuntime?.createModelPopup && modelDirectory ? typedRuntime.createModelPopup(modelDirectory) : null;
         let modelDirectoryUnsubscribe = null;
+        let modelEntryMode = 'seat';
         const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, credentials: [], pendingCredentialId: '', modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, stoppingTurnId: null, composer: typedRuntime?.createComposerState?.() || { phase: 'idle', attemptId: 0 }, composerEpoch: 0, requestActions: typedRuntime?.createRequestActionGate?.() || null, workspaces: null, lastWorkspaceOrderSequence: 0, conversationScrollTop: 0, trajectoryScrollTop: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 280, details: 'closed', detailsWidthPx: 0, narrow: false, narrowExpanded: false, mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sessionView: 'conversation', trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
         let usageDrawerOpen = false;
         let renderedSessionView = state.sessionView;
@@ -1122,6 +1131,7 @@
           renderDetails?.();
         };
         if (modelDirectory) modelDirectoryUnsubscribe = modelDirectory.subscribe(syncModelDirectoryState);
+        if (modelPopup) modelPopup.subscribe(() => { if (modelEntryMode === 'command' && state.overlay.open === 'model-popover') renderModelCommandPopup?.(); });
         const refreshSessionModels = async () => {
           if (!state.session || !modelDirectory) return null;
           modelDirectory.setSession(state.session.id);
@@ -2617,8 +2627,72 @@
         const renderSubagents = () => { subagentList.innerHTML = ''; if (!state.subagents.length) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = 'No child agents.'; subagentList.append(empty); return; } for (const entry of state.subagents) { const task = entry.task || {}; const row = document.createElement('div'); row.className = 'subagent-row'; const copy = document.createElement('span'); copy.className = 'subagent-copy'; const name = task.title || task.provider || 'Child agent'; copy.innerHTML = `<span class="subagent-name">${esc(name)}</span><span class="subagent-meta">${esc(entry.status || task.status || 'ready')} · ${esc(task.mode || 'one-shot')} · ${esc(task.id || '')}</span>`; row.append(copy); if (entry.live || task.status === 'running' || task.status === 'waiting') { const cancel = document.createElement('button'); cancel.className = 'subagent-cancel'; cancel.type = 'button'; cancel.textContent = '×'; cancel.title = 'Cancel child'; cancel.onclick = async () => { cancel.disabled = true; try { await api(`/v1/sessions/${encodeURIComponent(state.session.id)}/tasks/${encodeURIComponent(task.id)}/cancel`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); await refreshSubagents(); } catch (error) { setStatus(error.message, false); cancel.disabled = false; } }; row.append(cancel); } row.onclick = () => { if (task.childSessionId) openSession(task.childSessionId); }; subagentList.append(row); } };
         const renderMcp = () => { mcpList.innerHTML = ''; for (const server of state.mcp) { const name = server.config?.name || server.name; const scope = server.config?.scope || 'user'; const row = document.createElement('div'); row.className = 'mcp-row'; const label = document.createElement('span'); const unhealthy = ['disabled', 'failed', 'needs_auth'].includes(server.status); label.className = `mcp-copy mcp-status ${unhealthy ? 'error' : ''}`; label.title = `scope=${scope} · transport=${server.config?.transport || 'unknown'} · revision=${server.revision || 1} · generation=${server.generation || 0}${server.lastError ? ` · ${server.lastError}` : ''}`; label.textContent = `${name} · ${server.status} · ${scope} · r${server.revision || 1}`; const actions = document.createElement('span'); actions.className = 'mcp-actions'; const reconnect = document.createElement('button'); reconnect.type = 'button'; reconnect.textContent = '↻'; reconnect.title = 'Reconnect'; reconnect.onclick = async () => { reconnect.disabled = true; try { await api(`/v1/mcp/servers/${encodeURIComponent(name)}/reconnect`, { method: 'POST' }); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); renderDetails(); } finally { reconnect.disabled = false; } }; const toggle = document.createElement('button'); toggle.type = 'button'; toggle.textContent = server.status === 'disabled' ? '＋' : '−'; toggle.title = server.status === 'disabled' ? 'Enable' : 'Disable'; toggle.onclick = async () => { await api(`/v1/mcp/servers/${encodeURIComponent(name)}/${server.status === 'disabled' ? 'enable' : 'disable'}`, { method: 'POST' }); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); renderDetails(); }; actions.append(reconnect, toggle); row.append(label, actions); mcpList.append(row); } if (!state.mcp.length) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = 'No MCP servers configured.'; mcpList.append(empty); } };
         const renderModels = (payload) => { state.models = payload; modelTrigger.textContent = `Model · ${currentModel()}`; modelTrigger.disabled = state.modelStatus === 'loading'; modelPopover.innerHTML = '<div class="popover-label">Choose a model</div>'; for (const model of payload?.models || []) { const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${model === currentModel() ? 'selected' : ''}`; option.innerHTML = `<span class="model-check">${model === currentModel() ? '✓' : ''}</span><span>${esc(model)}<span class="model-meta">${esc(state.models?.provider || 'Host model catalog')}</span></span>`; option.onclick = async () => { modelPopover.hidden = true; modelTrigger.setAttribute('aria-expanded', 'false'); modelTrigger.disabled = true; state.modelStatus = 'loading'; state.modelError = ''; renderSettings(); try { await api('/v1/models', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }) }); const payload = await api('/v1/models'); state.modelStatus = 'ready'; state.modelReceipt = `Selected ${model}`; renderModels(payload); await refreshCapabilities(); renderModelSeatMenu(); renderSettings(); setStatus(`Model · ${model}`); } catch (error) { state.modelStatus = 'error'; state.modelError = error instanceof Error ? error.message : String(error); renderSettings(); setStatus(state.modelError, false); } finally { modelTrigger.disabled = state.modelStatus === 'loading'; } }; modelPopover.append(option); } };
+        const closeModelCommandPopup = () => {
+          modelEntryMode = 'seat';
+          modelPopup?.close();
+          dispatchOverlay({ type: 'close', overlay: 'model-popover' });
+          input.focus();
+        };
+        const selectModelCommandOption = async (id) => {
+          if (!modelPopup) return;
+          const selected = id === undefined ? await modelPopup.selectActive(commandKey()) : await modelPopup.select(id, commandKey());
+          if (!selected) { renderModelCommandPopup(); return; }
+          state.modelReceipt = `Selected ${selected.provider}/${selected.model}`;
+          state.modelStatus = 'ready';
+          await refreshCapabilities();
+          renderSettings();
+          setStatus(`Model · ${selected.provider}/${selected.model}`);
+          modelEntryMode = 'seat';
+          dispatchOverlay({ type: 'close', overlay: 'model-popover' });
+          input.focus();
+        };
+        const renderModelCommandPopup = () => {
+          if (!modelPopup || modelEntryMode !== 'command') return;
+          const popup = modelPopup.getSnapshot();
+          modelPopover.setAttribute('role', 'dialog');
+          modelPopover.setAttribute('aria-label', 'Select a model');
+          modelPopover.innerHTML = '';
+          const heading = document.createElement('div'); heading.className = 'popover-label'; heading.textContent = '/model · Select provider and model'; modelPopover.append(heading);
+          const search = document.createElement('input'); search.type = 'search'; search.className = 'model-command-search'; search.placeholder = 'Search provider or model'; search.value = popup.query; search.setAttribute('role', 'combobox'); search.setAttribute('aria-autocomplete', 'list'); search.setAttribute('aria-controls', 'model-command-list'); search.setAttribute('aria-expanded', 'true'); modelPopover.append(search);
+          if (popup.status === 'loading' || popup.status === 'selecting' || popup.error) {
+            const statusRow = document.createElement('div'); statusRow.className = `model-command-status ${popup.error ? 'error' : ''}`;
+            const message = document.createElement('span'); message.textContent = popup.error || (popup.status === 'selecting' ? 'Switching model…' : 'Loading model directory…'); statusRow.append(message);
+            if (popup.error) { const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'model-command-retry'; retry.textContent = 'Retry'; retry.onclick = () => { void modelPopup.retry(); }; statusRow.append(retry); }
+            modelPopover.append(statusRow);
+          }
+          const options = document.createElement('div'); options.id = 'model-command-list'; options.className = 'model-command-list'; options.setAttribute('role', 'listbox'); modelPopover.append(options);
+          for (const [index, option] of popup.visibleOptions.entries()) {
+            const row = document.createElement('button'); row.type = 'button'; row.id = `model-command-option-${index}`; row.className = `model-option model-command-option ${option.id === popup.activeId ? 'active' : ''} ${option.active ? 'selected' : ''}`; row.disabled = option.disabled || popup.status === 'selecting'; row.setAttribute('role', 'option'); row.setAttribute('aria-selected', String(option.id === popup.activeId)); row.innerHTML = `<span class="model-check">${option.active ? '✓' : ''}</span><span>${esc(option.label)}<span class="model-meta">${esc(option.providerName)} · ${esc(option.provider)}${option.disabled ? ' · unavailable' : ''}</span></span>`; row.onclick = () => { void selectModelCommandOption(option.id); }; options.append(row);
+          }
+          if (!popup.visibleOptions.length && popup.status !== 'loading') { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = popup.query ? 'No matching provider or model.' : 'No provider models available.'; options.append(empty); }
+          const activeIndex = popup.visibleOptions.findIndex((option) => option.id === popup.activeId);
+          if (activeIndex >= 0) search.setAttribute('aria-activedescendant', `model-command-option-${activeIndex}`);
+          search.oninput = () => { modelPopup.setQuery(search.value); };
+          search.onkeydown = (event) => {
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); modelPopup.move(event.key === 'ArrowDown' ? 1 : -1); }
+            else if (event.key === 'Enter') { event.preventDefault(); void selectModelCommandOption(); }
+            else if (event.key === 'Escape') { event.preventDefault(); closeModelCommandPopup(); }
+          };
+          requestAnimationFrame(() => {
+            if (modelEntryMode !== 'command' || state.overlay.open !== 'model-popover') return;
+            search.focus(); search.setSelectionRange(search.value.length, search.value.length);
+            if (activeIndex >= 0) options.querySelector(`#model-command-option-${activeIndex}`)?.scrollIntoView({ block: 'nearest' });
+          });
+        };
+        const openModelCommandPopup = (query = '') => {
+          if (!state.session || !modelPopup) { setStatus('Model command is unavailable for this session.', false); return; }
+          if (state.session.parentSessionId) { setStatus('Model selection is unavailable for child agent sessions.', false); return; }
+          modelEntryMode = 'command';
+          modelMenuPane = 'root';
+          input.value = '';
+          input.style.height = 'auto';
+          dispatchOverlay({ type: 'open', overlay: 'model-popover' });
+          void modelPopup.open(query);
+          renderModelCommandPopup();
+        };
         const renderModelSeatMenu = () => {
           if (!modelPopover || !modelTrigger) return;
+          if (modelEntryMode === 'command') { renderModelCommandPopup(); return; }
           modelTrigger.textContent = state.models ? `${currentProvider()} · ${currentModel()}` : 'Provider · Model · Loading…';
           modelTrigger.title = state.models ? `${currentProvider()} · ${currentModel()}` : 'Provider/model catalog loading';
           modelTrigger.disabled = state.modelStatus === 'loading';
@@ -2749,7 +2823,7 @@
         renameCancel.onclick = () => closeRenameSession();
         renameModal.addEventListener('click', (event) => { if (event.target === renameModal) closeRenameSession(); });
         renameForm.addEventListener('submit', async (event) => { event.preventDefault(); const target = state.renameTarget; const nextTitle = renameInput.value.trim(); if (!target) return; if (!nextTitle) { renameError.textContent = target.kind === 'workspace' ? 'Enter a workspace label.' : 'Enter a session title.'; renameInput.focus(); return; } renameSave.disabled = true; renameError.textContent = ''; try { if (target.kind === 'workspace') { state.workspaces = await typedRuntime.api.renameWorkspace(target.key, nextTitle, commandKey()); closeRenameSession(); await refreshSessionList(); setStatus(`Workspace renamed · ${nextTitle}`, true); } else { const updated = typedRuntime?.api?.renameSession ? await typedRuntime.api.renameSession(target.id, nextTitle, commandKey()) : await api(`/v1/sessions/${encodeURIComponent(target.id)}/title`, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': commandKey() }, body: JSON.stringify({ title: nextTitle }) }); if (state.session?.id === target.id) { state.session = updated; title.textContent = updated.title || 'Coding session'; render(); } closeRenameSession(); await refreshSessionList(); } } catch (error) { renameError.textContent = error instanceof Error ? error.message : String(error); } finally { renameSave.disabled = false; } });
-        document.addEventListener('keydown', (event) => { if (event.key !== 'Escape') return; if (!settingsModal.hidden) closeSettings(); else if (!workspaceModal.hidden) closeWorkspacePicker(); else if (!renameModal.hidden) closeRenameSession(); else if (!sessionMenu.hidden) closeSessionMenu(); else if (!modelPopover.hidden) dispatchOverlay({ type: 'close', overlay: 'model-popover' }); else if (!modePopover.hidden) dispatchOverlay({ type: 'close', overlay: 'mode-popover' }); else dispatchOverlay({ type: 'escape' }); });
+        document.addEventListener('keydown', (event) => { if (event.key !== 'Escape') return; if (!settingsModal.hidden) closeSettings(); else if (!workspaceModal.hidden) closeWorkspacePicker(); else if (!renameModal.hidden) closeRenameSession(); else if (!sessionMenu.hidden) closeSessionMenu(); else if (!modelPopover.hidden) { if (modelEntryMode === 'command') closeModelCommandPopup(); else dispatchOverlay({ type: 'close', overlay: 'model-popover' }); } else if (!modePopover.hidden) dispatchOverlay({ type: 'close', overlay: 'mode-popover' }); else dispatchOverlay({ type: 'escape' }); });
         archiveToggle.onclick = async () => { state.showArchived = !state.showArchived; try { await refreshSessionList(); } catch (error) { setStatus(error.message, false); } };
         sessionSearch.addEventListener('input', () => { state.sessionSearch = sessionSearch.value; showSessionsTree({ sessions: state.sidebarSessions }); });
         workspaceViewMode.addEventListener('change', () => { state.workspaceViewMode = workspaceViewMode.value === 'flat' ? 'flat' : 'tree'; showSessionsTree({ sessions: state.sidebarSessions }); });
@@ -2772,6 +2846,8 @@
         });
         modelTrigger.onclick = () => {
           if (state.modelStatus === 'loading') return;
+          modelEntryMode = 'seat';
+          modelPopup?.close();
           modelMenuPane = 'root';
           renderModelSeatMenu();
           dispatchOverlay({ type: 'toggle', overlay: 'model-popover' });
@@ -2781,9 +2857,16 @@
         usageMeter.addEventListener('keydown', (event) => { if (event.key === 'Escape' && usageDrawerOpen) { event.preventDefault(); usageDrawerOpen = false; renderUsageMeter(typedConnection?.store.getSnapshot() || { session: state.session }); } });
         if (planToggle) planToggle.onclick = () => { if (state.layout.details === 'closed') dispatchShellLayout({ type: 'toggle-details' }); renderPlanningPanel(typedConnection?.store.getSnapshot() || { session: state.session }); };
         document.addEventListener('click', (event) => {
-          if (!modelPopover.hidden && !modelPopover.contains(event.target) && event.target !== modelTrigger) dispatchOverlay({ type: 'close', overlay: 'model-popover' });
+          if (!modelPopover.hidden && !modelPopover.contains(event.target) && event.target !== modelTrigger) { if (modelEntryMode === 'command') closeModelCommandPopup(); else dispatchOverlay({ type: 'close', overlay: 'model-popover' }); }
           if (!modePopover.hidden && !modePopover.contains(event.target) && event.target !== modeTrigger) dispatchOverlay({ type: 'close', overlay: 'mode-popover' });
           if (!sessionMenu.hidden && !sessionMenu.contains(event.target)) closeSessionMenu();
+        });
+        input.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+          const match = input.value.trim().match(/^\/model(?:\s+(.+))?$/i);
+          if (!match) return;
+          event.preventDefault();
+          openModelCommandPopup(match[1] || '');
         });
         input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 220)}px`; const snapshot = typedConnection?.store.getSnapshot(); renderComposerState(snapshot || { session: state.session }); });
         const stopActiveTurn = async (turn) => {
@@ -2835,6 +2918,8 @@
           const turn = activeTurn(snapshot);
           if (turn) { await stopActiveTurn(turn); return; }
           const content = input.value.trim();
+          const modelCommand = content.match(/^\/model(?:\s+(.+))?$/i);
+          if (modelCommand) { openModelCommandPopup(modelCommand[1] || ''); return; }
           if (!content || !state.session) return;
           const composerEpoch = state.composerEpoch;
           const started = typedRuntime?.beginComposerSubmit

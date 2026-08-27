@@ -2,6 +2,7 @@ import { WebApiClient } from "./client/api.js";
 import { SessionConnectionController } from "./client/connection.js";
 import { SessionStore } from "./client/store.js";
 import { ModelDirectory } from "./client/model-directory.js";
+import { ModelPopupController } from "./client/model-popup.js";
 import type { SessionId } from "@code-review-agent/contracts";
 import { projectConversation } from "./projection/conversation.js";
 import { buildToolCallTree } from "./projection/tool-call-tree.js";
@@ -37,6 +38,7 @@ import { applyShellFrame, mountShellFrame } from "./shell/app-frame.js";
 export interface BrowserWebRuntime {
   readonly api: WebApiClient;
   readonly createModelDirectory: (sessionId?: SessionId) => ModelDirectory;
+  readonly createModelPopup: (directory: ModelDirectory) => ModelPopupController;
   readonly store: SessionStore;
   readonly connection: SessionConnectionController;
   readonly loadOlder: SessionConnectionController["loadOlder"];
@@ -103,6 +105,7 @@ const connection = new SessionConnectionController({ api, store });
 const runtime: BrowserWebRuntime = {
   api,
   createModelDirectory: (sessionId) => new ModelDirectory(api, sessionId),
+  createModelPopup: (directory) => new ModelPopupController(directory),
   store,
   connection,
   loadOlder: (limit?: number) => connection.loadOlder(limit),
