@@ -385,6 +385,7 @@
       .model-option { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px; border-radius: 9px; color: var(--text-secondary); background: transparent; text-align: left; font-size: 12px; }
       .model-option:hover { background: var(--surface-hover); color: var(--text); }
       .model-option.selected { color: var(--text); background: var(--blue-soft); }
+      .model-provider-group + .model-provider-group { margin-top: 5px; padding-top: 4px; border-top: 1px solid var(--border); }
       .model-check { width: 14px; color: var(--blue); font-weight: 700; }
       .model-meta { display: block; margin-top: 2px; color: var(--text-tertiary); font-size: 10px; }
       .details-panel { position: relative; z-index: 3; display: flex; grid-column: 3; min-width: 0; width: auto; flex-direction: column; overflow: hidden; border-left: 1px solid var(--border); box-shadow: none; transform: none; transition: none; }
@@ -799,6 +800,8 @@
       (() => {
         const typedRuntime = window.CodeReviewAgentWeb;
         const typedConnection = typedRuntime?.connection || null;
+        const modelDirectory = typedRuntime?.createModelDirectory?.() || null;
+        let modelDirectoryUnsubscribe = null;
         const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, credentials: [], pendingCredentialId: '', modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, stoppingTurnId: null, composer: typedRuntime?.createComposerState?.() || { phase: 'idle', attemptId: 0 }, composerEpoch: 0, requestActions: typedRuntime?.createRequestActionGate?.() || null, workspaces: null, lastWorkspaceOrderSequence: 0, conversationScrollTop: 0, trajectoryScrollTop: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 280, details: 'closed', detailsWidthPx: 0, narrow: false, narrowExpanded: false, mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sessionView: 'conversation', trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
         let usageDrawerOpen = false;
         let renderedSessionView = state.sessionView;
@@ -1096,7 +1099,44 @@
           if (retry) retry.onclick = () => { void startBoot(); };
         };
         const transitionBoot = (action) => { reduceBoot(action); renderBootBoundary(); };
-        const currentModel = () => state.models?.current || state.models?.defaultModel || 'deepseek-v4-flash';
+        const directorySnapshot = () => modelDirectory?.getSnapshot?.() || null;
+        const currentSelection = () => directorySnapshot()?.current || state.session?.modelSelection || null;
+        const currentProvider = () => currentSelection()?.provider || state.models?.provider || 'DeepSeek-compatible';
+        const currentModel = () => currentSelection()?.model || state.models?.current || state.models?.defaultModel || 'deepseek-v4-flash';
+        const syncModelDirectoryState = (snapshot) => {
+          if (!snapshot || !snapshot.sessionId || !state.session || snapshot.sessionId !== state.session.id) return;
+          const selection = snapshot.current;
+          const groups = Array.isArray(snapshot.groups) ? snapshot.groups : [];
+          const providers = groups.map((group) => ({ ...group, models: Array.isArray(group.models) ? group.models : [] }));
+          const models = providers.flatMap((group) => group.models.map((entry) => typeof entry === 'string' ? entry : entry.model));
+          state.models = {
+            ...(state.models || {}),
+            provider: selection?.provider || state.models?.provider || 'custom',
+            current: selection?.model || state.models?.current || state.models?.defaultModel || 'deepseek-v4-flash',
+            models,
+            providers,
+          };
+          state.modelStatus = snapshot.status === 'error' ? 'error' : snapshot.status === 'loading' || snapshot.status === 'selecting' ? 'loading' : 'ready';
+          state.modelError = snapshot.error || '';
+          renderModelSeatMenu?.();
+          renderDetails?.();
+        };
+        if (modelDirectory) modelDirectoryUnsubscribe = modelDirectory.subscribe(syncModelDirectoryState);
+        const refreshSessionModels = async () => {
+          if (!state.session || !modelDirectory) return null;
+          modelDirectory.setSession(state.session.id);
+          try {
+            const snapshot = await modelDirectory.load();
+            syncModelDirectoryState(snapshot);
+            return snapshot;
+          } catch (error) {
+            state.modelStatus = 'error';
+            state.modelError = error instanceof Error ? error.message : String(error);
+            renderModelSeatMenu?.();
+            renderSettings?.();
+            return null;
+          }
+        };
         const modeLabels = { 'read-only': 'Read only', 'workspace-write': 'Workspace write', 'ask-on-write': 'Ask on write', 'ask-on-execute': 'Ask on execute', 'danger-full-access': 'Full access' };
         const currentMode = () => state.session?.permissionPreset || 'ask-on-write';
         const refreshWorkspaces = async () => { try { state.workspaces = typedRuntime?.api?.listWorkspaces ? await typedRuntime.api.listWorkspaces(state.showArchived) : await api(`/v1/workspaces${state.showArchived ? '?include_archived=true' : ''}`); } catch { state.workspaces = null; } };
@@ -1906,6 +1946,7 @@
             renderModels(payload);
             renderModelSeatMenu?.();
             renderSettings();
+            if (state.session && modelDirectory) await refreshSessionModels();
             return payload;
           } catch (error) {
             state.models = null;
@@ -2578,8 +2619,9 @@
         const renderModels = (payload) => { state.models = payload; modelTrigger.textContent = `Model · ${currentModel()}`; modelTrigger.disabled = state.modelStatus === 'loading'; modelPopover.innerHTML = '<div class="popover-label">Choose a model</div>'; for (const model of payload?.models || []) { const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${model === currentModel() ? 'selected' : ''}`; option.innerHTML = `<span class="model-check">${model === currentModel() ? '✓' : ''}</span><span>${esc(model)}<span class="model-meta">${esc(state.models?.provider || 'Host model catalog')}</span></span>`; option.onclick = async () => { modelPopover.hidden = true; modelTrigger.setAttribute('aria-expanded', 'false'); modelTrigger.disabled = true; state.modelStatus = 'loading'; state.modelError = ''; renderSettings(); try { await api('/v1/models', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }) }); const payload = await api('/v1/models'); state.modelStatus = 'ready'; state.modelReceipt = `Selected ${model}`; renderModels(payload); await refreshCapabilities(); renderModelSeatMenu(); renderSettings(); setStatus(`Model · ${model}`); } catch (error) { state.modelStatus = 'error'; state.modelError = error instanceof Error ? error.message : String(error); renderSettings(); setStatus(state.modelError, false); } finally { modelTrigger.disabled = state.modelStatus === 'loading'; } }; modelPopover.append(option); } };
         const renderModelSeatMenu = () => {
           if (!modelPopover || !modelTrigger) return;
-          modelTrigger.textContent = state.models ? `Model · ${currentModel()}` : 'Model · Loading…';
-          modelTrigger.title = state.models ? `Model ${currentModel()}` : 'Model catalog loading';
+          modelTrigger.textContent = state.models ? `${currentProvider()} · ${currentModel()}` : 'Provider · Model · Loading…';
+          modelTrigger.title = state.models ? `${currentProvider()} · ${currentModel()}` : 'Provider/model catalog loading';
+          modelTrigger.disabled = state.modelStatus === 'loading';
           modelPopover.setAttribute('role', 'menu');
           modelPopover.setAttribute('aria-label', 'Model selection');
           modelPopover.innerHTML = '';
@@ -2592,29 +2634,44 @@
           if (modelMenuPane === 'models') {
             appendBack();
             const label = document.createElement('div'); label.className = 'popover-label'; label.textContent = 'Choose a model'; modelPopover.append(label);
-            const catalogModels = state.models?.providers?.flatMap((group) => group.models.map((entry) => ({ model: entry.model, provider: group.provider, status: group.status }))) || (state.models?.models || []).map((model) => ({ model, provider: state.models?.provider || 'Host model catalog', status: 'ready' }));
-            for (const entry of catalogModels) {
-              const model = entry.model;
-              const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${model === currentModel() ? 'selected' : ''}`; option.setAttribute('role', 'menuitemradio'); option.setAttribute('aria-checked', String(model === currentModel())); option.innerHTML = `<span class="model-check">${model === currentModel() ? '✓' : ''}</span><span>${esc(model)}<span class="model-meta">${esc(entry.provider)} · ${esc(entry.status)}</span></span>`;
-              option.onclick = async () => {
-                modelPopover.hidden = true; dispatchOverlay({ type: 'close', overlay: 'model-popover' }); modelTrigger.disabled = true; state.modelStatus = 'loading'; state.modelError = ''; renderSettings();
-                try { await api('/v1/models', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model, provider: entry.provider }) }); const next = await api('/v1/models'); state.modelStatus = 'ready'; state.modelReceipt = `Selected ${entry.provider}/${model}`; renderModels(next); await refreshCapabilities(); renderSettings(); setStatus(`Model · ${entry.provider}/${model}`); }
-                catch (error) { state.modelStatus = 'error'; state.modelError = error instanceof Error ? error.message : String(error); renderModelSeatMenu(); renderSettings(); setStatus(state.modelError, false); }
-                finally { modelTrigger.disabled = state.modelStatus === 'loading'; renderModelSeatMenu(); }
-              };
-              modelPopover.append(option);
+            const catalogGroups = state.models?.providers?.length ? state.models.providers : [{ provider: state.models?.provider || 'custom', displayName: state.models?.provider || 'Host model catalog', status: 'ready', models: (state.models?.models || []).map((model) => ({ model })) }];
+            if (!catalogGroups.length) { const empty = document.createElement('div'); empty.className = 'empty-detail'; empty.textContent = 'No provider models available.'; modelPopover.append(empty); return; }
+            for (const group of catalogGroups) {
+              const groupSection = document.createElement('section'); groupSection.className = 'model-provider-group';
+              const groupHeading = document.createElement('div'); groupHeading.className = 'popover-label'; groupHeading.textContent = `${group.displayName || group.provider} · ${group.status || 'ready'}`; groupSection.append(groupHeading);
+              for (const entry of group.models || []) {
+                const model = typeof entry === 'string' ? entry : entry.model;
+                const selectedSelection = currentSelection();
+                const selected = selectedSelection?.provider === group.provider && selectedSelection.model === model;
+                const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${selected ? 'selected' : ''}`; option.disabled = group.status !== 'ready'; option.title = group.status === 'ready' ? '' : `Provider unavailable · ${group.status}`; option.setAttribute('role', 'menuitemradio'); option.setAttribute('aria-checked', String(selected)); option.innerHTML = `<span class="model-check">${selected ? '✓' : ''}</span><span>${esc(model)}<span class="model-meta">${esc(group.provider)} · ${esc(group.status || 'ready')}</span></span>`;
+                option.onclick = async () => {
+                  modelPopover.hidden = true; dispatchOverlay({ type: 'close', overlay: 'model-popover' }); modelTrigger.disabled = true; state.modelStatus = 'loading'; state.modelError = ''; renderSettings();
+                  try {
+                    const sameModel = currentSelection()?.provider === group.provider && currentSelection()?.model === model;
+                    if (!sameModel) {
+                      const effort = typeof entry === 'string' ? undefined : entry.reasoning?.defaultEffort;
+                      if (modelDirectory && state.session) await modelDirectory.select({ provider: group.provider, model, ...(effort === undefined ? {} : { reasoningEffort: effort }) }, commandKey());
+                      else await api('/v1/models', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model, provider: group.provider }) });
+                    }
+                    state.modelStatus = 'ready'; state.modelReceipt = `Selected ${group.provider}/${model}`; await refreshCapabilities(); renderSettings(); setStatus(`Model · ${group.provider}/${model}`);
+                  } catch (error) { state.modelStatus = 'error'; state.modelError = error instanceof Error ? error.message : String(error); renderModelSeatMenu(); renderSettings(); setStatus(state.modelError, false); }
+                  finally { modelTrigger.disabled = state.modelStatus === 'loading'; renderModelSeatMenu(); }
+                };
+                groupSection.append(option);
+              }
+              modelPopover.append(groupSection);
             }
             return;
           }
-          const heading = document.createElement('div'); heading.className = 'popover-label'; heading.textContent = 'Model'; modelPopover.append(heading);
+          const heading = document.createElement('div'); heading.className = 'popover-label'; heading.textContent = 'Provider / model'; modelPopover.append(heading);
           const row = document.createElement('button'); row.type = 'button'; row.className = 'model-menu-row'; row.setAttribute('role', 'menuitem');
-          const copy = document.createElement('span'); copy.className = 'model-menu-row-copy'; const rowHeading = document.createElement('strong'); rowHeading.textContent = 'Model'; const meta = document.createElement('span'); meta.textContent = 'Provider model selection'; copy.append(rowHeading, meta);
-          const current = document.createElement('span'); current.className = 'model-menu-row-copy'; const currentValue = document.createElement('span'); currentValue.textContent = currentModel(); current.append(currentValue); const chevron = document.createElement('span'); chevron.className = 'model-menu-chevron'; chevron.textContent = '›'; row.append(copy, current, chevron);
+          const copy = document.createElement('span'); copy.className = 'model-menu-row-copy'; const rowHeading = document.createElement('strong'); rowHeading.textContent = 'Model'; const meta = document.createElement('span'); meta.textContent = `Provider · ${currentProvider()}`; copy.append(rowHeading, meta);
+          const current = document.createElement('span'); current.className = 'model-menu-row-copy'; const currentValue = document.createElement('span'); currentValue.textContent = `${currentProvider()} · ${currentModel()}`; current.append(currentValue); const chevron = document.createElement('span'); chevron.className = 'model-menu-chevron'; chevron.textContent = '›'; row.append(copy, current, chevron);
           row.onclick = () => { modelMenuPane = 'models'; renderModelSeatMenu(); };
           modelPopover.append(row);
         };
         const renderModes = () => { modeTrigger.textContent = `◉ Mode · ${modeLabels[currentMode()] || currentMode()}`; modePopover.innerHTML = '<div class="popover-label">Choose a work mode for this session</div>'; for (const [value, label] of Object.entries(modeLabels)) { const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${value === currentMode() ? 'selected' : ''}`; option.innerHTML = `<span class="model-check">${value === currentMode() ? '✓' : ''}</span><span>${label}<span class="model-meta">${value === 'read-only' ? 'Inspect without changing files' : value === 'danger-full-access' ? 'Run tools without approval' : 'Permission-controlled coding workflow'}</span></span>`; option.onclick = async () => { modePopover.hidden = true; modeTrigger.setAttribute('aria-expanded', 'false'); if (value === currentMode() || !state.session) return; modeTrigger.disabled = true; try { state.session = await api(`/v1/sessions/${encodeURIComponent(state.session.id)}/mode`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ permissionPreset: value }) }); renderModes(); renderDetails(); setStatus(`Mode · ${label}`); } catch (error) { setStatus(error.message, false); } finally { modeTrigger.disabled = false; } }; modePopover.append(option); } };
-        const renderDetails = () => { const connected = state.mcp.filter((server) => !['disabled', 'failed', 'needs_auth'].includes(server.status)).length; const typedSnapshot = typedConnection?.store.getSnapshot(); const trajectory = typedSnapshot?.trajectory; const treeWarnings = typedSnapshot?.toolCallTree?.warnings || []; const pendingPermissions = typedSnapshot?.conversation?.nodes?.filter((node) => node.kind === 'permission' && node.status === 'pending').length || 0; const pendingInteractions = typedSnapshot?.conversation?.nodes?.filter((node) => node.kind === 'interaction' && node.status === 'pending').length || 0; const diagnostics = state.mcp.map((server) => { const name = server.config?.name || server.name; const catalog = Array.isArray(server.catalog) ? server.catalog : []; const disabled = catalog.filter((item) => item.enabled === false).length; const active = server.status === 'connected' ? catalog.length - disabled : 0; return `<div class="detail-line"><span>${esc(name)}</span><strong>${esc(server.status)} · g${server.generation || 0} · ${active}/${catalog.length} active</strong></div><div class="detail-line"><span>Auth</span><strong>${server.status === 'needs_auth' ? 'Needs authorization' : server.config?.credentialRef ? 'Credential reference configured' : 'No credential reference'}</strong></div>${server.retry?.nextAttemptAt ? `<div class="detail-line"><span>Next retry</span><strong>${esc(server.retry.nextAttemptAt)}</strong></div>` : ''}`; }).join(''); details.innerHTML = `<div class="detail-section"><div class="detail-label">Model</div><div class="detail-value">${esc(currentModel())}</div><div class="detail-line"><span>Provider</span><strong>${esc(state.models?.provider || 'DeepSeek-compatible')}</strong></div><div class="detail-line"><span>Default</span><strong>${esc(state.models?.defaultModel || 'deepseek-v4-flash')}</strong></div></div><div class="detail-section"><div class="detail-label">Session</div><div class="detail-line"><span>Status</span><span class="status-pill">Connected</span></div><div class="detail-line"><span>Events</span><strong>${state.events.size}</strong></div><div class="detail-line"><span>Workspace</span><strong title="${esc(state.session?.workspaceRoot || '.')}">${esc(state.session?.workspaceRoot || '.')}</strong></div></div><div class="detail-section"><div class="detail-label">Trajectory</div><div class="detail-line"><span>Records</span><strong>${trajectory?.records.length || 0} · seq ${trajectory?.lastSequence || 0}</strong></div><div class="detail-line"><span>Running</span><strong>${trajectory?.records.filter((record) => record.running).length || 0}</strong></div><div class="detail-line"><span>Lineage warnings</span><strong>${treeWarnings.length}</strong></div></div><div class="detail-section"><div class="detail-label">MCP diagnostics</div><div class="detail-line"><span>Servers</span><strong>${connected}/${state.mcp.length} connected</strong></div><div class="detail-line"><span>Tools</span><strong>${state.tools.size}</strong></div>${diagnostics || '<div class="empty-detail">No MCP servers configured.</div>'}</div><div class="detail-section"><div class="detail-label">Tools</div><div id="detail-tools" class="tool-list"></div></div><div class="detail-section"><div class="detail-label">Permissions</div><div class="detail-line"><span>Pending approvals</span><strong>${pendingPermissions}</strong></div><div class="detail-line"><span>Pending questions</span><strong>${pendingInteractions}</strong></div></div>`; const toolList = details.querySelector('#detail-tools'); const names = [...state.tools.keys()].slice(0, 8); if (!names.length) toolList.innerHTML = '<div class="empty-detail">No tools discovered.</div>'; else names.forEach((name) => { const row = document.createElement('div'); row.className = 'tool-list-item'; row.textContent = name; toolList.append(row); }); };
+         const renderDetails = () => { const connected = state.mcp.filter((server) => !['disabled', 'failed', 'needs_auth'].includes(server.status)).length; const typedSnapshot = typedConnection?.store.getSnapshot(); const trajectory = typedSnapshot?.trajectory; const treeWarnings = typedSnapshot?.toolCallTree?.warnings || []; const pendingPermissions = typedSnapshot?.conversation?.nodes?.filter((node) => node.kind === 'permission' && node.status === 'pending').length || 0; const pendingInteractions = typedSnapshot?.conversation?.nodes?.filter((node) => node.kind === 'interaction' && node.status === 'pending').length || 0; const diagnostics = state.mcp.map((server) => { const name = server.config?.name || server.name; const catalog = Array.isArray(server.catalog) ? server.catalog : []; const disabled = catalog.filter((item) => item.enabled === false).length; const active = server.status === 'connected' ? catalog.length - disabled : 0; return `<div class="detail-line"><span>${esc(name)}</span><strong>${esc(server.status)} · g${server.generation || 0} · ${active}/${catalog.length} active</strong></div><div class="detail-line"><span>Auth</span><strong>${server.status === 'needs_auth' ? 'Needs authorization' : server.config?.credentialRef ? 'Credential reference configured' : 'No credential reference'}</strong></div>${server.retry?.nextAttemptAt ? `<div class="detail-line"><span>Next retry</span><strong>${esc(server.retry.nextAttemptAt)}</strong></div>` : ''}`; }).join(''); details.innerHTML = `<div class="detail-section"><div class="detail-label">Model</div><div class="detail-value">${esc(currentModel())}</div><div class="detail-line"><span>Provider</span><strong>${esc(currentProvider())}</strong></div><div class="detail-line"><span>Default</span><strong>${esc(state.models?.defaultModel || 'deepseek-v4-flash')}</strong></div></div><div class="detail-section"><div class="detail-label">Session</div><div class="detail-line"><span>Status</span><span class="status-pill">Connected</span></div><div class="detail-line"><span>Events</span><strong>${state.events.size}</strong></div><div class="detail-line"><span>Workspace</span><strong title="${esc(state.session?.workspaceRoot || '.')}">${esc(state.session?.workspaceRoot || '.')}</strong></div></div><div class="detail-section"><div class="detail-label">Trajectory</div><div class="detail-line"><span>Records</span><strong>${trajectory?.records.length || 0} · seq ${trajectory?.lastSequence || 0}</strong></div><div class="detail-line"><span>Running</span><strong>${trajectory?.records.filter((record) => record.running).length || 0}</strong></div><div class="detail-line"><span>Lineage warnings</span><strong>${treeWarnings.length}</strong></div></div><div class="detail-section"><div class="detail-label">MCP diagnostics</div><div class="detail-line"><span>Servers</span><strong>${connected}/${state.mcp.length} connected</strong></div><div class="detail-line"><span>Tools</span><strong>${state.tools.size}</strong></div>${diagnostics || '<div class="empty-detail">No MCP servers configured.</div>'}</div><div class="detail-section"><div class="detail-label">Tools</div><div id="detail-tools" class="tool-list"></div></div><div class="detail-section"><div class="detail-label">Permissions</div><div class="detail-line"><span>Pending approvals</span><strong>${pendingPermissions}</strong></div><div class="detail-line"><span>Pending questions</span><strong>${pendingInteractions}</strong></div></div>`; const toolList = details.querySelector('#detail-tools'); const names = [...state.tools.keys()].slice(0, 8); if (!names.length) toolList.innerHTML = '<div class="empty-detail">No tools discovered.</div>'; else names.forEach((name) => { const row = document.createElement('div'); row.className = 'tool-list-item'; row.textContent = name; toolList.append(row); }); };
         const openSession = async (id) => {
            dispatchShellLayout({ type: 'close-mobile-sidebar' });
           state.composerEpoch += 1;
@@ -2646,10 +2703,11 @@
               const latest = snapshot.events.at(-1);
               if (latest?.type.startsWith('worktree/')) void refreshWorktrees().then(() => renderWorktreePanel(snapshot));
             };
-            state.storeUnsubscribe = typedConnection.store.subscribe(syncTypedSnapshot);
-            await typedConnection.open(id);
-            syncTypedSnapshot(typedConnection.store.getSnapshot());
-            await refreshSessionList();
+             state.storeUnsubscribe = typedConnection.store.subscribe(syncTypedSnapshot);
+             await typedConnection.open(id);
+             syncTypedSnapshot(typedConnection.store.getSnapshot());
+             await refreshSessionModels();
+             await refreshSessionList();
             await refreshSubagents();
             await refreshWorktrees();
             renderWorktreePanel(typedConnection.store.getSnapshot());
@@ -2659,12 +2717,13 @@
           title.textContent = state.session.title || state.session.messages?.find((message) => message.role === 'user')?.content?.slice(0, 58) || 'Coding session';
           path.textContent = `Workspace · ${state.session.workspaceRoot || '.'}`;
           state.events.clear();
-          const history = await api(`/v1/sessions/${encodeURIComponent(id)}/events?format=json`);
-          for (const event of history) addEvent(event, false);
-          render();
+           const history = await api(`/v1/sessions/${encodeURIComponent(id)}/events?format=json`);
+           for (const event of history) addEvent(event, false);
+           await refreshSessionModels();
+           render();
           state.source = new EventSource(`/v1/sessions/${encodeURIComponent(id)}/events?after_sequence=${state.session.lastSequence || 0}`);
           const types = ['session/created','session/updated','session/model_selected','session/deleted','workspace/updated','user/message','turn/steered','attachment/received','attachment/rejected','workspace/reordered','turn/queued','queue/changed','turn/started','step/started','step/ended','turn/ended','assistant/chunk','assistant/message','task/created','task/updated','task/input-required','task/report','task/artifact','task/ended','subagent/descriptor','subagent/start','subagent/end','subagent/inbox','subagent/settlement','goal/created','goal/updated','goal/ended','plan/updated','todo/updated','tool/call','tool/progress','tool/result','diff/preview','patch/preview','patch/applied','patch/rejected','patch/rolled_back','lsp/server','lsp/request','permission/requested','permission/resolved','interaction/requested','interaction/resolved','terminal/session','job/started','job/output','job/ended','mcp/server','mcp/tool','mcp/resource','mcp/prompt','agent/status','agent/error'];
-          types.forEach((type) => state.source.addEventListener(type, (message) => { const event = JSON.parse(message.data); addEvent(event); if (event.type === 'workspace/reordered' || event.type === 'workspace/updated') void refreshSessionList(); void refreshSubagents(); }));
+           types.forEach((type) => state.source.addEventListener(type, (message) => { const event = JSON.parse(message.data); addEvent(event); if (event.type === 'session/model_selected') void refreshSessionModels(); if (event.type === 'workspace/reordered' || event.type === 'workspace/updated') void refreshSessionList(); void refreshSubagents(); }));
           state.source.onerror = () => setStatus('Reconnecting…', false);
           state.source.onopen = () => setStatus('Connected', true);
           state.scopedSource = new EventSource(`/v1/sessions/${encodeURIComponent(id)}/subagents/events`);
