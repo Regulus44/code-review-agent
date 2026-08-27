@@ -1216,11 +1216,46 @@ export interface ModelCatalogEntry {
   readonly provider: string;
   readonly model: string;
   readonly displayName?: string;
+  /** Input modalities advertised by the provider catalog. */
+  readonly inputModalities?: readonly ("text" | "image")[];
+  /** Provider-advertised default output reservation. */
+  readonly defaultMaxOutputTokens?: number;
   readonly contextCapability?: ModelContextCapability;
   readonly reasoning?: {
     readonly efforts: readonly string[];
     readonly defaultEffort?: string;
   };
+}
+
+/** Host configuration for one provider. It contains metadata and opaque credential references only. */
+export interface ProviderProfileRecord {
+  readonly id: string;
+  readonly tenantId?: string;
+  readonly displayName: string;
+  readonly protocol: string;
+  readonly baseUrl?: string;
+  readonly credentialRef?: McpCredentialReference;
+  readonly models: readonly ModelCatalogEntry[];
+  readonly enabled: boolean;
+  readonly revision: number;
+  readonly source?: "builtin" | "custom";
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export type ProviderCatalogStatus = "ready" | "failed" | "unavailable";
+
+/** Provider-grouped advisory catalog returned to API/Web consumers. */
+export interface ProviderCatalogGroup {
+  readonly provider: string;
+  readonly displayName: string;
+  readonly protocol: string;
+  readonly enabled: boolean;
+  readonly source: "builtin" | "custom";
+  readonly status: ProviderCatalogStatus;
+  readonly models: readonly ModelCatalogEntry[];
+  readonly refreshedAt?: string;
+  readonly error?: string;
 }
 
 /** Exact provider/protocol resolution used to prepare one model route. */

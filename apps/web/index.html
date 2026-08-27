@@ -1777,6 +1777,52 @@
           line(model, 'Current model', view.model.current);
           line(model, 'Credentials', view.model.configured ? 'Configured (secret stays host-side)' : 'Not configured');
           const modelList = document.createElement('p'); modelList.className = 'settings-muted'; modelList.textContent = view.model.available.length ? `Available: ${view.model.available.join(', ')}` : 'No model catalog returned.'; model.append(modelList);
+          if (view.model.providers.length) {
+            const providerList = document.createElement('div'); providerList.className = 'settings-muted';
+            providerList.textContent = view.model.providers.map((group) => `${group.displayName} · ${group.status} · ${group.models.length} models`).join(' | ');
+            model.append(providerList);
+          }
+          for (const failure of view.model.providerErrors) {
+            const error = document.createElement('p'); error.className = 'settings-error'; error.textContent = `${failure.provider}: ${failure.error}`; model.append(error);
+          }
+          const providerForm = document.createElement('form'); providerForm.className = 'settings-provider-form'; providerForm.hidden = true;
+          const providerFields = [
+            ['id', 'Provider id', 'custom-provider'],
+            ['displayName', 'Display name', 'Custom provider'],
+            ['protocol', 'Protocol', 'anthropic-messages'],
+            ['baseUrl', 'Base URL', 'https://gateway.example/v1'],
+            ['models', 'Models (comma separated)', 'model-a,model-b'],
+            ['credentialRefId', 'Credential reference id (optional)', 'cred_…'],
+          ];
+          const providerInputs = {};
+          for (const [key, label, placeholder] of providerFields) {
+            const field = document.createElement('label'); field.className = 'settings-line';
+            const caption = document.createElement('span'); caption.textContent = label;
+            const input = document.createElement('input'); input.type = 'text'; input.placeholder = placeholder; input.name = key; input.autocomplete = 'off'; input.className = 'settings-input';
+            field.append(caption, input); providerForm.append(field); providerInputs[key] = input;
+          }
+          const providerActions = document.createElement('div'); providerActions.className = 'settings-actions';
+          const saveProvider = document.createElement('button'); saveProvider.type = 'submit'; saveProvider.className = 'workspace-create'; saveProvider.textContent = 'Save provider';
+          const cancelProvider = document.createElement('button'); cancelProvider.type = 'button'; cancelProvider.className = 'workspace-create'; cancelProvider.textContent = 'Cancel'; cancelProvider.onclick = () => { providerForm.hidden = true; addProvider.hidden = false; };
+          providerActions.append(saveProvider, cancelProvider); providerForm.append(providerActions); model.append(providerForm);
+          const addProvider = document.createElement('button'); addProvider.type = 'button'; addProvider.className = 'workspace-create'; addProvider.textContent = 'Add custom provider'; addProvider.onclick = () => { addProvider.hidden = true; providerForm.hidden = false; providerInputs.id.focus(); }; model.append(addProvider);
+          providerForm.onsubmit = async (event) => {
+            event.preventDefault(); saveProvider.disabled = true;
+            try {
+              const models = String(providerInputs.models.value || '').split(',').map((value) => value.trim()).filter(Boolean);
+              const credentialRefId = String(providerInputs.credentialRefId.value || '').trim();
+              await api('/v1/providers', { method: 'POST', headers: { 'content-type': 'application/json' }, body: {
+                id: String(providerInputs.id.value || '').trim(),
+                displayName: String(providerInputs.displayName.value || '').trim(),
+                protocol: String(providerInputs.protocol.value || '').trim(),
+                baseUrl: String(providerInputs.baseUrl.value || '').trim() || undefined,
+                models,
+                ...(credentialRefId ? { credentialRef: { id: credentialRefId, kind: 'header' } } : {}),
+              } });
+              providerForm.reset(); providerForm.hidden = true; addProvider.hidden = false; state.modelReceipt = 'Custom provider saved'; await refreshModelCatalog();
+            } catch (error) { state.modelStatus = 'error'; state.modelError = error instanceof Error ? error.message : String(error); renderSettings(); setStatus(state.modelError, false); }
+            finally { saveProvider.disabled = false; }
+          };
           line(model, 'Catalog status', view.model.status);
           if (view.model.error) { const error = document.createElement('p'); error.className = 'settings-error'; error.textContent = `Provider/model catalog failed: ${view.model.error}`; model.append(error); const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'workspace-create settings-retry'; retry.textContent = 'Retry model catalog'; retry.onclick = () => { void refreshModelCatalog(); }; model.append(retry); }
           if (view.model.receipt) { const receipt = document.createElement('p'); receipt.className = 'settings-receipt'; receipt.textContent = view.model.receipt; model.append(receipt); }
@@ -2492,11 +2538,13 @@
           if (modelMenuPane === 'models') {
             appendBack();
             const label = document.createElement('div'); label.className = 'popover-label'; label.textContent = 'Choose a model'; modelPopover.append(label);
-            for (const model of state.models?.models || []) {
-              const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${model === currentModel() ? 'selected' : ''}`; option.setAttribute('role', 'menuitemradio'); option.setAttribute('aria-checked', String(model === currentModel())); option.innerHTML = `<span class="model-check">${model === currentModel() ? '✓' : ''}</span><span>${esc(model)}<span class="model-meta">${esc(state.models?.provider || 'Host model catalog')}</span></span>`;
+            const catalogModels = state.models?.providers?.flatMap((group) => group.models.map((entry) => ({ model: entry.model, provider: group.provider, status: group.status }))) || (state.models?.models || []).map((model) => ({ model, provider: state.models?.provider || 'Host model catalog', status: 'ready' }));
+            for (const entry of catalogModels) {
+              const model = entry.model;
+              const option = document.createElement('button'); option.type = 'button'; option.className = `model-option ${model === currentModel() ? 'selected' : ''}`; option.setAttribute('role', 'menuitemradio'); option.setAttribute('aria-checked', String(model === currentModel())); option.innerHTML = `<span class="model-check">${model === currentModel() ? '✓' : ''}</span><span>${esc(model)}<span class="model-meta">${esc(entry.provider)} · ${esc(entry.status)}</span></span>`;
               option.onclick = async () => {
                 modelPopover.hidden = true; dispatchOverlay({ type: 'close', overlay: 'model-popover' }); modelTrigger.disabled = true; state.modelStatus = 'loading'; state.modelError = ''; renderSettings();
-                try { await api('/v1/models', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }) }); const next = await api('/v1/models'); state.modelStatus = 'ready'; state.modelReceipt = `Selected ${model}`; renderModels(next); await refreshCapabilities(); renderSettings(); setStatus(`Model · ${model}`); }
+                try { await api('/v1/models', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model, provider: entry.provider }) }); const next = await api('/v1/models'); state.modelStatus = 'ready'; state.modelReceipt = `Selected ${entry.provider}/${model}`; renderModels(next); await refreshCapabilities(); renderSettings(); setStatus(`Model · ${entry.provider}/${model}`); }
                 catch (error) { state.modelStatus = 'error'; state.modelError = error instanceof Error ? error.message : String(error); renderModelSeatMenu(); renderSettings(); setStatus(state.modelError, false); }
                 finally { modelTrigger.disabled = state.modelStatus === 'loading'; renderModelSeatMenu(); }
               };

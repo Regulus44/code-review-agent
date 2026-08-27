@@ -6,9 +6,9 @@ import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { createInProcessSubagentProvider, sessionId, AgentHost, turnId, type TenantModelRoute } from "@code-review-agent/runtime";
 import { SqliteEventStore } from "@code-review-agent/storage";
-import { brand, type AgentEvent, type ChatModel, type ContextBudgetConfig, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem, type ProductizationCapability, type SessionOwnership, type ModelRouteBackend, type ModelRouteRecord, type CredentialBackend, type McpCredentialReference, type PrincipalBackend, type ModelSelection as ContractModelSelection } from "@code-review-agent/contracts";
+import { brand, type AgentEvent, type ChatModel, type ContextBudgetConfig, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem, type ProductizationCapability, type SessionOwnership, type ModelRouteBackend, type ModelRouteRecord, type CredentialBackend, type McpCredentialReference, type PrincipalBackend, type ModelSelection as ContractModelSelection, type ModelCatalogEntry, type ProviderCatalogGroup, type ProviderProfileRecord } from "@code-review-agent/contracts";
 import { SubagentRuntime } from "@code-review-agent/subagent";
-import { createConfiguredModelBootstrap, type ModelConfigView } from "@code-review-agent/llm";
+import { createBuiltInModelProtocolRegistry, createConfiguredModelBootstrap, createModelFromProviderProfile, ModelCatalog, type ModelConfigView, type ProviderCredentialMaterial } from "@code-review-agent/llm";
 import { McpConnectionManager, type McpServerConfig } from "@code-review-agent/mcp-client";
 import type { CodeModeSandbox, PermissionPreset } from "@code-review-agent/tools";
 import { artifactAccessResponse, inspectArtifact, isAvailableArtifact, type ArtifactAccess } from "./artifacts.js";
@@ -21,7 +21,7 @@ export interface ModelSelection {
   readonly config: ModelConfigView;
 }
 
-export type ModelSelector = (model: string, tenantId?: string, credential?: CredentialMaterial) => ModelSelection;
+export type ModelSelector = (model: string, tenantId?: string, credential?: CredentialMaterial, provider?: string) => ModelSelection;
 
 export interface ProductizationToken {
   readonly token: string;
@@ -52,6 +52,10 @@ export interface ApiServerOptions {
   readonly modelInfo?: ModelConfigView;
   readonly availableModels?: readonly string[];
   readonly modelSelector?: ModelSelector;
+  /** Host-scoped or tenant-scoped provider profiles used by the MR5 model catalog. */
+  readonly providerProfiles?: readonly ProviderProfileRecord[];
+  /** Optional provider discovery hook. Failures are isolated to the corresponding provider group. */
+  readonly providerDiscovery?: (profile: ProviderProfileRecord, signal?: AbortSignal) => Promise<readonly ModelCatalogEntry[]>;
   /** Optional durable tenant-scoped routing backend; SQLite stores implement it directly. */
   readonly modelRouting?: ModelRouteBackend;
   /** Optional durable credential metadata backend; SQLite stores implement it directly. */
@@ -96,9 +100,15 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
     ...(options.modelInfo === undefined ? {} : { info: options.modelInfo }),
     ...(options.modelSelector === undefined ? {} : { selector: options.modelSelector }),
     routes: new Map(),
+    catalog: new ModelCatalog(),
     credentials,
     ...(options.modelRouting === undefined && (store === undefined || typeof (store as Partial<ModelRouteBackend>).listModelRoutes !== "function") ? {} : { routeBackend: options.modelRouting ?? store as unknown as ModelRouteBackend }),
   };
+  for (const profile of options.providerProfiles ?? []) {
+    createBuiltInModelProtocolRegistry().get(profile.protocol);
+    modelRuntime.catalog.register(profile, options.providerDiscovery === undefined ? undefined : { listModels: options.providerDiscovery });
+  }
+  registerBootstrapCatalog(modelRuntime, options.modelInfo, options.availableModels);
   for (const route of modelRuntime.routeBackend?.listModelRoutes() ?? []) {
     modelRuntime.routes.set(route.tenantId, route);
     if (modelRuntime.selector === undefined) throw new Error("tenant model routing requires a model selector during restore");
@@ -162,6 +172,7 @@ interface ModelRuntimeState {
   readonly routeBackend?: ModelRouteBackend;
   readonly credentials: CredentialVault;
   readonly routes: Map<string, ModelRouteRecord>;
+  readonly catalog: ModelCatalog;
   remainingCatalogFailures: number;
   selectionRestore?: Promise<void>;
 }
@@ -183,6 +194,101 @@ function principalBackendFrom(store: SessionEventStore | undefined): PrincipalBa
   return candidate !== undefined && typeof candidate.getPrincipal === "function" && typeof candidate.listPrincipals === "function" && typeof candidate.upsertPrincipal === "function"
     ? store as unknown as PrincipalBackend
     : undefined;
+}
+
+function registerBootstrapCatalog(modelRuntime: ModelRuntimeState, info: ModelConfigView | undefined, availableModels: readonly string[] | undefined): void {
+  if (info === undefined) return;
+  if (modelRuntime.catalog.profile(info.provider) !== undefined) return;
+  const models = [...new Set([info.model, ...(availableModels ?? [])])].filter((model) => model.trim() !== "");
+  const entries: ModelCatalogEntry[] = models.map((model) => ({
+    provider: info.provider,
+    model,
+    displayName: model,
+    ...(info.provider === "deepseek" ? {
+      contextCapability: {
+        provider: "deepseek",
+        model,
+        maxInputTokens: 128_000,
+        maxOutputTokens: 8_000,
+        supportsExactCount: false,
+        supportsPromptCache: false,
+        source: "provider" as const,
+      },
+    } : {}),
+    ...(info.provider === "anthropic" ? {
+      contextCapability: {
+        provider: "anthropic",
+        model,
+        maxInputTokens: 200_000,
+        maxOutputTokens: 8_192,
+        supportsExactCount: false,
+        supportsPromptCache: false,
+        source: "provider" as const,
+      },
+    } : {}),
+  }));
+  const now = new Date().toISOString();
+  modelRuntime.catalog.register({
+    id: info.provider,
+    displayName: info.provider,
+    protocol: info.provider === "anthropic" ? "anthropic-messages" : info.provider === "echo" ? "echo" : "openai-chat-completions",
+    ...(info.baseUrl === undefined ? {} : { baseUrl: info.baseUrl }),
+    models: entries,
+    enabled: true,
+    revision: 1,
+    source: "builtin",
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
+function selectCatalogModel(modelRuntime: ModelRuntimeState, model: string, tenantId: string | undefined, credential: CredentialMaterial | undefined, provider?: string): ModelSelection {
+  const profile = provider === undefined ? undefined : modelRuntime.catalog.profile(provider, tenantId);
+  if (modelRuntime.selector !== undefined && profile?.source !== "custom") {
+    const selected = modelRuntime.selector(model, tenantId, credential, provider);
+    if (provider !== undefined && selected.config.provider !== provider) throw new HttpError(400, "provider does not match the selected model");
+    return selected;
+  }
+  const resolvedProvider = provider ?? modelRuntime.info?.provider ?? modelRuntime.catalog.listProfiles(tenantId)[0]?.id;
+  if (resolvedProvider === undefined) throw new HttpError(409, "model switching is not configured");
+  const resolved = modelRuntime.catalog.resolve(resolvedProvider, model, tenantId);
+  const material: ProviderCredentialMaterial | undefined = credential === undefined ? undefined : { ...(credential.env === undefined ? {} : { env: credential.env }), ...(credential.headers === undefined ? {} : { headers: credential.headers }) };
+  const created = createModelFromProviderProfile(resolved.profile, model, material);
+  return {
+    model: created.model,
+    config: { provider: resolved.profile.id, model, ...(created.config.baseUrl === undefined ? {} : { baseUrl: created.config.baseUrl }), configured: created.config.configured },
+  };
+}
+
+function publicProviderProfile(profile: ProviderProfileRecord): Record<string, unknown> {
+  return {
+    id: profile.id,
+    ...(profile.tenantId === undefined ? {} : { tenantId: profile.tenantId }),
+    displayName: profile.displayName,
+    protocol: profile.protocol,
+    ...(profile.baseUrl === undefined ? {} : { baseUrl: profile.baseUrl }),
+    ...(profile.credentialRef === undefined ? {} : { credentialRef: profile.credentialRef }),
+    enabled: profile.enabled,
+    revision: profile.revision,
+    source: profile.source ?? "custom",
+    models: profile.models,
+    createdAt: profile.createdAt,
+    updatedAt: profile.updatedAt,
+  };
+}
+
+function publicCatalogGroups(groups: readonly ProviderCatalogGroup[]): readonly Record<string, unknown>[] {
+  return groups.map((group) => ({
+    provider: group.provider,
+    displayName: group.displayName,
+    protocol: group.protocol,
+    enabled: group.enabled,
+    source: group.source,
+    status: group.status,
+    models: group.models,
+    ...(group.refreshedAt === undefined ? {} : { refreshedAt: group.refreshedAt }),
+    ...(group.error === undefined ? {} : { error: group.error }),
+  }));
 }
 
 function requireTenantIdentity(identity: SessionOwnership | undefined): SessionOwnership {
@@ -235,6 +341,58 @@ function parseCredentialReference(value: unknown): McpCredentialReference {
   const version = record.version;
   if (version !== undefined && (typeof version !== "number" || !Number.isInteger(version) || version < 1)) throw new HttpError(400, "credentialRef.version must be a positive integer");
   return { id, kind, ...(typeof record.label === "string" ? { label: record.label } : {}), ...(version === undefined ? {} : { version }) };
+}
+
+function parseProviderProfile(body: Readonly<Record<string, unknown>>, tenantId?: string): ProviderProfileRecord {
+  const id = requireString(body.id ?? body.provider, "id").trim().toLowerCase();
+  if (!/^[a-z][a-z0-9_.-]{0,63}$/u.test(id)) throw new HttpError(400, "provider id must be a lowercase identifier");
+  const displayName = requireString(body.displayName ?? body.name ?? id, "displayName").trim();
+  const protocol = requireString(body.protocol, "protocol").trim().toLowerCase();
+  const baseUrl = body.baseUrl === undefined ? undefined : requireString(body.baseUrl, "baseUrl").trim();
+  if (baseUrl !== undefined) {
+    try {
+      const parsed = new URL(baseUrl);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("unsupported protocol");
+    } catch {
+      throw new HttpError(400, "baseUrl must be an http(s) URL");
+    }
+  }
+  const rawModels = body.models;
+  if (!Array.isArray(rawModels) || rawModels.length > 256) throw new HttpError(400, "models must be an array with at most 256 entries");
+  const models: ModelCatalogEntry[] = [];
+  const seen = new Set<string>();
+  for (const raw of rawModels) {
+    const model = typeof raw === "string" ? { model: raw } : requireRecord(raw, "models[]");
+    const modelId = requireString(model.model ?? model.id, "models[].model").trim();
+    if (modelId.length === 0 || seen.has(modelId)) continue;
+    seen.add(modelId);
+    const capability = typeof model.contextCapability === "object" && model.contextCapability !== null ? model.contextCapability as NonNullable<ModelCatalogEntry["contextCapability"]> : undefined;
+    models.push({
+      provider: id,
+      model: modelId,
+      ...(typeof model.displayName === "string" ? { displayName: model.displayName.slice(0, 200) } : {}),
+      ...(typeof model.defaultMaxOutputTokens === "number" && Number.isInteger(model.defaultMaxOutputTokens) && model.defaultMaxOutputTokens > 0 ? { defaultMaxOutputTokens: model.defaultMaxOutputTokens } : {}),
+      ...(capability === undefined ? {} : { contextCapability: capability }),
+      ...(Array.isArray(model.inputModalities) ? { inputModalities: model.inputModalities.filter((item): item is "text" | "image" => item === "text" || item === "image") } : {}),
+    });
+  }
+  const enabled = body.enabled === undefined ? true : body.enabled === true;
+  const credentialRef = body.credentialRef === undefined ? undefined : parseCredentialReference(body.credentialRef);
+  const timestamp = new Date().toISOString();
+  return {
+    id,
+    ...(tenantId === undefined ? {} : { tenantId }),
+    displayName,
+    protocol,
+    ...(baseUrl === undefined ? {} : { baseUrl }),
+    ...(credentialRef === undefined ? {} : { credentialRef }),
+    models,
+    enabled,
+    revision: 1,
+    source: "custom",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
 }
 
 function isCredentialReferenced(tenantId: string, credentialId: string, modelRuntime: ModelRuntimeState, mcp: McpConnectionManager): boolean {
@@ -346,6 +504,57 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       throw new HttpError(404, "credential endpoint not found");
     }
+    if (url.pathname === "/v1/providers" || url.pathname.startsWith("/v1/providers/")) {
+      const tenantId = identity?.tenantId;
+      if (request.method === "GET" && url.pathname === "/v1/providers") {
+        const snapshot = await modelRuntime.catalog.refresh(tenantId);
+        const profiles = modelRuntime.catalog.listProfiles(tenantId).map(publicProviderProfile);
+        sendJson(response, 200, { providers: publicCatalogGroups(snapshot.groups), profiles });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/v1/providers") {
+        const body = await readJson(request);
+        const profile = parseProviderProfile(body, tenantId);
+        if (profile.tenantId !== undefined && identity === undefined) throw new HttpError(401, "provider profile requires authenticated identity");
+        if (profile.credentialRef !== undefined && identity === undefined) throw new HttpError(401, "provider credential reference requires authenticated identity");
+        try {
+          // Validate the protocol before making the profile visible to discovery/UI.
+          createBuiltInModelProtocolRegistry().get(profile.protocol);
+          modelRuntime.catalog.register(profile);
+        } catch (error) {
+          throw error instanceof HttpError ? error : new HttpError(400, error instanceof Error ? error.message : String(error));
+        }
+        sendJson(response, 201, { provider: publicProviderProfile(profile) });
+        return;
+      }
+      const discoverMatch = url.pathname.match(/^\/v1\/providers\/([^/]+)\/discover$/u);
+      if (discoverMatch?.[1] !== undefined && request.method === "POST") {
+        const providerId = decodeURIComponent(discoverMatch[1]);
+        const profile = modelRuntime.catalog.profile(providerId, tenantId);
+        if (profile === undefined) throw new HttpError(404, "provider profile not found");
+        const snapshot = await modelRuntime.catalog.refresh(tenantId);
+        const group = snapshot.groups.find((item) => item.provider === providerId);
+        sendJson(response, group?.status === "failed" ? 503 : 200, { provider: group ?? { provider: providerId, status: "unavailable", models: [] } });
+        return;
+      }
+      throw new HttpError(404, "provider endpoint not found");
+    }
+    const sessionModelsMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/models$/u);
+    if (sessionModelsMatch?.[1] !== undefined) {
+      if (request.method !== "GET") throw new HttpError(405, "method not allowed");
+      const targetSessionId = sessionId(decodeURIComponent(sessionModelsMatch[1]));
+      const projection = await host.getSession(targetSessionId);
+      if (projection === undefined) throw new HttpError(404, "session not found");
+      const snapshot = await modelRuntime.catalog.refresh(projection.ownership?.tenantId);
+      const effective = projection.modelSelection ?? (projection.ownership?.tenantId === undefined ? undefined : modelRuntime.routes.get(projection.ownership.tenantId));
+      sendJson(response, 200, {
+        sessionId: targetSessionId,
+        selection: projection.modelSelection ?? null,
+        providers: publicCatalogGroups(snapshot.groups),
+        ...(effective === undefined ? {} : { effective: { provider: effective.provider, model: effective.model } }),
+      });
+      return;
+    }
     const sessionModelMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/model$/u);
     if (sessionModelMatch?.[1] !== undefined) {
       const targetSessionId = sessionId(decodeURIComponent(sessionModelMatch[1]));
@@ -370,19 +579,20 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       if (request.method !== "POST") throw new HttpError(405, "method not allowed");
       const body = await readJson(request);
       if (typeof body.model !== "string" || body.model.trim() === "") throw new HttpError(400, "model is required");
-      if (modelRuntime.selector === undefined) throw new HttpError(409, "model switching is not configured");
       const requestedModel = body.model.trim();
-      if (modelRuntime.availableModels.length > 0 && !modelRuntime.availableModels.includes(requestedModel)) throw new HttpError(400, "unsupported model");
       const reasoningEffort = body.reasoningEffort === undefined ? undefined : requireReasoningEffort(body.reasoningEffort);
       const tenantId = projection.ownership?.tenantId;
       const currentRoute = tenantId === undefined ? undefined : modelRuntime.routes.get(tenantId);
       const requestedCredential = body.credentialRef === undefined
         ? currentRoute?.credentialRef
         : tenantId === undefined ? undefined : parseCredentialReference(body.credentialRef);
-      const material = requestedCredential === undefined || tenantId === undefined ? undefined : modelRuntime.credentials.resolve(requestedCredential, tenantId);
-      if (requestedCredential !== undefined && material === undefined) throw new CredentialLifecycleError("CREDENTIAL_REFERENCE_INVALID", "Credential reference is missing, revoked, or stale");
-      const selected = modelRuntime.selector(requestedModel, tenantId, material);
-      if (body.provider !== undefined && (typeof body.provider !== "string" || body.provider.trim() !== selected.config.provider)) throw new HttpError(400, "provider does not match the selected model");
+      const requestedProvider = body.provider === undefined ? currentRoute?.provider : typeof body.provider === "string" ? body.provider.trim() : undefined;
+      const profileCredential = requestedProvider === undefined ? undefined : modelRuntime.catalog.profile(requestedProvider, tenantId)?.credentialRef;
+      const effectiveCredential = requestedCredential ?? profileCredential;
+      const material = effectiveCredential === undefined || tenantId === undefined ? undefined : modelRuntime.credentials.resolve(effectiveCredential, tenantId);
+      if (effectiveCredential !== undefined && material === undefined) throw new CredentialLifecycleError("CREDENTIAL_REFERENCE_INVALID", "Credential reference is missing, revoked, or stale");
+      const selected = selectCatalogModel(modelRuntime, requestedModel, tenantId, material, requestedProvider);
+      if (modelRuntime.selector !== undefined && requestedProvider === undefined && modelRuntime.catalog.profile(selected.config.provider, tenantId)?.source !== "custom" && modelRuntime.availableModels.length > 0 && !modelRuntime.availableModels.includes(requestedModel)) throw new HttpError(400, "unsupported model");
       const selection: ContractModelSelection = {
         provider: selected.config.provider,
         model: selected.config.model,
@@ -393,7 +603,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         model: selected.config.model,
         ...(selected.config.baseUrl === undefined ? {} : { baseUrl: selected.config.baseUrl }),
         ...(selected.model.contextCapability === undefined ? {} : { contextCapability: selected.model.contextCapability }),
-        ...(currentRoute?.credentialRef === undefined ? {} : { credentialRef: currentRoute.credentialRef }),
+        ...(effectiveCredential === undefined ? {} : { credentialRef: effectiveCredential }),
       };
       const updated = await host.selectSessionModel(targetSessionId, selection, selected.model, route, commandId(request, body));
       sendJson(response, 200, { sessionId: targetSessionId, selection: updated.modelSelection ?? selection, model: selected.config, effective: { provider: selection.provider, model: selection.model } });
@@ -404,13 +614,20 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         modelRuntime.remainingCatalogFailures -= 1;
         throw new HttpError(503, "model catalog temporarily unavailable");
       }
+      const catalogSnapshot = await modelRuntime.catalog.refresh(identity?.tenantId);
       const route = identity === undefined ? undefined : modelRuntime.routes.get(identity.tenantId);
+      const currentProvider = route?.provider ?? modelRuntime.info?.provider ?? "custom";
+      const currentModel = route?.model ?? modelRuntime.info?.model ?? "custom";
+      const currentGroup = catalogSnapshot.groups.find((group) => group.provider === currentProvider);
       sendJson(response, 200, {
-        provider: route?.provider ?? modelRuntime.info?.provider ?? "custom",
-        current: route?.model ?? modelRuntime.info?.model ?? "custom",
+        provider: currentProvider,
+        current: currentModel,
         configured: route === undefined ? modelRuntime.info?.configured ?? false : true,
-        models: modelRuntime.availableModels,
-        reasoning: reasoningCapability(route?.provider ?? modelRuntime.info?.provider, host.currentReasoningEffort()),
+        models: currentGroup?.models.map((entry) => entry.model) ?? modelRuntime.availableModels,
+        providers: publicCatalogGroups(catalogSnapshot.groups),
+        profiles: modelRuntime.catalog.listProfiles(identity?.tenantId).map(publicProviderProfile),
+        ...(currentGroup?.status === "failed" ? { catalogError: currentGroup.error } : {}),
+        reasoning: reasoningCapability(currentProvider, host.currentReasoningEffort()),
         ...(route === undefined ? {} : { route: publicModelRoute(route) }),
       });
       return;
@@ -418,7 +635,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "POST" && url.pathname === "/v1/models") {
       const body = await readJson(request);
       const reasoningEffort = body.reasoningEffort === undefined ? undefined : requireReasoningEffort(body.reasoningEffort);
-      const provider = identity === undefined ? modelRuntime.info?.provider : modelRuntime.routes.get(identity.tenantId)?.provider ?? modelRuntime.info?.provider;
+      const provider = typeof body.provider === "string" && body.provider.trim() !== "" ? body.provider.trim() : identity === undefined ? modelRuntime.info?.provider : modelRuntime.routes.get(identity.tenantId)?.provider ?? modelRuntime.info?.provider;
       if (reasoningEffort !== undefined) {
         const capability = reasoningCapability(provider, host.currentReasoningEffort());
         if (!capability.supported || !capability.options.some((option) => option.id === reasoningEffort)) throw new HttpError(400, "unsupported reasoning effort");
@@ -428,13 +645,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         sendJson(response, 200, { reasoning: reasoningCapability(provider, host.currentReasoningEffort()) });
         return;
       }
-      if (modelRuntime.selector === undefined) throw new HttpError(409, "model switching is not configured");
       if (typeof body.model !== "string" || body.model.length === 0) throw new HttpError(400, "model is required");
-      if (modelRuntime.availableModels.length > 0 && !modelRuntime.availableModels.includes(body.model)) throw new HttpError(400, "unsupported model");
       const requestedCredential = identity === undefined || body.credentialRef === undefined ? undefined : parseCredentialReference(body.credentialRef);
-      const material = requestedCredential === undefined ? undefined : credentials.resolve(requestedCredential, identity?.tenantId);
-      if (requestedCredential !== undefined && material === undefined) throw new CredentialLifecycleError("CREDENTIAL_REFERENCE_INVALID", "Credential reference is missing, revoked, or stale");
-      const selected = modelRuntime.selector(body.model, identity?.tenantId, material);
+      const profileCredential = provider === undefined ? undefined : modelRuntime.catalog.profile(provider, identity?.tenantId)?.credentialRef;
+      const effectiveCredential = requestedCredential ?? profileCredential;
+      const material = effectiveCredential === undefined ? undefined : credentials.resolve(effectiveCredential, identity?.tenantId);
+      if (effectiveCredential !== undefined && material === undefined) throw new CredentialLifecycleError("CREDENTIAL_REFERENCE_INVALID", "Credential reference is missing, revoked, or stale");
+      const selected = selectCatalogModel(modelRuntime, body.model, identity?.tenantId, material, provider);
+      if (modelRuntime.selector !== undefined && modelRuntime.catalog.profile(selected.config.provider, identity?.tenantId)?.source !== "custom" && modelRuntime.availableModels.length > 0 && !modelRuntime.availableModels.includes(body.model)) throw new HttpError(400, "unsupported model");
       if (identity === undefined) {
         host.setModel(selected.model);
         modelRuntime.info = selected.config;
@@ -447,7 +665,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         model: selected.config.model,
         ...(selected.config.baseUrl === undefined ? {} : { baseUrl: selected.config.baseUrl }),
         ...(selected.model.contextCapability === undefined ? {} : { contextCapability: selected.model.contextCapability }),
-        ...(requestedCredential === undefined ? {} : { credentialRef: credentials.reference(credentials.requireReference(identity.tenantId, requestedCredential)) }),
+        ...(effectiveCredential === undefined ? {} : { credentialRef: credentials.reference(credentials.requireReference(identity.tenantId, effectiveCredential)) }),
         updatedAt: new Date().toISOString(),
       };
       if (modelRuntime.routeBackend === undefined) throw new HttpError(409, "tenant model routing persistence is not configured");

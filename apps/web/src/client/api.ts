@@ -21,6 +21,9 @@ import type {
   ProductizationCapability,
   McpCredentialReference,
   CredentialRecord,
+  ModelCatalogEntry,
+  ProviderCatalogGroup,
+  ProviderProfileRecord,
 } from "@code-review-agent/contracts";
 
 export interface ToolCatalogEntry {
@@ -39,6 +42,9 @@ export interface ModelCatalogResponse {
   readonly current: string;
   readonly configured: boolean;
   readonly models: readonly string[];
+  readonly providers?: readonly ProviderCatalogGroup[];
+  readonly profiles?: readonly Readonly<Record<string, unknown>>[];
+  readonly catalogError?: string;
   readonly reasoning?: {
     readonly supported: boolean;
     readonly current?: string;
@@ -51,6 +57,21 @@ export interface ModelCatalogResponse {
     readonly credentialRef?: McpCredentialReference;
     readonly updatedAt: string;
   };
+}
+
+export interface ProviderCatalogResponse {
+  readonly providers: readonly ProviderCatalogGroup[];
+  readonly profiles: readonly Readonly<Record<string, unknown>>[];
+}
+
+export interface ProviderProfileInput {
+  readonly id: string;
+  readonly displayName: string;
+  readonly protocol: string;
+  readonly baseUrl?: string;
+  readonly credentialRef?: McpCredentialReference;
+  readonly models: readonly (string | Omit<ModelCatalogEntry, "provider">)[];
+  readonly enabled?: boolean;
 }
 
 export interface CredentialMaterialInput {
@@ -486,8 +507,24 @@ export class WebApiClient {
     return this.request("/v1/models");
   }
 
-  selectModel(model: string, commandId?: string, credentialRef?: McpCredentialReference, reasoningEffort?: string): Promise<{ readonly model: Readonly<Record<string, unknown>>; readonly route?: ModelCatalogResponse["route"]; readonly reasoning?: ModelCatalogResponse["reasoning"] }> {
-    return this.request("/v1/models", { method: "POST", commandId, body: { model, ...(credentialRef === undefined ? {} : { credentialRef }), ...(reasoningEffort === undefined || reasoningEffort === "default" ? {} : { reasoningEffort }) } });
+  listProviders(): Promise<ProviderCatalogResponse> {
+    return this.request("/v1/providers");
+  }
+
+  createProvider(input: ProviderProfileInput): Promise<{ readonly provider: Readonly<Record<string, unknown>> }> {
+    return this.request("/v1/providers", { method: "POST", body: input });
+  }
+
+  discoverProvider(provider: string): Promise<{ readonly provider: ProviderCatalogGroup }> {
+    return this.request(`/v1/providers/${encodeURIComponent(provider)}/discover`, { method: "POST" });
+  }
+
+  listSessionModels(sessionId: SessionId): Promise<{ readonly sessionId: SessionId; readonly selection: unknown; readonly providers: readonly ProviderCatalogGroup[]; readonly effective?: { readonly provider: string; readonly model: string } }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/models`);
+  }
+
+  selectModel(model: string, commandId?: string, credentialRef?: McpCredentialReference, reasoningEffort?: string, provider?: string): Promise<{ readonly model: Readonly<Record<string, unknown>>; readonly route?: ModelCatalogResponse["route"]; readonly reasoning?: ModelCatalogResponse["reasoning"] }> {
+    return this.request("/v1/models", { method: "POST", commandId, body: { model, ...(provider === undefined ? {} : { provider }), ...(credentialRef === undefined ? {} : { credentialRef }), ...(reasoningEffort === undefined || reasoningEffort === "default" ? {} : { reasoningEffort }) } });
   }
 
   listCredentials(): Promise<CredentialListResponse> {

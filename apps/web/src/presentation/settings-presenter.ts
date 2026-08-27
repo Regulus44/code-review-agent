@@ -1,5 +1,6 @@
 import type { PermissionPreset, SessionProjection } from "@code-review-agent/contracts";
 import type { AttachmentCapability, CodeModeCapability, ContextCapability, LspCapability, ModelCatalogResponse, McpServerView, PluginsCapability, ProductizationCapabilityResponse, ToolCatalogEntry } from "../client/api.js";
+import type { ProviderCatalogGroup } from "@code-review-agent/contracts";
 
 export interface SettingsCapability {
   readonly key: string;
@@ -20,6 +21,8 @@ export interface SettingsRenderIntent {
     readonly current: string;
     readonly configured: boolean;
     readonly available: readonly string[];
+    readonly providers: readonly ProviderCatalogGroup[];
+    readonly providerErrors: readonly { readonly provider: string; readonly error: string }[];
     readonly error?: string;
     readonly receipt?: string;
   };
@@ -122,6 +125,8 @@ export function presentSettings(
       current: models?.current ?? "unknown",
       configured: models?.configured === true,
       available: (models?.models ?? []).slice(0, 32),
+      providers: (models?.providers ?? []).slice(0, 32),
+      providerErrors: (models?.providers ?? []).filter((group) => group.status === "failed" && group.error !== undefined).map((group) => ({ provider: group.provider, error: group.error! })).slice(0, 32),
       ...(modelState.error ? { error: modelState.error } : {}),
       ...(modelState.receipt ? { receipt: modelState.receipt } : {}),
     },

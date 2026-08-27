@@ -2,6 +2,8 @@ import type { ChatMessage, ChatModel, ModelContextCapability, ModelRequest, Mode
 import { ModelProtocolRegistry, type ModelProtocolModelConfig } from "./registry.js";
 import { AnthropicMessagesChatModel } from "./providers/anthropic-messages/adapter.js";
 
+export { ModelCatalog, createModelFromProviderProfile, type ModelCatalogSnapshot, type ProviderCatalogDiscovery, type ProviderCredentialMaterial } from "./catalog.js";
+
 export { ModelProtocolRegistry, ModelProtocolRegistryError, type ModelProtocolAdapter, type ModelProtocolModelConfig, type ModelProtocolRegistration } from "./registry.js";
 
 export const ECHO_MODEL_PROTOCOL = "echo";
@@ -349,7 +351,7 @@ export function createConfiguredModelBootstrap(
   registry: ModelProtocolRegistry = createBuiltInModelProtocolRegistry(),
 ): ConfiguredModelBootstrap {
   const initial = createConfiguredChatModel(env, registry);
-  const selectable = configuredProviderSelection(initial.config.provider);
+  const selectable = configuredProviderSelection(initial.config.provider, env);
   return {
     initial,
     availableModels: selectable?.models ?? [],
@@ -364,14 +366,19 @@ export function createConfiguredModelBootstrap(
   };
 }
 
-function configuredProviderSelection(provider: string): { readonly models: readonly string[]; readonly modelEnvironmentVariable: string } | undefined {
+function configuredProviderSelection(provider: string, env: NodeJS.ProcessEnv = process.env): { readonly models: readonly string[]; readonly modelEnvironmentVariable: string } | undefined {
   if (provider === "deepseek") {
     return { models: DEEPSEEK_MODELS, modelEnvironmentVariable: "DEEPSEEK_MODEL" };
   }
   if (provider === "anthropic") {
-    // Anthropic-compatible gateways expose provider-specific model ids; keep
-    // the catalog open while still allowing an explicit model override.
-    return { models: [], modelEnvironmentVariable: "ANTHROPIC_MODEL" };
+    // Anthropic-compatible gateways expose provider-specific model ids. An
+    // optional comma-separated env catalog keeps the route open for custom IDs.
+    const models = (env["ANTHROPIC_MODELS"] ?? env["ANTHROPIC_MODEL_CATALOG"] ?? "")
+      .split(",")
+      .map((model) => model.trim())
+      .filter((model, index, values) => model.length > 0 && values.indexOf(model) === index)
+      .slice(0, 256);
+    return { models, modelEnvironmentVariable: "ANTHROPIC_MODEL" };
   }
   return undefined;
 }

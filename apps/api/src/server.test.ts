@@ -1205,4 +1205,76 @@ describe("Phase 2 API", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it("exposes grouped provider catalogs, isolates discovery failures, and routes unlisted custom models", async () => {
+    const server = createApiServer({
+      store: new InMemoryEventStore(),
+      providerProfiles: [
+        {
+          id: "alpha",
+          displayName: "Alpha Gateway",
+          protocol: "echo",
+          models: [{ provider: "alpha", model: "alpha-listed" }],
+          enabled: true,
+          revision: 1,
+          source: "custom",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: "offline",
+          displayName: "Offline Gateway",
+          protocol: "echo",
+          models: [{ provider: "offline", model: "offline-listed" }],
+          enabled: true,
+          revision: 1,
+          source: "custom",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+      providerDiscovery: async (profile) => {
+        if (profile.id === "offline") throw new Error("discovery unavailable");
+        return [{ provider: profile.id, model: profile.id + "-discovered" }];
+      },
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("Catalog API did not bind");
+    const url = "http://127.0.0.1:" + address.port;
+    try {
+      const catalog = await (await fetch(url + "/v1/models")).json() as { providers: { provider: string; status: string; models: { model: string }[]; error?: string }[] };
+      expect(catalog.providers.find((provider) => provider.provider === "alpha")).toMatchObject({ status: "ready", models: [{ model: "alpha-discovered" }] });
+      expect(catalog.providers.find((provider) => provider.provider === "offline")).toMatchObject({ status: "failed", error: "discovery unavailable" });
+
+      const selected = await fetch(url + "/v1/models", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ provider: "alpha", model: "alpha-unlisted" }) });
+      expect(selected.status).toBe(200);
+      expect(await selected.json()).toMatchObject({ model: { provider: "alpha", model: "alpha-unlisted" } });
+      const providers = await (await fetch(url + "/v1/providers")).json() as { profiles: { id: string; models: { model: string }[] }[] };
+      expect(providers.profiles.find((profile) => profile.id === "alpha")?.models).toEqual([{ provider: "alpha", model: "alpha-discovered" }]);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it("registers a custom provider profile without exposing credential material", async () => {
+    const server = createApiServer({ store: new InMemoryEventStore() });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("Provider profile API did not bind");
+    const url = "http://127.0.0.1:" + address.port;
+    try {
+      const response = await fetch(url + "/v1/providers", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "custom-gateway", displayName: "Custom Gateway", protocol: "echo", models: ["gateway-model"], credentialRef: { id: "cred_missing", kind: "header", version: 1 } }) });
+      expect(response.status).toBe(401);
+
+      const accepted = await fetch(url + "/v1/providers", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "custom-gateway", displayName: "Custom Gateway", protocol: "echo", models: ["gateway-model"] }) });
+      expect(accepted.status).toBe(201);
+      expect(JSON.stringify(await accepted.json())).not.toContain("secret");
+      const selected = await fetch(url + "/v1/models", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ provider: "custom-gateway", model: "unlisted-gateway-model" }) });
+      expect(selected.status).toBe(200);
+      expect(await selected.json()).toMatchObject({ model: { provider: "custom-gateway", model: "unlisted-gateway-model" } });
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
 });

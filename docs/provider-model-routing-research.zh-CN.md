@@ -1,6 +1,6 @@
 # Provider / Model 路由与 Anthropic 协议适配调研草案
 
-状态：`research-draft`（调研和实施索引，不代表已接受的公共契约）
+状态：`research-draft`（调研和实施索引，不代表已接受的公共契约）；P8.5-MR0–MR5 已按本索引落地，MR6 保持后续切片
 
 日期：2026-08-27
 

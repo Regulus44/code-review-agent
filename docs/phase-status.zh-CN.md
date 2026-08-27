@@ -92,6 +92,13 @@
 
 - P8.5-MR4 已新增 `session/model_selected` 事件和 `SessionProjection.modelSelection`；Runtime 提供 Session 级选择命令、command idempotency、fork inheritance，并在 Turn 启动时固定 model/route/reasoning snapshot，后续切换只影响下一 Turn。API 新增 `GET/POST /v1/sessions/:id/model`，认证请求沿用 Session tenant ownership，响应不返回 credential material；无 Session selection 时继续回退现有 tenant route/host model。参考入口：DSH `packages/host/apiproxy/src/api-proxy.ts:selectionFor()`、`sessions.models()`、`sessions.selectModel()` 与 `packages/llm/llm/src/index.ts:prepareCall()`；Claude Code `src/query.ts`/`src/services/api/claude.ts` 的一次 query 固定 model 语义。MR4 当前已通过 InMemory/SQLite replay、Runtime 在途切换/下一 Turn/fork、API 重启恢复、幂等与 projection 测试，独立 checkpoint：`3af875a feat(phase8): add session model selection snapshots`。
 
+## P8.5-MR5 Model Catalog、Discovery 与 Web 设置（implemented，未完成整体 8.5）
+
+- `packages/llm/src/catalog.ts` 提供 provider profile 注册、按 provider 分组的 advisory catalog、单 provider discovery failure 隔离和 unlisted-but-routable exact resolve；`ProviderProfileRecord`、`ProviderCatalogGroup` 与扩展后的 `ModelCatalogEntry` 不包含 credential material。
+- API `GET /v1/models` 保留旧字段并增加 `providers`/`profiles` 分组视图，新增 `GET/POST /v1/providers`、`POST /v1/providers/:id/discover` 和 `GET /v1/sessions/:id/models`；自定义 profile 通过内置 protocol registry 校验，credential 只接受 opaque reference。
+- Web typed client、Settings presenter 和 composer model picker 已消费 provider 分组、状态和失败信息；每次 refresh 重新触发 discovery，局部失败不会隐藏其他 provider。
+- 参考 DSH `packages/llm/llm/src/index.ts:listModels()/resolveModelInfo()`、`packages/host/apiproxy/src/api/sessions.ts:SessionModels`、`packages/client/ui-model-selection/src/client/directory.ts:ModelDirectory`；Claude Code 仅作脱敏错误文案行为参考。验证：`pnpm typecheck`、LLM 22 项、API 36 项、Web 139 项、browser bundle build、`git diff --check`。
+
 ## Phase 8.5 tenant-scoped Workspace slice（implemented，未完成整体 8.5）
 
 - `AgentHost` 的 Workspace catalog、reorder、rename、archive/restore 和 soft delete 接受可选 `SessionOwnership` scope；认证 API 仅投影调用者 tenant 的 Session members。
