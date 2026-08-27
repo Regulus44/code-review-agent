@@ -1200,6 +1200,35 @@ export interface ModelContextCapability {
   readonly source?: "provider" | "estimate" | "hybrid";
 }
 
+/** A user- or host-selected provider/model pair. It is free of credential material. */
+export interface ModelSelection {
+  readonly provider: string;
+  readonly model: string;
+  /** Provider-owned reasoning effort. Omitted means the provider default. */
+  readonly reasoningEffort?: string;
+}
+
+/** Advisory metadata for one provider/model route. A catalog entry never gates routing by itself. */
+export interface ModelCatalogEntry {
+  readonly provider: string;
+  readonly model: string;
+  readonly displayName?: string;
+  readonly contextCapability?: ModelContextCapability;
+  readonly reasoning?: {
+    readonly efforts: readonly string[];
+    readonly defaultEffort?: string;
+  };
+}
+
+/** Exact provider/protocol resolution used to prepare one model route. */
+export interface ResolvedModelInfo {
+  readonly provider: string;
+  readonly protocol: string;
+  readonly model: string;
+  readonly catalogEntry?: ModelCatalogEntry;
+  readonly contextCapability?: ModelContextCapability;
+}
+
 /** Host-owned status for the optional Claude Code-style historical collapse layer. */
 export interface ContextCollapseCapability {
   readonly version: 1;
@@ -1277,6 +1306,19 @@ export interface ChatModel {
   stream(request: ModelRequest): AsyncIterable<ModelStreamPart>;
   /** Optional provider exact token counter used by M02 near budget boundaries. */
   countTokens?(request: ModelRequest): Promise<number | undefined>;
+}
+
+/**
+ * Runtime-only immutable route prepared before a turn starts. It is deliberately
+ * not an event or persistence record: `model` may hold credentials in process.
+ */
+export interface PreparedModelRoute {
+  readonly selection: ModelSelection;
+  readonly resolved: ResolvedModelInfo;
+  readonly model: ChatModel;
+  readonly profileRevision?: number;
+  readonly credentialVersion?: number;
+  readonly fallbacks?: readonly PreparedModelRoute[];
 }
 
 export interface EventStore {

@@ -80,6 +80,11 @@
 - Web Settings 和 typed browser bundle 展示 Productization 状态；`scripts/phase8-productization-gate.mjs` 与 `pnpm test:phase8:productization` 已覆盖认证、租户目录、跨租户拒绝、turn quota、credential lifecycle 和凭据脱敏边界；
 - 当前仍未实现外部 IdP/JWT、完整 principal catalog、外部 secret manager、upgrade/deployment policy；backup/restore 与 migration rollback 仅完成第一切片，不能将 8.5 或 Phase 8 标记为完成。
 
+## Phase 8.5 Provider/model routing 演进（in_progress）
+
+- P8.5-MR0 已接受 provider、protocol、model 三层标识和 `ModelSelection`、`ModelCatalogEntry`、`ResolvedModelInfo`、`PreparedModelRoute` 的公共边界；完整决定见 [Provider/model routing ADR](adr/phase-8-provider-model-routing.zh-CN.md)。
+- 本切片未新增 ProviderProfile 持久化、Session selection event、Turn route snapshot 或新的 HTTP protocol；这些内容分别保留给 P8.5-MR2、MR3 和 MR4。第三方凭据继续只保存在 host-owned resolver，`yayienv.txt` 已被 Git 忽略。
+
 ## Phase 8.5 tenant-scoped Workspace slice（implemented，未完成整体 8.5）
 
 - `AgentHost` 的 Workspace catalog、reorder、rename、archive/restore 和 soft delete 接受可选 `SessionOwnership` scope；认证 API 仅投影调用者 tenant 的 Session members。

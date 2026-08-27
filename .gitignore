@@ -1,6 +1,9 @@
 .env
 .env.*
 !.env.example
+# Local third-party provider credentials. Keep this file outside every source,
+# diagnostic, event, and configuration artifact.
+yayienv.txt
 .data/
 tmp/
 .tmp/

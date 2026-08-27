@@ -77,6 +77,8 @@ mcp/prompt
 
 Credential metadata 是 Phase 8.5 的 control-plane 配置事实，不属于 Session event 集合。`CredentialRecord` 只保存 tenant、kind、状态、版本和时间；secret material 只能存在 host-owned resolver 中，不能写入 EventStore、SQLite metadata、route、MCP config、SSE、diagnostics 或 Web projection。model route 的实际使用仍通过所属 Session 的 `turn/started` 或恢复 `agent/status` bounded metadata 记录；credential create/rotate/revoke/delete 本身不伪造一条 Session event。rotation 递增 credential version，旧 reference 必须 fail closed；revocation 要先停止可控的 live consumer，随后清除或标记不可用的 route。
 
+P8.5-MR0 为后续 provider/model routing 追加了 `ModelSelection`、`ModelCatalogEntry`、`ResolvedModelInfo` 与 `PreparedModelRoute` 公共类型。前两者和解析结果不携带 credential material；`PreparedModelRoute` 是执行期对象，不能写入事件、projection、SSE 或 SQLite。Provider catalog 只用于展示和能力提示，不能作为路由的硬 allowlist。Session 级选择事件（预留为 `session/model_selected`）与 `turn/started` 的不可变路由快照将在 P8.5-MR4 一并接受，旧事件和 `ModelRouteRecord` 在此之前保持兼容可读。
+
 `queue/changed` 的 payload 是当前 Session 尚未启动的队列快照：
 
 ```ts
