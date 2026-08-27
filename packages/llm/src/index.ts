@@ -1,4 +1,10 @@
 import type { ChatMessage, ChatModel, ModelContextCapability, ModelRequest, ModelStreamPart, ModelToolCall, ModelUsage } from "@code-review-agent/contracts";
+import { ModelProtocolRegistry, type ModelProtocolModelConfig } from "./registry.js";
+
+export { ModelProtocolRegistry, ModelProtocolRegistryError, type ModelProtocolAdapter, type ModelProtocolModelConfig, type ModelProtocolRegistration } from "./registry.js";
+
+export const ECHO_MODEL_PROTOCOL = "echo";
+export const OPENAI_CHAT_COMPLETIONS_PROTOCOL = "openai-chat-completions";
 
 export interface OpenAICompatibleOptions {
   readonly baseUrl: string;
@@ -10,7 +16,8 @@ export interface OpenAICompatibleOptions {
   readonly fetch?: typeof globalThis.fetch;
 }
 
-export type ConfiguredModelProvider = "echo" | "deepseek";
+/** Provider IDs are configuration values; protocol identity is kept separately. */
+export type ConfiguredModelProvider = string;
 
 export const DEEPSEEK_MODELS = [
   "deepseek-v4-flash",
@@ -32,6 +39,14 @@ export interface ModelConfigView {
 export interface ConfiguredChatModel {
   readonly model: ChatModel;
   readonly config: ModelConfigView;
+}
+
+/** Bootstrap used by API Hosts without embedding provider-specific environment logic. */
+export interface ConfiguredModelBootstrap {
+  readonly initial: ConfiguredChatModel;
+  readonly availableModels: readonly string[];
+  /** Present only when the configured provider exposes a selectable model catalog. */
+  readonly selectModel?: (model: string, credentialEnvironment?: NodeJS.ProcessEnv) => ConfiguredChatModel;
 }
 
 export class ModelConfigurationError extends Error {
@@ -158,6 +173,32 @@ export class OpenAICompatibleChatModel implements ChatModel {
   }
 }
 
+/** Registers the two current protocol implementations without retaining call configuration. */
+export function createBuiltInModelProtocolRegistry(): ModelProtocolRegistry {
+  const registry = new ModelProtocolRegistry();
+  registry.register({
+    protocol: ECHO_MODEL_PROTOCOL,
+    createModel: () => new EchoChatModel(),
+  });
+  registry.register({
+    protocol: OPENAI_CHAT_COMPLETIONS_PROTOCOL,
+    createModel: (config: ModelProtocolModelConfig) => {
+      if (config.baseUrl === undefined || config.baseUrl.length === 0) {
+        throw new ModelConfigurationError(`${OPENAI_CHAT_COMPLETIONS_PROTOCOL} requires baseUrl`);
+      }
+      return new OpenAICompatibleChatModel({
+        baseUrl: config.baseUrl,
+        model: config.model,
+        ...(config.apiKey === undefined ? {} : { apiKey: config.apiKey }),
+        ...(config.headers === undefined ? {} : { headers: config.headers }),
+        ...(config.contextCapability === undefined ? {} : { contextCapability: config.contextCapability }),
+        ...(config.fetch === undefined ? {} : { fetch: config.fetch }),
+      });
+    },
+  });
+  return registry;
+}
+
 async function readProviderErrorDetail(response: Response): Promise<{ readonly message?: string; readonly code?: string }> {
   try {
     const raw = await response.text();
@@ -205,7 +246,10 @@ function describeNetworkError(error: unknown): string {
  * Selects the local model without ever returning the API key to callers.
  * `auto` uses DeepSeek only when a non-empty key is present; otherwise it is deterministic Echo.
  */
-export function createConfiguredChatModel(env: NodeJS.ProcessEnv = process.env): ConfiguredChatModel {
+export function createConfiguredChatModel(
+  env: NodeJS.ProcessEnv = process.env,
+  registry: ModelProtocolRegistry = createBuiltInModelProtocolRegistry(),
+): ConfiguredChatModel {
   const requested = (env["MODEL_PROVIDER"]?.trim().toLowerCase() || "auto");
   if (requested !== "auto" && requested !== "echo" && requested !== "deepseek") {
     throw new ModelConfigurationError("MODEL_PROVIDER must be one of auto, echo, or deepseek");
@@ -218,7 +262,7 @@ export function createConfiguredChatModel(env: NodeJS.ProcessEnv = process.env):
   }
   if (provider === "echo") {
     return {
-      model: new EchoChatModel(),
+      model: registry.create(ECHO_MODEL_PROTOCOL, { model: "echo" }),
       config: { provider: "echo", model: "echo", configured: false },
     };
   }
@@ -239,9 +283,40 @@ export function createConfiguredChatModel(env: NodeJS.ProcessEnv = process.env):
     source: "provider",
   };
   return {
-    model: new OpenAICompatibleChatModel({ baseUrl: safeBaseUrl, model, contextCapability, ...(apiKey === undefined ? {} : { apiKey }) }),
+    model: registry.create(OPENAI_CHAT_COMPLETIONS_PROTOCOL, { baseUrl: safeBaseUrl, model, contextCapability, ...(apiKey === undefined ? {} : { apiKey }) }),
     config: { provider: "deepseek", model, baseUrl: safeBaseUrl, configured: true },
   };
+}
+
+/**
+ * Converts legacy process-environment configuration into an API-neutral model
+ * bootstrap. Future ProviderProfile support replaces this compatibility layer.
+ */
+export function createConfiguredModelBootstrap(
+  env: NodeJS.ProcessEnv = process.env,
+  registry: ModelProtocolRegistry = createBuiltInModelProtocolRegistry(),
+): ConfiguredModelBootstrap {
+  const initial = createConfiguredChatModel(env, registry);
+  const selectable = configuredProviderSelection(initial.config.provider);
+  return {
+    initial,
+    availableModels: selectable?.models ?? [],
+    ...(selectable === undefined ? {} : {
+      selectModel: (model: string, credentialEnvironment: NodeJS.ProcessEnv = {}) => createConfiguredChatModel({
+        ...env,
+        ...credentialEnvironment,
+        MODEL_PROVIDER: initial.config.provider,
+        [selectable.modelEnvironmentVariable]: model,
+      }, registry),
+    }),
+  };
+}
+
+function configuredProviderSelection(provider: string): { readonly models: readonly string[]; readonly modelEnvironmentVariable: string } | undefined {
+  if (provider === "deepseek") {
+    return { models: DEEPSEEK_MODELS, modelEnvironmentVariable: "DEEPSEEK_MODEL" };
+  }
+  return undefined;
 }
 
 interface ParsedToolCallDelta {

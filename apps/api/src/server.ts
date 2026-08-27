@@ -8,7 +8,7 @@ import { createInProcessSubagentProvider, sessionId, AgentHost, turnId, type Ten
 import { SqliteEventStore } from "@code-review-agent/storage";
 import { brand, type AgentEvent, type ChatModel, type ContextBudgetConfig, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem, type ProductizationCapability, type SessionOwnership, type ModelRouteBackend, type ModelRouteRecord, type CredentialBackend, type McpCredentialReference, type PrincipalBackend } from "@code-review-agent/contracts";
 import { SubagentRuntime } from "@code-review-agent/subagent";
-import { createConfiguredChatModel, DEEPSEEK_MODELS, type ModelConfigView } from "@code-review-agent/llm";
+import { createConfiguredModelBootstrap, type ModelConfigView } from "@code-review-agent/llm";
 import { McpConnectionManager, type McpServerConfig } from "@code-review-agent/mcp-client";
 import type { CodeModeSandbox, PermissionPreset } from "@code-review-agent/tools";
 import { artifactAccessResponse, inspectArtifact, isAvailableArtifact, type ArtifactAccess } from "./artifacts.js";
@@ -76,6 +76,8 @@ export interface ApiServerOptions {
   readonly codeMode?: CodeModeSandbox;
   readonly productization?: ProductizationServerOptions;
   readonly webRoot?: string;
+  /** Injectable process environment for the configured local model bootstrap. */
+  readonly modelEnvironment?: NodeJS.ProcessEnv;
 }
 
 export function createApiServer(options: ApiServerOptions = {}): Server {
@@ -131,22 +133,21 @@ function defaultDatabasePath(): string {
 /** CLI/runtime entry that opts into local `.env` model configuration. Tests stay deterministic via createApiServer(). */
 export function createConfiguredApiServer(options: ApiServerOptions = {}): Server {
   if (options.host !== undefined || options.model !== undefined) return createApiServer(options);
-  const configured = createConfiguredChatModel();
-  const switchOptions: ApiServerOptions = configured.config.provider === "deepseek" ? {
-    ...(options.availableModels === undefined ? { availableModels: DEEPSEEK_MODELS } : { availableModels: options.availableModels }),
-    ...(options.modelSelector === undefined ? {
+  const bootstrap = createConfiguredModelBootstrap(options.modelEnvironment);
+  const bootstrapSelector = bootstrap.selectModel;
+  const switchOptions: ApiServerOptions = {
+    ...(options.availableModels === undefined ? { availableModels: bootstrap.availableModels } : { availableModels: options.availableModels }),
+    ...(options.modelSelector === undefined && bootstrapSelector !== undefined ? {
       modelSelector: (model: string, _tenantId: string | undefined, credential: CredentialMaterial | undefined) => {
-        const selected = createConfiguredChatModel({ ...process.env, ...(credential?.env ?? {}), MODEL_PROVIDER: "deepseek", DEEPSEEK_MODEL: model });
+        const selected = bootstrapSelector(model, credential?.env);
         return { model: selected.model, config: selected.config };
       },
-    } : { modelSelector: options.modelSelector }),
-  } : {
-    ...(options.availableModels === undefined ? { availableModels: [] } : { availableModels: options.availableModels }),
+    } : options.modelSelector === undefined ? {} : { modelSelector: options.modelSelector }),
   };
   return createApiServer({
     ...options,
-    model: configured.model,
-    modelInfo: options.modelInfo ?? configured.config,
+    model: bootstrap.initial.model,
+    modelInfo: options.modelInfo ?? bootstrap.initial.config,
     ...switchOptions,
   });
 }

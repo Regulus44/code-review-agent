@@ -84,6 +84,8 @@
 
 - P8.5-MR0 已接受 provider、protocol、model 三层标识和 `ModelSelection`、`ModelCatalogEntry`、`ResolvedModelInfo`、`PreparedModelRoute` 的公共边界；完整决定见 [Provider/model routing ADR](adr/phase-8-provider-model-routing.zh-CN.md)。
 - 本切片未新增 ProviderProfile 持久化、Session selection event、Turn route snapshot 或新的 HTTP protocol；这些内容分别保留给 P8.5-MR2、MR3 和 MR4。第三方凭据继续只保存在 host-owned resolver，`yayienv.txt` 已被 Git 忽略。
+- P8.5-MR1 新增 `ModelProtocolRegistry`，以 fail-fast 的 protocol 注册、重复保护和 identity-safe disposal 承载 Echo 与 `openai-chat-completions` adapter；`createConfiguredModelBootstrap()` 将旧环境变量路径封装为 LLM 边界，API Host 从该边界取得 catalog 和 selector，不再拼接 DeepSeek provider 环境变量。
+- MR1 没有注册新的 protocol、读取第三方 Token Plan 或改变 ProviderProfile / Session selection / EventStore schema。验证：`pnpm typecheck`、LLM 12 项与 API 43 项测试、`git diff --check`。
 
 ## Phase 8.5 tenant-scoped Workspace slice（implemented，未完成整体 8.5）
 

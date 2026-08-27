@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { createApiServer } from "./server.js";
+import { createApiServer, createConfiguredApiServer } from "./server.js";
 import { InMemoryEventStore } from "@code-review-agent/storage";
 import { sessionId } from "@code-review-agent/runtime";
 import { DEEPSEEK_MODELS, OpenAICompatibleChatModel } from "@code-review-agent/llm";
@@ -693,6 +693,31 @@ describe("Phase 2 API", () => {
       expect(visionCapabilities.attachments.imagesEnabled).toBe(true);
       const rejected = await fetch(`${configuredUrl}/v1/models`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "not-a-deepseek-model" }) });
       expect(rejected.status).toBe(400);
+    } finally {
+      await new Promise<void>((resolve, reject) => configured.close((error) => (error ? reject(error) : resolve())));
+    }
+  });
+
+  it("gets its configured model catalog and selector from the LLM bootstrap", async () => {
+    const configured = createConfiguredApiServer({
+      store: new InMemoryEventStore(),
+      modelEnvironment: { MODEL_PROVIDER: "deepseek", DEEPSEEK_API_KEY: "sk-test-only" },
+    });
+    await new Promise<void>((resolve) => configured.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = configured.address();
+      if (address === null || typeof address === "string") throw new Error("Configured bootstrap API did not bind");
+      const configuredUrl = `http://127.0.0.1:${address.port}`;
+      const models = await (await fetch(`${configuredUrl}/v1/models`)).json() as { provider: string; current: string; models: string[] };
+      expect(models).toMatchObject({ provider: "deepseek", current: "deepseek-v4-flash", models: [...DEEPSEEK_MODELS] });
+
+      const switched = await fetch(`${configuredUrl}/v1/models`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: "deepseek-v4-pro" }),
+      });
+      expect(switched.status).toBe(200);
+      expect(await switched.json()).toMatchObject({ model: { provider: "deepseek", model: "deepseek-v4-pro" } });
     } finally {
       await new Promise<void>((resolve, reject) => configured.close((error) => (error ? reject(error) : resolve())));
     }

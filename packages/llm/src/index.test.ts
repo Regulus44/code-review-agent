@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_DEEPSEEK_MODEL, DEEPSEEK_MODELS, EchoChatModel, ModelConfigurationError, OpenAICompatibleChatModel, createConfiguredChatModel } from "./index.js";
+import { DEFAULT_DEEPSEEK_MODEL, DEEPSEEK_MODELS, ECHO_MODEL_PROTOCOL, EchoChatModel, ModelConfigurationError, ModelProtocolRegistry, OPENAI_CHAT_COMPLETIONS_PROTOCOL, OpenAICompatibleChatModel, createConfiguredChatModel, createConfiguredModelBootstrap } from "./index.js";
 
 describe("EchoChatModel", () => {
   it("streams incremental text and a terminal marker", async () => {
@@ -140,5 +140,31 @@ describe("EchoChatModel", () => {
   it("fails explicitly selected DeepSeek without revealing a credential", () => {
     expect(() => createConfiguredChatModel({ MODEL_PROVIDER: "deepseek", DEEPSEEK_API_KEY: "" })).toThrowError(ModelConfigurationError);
     expect(() => createConfiguredChatModel({ MODEL_PROVIDER: "deepseek", DEEPSEEK_API_KEY: "" })).toThrow("DEEPSEEK_API_KEY");
+  });
+
+  it("dispatches Echo and DeepSeek bootstrap models through registered protocols", () => {
+    const registry = new ModelProtocolRegistry();
+    const calls: { protocol: string; model: string; baseUrl?: string }[] = [];
+    registry.register({ protocol: ECHO_MODEL_PROTOCOL, createModel: (config) => {
+      calls.push({ protocol: ECHO_MODEL_PROTOCOL, model: config.model });
+      return new EchoChatModel();
+    } });
+    registry.register({ protocol: OPENAI_CHAT_COMPLETIONS_PROTOCOL, createModel: (config) => {
+      calls.push({ protocol: OPENAI_CHAT_COMPLETIONS_PROTOCOL, model: config.model, ...(config.baseUrl === undefined ? {} : { baseUrl: config.baseUrl }) });
+      return new EchoChatModel();
+    } });
+
+    const echo = createConfiguredChatModel({ MODEL_PROVIDER: "echo" }, registry);
+    const bootstrap = createConfiguredModelBootstrap({ MODEL_PROVIDER: "deepseek", DEEPSEEK_API_KEY: "sk-test-only" }, registry);
+    const selected = bootstrap.selectModel?.("deepseek-v4-pro");
+
+    expect(echo.config).toEqual({ provider: "echo", model: "echo", configured: false });
+    expect(bootstrap.availableModels).toEqual(DEEPSEEK_MODELS);
+    expect(selected?.config.model).toBe("deepseek-v4-pro");
+    expect(calls).toEqual([
+      { protocol: ECHO_MODEL_PROTOCOL, model: "echo" },
+      { protocol: OPENAI_CHAT_COMPLETIONS_PROTOCOL, model: DEFAULT_DEEPSEEK_MODEL, baseUrl: "https://api.deepseek.com" },
+      { protocol: OPENAI_CHAT_COMPLETIONS_PROTOCOL, model: "deepseek-v4-pro", baseUrl: "https://api.deepseek.com" },
+    ]);
   });
 });
