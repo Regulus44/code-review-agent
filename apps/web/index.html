@@ -2821,7 +2821,10 @@
           if (state.modelStatus === 'loading') return;
           modelEntryMode = 'seat';
           modelPopup?.close();
-          modelMenuPane = 'root';
+          // This seat currently has no separate Effort pane, so open the
+          // provider-grouped model list directly instead of hiding it behind
+          // a summary row that only repeats the active model.
+          modelMenuPane = 'models';
           renderModelSeatMenu();
           dispatchOverlay({ type: 'toggle', overlay: 'model-popover' });
         };

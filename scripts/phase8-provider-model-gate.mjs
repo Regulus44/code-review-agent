@@ -220,6 +220,11 @@ async function runWebContractScenario() {
     for (const marker of ["settings-provider-row", "settings-provider-editor", "API token (write-only)", "createCredential", "discoverProvider", "model-command-search", "Provider · Model", "event.stopPropagation(); modelMenuPane = 'models'"]) {
       assert(shell.text.includes(marker), `Web shell is missing ${marker}`);
     }
+    assert(
+      shell.text.includes("modelMenuPane = 'models';\n          renderModelSeatMenu();\n          dispatchOverlay({ type: 'toggle', overlay: 'model-popover' });") ||
+        shell.text.includes("modelMenuPane = 'models';\r\n          renderModelSeatMenu();\r\n          dispatchOverlay({ type: 'toggle', overlay: 'model-popover' });"),
+      "Composer model trigger must open the provider-grouped model pane directly",
+    );
     assert(browser.text.includes("ModelDirectory") || browser.text.includes("createModelPopup"), "typed browser bundle is missing the shared model selection bridge");
     return { settingsEditor: true, modelPopup: true, credentialWriteOnly: true };
   } finally {
