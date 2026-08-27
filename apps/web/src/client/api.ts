@@ -22,6 +22,7 @@ import type {
   McpCredentialReference,
   CredentialRecord,
   ModelCatalogEntry,
+  ModelSelection,
   ProviderCatalogGroup,
   ProviderProfileRecord,
 } from "@code-review-agent/contracts";
@@ -62,6 +63,44 @@ export interface ModelCatalogResponse {
 export interface ProviderCatalogResponse {
   readonly providers: readonly ProviderCatalogGroup[];
   readonly profiles: readonly Readonly<Record<string, unknown>>[];
+}
+
+/**
+ * Session-scoped model directory returned by the Host. `selection` is null when
+ * the session inherits its effective route; `effective` is the route that will
+ * be used for the next turn in that case. Provider groups are advisory catalog
+ * data and never contain credential material.
+ */
+export interface SessionModelsResponse {
+  readonly sessionId: SessionId;
+  readonly selection: ModelSelection | null;
+  readonly providers: readonly ProviderCatalogGroup[];
+  readonly effective?: {
+    readonly provider: string;
+    readonly model: string;
+  };
+}
+
+/** Current Session selection and inheritance state. */
+export interface SessionModelSelectionResponse {
+  readonly sessionId: SessionId;
+  readonly selection: ModelSelection | null;
+  readonly inherited?: boolean;
+  readonly effective?: {
+    readonly provider: string;
+    readonly model: string;
+  };
+}
+
+/** Receipt returned after a Session-scoped model switch. */
+export interface SessionModelSelectionMutationResponse {
+  readonly sessionId: SessionId;
+  readonly selection: ModelSelection;
+  readonly model: Readonly<Record<string, unknown>>;
+  readonly effective: {
+    readonly provider: string;
+    readonly model: string;
+  };
 }
 
 export interface ProviderProfileInput {
@@ -519,8 +558,26 @@ export class WebApiClient {
     return this.request(`/v1/providers/${encodeURIComponent(provider)}/discover`, { method: "POST" });
   }
 
-  listSessionModels(sessionId: SessionId): Promise<{ readonly sessionId: SessionId; readonly selection: unknown; readonly providers: readonly ProviderCatalogGroup[]; readonly effective?: { readonly provider: string; readonly model: string } }> {
+  listSessionModels(sessionId: SessionId): Promise<SessionModelsResponse> {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/models`);
+  }
+
+  /** Read the explicit Session selection and its inherited effective route. */
+  getSessionModelSelection(sessionId: SessionId): Promise<SessionModelSelectionResponse> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/model`);
+  }
+
+  /**
+   * Select the complete provider/model/reasoning tuple for one Session. This is
+   * the primary Web path; the host-scoped `selectModel` method below remains for
+   * legacy `/v1/models` callers and provider credential binding flows.
+   */
+  selectSessionModel(sessionId: SessionId, selection: ModelSelection, commandId?: string): Promise<SessionModelSelectionMutationResponse> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/model`, {
+      method: "POST",
+      commandId,
+      body: selection,
+    });
   }
 
   selectModel(model: string, commandId?: string, credentialRef?: McpCredentialReference, reasoningEffort?: string, provider?: string): Promise<{ readonly model: Readonly<Record<string, unknown>>; readonly route?: ModelCatalogResponse["route"]; readonly reasoning?: ModelCatalogResponse["reasoning"] }> {

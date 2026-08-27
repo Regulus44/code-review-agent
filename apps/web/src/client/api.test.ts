@@ -207,4 +207,41 @@ describe("WebApiClient", () => {
     expect(calls[5]?.init?.body).toBe(JSON.stringify({ model: "tenant-model", credentialRef: { id: "cred_1", kind: "header", version: 1 } }));
     expect(new Headers(calls[5]?.init?.headers).get("idempotency-key")).toBe("model-select");
   });
+
+  it("builds Session-scoped model directory and selection commands", async () => {
+    const calls: { url: string; init?: RequestInit | undefined }[] = [];
+    const client = new WebApiClient({
+      baseUrl: "http://localhost:4317",
+      fetcher: async (input, init) => {
+        calls.push({ url: String(input), init });
+        return new Response(JSON.stringify({
+          sessionId: "ses_model",
+          selection: { provider: "anthropic", model: "claude-fixture", reasoningEffort: "high" },
+          providers: [],
+          effective: { provider: "anthropic", model: "claude-fixture" },
+          model: { provider: "anthropic", model: "claude-fixture" },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+
+    await client.listSessionModels("ses/model" as never);
+    await client.getSessionModelSelection("ses/model" as never);
+    await client.selectSessionModel("ses/model" as never, {
+      provider: "anthropic",
+      model: "claude-fixture",
+      reasoningEffort: "high",
+    }, "session-model-select");
+
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://localhost:4317/v1/sessions/ses%2Fmodel/models",
+      "http://localhost:4317/v1/sessions/ses%2Fmodel/model",
+      "http://localhost:4317/v1/sessions/ses%2Fmodel/model",
+    ]);
+    expect(calls[2]?.init?.body).toBe(JSON.stringify({
+      provider: "anthropic",
+      model: "claude-fixture",
+      reasoningEffort: "high",
+    }));
+    expect(new Headers(calls[2]?.init?.headers).get("idempotency-key")).toBe("session-model-select");
+  });
 });
