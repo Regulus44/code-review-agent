@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_DEEPSEEK_MODEL, DEEPSEEK_MODELS, ECHO_MODEL_PROTOCOL, EchoChatModel, ModelConfigurationError, ModelProtocolRegistry, OPENAI_CHAT_COMPLETIONS_PROTOCOL, OpenAICompatibleChatModel, createConfiguredChatModel, createConfiguredModelBootstrap } from "./index.js";
+import { ANTHROPIC_MESSAGES_PROTOCOL, DEFAULT_DEEPSEEK_MODEL, DEEPSEEK_MODELS, ECHO_MODEL_PROTOCOL, EchoChatModel, ModelConfigurationError, ModelProtocolRegistry, OPENAI_CHAT_COMPLETIONS_PROTOCOL, OpenAICompatibleChatModel, createConfiguredChatModel, createConfiguredModelBootstrap } from "./index.js";
 
 describe("EchoChatModel", () => {
   it("streams incremental text and a terminal marker", async () => {
@@ -166,5 +166,29 @@ describe("EchoChatModel", () => {
       { protocol: OPENAI_CHAT_COMPLETIONS_PROTOCOL, model: DEFAULT_DEEPSEEK_MODEL, baseUrl: "https://api.deepseek.com" },
       { protocol: OPENAI_CHAT_COMPLETIONS_PROTOCOL, model: "deepseek-v4-pro", baseUrl: "https://api.deepseek.com" },
     ]);
+  });
+
+  it("selects an Anthropic Messages model from the third-party-compatible environment variables", () => {
+    const registry = new ModelProtocolRegistry();
+    registry.register({ protocol: ECHO_MODEL_PROTOCOL, createModel: () => new EchoChatModel() });
+    const received: { protocol?: string; model?: string; baseUrl?: string; maxOutputTokens?: number } = {};
+    registry.register({ protocol: OPENAI_CHAT_COMPLETIONS_PROTOCOL, createModel: () => new EchoChatModel() });
+    registry.register({ protocol: ANTHROPIC_MESSAGES_PROTOCOL, createModel: (config) => {
+      received.protocol = ANTHROPIC_MESSAGES_PROTOCOL;
+      received.model = config.model;
+      if (config.baseUrl !== undefined) received.baseUrl = config.baseUrl;
+      if (config.maxOutputTokens !== undefined) received.maxOutputTokens = config.maxOutputTokens;
+      return new EchoChatModel();
+    } });
+
+    const configured = createConfiguredChatModel({
+      MODEL_PROVIDER: "anthropic",
+      ANTHROPIC_AUTH_TOKEN: "token-test-only",
+      ANTHROPIC_BASE_URL: "https://provider.example.test/v1",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-fixture",
+    }, registry);
+
+    expect(configured.config).toEqual({ provider: "anthropic", model: "claude-fixture", baseUrl: "https://provider.example.test/v1", configured: true });
+    expect(received).toEqual({ protocol: ANTHROPIC_MESSAGES_PROTOCOL, model: "claude-fixture", baseUrl: "https://provider.example.test/v1", maxOutputTokens: 8192 });
   });
 });

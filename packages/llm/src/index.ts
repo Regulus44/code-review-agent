@@ -1,10 +1,15 @@
 import type { ChatMessage, ChatModel, ModelContextCapability, ModelRequest, ModelStreamPart, ModelToolCall, ModelUsage } from "@code-review-agent/contracts";
 import { ModelProtocolRegistry, type ModelProtocolModelConfig } from "./registry.js";
+import { AnthropicMessagesChatModel } from "./providers/anthropic-messages/adapter.js";
 
 export { ModelProtocolRegistry, ModelProtocolRegistryError, type ModelProtocolAdapter, type ModelProtocolModelConfig, type ModelProtocolRegistration } from "./registry.js";
 
 export const ECHO_MODEL_PROTOCOL = "echo";
 export const OPENAI_CHAT_COMPLETIONS_PROTOCOL = "openai-chat-completions";
+export const ANTHROPIC_MESSAGES_PROTOCOL = "anthropic-messages";
+
+export { AnthropicMessagesChatModel } from "./providers/anthropic-messages/adapter.js";
+export { AnthropicMessagesError, AnthropicMessagesError as AnthropicProtocolError } from "./providers/anthropic-messages/errors.js";
 
 export interface OpenAICompatibleOptions {
   readonly baseUrl: string;
@@ -196,6 +201,25 @@ export function createBuiltInModelProtocolRegistry(): ModelProtocolRegistry {
       });
     },
   });
+  registry.register({
+    protocol: ANTHROPIC_MESSAGES_PROTOCOL,
+    createModel: (config: ModelProtocolModelConfig) => {
+      if (config.baseUrl === undefined || config.baseUrl.length === 0) {
+        throw new ModelConfigurationError(`${ANTHROPIC_MESSAGES_PROTOCOL} requires baseUrl`);
+      }
+      return new AnthropicMessagesChatModel({
+        baseUrl: config.baseUrl,
+        model: config.model,
+        ...(config.apiKey === undefined ? {} : { apiKey: config.apiKey }),
+        ...(config.headers === undefined ? {} : { headers: config.headers }),
+        ...(config.maxOutputTokens === undefined ? {} : { maxOutputTokens: config.maxOutputTokens }),
+        ...(config.apiVersion === undefined ? {} : { apiVersion: config.apiVersion }),
+        ...(config.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: config.idleTimeoutMs }),
+        ...(config.contextCapability === undefined ? {} : { contextCapability: config.contextCapability }),
+        ...(config.fetch === undefined ? {} : { fetch: config.fetch }),
+      });
+    },
+  });
   return registry;
 }
 
@@ -251,19 +275,47 @@ export function createConfiguredChatModel(
   registry: ModelProtocolRegistry = createBuiltInModelProtocolRegistry(),
 ): ConfiguredChatModel {
   const requested = (env["MODEL_PROVIDER"]?.trim().toLowerCase() || "auto");
-  if (requested !== "auto" && requested !== "echo" && requested !== "deepseek") {
-    throw new ModelConfigurationError("MODEL_PROVIDER must be one of auto, echo, or deepseek");
+  if (requested !== "auto" && requested !== "echo" && requested !== "deepseek" && requested !== "anthropic") {
+    throw new ModelConfigurationError("MODEL_PROVIDER must be one of auto, echo, deepseek, or anthropic");
   }
 
-  const apiKey = env["DEEPSEEK_API_KEY"]?.trim();
-  const provider: ConfiguredModelProvider = requested === "auto" ? (apiKey === undefined || apiKey.length === 0 ? "echo" : "deepseek") : requested;
-  if (provider === "deepseek" && (apiKey === undefined || apiKey.length === 0)) {
+  const deepSeekApiKey = env["DEEPSEEK_API_KEY"]?.trim();
+  const anthropicApiKey = env["ANTHROPIC_API_KEY"]?.trim() || env["ANTHROPIC_AUTH_TOKEN"]?.trim();
+  const provider: ConfiguredModelProvider = requested === "auto"
+    ? deepSeekApiKey === undefined || deepSeekApiKey.length === 0
+      ? anthropicApiKey === undefined || anthropicApiKey.length === 0 ? "echo" : "anthropic"
+      : "deepseek"
+    : requested;
+  if (provider === "deepseek" && (deepSeekApiKey === undefined || deepSeekApiKey.length === 0)) {
     throw new ModelConfigurationError("MODEL_PROVIDER=deepseek requires DEEPSEEK_API_KEY");
   }
   if (provider === "echo") {
     return {
       model: registry.create(ECHO_MODEL_PROTOCOL, { model: "echo" }),
       config: { provider: "echo", model: "echo", configured: false },
+    };
+  }
+
+  if (provider === "anthropic") {
+    if (anthropicApiKey === undefined || anthropicApiKey.length === 0) {
+      throw new ModelConfigurationError("MODEL_PROVIDER=anthropic requires ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN");
+    }
+    const baseUrl = env["ANTHROPIC_BASE_URL"]?.trim() || "https://api.anthropic.com/v1";
+    validateHttpUrl(baseUrl, "ANTHROPIC_BASE_URL");
+    const safeBaseUrl = publicBaseUrl(baseUrl);
+    const model = env["ANTHROPIC_MODEL"]?.trim() || env["ANTHROPIC_DEFAULT_SONNET_MODEL"]?.trim() || "claude-sonnet-4-5";
+    const contextCapability: ModelContextCapability = {
+      provider: "anthropic",
+      model,
+      maxInputTokens: 200_000,
+      maxOutputTokens: 8_192,
+      supportsExactCount: false,
+      supportsPromptCache: false,
+      source: "provider",
+    };
+    return {
+      model: registry.create(ANTHROPIC_MESSAGES_PROTOCOL, { baseUrl: safeBaseUrl, model, contextCapability, apiKey: anthropicApiKey, maxOutputTokens: contextCapability.maxOutputTokens }),
+      config: { provider: "anthropic", model, baseUrl: safeBaseUrl, configured: true },
     };
   }
 
@@ -283,7 +335,7 @@ export function createConfiguredChatModel(
     source: "provider",
   };
   return {
-    model: registry.create(OPENAI_CHAT_COMPLETIONS_PROTOCOL, { baseUrl: safeBaseUrl, model, contextCapability, ...(apiKey === undefined ? {} : { apiKey }) }),
+    model: registry.create(OPENAI_CHAT_COMPLETIONS_PROTOCOL, { baseUrl: safeBaseUrl, model, contextCapability, ...(deepSeekApiKey === undefined ? {} : { apiKey: deepSeekApiKey }) }),
     config: { provider: "deepseek", model, baseUrl: safeBaseUrl, configured: true },
   };
 }
@@ -315,6 +367,11 @@ export function createConfiguredModelBootstrap(
 function configuredProviderSelection(provider: string): { readonly models: readonly string[]; readonly modelEnvironmentVariable: string } | undefined {
   if (provider === "deepseek") {
     return { models: DEEPSEEK_MODELS, modelEnvironmentVariable: "DEEPSEEK_MODEL" };
+  }
+  if (provider === "anthropic") {
+    // Anthropic-compatible gateways expose provider-specific model ids; keep
+    // the catalog open while still allowing an explicit model override.
+    return { models: [], modelEnvironmentVariable: "ANTHROPIC_MODEL" };
   }
   return undefined;
 }

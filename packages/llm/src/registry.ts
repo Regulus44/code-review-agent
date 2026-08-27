@@ -7,6 +7,12 @@ export interface ModelProtocolModelConfig {
   readonly apiKey?: string;
   readonly headers?: Readonly<Record<string, string>>;
   readonly contextCapability?: ModelContextCapability;
+  /** Protocol-owned output cap; adapters apply their documented default when absent. */
+  readonly maxOutputTokens?: number;
+  /** Optional protocol API version used by adapters with versioned wire contracts. */
+  readonly apiVersion?: string;
+  /** Maximum interval without response bytes before the adapter aborts the request. */
+  readonly idleTimeoutMs?: number;
   /** Injectable for protocol contract tests; production adapters use platform Fetch. */
   readonly fetch?: typeof globalThis.fetch;
 }
