@@ -37,6 +37,9 @@ try {
   const shell = await request("/");
   assert(shell.response.status === 200 && typeof shell.body === "string", "Web shell did not load");
   assert(shell.body.includes("Catalog status") && shell.body.includes("Retry model catalog"), "Settings retry surface is missing");
+  assert(shell.body.includes("settings-provider-row") && shell.body.includes("settings-provider-editor"), "Provider list/editor surface is missing");
+  assert(shell.body.includes("API token (write-only)") && shell.body.includes("createCredential") && shell.body.includes("discoverProvider"), "write-only credential and discovery flow is missing");
+  assert(!shell.body.includes("credentialInputs.token.value"), "legacy standalone credential form is still present in the Settings surface");
 
   const failed = await request("/v1/models");
   assert(failed.response.status === 503 && String(failed.body?.error).includes("temporarily unavailable"), "provider failure fixture did not fail explicitly");

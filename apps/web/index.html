@@ -596,6 +596,23 @@
       .settings-error { margin: 7px 0 0; color: #a13c3c; font-size: 10px; line-height: 1.45; }
       .settings-receipt { margin: 7px 0 0; color: var(--green); font-size: 10px; line-height: 1.45; }
       .settings-retry { margin-top: 7px; }
+      .settings-provider-list { display: grid; gap: 7px; }
+      .settings-provider-row { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); }
+      .settings-provider-row-button { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 8px; width: 100%; padding: 0; color: var(--text); background: transparent; text-align: left; }
+      .settings-provider-row-button:hover { color: var(--blue); }
+      .settings-provider-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 650; }
+      .settings-provider-meta { min-width: 0; overflow: hidden; color: var(--text-tertiary); text-overflow: ellipsis; white-space: nowrap; font: 9px ui-monospace, SFMono-Regular, Consolas, monospace; }
+      .settings-provider-status { grid-row: 1 / span 2; grid-column: 2; align-self: center; padding: 3px 6px; border-radius: 99px; color: var(--text-tertiary); background: var(--surface); font-size: 9px; white-space: nowrap; }
+      .settings-provider-status.ready { color: var(--green); background: #edf9f1; }
+      .settings-provider-status.failed { color: #a13c3c; background: #fff0f0; }
+      .settings-provider-status.unavailable { color: #8f5c13; background: #fff4dc; }
+      .settings-provider-discover { justify-self: start; min-height: 26px; padding: 0 8px; font-size: 10px; }
+      .settings-provider-editor { display: grid; gap: 2px; padding: 8px 0 0; border-top: 1px solid var(--border); }
+      .settings-provider-editor .settings-line { display: grid; grid-template-columns: minmax(90px, .35fr) minmax(0, 1fr); align-items: center; gap: 8px; }
+      .settings-input { width: 100%; min-width: 0; height: 29px; padding: 0 7px; border: 1px solid var(--border-strong); border-radius: 7px; color: var(--text); background: var(--surface); font: 10px ui-monospace, SFMono-Regular, Consolas, monospace; }
+      .settings-input:focus { border-color: rgba(65,118,230,.55); outline: none; box-shadow: 0 0 0 2px rgba(65,118,230,.12); }
+      .settings-actions { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 7px; }
+      .settings-actions button { min-height: 28px; padding: 0 9px; border-radius: 7px; font-size: 10px; }
       .worktree-ledger { display: grid; gap: 7px; }
       .worktree-record { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); }
       .worktree-record.active { border-color: rgba(65,118,230,.35); background: var(--blue-soft); }
@@ -811,7 +828,7 @@
         const modelPopup = typedRuntime?.createModelPopup && modelDirectory ? typedRuntime.createModelPopup(modelDirectory) : null;
         let modelDirectoryUnsubscribe = null;
         let modelEntryMode = 'seat';
-        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, credentials: [], pendingCredentialId: '', modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, stoppingTurnId: null, composer: typedRuntime?.createComposerState?.() || { phase: 'idle', attemptId: 0 }, composerEpoch: 0, requestActions: typedRuntime?.createRequestActionGate?.() || null, workspaces: null, lastWorkspaceOrderSequence: 0, conversationScrollTop: 0, trajectoryScrollTop: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 280, details: 'closed', detailsWidthPx: 0, narrow: false, narrowExpanded: false, mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sessionView: 'conversation', trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
+        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, credentials: [], pendingCredentialId: '', settingsProviderEditorId: null, settingsProviderDraft: null, settingsProviderBusy: false, settingsProviderError: '', settingsProviderDiscovery: new Map(), modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, stoppingTurnId: null, composer: typedRuntime?.createComposerState?.() || { phase: 'idle', attemptId: 0 }, composerEpoch: 0, requestActions: typedRuntime?.createRequestActionGate?.() || null, workspaces: null, lastWorkspaceOrderSequence: 0, conversationScrollTop: 0, trajectoryScrollTop: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 280, details: 'closed', detailsWidthPx: 0, narrow: false, narrowExpanded: false, mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sessionView: 'conversation', trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
         let usageDrawerOpen = false;
         let renderedSessionView = state.sessionView;
         let modelMenuPane = 'root';
@@ -1823,110 +1840,66 @@
           const permission = section('Permission');
           line(permission, 'Work mode', view.permissionLabel);
           const permissionDescription = document.createElement('p'); permissionDescription.className = 'settings-description'; permissionDescription.textContent = view.permissionDescription; permission.append(permissionDescription);
-          const model = section('Model');
-          line(model, 'Provider', view.model.provider);
-          line(model, 'Current model', view.model.current);
-          line(model, 'Credentials', view.model.configured ? 'Configured (secret stays host-side)' : 'Not configured');
-          const modelList = document.createElement('p'); modelList.className = 'settings-muted'; modelList.textContent = view.model.available.length ? `Available: ${view.model.available.join(', ')}` : 'No model catalog returned.'; model.append(modelList);
-          if (view.model.providers.length) {
-            const providerList = document.createElement('div'); providerList.className = 'settings-muted';
-            providerList.textContent = view.model.providers.map((group) => `${group.displayName} · ${group.status} · ${group.models.length} models`).join(' | ');
-            model.append(providerList);
-          }
-          for (const failure of view.model.providerErrors) {
-            const error = document.createElement('p'); error.className = 'settings-error'; error.textContent = `${failure.provider}: ${failure.error}`; model.append(error);
-          }
-          const credentialSection = section('Credentials');
-          const credentialSummary = document.createElement('p'); credentialSummary.className = 'settings-muted'; credentialSummary.textContent = state.credentials.length ? `${state.credentials.length} host-local credential${state.credentials.length === 1 ? '' : 's'} configured. Secret material never leaves the API host.` : 'No host-local credentials configured.'; credentialSection.append(credentialSummary);
-          const credentialList = document.createElement('div'); credentialList.className = 'settings-credential-list';
-          for (const credential of state.credentials) {
-            const row = document.createElement('div'); row.className = 'settings-line';
-            const caption = document.createElement('span'); caption.textContent = `${credential.label || credential.id} · ${credential.kind}`;
-            const status = document.createElement('strong'); status.textContent = `${credential.status} · v${credential.version}`;
-            row.append(caption, status); credentialList.append(row);
-          }
-          credentialSection.append(credentialList);
-          const credentialForm = document.createElement('form'); credentialForm.className = 'settings-provider-form';
-          const credentialFields = [
-            ['label', 'Label', 'A provider token'],
-            ['headerName', 'Header name', 'authorization'],
-            ['prefix', 'Header prefix', 'Bearer'],
-            ['token', 'Token', 'Paste token here'],
-          ];
-          const credentialInputs = {};
-          for (const [key, label, placeholder] of credentialFields) {
-            const field = document.createElement('label'); field.className = 'settings-line';
-            const caption = document.createElement('span'); caption.textContent = label;
-            const input = document.createElement('input'); input.type = key === 'token' ? 'password' : 'text'; input.placeholder = placeholder; input.name = key; input.autocomplete = key === 'token' ? 'new-password' : 'off'; input.className = 'settings-input';
-            if (key === 'headerName') input.value = 'authorization';
-            if (key === 'prefix') input.value = 'Bearer';
-            field.append(caption, input); credentialForm.append(field); credentialInputs[key] = input;
-          }
-          const credentialActions = document.createElement('div'); credentialActions.className = 'settings-actions';
-          const saveCredential = document.createElement('button'); saveCredential.type = 'submit'; saveCredential.className = 'workspace-create'; saveCredential.textContent = 'Save credential'; credentialActions.append(saveCredential); credentialForm.append(credentialActions); credentialSection.append(credentialForm);
-          credentialForm.onsubmit = async (event) => {
-            event.preventDefault(); saveCredential.disabled = true;
-            try {
-              const token = String(credentialInputs.token.value || '').trim();
-              const headerName = String(credentialInputs.headerName.value || 'authorization').trim().toLowerCase();
-              const prefix = String(credentialInputs.prefix.value || '').trim();
-              if (!token || !/^[A-Za-z0-9_.-]{1,128}$/.test(headerName)) throw new Error('Enter a token and a valid header name.');
-              const value = prefix ? `${prefix} ${token}` : token;
-              const created = typedRuntime?.api?.createCredential
-                ? await typedRuntime.api.createCredential({ kind: 'header', label: String(credentialInputs.label.value || '').trim() || undefined, material: { headers: { [headerName]: value } } })
-                : await api('/v1/credentials', { method: 'POST', headers: { 'content-type': 'application/json' }, body: { kind: 'header', label: String(credentialInputs.label.value || '').trim() || undefined, material: { headers: { [headerName]: value } } } });
-              state.pendingCredentialId = created.credential.id;
-              credentialInputs.token.value = '';
-              await refreshCredentials();
-              state.modelReceipt = 'Credential saved on the local API host';
-              renderSettings();
-              setStatus('Credential saved', true);
-            } catch (error) { state.modelStatus = 'error'; state.modelError = error instanceof Error ? error.message : String(error); renderSettings(); setStatus(state.modelError, false); }
-            finally { saveCredential.disabled = false; }
-          };
-          const providerForm = document.createElement('form'); providerForm.className = 'settings-provider-form'; providerForm.hidden = true;
-          const providerFields = [
-            ['id', 'Provider id', 'custom-provider'],
-            ['displayName', 'Display name', 'Custom provider'],
-            ['protocol', 'Protocol', 'anthropic-messages'],
-            ['baseUrl', 'Base URL', 'https://gateway.example/v1'],
-            ['models', 'Models (comma separated)', 'model-a,model-b'],
-            ['credentialRefId', 'Credential reference id (optional)', 'cred_…'],
-          ];
-          const providerInputs = {};
-          for (const [key, label, placeholder] of providerFields) {
-            const field = document.createElement('label'); field.className = 'settings-line';
-            const caption = document.createElement('span'); caption.textContent = label;
-            const input = key === 'credentialRefId' ? document.createElement('select') : document.createElement('input'); if (key !== 'credentialRefId') input.type = 'text'; input.placeholder = placeholder; input.name = key; input.autocomplete = 'off'; input.className = 'settings-input';
-            if (key === 'credentialRefId') {
-              const none = document.createElement('option'); none.value = ''; none.textContent = 'No credential'; input.append(none);
-              for (const credential of state.credentials.filter((item) => item.status === 'active')) { const option = document.createElement('option'); option.value = credential.id; option.textContent = `${credential.label || credential.id} · v${credential.version}`; input.append(option); }
-              input.value = state.pendingCredentialId || '';
-            }
-            field.append(caption, input); providerForm.append(field); providerInputs[key] = input;
-          }
-          const providerActions = document.createElement('div'); providerActions.className = 'settings-actions';
-          const saveProvider = document.createElement('button'); saveProvider.type = 'submit'; saveProvider.className = 'workspace-create'; saveProvider.textContent = 'Save provider';
-          const cancelProvider = document.createElement('button'); cancelProvider.type = 'button'; cancelProvider.className = 'workspace-create'; cancelProvider.textContent = 'Cancel'; cancelProvider.onclick = () => { providerForm.hidden = true; addProvider.hidden = false; };
-          providerActions.append(saveProvider, cancelProvider); providerForm.append(providerActions); model.append(providerForm);
-          const addProvider = document.createElement('button'); addProvider.type = 'button'; addProvider.className = 'workspace-create'; addProvider.textContent = 'Add custom provider'; addProvider.onclick = () => { addProvider.hidden = true; providerForm.hidden = false; providerInputs.id.focus(); }; model.append(addProvider);
-          providerForm.onsubmit = async (event) => {
-            event.preventDefault(); saveProvider.disabled = true;
-            try {
-              const models = String(providerInputs.models.value || '').split(',').map((value) => value.trim()).filter(Boolean);
-              const credentialRefId = String(providerInputs.credentialRefId.value || '').trim();
-              await api('/v1/providers', { method: 'POST', headers: { 'content-type': 'application/json' }, body: {
-                id: String(providerInputs.id.value || '').trim(),
-                displayName: String(providerInputs.displayName.value || '').trim(),
-                protocol: String(providerInputs.protocol.value || '').trim(),
-                baseUrl: String(providerInputs.baseUrl.value || '').trim() || undefined,
-                models,
-                ...(credentialRefId ? { credentialRef: { id: credentialRefId, kind: 'header' } } : {}),
-              } });
-              providerForm.reset(); providerForm.hidden = true; addProvider.hidden = false; state.pendingCredentialId = ''; state.modelReceipt = 'Custom provider saved'; await refreshModelCatalog();
-            } catch (error) { state.modelStatus = 'error'; state.modelError = error instanceof Error ? error.message : String(error); renderSettings(); setStatus(state.modelError, false); }
-            finally { saveProvider.disabled = false; }
-          };
+           const model = section('Model');
+           line(model, 'Current provider', view.model.provider);
+           line(model, 'Current model', view.model.current);
+           line(model, 'Credentials', view.model.configured ? 'Configured (secret stays host-side)' : 'Not configured');
+           const modelList = document.createElement('p'); modelList.className = 'settings-muted'; modelList.textContent = view.model.available.length ? `Available in current provider: ${view.model.available.join(', ')}` : 'No model catalog returned.'; model.append(modelList);
+           const profiles = Array.isArray(state.models?.profiles) ? state.models.profiles : [];
+           const groups = Array.isArray(view.model.providers) ? view.model.providers : [];
+           const providerIds = new Set([...groups.map((group) => group.provider), ...profiles.map((profile) => profile.id)]);
+           const providerRows = document.createElement('div'); providerRows.className = 'settings-provider-list';
+           const credentialById = new Map(state.credentials.map((credential) => [credential.id, credential]));
+           const profileFor = (provider) => profiles.find((profile) => profile.id === provider) || null;
+           const groupFor = (provider) => groups.find((group) => group.provider === provider) || null;
+           const openEditor = (provider, seed = null) => {
+             state.settingsProviderEditorId = provider;
+             state.settingsProviderDraft = seed || (() => { const profile = profileFor(provider); const group = groupFor(provider); return { id: provider, displayName: profile?.displayName || group?.displayName || provider, protocol: profile?.protocol || group?.protocol || 'openai-compatible', baseUrl: profile?.baseUrl || '', models: (profile?.models || group?.models || []).map((entry) => typeof entry === 'string' ? entry : entry.model).join(', '), credentialRefId: profile?.credentialRef?.id || '' }; })();
+             state.settingsProviderError = '';
+             renderSettings();
+           };
+           const closeEditor = () => { state.settingsProviderEditorId = null; state.settingsProviderDraft = null; state.settingsProviderError = ''; state.settingsProviderBusy = false; renderSettings(); };
+           for (const provider of providerIds) {
+             const group = groupFor(provider); const profile = profileFor(provider); const credential = profile?.credentialRef ? credentialById.get(profile.credentialRef.id) : null;
+             const row = document.createElement('div'); row.className = 'settings-provider-row';
+             const rowButton = document.createElement('button'); rowButton.type = 'button'; rowButton.className = 'settings-provider-row-button';
+             const title = document.createElement('span'); title.className = 'settings-provider-title'; title.textContent = profile?.displayName || group?.displayName || provider;
+             const meta = document.createElement('span'); meta.className = 'settings-provider-meta'; meta.textContent = `${provider} · ${profile?.protocol || group?.protocol || 'unknown'} · ${(group?.models || profile?.models || []).length} models`;
+             const status = document.createElement('span'); status.className = `settings-provider-status ${group?.status || 'unavailable'}`; status.textContent = `${group?.status || 'unavailable'} · ${credential?.status === 'active' ? 'credential configured' : profile?.credentialRef ? 'credential missing' : 'no credential'}`;
+             rowButton.append(title, meta, status); rowButton.onclick = () => state.settingsProviderEditorId === provider ? closeEditor() : openEditor(provider); row.append(rowButton);
+             if (group?.error) { const failure = document.createElement('p'); failure.className = 'settings-error'; failure.textContent = `Last discovery error: ${group.error}`; row.append(failure); }
+             const discovery = state.settingsProviderDiscovery.get(provider);
+             const discover = document.createElement('button'); discover.type = 'button'; discover.className = 'workspace-create settings-provider-discover'; discover.textContent = discovery === 'loading' ? 'Discovering…' : group?.status === 'failed' ? 'Retry discovery' : 'Discover'; discover.disabled = discovery === 'loading'; discover.onclick = async () => { discover.disabled = true; state.settingsProviderDiscovery.set(provider, 'loading'); renderSettings(); try { const result = typedRuntime?.api?.discoverProvider ? await typedRuntime.api.discoverProvider(provider) : await api(`/v1/providers/${encodeURIComponent(provider)}/discover`, { method: 'POST' }); state.settingsProviderDiscovery.set(provider, result.provider?.status === 'failed' ? 'failed' : 'ready'); await refreshModelCatalog(); } catch (error) { state.settingsProviderDiscovery.set(provider, 'failed'); state.settingsProviderError = error instanceof Error ? error.message : String(error); renderSettings(); setStatus(state.settingsProviderError, false); } }; row.append(discover); providerRows.append(row);
+             if (state.settingsProviderEditorId === provider) {
+               const draft = state.settingsProviderDraft || {};
+               const editor = document.createElement('form'); editor.className = 'settings-provider-editor';
+               const fields = [['id', 'Provider id', 'custom-provider'], ['displayName', 'Display name', 'Custom provider'], ['protocol', 'Protocol', 'anthropic-messages'], ['baseUrl', 'Base URL', 'https://gateway.example/v1'], ['models', 'Models (comma separated)', 'model-a, model-b']];
+               const inputs = {};
+               for (const [key, label, placeholder] of fields) { const field = document.createElement('label'); field.className = 'settings-line'; const caption = document.createElement('span'); caption.textContent = label; const input = document.createElement('input'); input.type = 'text'; input.name = key; input.placeholder = placeholder; input.value = String(draft[key] || ''); input.readOnly = key === 'id' && provider !== 'new'; input.className = 'settings-input'; input.oninput = () => { state.settingsProviderDraft = { ...(state.settingsProviderDraft || {}), [key]: input.value }; }; field.append(caption, input); editor.append(field); inputs[key] = input; }
+               const credentialField = document.createElement('label'); credentialField.className = 'settings-line'; const credentialCaption = document.createElement('span'); credentialCaption.textContent = 'Credential'; const credentialSelect = document.createElement('select'); credentialSelect.className = 'settings-input'; const none = document.createElement('option'); none.value = ''; none.textContent = 'No credential'; credentialSelect.append(none); for (const credential of state.credentials.filter((item) => item.status === 'active')) { const option = document.createElement('option'); option.value = credential.id; option.textContent = `${credential.label || credential.id} · v${credential.version}`; credentialSelect.append(option); } credentialSelect.value = String(draft.credentialRefId || ''); credentialSelect.onchange = () => { state.settingsProviderDraft = { ...(state.settingsProviderDraft || {}), credentialRefId: credentialSelect.value }; }; credentialField.append(credentialCaption, credentialSelect); editor.append(credentialField);
+               const tokenField = document.createElement('label'); tokenField.className = 'settings-line'; const tokenCaption = document.createElement('span'); tokenCaption.textContent = 'API token (write-only)'; const tokenInput = document.createElement('input'); tokenInput.type = 'password'; tokenInput.name = 'token'; tokenInput.placeholder = 'Leave blank to keep current credential'; tokenInput.autocomplete = 'new-password'; tokenInput.className = 'settings-input'; tokenField.append(tokenCaption, tokenInput); editor.append(tokenField);
+               const headerField = document.createElement('label'); headerField.className = 'settings-line'; const headerCaption = document.createElement('span'); headerCaption.textContent = 'Token header'; const headerInput = document.createElement('input'); headerInput.type = 'text'; headerInput.value = 'authorization'; headerInput.className = 'settings-input'; headerField.append(headerCaption, headerInput); editor.append(headerField);
+               const prefixField = document.createElement('label'); prefixField.className = 'settings-line'; const prefixCaption = document.createElement('span'); prefixCaption.textContent = 'Token prefix'; const prefixInput = document.createElement('input'); prefixInput.type = 'text'; prefixInput.value = 'Bearer'; prefixInput.className = 'settings-input'; prefixField.append(prefixCaption, prefixInput); editor.append(prefixField);
+               const actions = document.createElement('div'); actions.className = 'settings-actions'; const save = document.createElement('button'); save.type = 'submit'; save.className = 'workspace-create'; save.textContent = state.settingsProviderBusy ? 'Saving…' : 'Save provider'; save.disabled = state.settingsProviderBusy; const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'workspace-create'; cancel.textContent = 'Cancel'; cancel.onclick = closeEditor; actions.append(save, cancel); editor.append(actions);
+               if (state.settingsProviderError) { const error = document.createElement('p'); error.className = 'settings-error'; error.textContent = state.settingsProviderError; editor.append(error); }
+               editor.onsubmit = async (event) => { event.preventDefault(); state.settingsProviderBusy = true; state.settingsProviderError = ''; renderSettings(); try { const current = state.settingsProviderDraft || {}; const id = String(current.id || '').trim(); const displayName = String(current.displayName || '').trim(); const protocol = String(current.protocol || '').trim(); const baseUrl = String(current.baseUrl || '').trim(); const models = String(current.models || '').split(',').map((value) => value.trim()).filter(Boolean); if (!/^[A-Za-z0-9_.-]{1,128}$/.test(id) || !displayName || !protocol || !models.length) throw new Error('Enter a valid provider id, display name, protocol, and at least one model.'); let credentialRefId = String(current.credentialRefId || '').trim(); const token = String(tokenInput.value || '').trim(); if (token) { const headerName = String(headerInput.value || 'authorization').trim().toLowerCase(); const prefix = String(prefixInput.value || '').trim(); if (!/^[A-Za-z0-9_.-]{1,128}$/.test(headerName)) throw new Error('Enter a valid token header name.'); const value = prefix ? `${prefix} ${token}` : token; const created = typedRuntime?.api?.createCredential ? await typedRuntime.api.createCredential({ kind: 'header', label: displayName, material: { headers: { [headerName]: value } } }) : await api('/v1/credentials', { method: 'POST', headers: { 'content-type': 'application/json' }, body: { kind: 'header', label: displayName, material: { headers: { [headerName]: value } } } }); credentialRefId = created.credential.id; tokenInput.value = ''; } await (typedRuntime?.api?.createProvider ? typedRuntime.api.createProvider({ id, displayName, protocol, ...(baseUrl ? { baseUrl } : {}), models, ...(credentialRefId ? { credentialRef: { id: credentialRefId, kind: 'header' } } : {}) }) : api('/v1/providers', { method: 'POST', headers: { 'content-type': 'application/json' }, body: { id, displayName, protocol, ...(baseUrl ? { baseUrl } : {}), models, ...(credentialRefId ? { credentialRef: { id: credentialRefId, kind: 'header' } } : {}) } })); try { await (typedRuntime?.api?.discoverProvider ? typedRuntime.api.discoverProvider(id) : api(`/v1/providers/${encodeURIComponent(id)}/discover`, { method: 'POST' })); } catch { /* catalog refresh below preserves the saved profile even when discovery is unavailable */ } await refreshCredentials(); state.settingsProviderEditorId = null; state.settingsProviderDraft = null; state.settingsProviderBusy = false; state.modelReceipt = `Provider saved · ${displayName}`; await refreshModelCatalog(); setStatus(`Provider · ${displayName}`); } catch (error) { state.settingsProviderBusy = false; state.settingsProviderError = error instanceof Error ? error.message : String(error); renderSettings(); setStatus(state.settingsProviderError, false); } };
+               providerRows.append(editor);
+             }
+           }
+           model.append(providerRows);
+           const addProvider = document.createElement('button'); addProvider.type = 'button'; addProvider.className = 'workspace-create'; addProvider.textContent = 'Add custom provider'; addProvider.onclick = () => { openEditor('new', { id: '', displayName: '', protocol: 'anthropic-messages', baseUrl: '', models: '', credentialRefId: '' }); }; model.append(addProvider);
+           if (state.settingsProviderEditorId === 'new') {
+             const draft = state.settingsProviderDraft || { id: '', displayName: '', protocol: 'anthropic-messages', baseUrl: '', models: '', credentialRefId: '' };
+             const editor = document.createElement('form'); editor.className = 'settings-provider-editor';
+             const fields = [['id', 'Provider id', 'custom-provider'], ['displayName', 'Display name', 'Custom provider'], ['protocol', 'Protocol', 'anthropic-messages'], ['baseUrl', 'Base URL', 'https://gateway.example/v1'], ['models', 'Models (comma separated)', 'model-a, model-b']];
+             const inputs = {}; for (const [key, label, placeholder] of fields) { const field = document.createElement('label'); field.className = 'settings-line'; const caption = document.createElement('span'); caption.textContent = label; const input = document.createElement('input'); input.type = 'text'; input.name = key; input.placeholder = placeholder; input.value = String(draft[key] || ''); input.className = 'settings-input'; input.oninput = () => { state.settingsProviderDraft = { ...(state.settingsProviderDraft || {}), [key]: input.value }; }; field.append(caption, input); editor.append(field); inputs[key] = input; }
+             const tokenField = document.createElement('label'); tokenField.className = 'settings-line'; const tokenCaption = document.createElement('span'); tokenCaption.textContent = 'API token (write-only)'; const tokenInput = document.createElement('input'); tokenInput.type = 'password'; tokenInput.placeholder = 'Paste token here'; tokenInput.autocomplete = 'new-password'; tokenInput.className = 'settings-input'; tokenField.append(tokenCaption, tokenInput); editor.append(tokenField);
+             const headerField = document.createElement('label'); headerField.className = 'settings-line'; const headerCaption = document.createElement('span'); headerCaption.textContent = 'Token header'; const headerInput = document.createElement('input'); headerInput.type = 'text'; headerInput.value = 'authorization'; headerInput.className = 'settings-input'; headerField.append(headerCaption, headerInput); editor.append(headerField);
+             const prefixField = document.createElement('label'); prefixField.className = 'settings-line'; const prefixCaption = document.createElement('span'); prefixCaption.textContent = 'Token prefix'; const prefixInput = document.createElement('input'); prefixInput.type = 'text'; prefixInput.value = 'Bearer'; prefixInput.className = 'settings-input'; prefixField.append(prefixCaption, prefixInput); editor.append(prefixField);
+             const actions = document.createElement('div'); actions.className = 'settings-actions'; const save = document.createElement('button'); save.type = 'submit'; save.className = 'workspace-create'; save.textContent = state.settingsProviderBusy ? 'Saving…' : 'Save provider'; save.disabled = state.settingsProviderBusy; const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'workspace-create'; cancel.textContent = 'Cancel'; cancel.onclick = closeEditor; actions.append(save, cancel); editor.append(actions); if (state.settingsProviderError) { const error = document.createElement('p'); error.className = 'settings-error'; error.textContent = state.settingsProviderError; editor.append(error); }
+             editor.onsubmit = async (event) => { event.preventDefault(); state.settingsProviderBusy = true; state.settingsProviderError = ''; renderSettings(); try { const current = state.settingsProviderDraft || {}; const id = String(current.id || '').trim(); const displayName = String(current.displayName || '').trim(); const protocol = String(current.protocol || '').trim(); const baseUrl = String(current.baseUrl || '').trim(); const models = String(current.models || '').split(',').map((value) => value.trim()).filter(Boolean); if (!/^[A-Za-z0-9_.-]{1,128}$/.test(id) || !displayName || !protocol || !models.length) throw new Error('Enter a valid provider id, display name, protocol, and at least one model.'); const token = String(tokenInput.value || '').trim(); if (!token) throw new Error('Enter an API token for a new provider.'); const headerName = String(headerInput.value || 'authorization').trim().toLowerCase(); const prefix = String(prefixInput.value || '').trim(); if (!/^[A-Za-z0-9_.-]{1,128}$/.test(headerName)) throw new Error('Enter a valid token header name.'); const value = prefix ? `${prefix} ${token}` : token; const created = typedRuntime?.api?.createCredential ? await typedRuntime.api.createCredential({ kind: 'header', label: displayName, material: { headers: { [headerName]: value } } }) : await api('/v1/credentials', { method: 'POST', headers: { 'content-type': 'application/json' }, body: { kind: 'header', label: displayName, material: { headers: { [headerName]: value } } } }); await (typedRuntime?.api?.createProvider ? typedRuntime.api.createProvider({ id, displayName, protocol, ...(baseUrl ? { baseUrl } : {}), models, credentialRef: { id: created.credential.id, kind: 'header' } }) : api('/v1/providers', { method: 'POST', headers: { 'content-type': 'application/json' }, body: { id, displayName, protocol, ...(baseUrl ? { baseUrl } : {}), models, credentialRef: { id: created.credential.id, kind: 'header' } } })); try { await (typedRuntime?.api?.discoverProvider ? typedRuntime.api.discoverProvider(id) : api(`/v1/providers/${encodeURIComponent(id)}/discover`, { method: 'POST' })); } catch { /* catalog refresh below preserves the saved profile even when discovery is unavailable */ } await refreshCredentials(); state.settingsProviderEditorId = null; state.settingsProviderDraft = null; state.settingsProviderBusy = false; state.modelReceipt = `Provider saved · ${displayName}`; await refreshModelCatalog(); setStatus(`Provider · ${displayName}`); } catch (error) { state.settingsProviderBusy = false; state.settingsProviderError = error instanceof Error ? error.message : String(error); renderSettings(); setStatus(state.settingsProviderError, false); } }; model.append(editor);
+           }
+           for (const failure of view.model.providerErrors) { const error = document.createElement('p'); error.className = 'settings-error'; error.textContent = `${failure.provider}: ${failure.error}`; model.append(error); }
           line(model, 'Catalog status', view.model.status);
           if (view.model.error) { const error = document.createElement('p'); error.className = 'settings-error'; error.textContent = `Provider/model catalog failed: ${view.model.error}`; model.append(error); const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'workspace-create settings-retry'; retry.textContent = 'Retry model catalog'; retry.onclick = () => { void refreshModelCatalog(); }; model.append(retry); }
           if (view.model.receipt) { const receipt = document.createElement('p'); receipt.className = 'settings-receipt'; receipt.textContent = view.model.receipt; model.append(receipt); }
