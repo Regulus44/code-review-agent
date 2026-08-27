@@ -969,6 +969,45 @@ describe("Phase 2 API", () => {
     }
   });
 
+  it("supports an unauthenticated local host credential flow and restores it after restart", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "cra-local-host-"));
+    const databasePath = join(directory, "events.sqlite");
+    const credentialSecretsPath = join(directory, "credentials.secrets.json");
+    const providerProfilesPath = join(directory, "provider-profiles.json");
+    let current: Server | undefined;
+    try {
+      current = createApiServer({ databasePath, credentialSecretsPath, providerProfilesPath });
+      await new Promise<void>((resolve) => current!.listen(0, "127.0.0.1", resolve));
+      const address = current.address();
+      if (address === null || typeof address === "string") throw new Error("Local API did not bind");
+      const url = `http://127.0.0.1:${address.port}`;
+      const createdResponse = await fetch(`${url}/v1/credentials`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "header", label: "Local provider", material: { headers: { authorization: "Bearer local-only" } } }) });
+      expect(createdResponse.status).toBe(201);
+      const created = await createdResponse.json() as { credential: { id: string; kind: "header"; version: number } };
+      const providerResponse = await fetch(`${url}/v1/providers`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "local-echo", displayName: "Local Echo", protocol: "echo", models: ["local-model"], credentialRef: { id: created.credential.id, kind: created.credential.kind, version: created.credential.version } }) });
+      expect(providerResponse.status).toBe(201);
+      const selected = await fetch(`${url}/v1/models`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ provider: "local-echo", model: "local-model" }) });
+      expect(selected.status).toBe(200);
+      expect(await selected.json()).toMatchObject({ route: { provider: "local-echo", model: "local-model", credentialRef: { id: created.credential.id, version: 1 } } });
+      const rotated = await fetch(`${url}/v1/credentials/${encodeURIComponent(created.credential.id)}/rotate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "header", material: { headers: { authorization: "Bearer local-rotated" } } }) });
+      expect(rotated.status).toBe(200);
+      expect(await (await fetch(`${url}/v1/models`)).json()).toMatchObject({ route: { provider: "local-echo", credentialRef: { id: created.credential.id, version: 2 } } });
+      await new Promise<void>((resolve, reject) => current!.close((error) => error ? reject(error) : resolve()));
+      current = createApiServer({ databasePath, credentialSecretsPath, providerProfilesPath });
+      await new Promise<void>((resolve) => current!.listen(0, "127.0.0.1", resolve));
+      const reopenedAddress = current.address();
+      if (reopenedAddress === null || typeof reopenedAddress === "string") throw new Error("Reopened local API did not bind");
+      const reopenedUrl = `http://127.0.0.1:${reopenedAddress.port}`;
+      const listed = await (await fetch(`${reopenedUrl}/v1/credentials`)).json() as { credentials: { id: string; status: string }[] };
+      expect(listed.credentials).toMatchObject([{ id: created.credential.id, status: "active", version: 2 }]);
+      const models = await (await fetch(`${reopenedUrl}/v1/models`)).json() as { provider: string; current: string; route?: { credentialRef?: { id: string; version: number } } };
+      expect(models).toMatchObject({ provider: "local-echo", current: "local-model", route: { credentialRef: { id: created.credential.id, version: 2 } } });
+    } finally {
+      if (current?.listening) await new Promise<void>((resolve, reject) => current!.close((error) => error ? reject(error) : resolve()));
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("enforces bearer auth, durable tenant isolation, quota, and restart replay", async () => {
     const scopedStore = new InMemoryEventStore();
     const scoped = createApiServer({

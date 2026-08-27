@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import type { CredentialBackend, CredentialRecord, McpCredentialReference } from "@code-review-agent/contracts";
 
 export interface CredentialMaterial {
@@ -41,6 +43,110 @@ export class HostOwnedSecretProvider implements SecretProvider {
     return material === undefined ? undefined : cloneMaterial(material);
   }
   delete(reference: SecretReference): void { this.material.delete(secretKey(reference)); }
+}
+
+export interface LocalFileSecretProviderOptions {
+  /** Absolute or process-relative path owned by the API host. */
+  readonly filePath: string;
+}
+
+interface LocalSecretFile {
+  readonly version: 1;
+  readonly entries: Readonly<Record<string, CredentialMaterial>>;
+}
+
+/**
+ * Host-local durable secret provider.
+ *
+ * The file contains only the secret material map and is never returned through
+ * the credential API, events, projections, or logs. Writes are atomic so a
+ * process interruption cannot leave a partially-written credential file.
+ */
+export class LocalFileSecretProvider implements SecretProvider {
+  readonly kind = "host-only" as const;
+  readonly filePath: string;
+  private readonly material = new Map<string, CredentialMaterial>();
+  private unavailable = false;
+
+  constructor(options: LocalFileSecretProviderOptions) {
+    this.filePath = path.resolve(options.filePath);
+    this.load();
+  }
+
+  put(reference: SecretReference, material: CredentialMaterial): void {
+    this.ensureAvailable();
+    const key = secretKey(reference);
+    const previous = this.material.get(key);
+    this.material.set(key, cloneMaterial(material));
+    try {
+      this.persist();
+    } catch (error) {
+      if (previous === undefined) this.material.delete(key);
+      else this.material.set(key, previous);
+      throw error;
+    }
+  }
+
+  get(reference: SecretReference): CredentialMaterial | undefined {
+    if (this.unavailable) return undefined;
+    const value = this.material.get(secretKey(reference));
+    return value === undefined ? undefined : cloneMaterial(value);
+  }
+
+  delete(reference: SecretReference): void {
+    this.ensureAvailable();
+    const key = secretKey(reference);
+    const previous = this.material.get(key);
+    if (previous === undefined) return;
+    this.material.delete(key);
+    try {
+      this.persist();
+    } catch (error) {
+      this.material.set(key, previous);
+      throw error;
+    }
+  }
+
+  private load(): void {
+    if (!existsSync(this.filePath)) return;
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(this.filePath, "utf8"));
+      if (!isRecord(parsed) || parsed.version !== 1 || !isRecord(parsed.entries)) throw new Error("invalid credential file");
+      for (const [key, value] of Object.entries(parsed.entries)) {
+        const material = parseStoredMaterial(value);
+        if (material === undefined) throw new Error("invalid credential material");
+        this.material.set(key, material);
+      }
+    } catch {
+      // Fail closed: existing metadata remains visible, but no secret is
+      // resolved and mutations are rejected until the file is repaired.
+      this.unavailable = true;
+      this.material.clear();
+    }
+  }
+
+  private persist(): void {
+    this.ensureAvailable();
+    const directory = path.dirname(this.filePath);
+    mkdirSync(directory, { recursive: true });
+    const payload: LocalSecretFile = { version: 1, entries: Object.fromEntries(this.material) };
+    const temporary = `${this.filePath}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      writeFileSync(temporary, JSON.stringify(payload) + "\n", { encoding: "utf8", mode: 0o600 });
+      // chmod is effective on POSIX and harmless on Windows. Windows ACLs are
+      // inherited from the user-owned application data directory.
+      try { chmodSync(temporary, 0o600); } catch { /* platform without chmod */ }
+      renameSync(temporary, this.filePath);
+      try { chmodSync(this.filePath, 0o600); } catch { /* platform without chmod */ }
+    } catch (error) {
+      try { if (existsSync(temporary)) unlinkSync(temporary); } catch { /* best effort cleanup */ }
+      throw error;
+    }
+  }
+
+  private ensureAvailable(): void {
+    if (this.unavailable) throw new Error("Local credential secret store is unavailable");
+  }
 }
 
 /** Adapter boundary for a vault such as KMS/Vault/Secrets Manager. */
@@ -178,6 +284,29 @@ function cloneMaterial(material: CredentialMaterial): CredentialMaterial {
     ...(material.env === undefined ? {} : { env: { ...material.env } }),
     ...(material.headers === undefined ? {} : { headers: { ...material.headers } }),
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseStoredMaterial(value: unknown): CredentialMaterial | undefined {
+  if (!isRecord(value)) return undefined;
+  const env = parseStoredMap(value.env);
+  const headers = parseStoredMap(value.headers);
+  if (env === undefined && headers === undefined) return undefined;
+  return { ...(env === undefined ? {} : { env }), ...(headers === undefined ? {} : { headers }) };
+}
+
+function parseStoredMap(value: unknown): Readonly<Record<string, string>> | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) return undefined;
+  const entries = Object.entries(value);
+  if (entries.length === 0 || entries.length > 32) return undefined;
+  for (const [key, item] of entries) {
+    if (!/^[A-Za-z0-9_.-]{1,128}$/u.test(key) || typeof item !== "string" || item.length === 0 || item.length > 16_384) return undefined;
+  }
+  return Object.fromEntries(entries) as Record<string, string>;
 }
 
 function withoutUndefinedRevokedAt(record: CredentialRecord): CredentialRecord {

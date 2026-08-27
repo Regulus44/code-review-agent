@@ -163,6 +163,16 @@
 - `docs/phase8-deployment-policy.json` 与 `scripts/phase8-upgrade-policy-gate.mjs` 审计 Docker non-root/read-only/no-new-privileges/cap-drop、bounded workspace 和 `upgrade=deferred-until-deployment-smoke`；`phase8-operations-gate` 已将 policy 与 v5 → v7 restore/rollback 联合验证。
 - credential unit、operations、upgrade-policy 和 productization gates 已通过；真实云端 secret manager、IdP/Docker deployment smoke 仍需在目标部署环境执行，因此公开 upgrade capability 继续 `deferred`。
 
+## Phase 8.5 本地 host 凭据与可视化 Provider/Model 切换 slice（implemented，整体 8.5 仍未完成）
+
+- `apps/api/src/credentials.ts:LocalFileSecretProvider` 将 `(tenant, credential, version)` 对应的 secret material 持久化到 API host-owned `.data/credentials.secrets.json`；写入采用临时文件与原子 rename，POSIX 使用 `0600`，损坏文件读取和 mutation 均 fail closed。
+- `apps/api/src/provider-profiles.ts:LocalProviderProfileStore` 持久化自定义 ProviderProfile 元数据和 opaque `credentialRef`；SQLite host 默认启用 `provider-profiles.json`，不把 token 写入 SQLite、EventStore、SSE 或 Web projection。
+- 本地无远程认证的 SQLite host 使用单一 `local` scope，允许 Web Settings 直接创建凭据；配置 bearer/JWT 后仍要求认证 tenant，未开放跨租户本地 mutation。
+- `apps/web/index.html:renderSettings` 增加 password token、header 名称/前缀、凭据状态与 Provider credential 选择；保存后 catalog 刷新，Provider/Model 切换直接构造新 route，重启后由 metadata、profile 和 secret file 恢复。
+- DSH 对照：`packages/client/connection/src/index.ts` 的 privileged credentials API、`packages/llm/llm-pi-ai/tests/loader-composition.spec.ts` 的 `.credentials.yaml`/`0600` host-owned 文件；Claude Code 对照：`src/utils/auth.ts` 的 keychain→文件 fallback、缓存失效和重新解析。实现为本项目自有代码，不复制 Claude Code/DSH 源码。
+- 验证：`pnpm typecheck`、API credential/server 定向测试（含无认证本地 host 重启恢复）、Web 139 项测试、`pnpm build:web`、`pnpm test:phase8:settings`、`git diff --check`；独立 checkpoint 需在本 slice 完成后建立。
+- 回滚：移除本地 file provider、profile store 和 Settings mutation surface，恢复进程内 host-only provider；已有 SQLite credential metadata、model route 和事件 schema 保持可读。
+
 ## Phase 8.3 OS/container isolation 与 deployment evidence slice（implemented，宿主能力依赖）
 
 - `packages/tools/src/code-mode.ts` 新增 `CodeModeIsolationAdapter`，将真正的 OS/container network boundary 与现有 process-policy 分开；`os-required` 在 adapter 缺失或探测失败时保持 `CODE_MODE_OS_ISOLATION_UNAVAILABLE`。

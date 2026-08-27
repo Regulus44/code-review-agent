@@ -13,7 +13,8 @@ import { McpConnectionManager, type McpServerConfig } from "@code-review-agent/m
 import type { CodeModeSandbox, PermissionPreset } from "@code-review-agent/tools";
 import { artifactAccessResponse, inspectArtifact, isAvailableArtifact, type ArtifactAccess } from "./artifacts.js";
 import { attachmentCapability, AttachmentInputError, stageAttachment, type AttachmentPolicy } from "./attachments.js";
-import { CredentialLifecycleError, CredentialVault, type CredentialInput, type CredentialMaterial, type SecretProvider } from "./credentials.js";
+import { CredentialLifecycleError, CredentialVault, LocalFileSecretProvider, type CredentialInput, type CredentialMaterial, type SecretProvider } from "./credentials.js";
+import { LocalProviderProfileStore } from "./provider-profiles.js";
 import { verifyProductizationJwt, type ProductizationJwtOptions } from "./auth.js";
 
 export interface ModelSelection {
@@ -66,6 +67,12 @@ export interface ApiServerOptions {
   readonly credentials?: CredentialVault;
   /** Explicit external secret-manager adapter; absent means host-only memory. */
   readonly secretProvider?: SecretProvider;
+  /** Local durable secret file; defaults to apps/api/.data/credentials.secrets.json for SQLite hosts. */
+  readonly credentialSecretsPath?: string;
+  /** Local durable custom provider profile file; defaults to apps/api/.data/provider-profiles.json for SQLite hosts. */
+  readonly providerProfilesPath?: string;
+  /** Enables unauthenticated mutation for the single local host scope. */
+  readonly localHostMode?: boolean;
   /** Test/deployment hook for bounded provider catalog recovery fixtures. */
   readonly modelCatalogFailures?: number;
   readonly permissionPreset?: PermissionPreset;
@@ -89,7 +96,10 @@ export interface ApiServerOptions {
 export function createApiServer(options: ApiServerOptions = {}): Server {
   const ownsStore = options.store === undefined && options.host === undefined;
   const store = options.store ?? (options.host === undefined ? new SqliteEventStore({ databasePath: options.databasePath ?? defaultDatabasePath() }) : undefined);
-  const credentials = options.credentials ?? new CredentialVault(options.credentialBackend ?? credentialBackendFrom(store), options.secretProvider);
+  const localHostMode = options.localHostMode ?? (options.productization?.auth === undefined && store instanceof SqliteEventStore);
+  const secretProvider = options.secretProvider ?? (store instanceof SqliteEventStore ? new LocalFileSecretProvider({ filePath: options.credentialSecretsPath ?? defaultCredentialSecretsPath() }) : undefined);
+  const credentials = options.credentials ?? new CredentialVault(options.credentialBackend ?? credentialBackendFrom(store), secretProvider);
+  const providerProfileStore = store instanceof SqliteEventStore ? new LocalProviderProfileStore(options.providerProfilesPath ?? defaultProviderProfilesPath()) : undefined;
   const principals = options.principalBackend ?? principalBackendFrom(store);
   const subagentRuntime = options.subagentRuntime ?? new SubagentRuntime({ store: store as SessionEventStore });
   const host = options.host ?? new AgentHost({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), ...(options.fallbackModels === undefined ? {} : { fallbackModels: options.fallbackModels }), ...(options.maxSteps === undefined ? {} : { maxSteps: options.maxSteps }), ...(options.permissionPreset === undefined ? {} : { permissionPreset: options.permissionPreset }), ...(options.contextBudget === undefined ? {} : { contextBudget: options.contextBudget }), ...(options.contextPolicy === undefined ? {} : { contextPolicy: options.contextPolicy }), ...(options.codeMode === undefined ? {} : { codeMode: options.codeMode }), ...(options.productization?.quota === undefined ? {} : { quota: options.productization.quota }), ...(store instanceof SqliteEventStore ? { operations: { backup: "available", migration: "available", upgrade: "deferred" } } : {}), subagentRuntime });
@@ -104,18 +114,22 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
     credentials,
     ...(options.modelRouting === undefined && (store === undefined || typeof (store as Partial<ModelRouteBackend>).listModelRoutes !== "function") ? {} : { routeBackend: options.modelRouting ?? store as unknown as ModelRouteBackend }),
   };
-  for (const profile of options.providerProfiles ?? []) {
+  for (const profile of [...(providerProfileStore?.listAll() ?? []), ...(options.providerProfiles ?? [])]) {
     createBuiltInModelProtocolRegistry().get(profile.protocol);
     modelRuntime.catalog.register(profile, options.providerDiscovery === undefined ? undefined : { listModels: options.providerDiscovery });
   }
   registerBootstrapCatalog(modelRuntime, options.modelInfo, options.availableModels);
   for (const route of modelRuntime.routeBackend?.listModelRoutes() ?? []) {
-    modelRuntime.routes.set(route.tenantId, route);
-    if (modelRuntime.selector === undefined) throw new Error("tenant model routing requires a model selector during restore");
     const material = route.credentialRef === undefined ? undefined : credentials.resolve(route.credentialRef, route.tenantId);
-    if (route.credentialRef !== undefined && material === undefined) throw new Error(`credential reference ${route.credentialRef.id} is unavailable during restore`);
-    const selected = modelRuntime.selector(route.model, route.tenantId, material);
-    host.setTenantModel(route.tenantId, selected.model, routeSelection(route));
+    if (route.credentialRef !== undefined && material === undefined) continue;
+    try {
+      const selected = selectCatalogModel(modelRuntime, route.model, route.tenantId, material, route.provider);
+      modelRuntime.routes.set(route.tenantId, route);
+      host.setTenantModel(route.tenantId, selected.model, routeSelection(route));
+    } catch {
+      // Keep durable metadata intact while failing closed when a local secret
+      // file or provider profile is unavailable during host restart.
+    }
   }
   modelRuntime.selectionRestore = restoreSessionSelections(store as SessionEventStore | undefined, host, modelRuntime);
   const ownsMcp = options.mcp === undefined;
@@ -129,7 +143,7 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
   const persistence = store instanceof SqliteEventStore ? "sqlite" : "custom";
   const webRoot = options.webRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web");
   const server = createServer((request, response) => {
-    void handleRequest(request, response, host, mcp, subagentRuntime, webRoot, persistence, modelRuntime, credentials, principals, options.attachmentPolicy, options.productization);
+    void handleRequest(request, response, host, mcp, subagentRuntime, webRoot, persistence, modelRuntime, credentials, principals, options.attachmentPolicy, options.productization, localHostMode, providerProfileStore);
   });
   server.on("close", () => { void host.shutdown(); });
   if (ownsStore && store instanceof SqliteEventStore) server.on("close", () => store.close());
@@ -141,6 +155,14 @@ function defaultDatabasePath(): string {
   // Keep the local database stable when the API is started from the repository
   // root, apps/api, or a process manager with a different working directory.
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.data/code-review-agent.sqlite");
+}
+
+function defaultCredentialSecretsPath(): string {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.data/credentials.secrets.json");
+}
+
+function defaultProviderProfilesPath(): string {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.data/provider-profiles.json");
 }
 
 /** CLI/runtime entry that opts into local `.env` model configuration. Tests stay deterministic via createApiServer(). */
@@ -176,6 +198,11 @@ interface ModelRuntimeState {
   remainingCatalogFailures: number;
   selectionRestore?: Promise<void>;
 }
+
+const LOCAL_HOST_IDENTITY: SessionOwnership = {
+  principalId: brand<string, "PrincipalId">("local-host"),
+  tenantId: brand<string, "TenantId">("local"),
+};
 
 function currentAttachmentCapability(policy: AttachmentPolicy | undefined, modelRuntime: ModelRuntimeState, tenantId?: string) {
   return attachmentCapability(policy, (modelRuntime.routes.get(tenantId ?? "")?.model ?? modelRuntime.info?.model)?.includes("vision") === true);
@@ -405,12 +432,12 @@ function rebindModelCredential(tenantId: string, credentialId: string, record: i
   const material = credentials.resolve(reference, tenantId);
   for (const route of [...modelRuntime.routes.values()]) {
     if (route.tenantId !== tenantId || route.credentialRef?.id !== credentialId) continue;
-    if (modelRuntime.routeBackend === undefined || modelRuntime.selector === undefined || material === undefined) {
+    if (modelRuntime.routeBackend === undefined || material === undefined) {
       clearModelCredential(tenantId, credentialId, host, modelRuntime);
       continue;
     }
     try {
-      const selected = modelRuntime.selector(route.model, tenantId, material);
+      const selected = selectCatalogModel(modelRuntime, route.model, tenantId, material, route.provider);
       const next: ModelRouteRecord = {
         ...route,
         provider: selected.config.provider,
@@ -437,7 +464,7 @@ function clearModelCredential(tenantId: string, credentialId: string, host: Agen
   host.clearTenantModel(tenantId);
 }
 
-async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, mcp: McpConnectionManager, subagents: SubagentRuntime, webRoot: string, persistence: string, modelRuntime: ModelRuntimeState, credentials: CredentialVault, principals: PrincipalBackend | undefined, attachmentPolicy: AttachmentPolicy | undefined, productization: ProductizationServerOptions | undefined): Promise<void> {
+async function handleRequest(request: IncomingMessage, response: ServerResponse, host: AgentHost, mcp: McpConnectionManager, subagents: SubagentRuntime, webRoot: string, persistence: string, modelRuntime: ModelRuntimeState, credentials: CredentialVault, principals: PrincipalBackend | undefined, attachmentPolicy: AttachmentPolicy | undefined, productization: ProductizationServerOptions | undefined, localHostMode: boolean, providerProfileStore: LocalProviderProfileStore | undefined): Promise<void> {
   response.setHeader("access-control-allow-origin", "*");
   response.setHeader("access-control-allow-headers", "content-type, idempotency-key, last-event-id");
   response.setHeader("access-control-allow-methods", "GET,POST,DELETE,OPTIONS");
@@ -448,6 +475,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
   try {
     const identity = await authenticateRequest(request, url.pathname, productization, principals);
+    const localIdentity = localHostMode ? LOCAL_HOST_IDENTITY : undefined;
+    const tenantIdentity = identity ?? localIdentity;
     await modelRuntime.selectionRestore;
     const sessionResource = url.pathname.match(/^\/v1\/sessions\/([^/]+)/u);
     if (identity !== undefined && sessionResource?.[1] !== undefined) {
@@ -468,7 +497,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
     if (url.pathname === "/v1/credentials" || url.pathname.startsWith("/v1/credentials/")) {
-      const tenant = requireTenantIdentity(identity);
+      const tenant = requireTenantIdentity(tenantIdentity);
       if (request.method === "GET" && url.pathname === "/v1/credentials") {
         sendJson(response, 200, { credentials: credentials.list(tenant.tenantId).map(publicCredential) });
         return;
@@ -505,7 +534,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       throw new HttpError(404, "credential endpoint not found");
     }
     if (url.pathname === "/v1/providers" || url.pathname.startsWith("/v1/providers/")) {
-      const tenantId = identity?.tenantId;
+      const tenantId = tenantIdentity?.tenantId;
       if (request.method === "GET" && url.pathname === "/v1/providers") {
         const snapshot = await modelRuntime.catalog.refresh(tenantId);
         const profiles = modelRuntime.catalog.listProfiles(tenantId).map(publicProviderProfile);
@@ -515,12 +544,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       if (request.method === "POST" && url.pathname === "/v1/providers") {
         const body = await readJson(request);
         const profile = parseProviderProfile(body, tenantId);
-        if (profile.tenantId !== undefined && identity === undefined) throw new HttpError(401, "provider profile requires authenticated identity");
-        if (profile.credentialRef !== undefined && identity === undefined) throw new HttpError(401, "provider credential reference requires authenticated identity");
+        if (profile.tenantId !== undefined && tenantIdentity === undefined) throw new HttpError(401, "provider profile requires authenticated identity");
+        if (profile.credentialRef !== undefined && tenantIdentity === undefined) throw new HttpError(401, "provider credential reference requires authenticated identity");
+        if (profile.credentialRef !== undefined && tenantIdentity !== undefined) credentials.requireReference(tenantIdentity.tenantId, profile.credentialRef);
         try {
           // Validate the protocol before making the profile visible to discovery/UI.
           createBuiltInModelProtocolRegistry().get(profile.protocol);
           modelRuntime.catalog.register(profile);
+          providerProfileStore?.upsert(profile);
         } catch (error) {
           throw error instanceof HttpError ? error : new HttpError(400, error instanceof Error ? error.message : String(error));
         }
@@ -614,8 +645,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         modelRuntime.remainingCatalogFailures -= 1;
         throw new HttpError(503, "model catalog temporarily unavailable");
       }
-      const catalogSnapshot = await modelRuntime.catalog.refresh(identity?.tenantId);
-      const route = identity === undefined ? undefined : modelRuntime.routes.get(identity.tenantId);
+      const catalogSnapshot = await modelRuntime.catalog.refresh(tenantIdentity?.tenantId);
+      const route = tenantIdentity === undefined ? undefined : modelRuntime.routes.get(tenantIdentity.tenantId);
       const currentProvider = route?.provider ?? modelRuntime.info?.provider ?? "custom";
       const currentModel = route?.model ?? modelRuntime.info?.model ?? "custom";
       const currentGroup = catalogSnapshot.groups.find((group) => group.provider === currentProvider);
@@ -625,7 +656,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         configured: route === undefined ? modelRuntime.info?.configured ?? false : true,
         models: currentGroup?.models.map((entry) => entry.model) ?? modelRuntime.availableModels,
         providers: publicCatalogGroups(catalogSnapshot.groups),
-        profiles: modelRuntime.catalog.listProfiles(identity?.tenantId).map(publicProviderProfile),
+        profiles: modelRuntime.catalog.listProfiles(tenantIdentity?.tenantId).map(publicProviderProfile),
         ...(currentGroup?.status === "failed" ? { catalogError: currentGroup.error } : {}),
         reasoning: reasoningCapability(currentProvider, host.currentReasoningEffort()),
         ...(route === undefined ? {} : { route: publicModelRoute(route) }),
@@ -635,7 +666,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "POST" && url.pathname === "/v1/models") {
       const body = await readJson(request);
       const reasoningEffort = body.reasoningEffort === undefined ? undefined : requireReasoningEffort(body.reasoningEffort);
-      const provider = typeof body.provider === "string" && body.provider.trim() !== "" ? body.provider.trim() : identity === undefined ? modelRuntime.info?.provider : modelRuntime.routes.get(identity.tenantId)?.provider ?? modelRuntime.info?.provider;
+      const provider = typeof body.provider === "string" && body.provider.trim() !== "" ? body.provider.trim() : tenantIdentity === undefined ? modelRuntime.info?.provider : modelRuntime.routes.get(tenantIdentity.tenantId)?.provider ?? modelRuntime.info?.provider;
       if (reasoningEffort !== undefined) {
         const capability = reasoningCapability(provider, host.currentReasoningEffort());
         if (!capability.supported || !capability.options.some((option) => option.id === reasoningEffort)) throw new HttpError(400, "unsupported reasoning effort");
@@ -646,41 +677,41 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         return;
       }
       if (typeof body.model !== "string" || body.model.length === 0) throw new HttpError(400, "model is required");
-      const requestedCredential = identity === undefined || body.credentialRef === undefined ? undefined : parseCredentialReference(body.credentialRef);
-      const profileCredential = provider === undefined ? undefined : modelRuntime.catalog.profile(provider, identity?.tenantId)?.credentialRef;
+      const requestedCredential = tenantIdentity === undefined || body.credentialRef === undefined ? undefined : parseCredentialReference(body.credentialRef);
+      const profileCredential = provider === undefined ? undefined : modelRuntime.catalog.profile(provider, tenantIdentity?.tenantId)?.credentialRef;
       const effectiveCredential = requestedCredential ?? profileCredential;
-      const material = effectiveCredential === undefined ? undefined : credentials.resolve(effectiveCredential, identity?.tenantId);
+      const material = effectiveCredential === undefined ? undefined : credentials.resolve(effectiveCredential, tenantIdentity?.tenantId);
       if (effectiveCredential !== undefined && material === undefined) throw new CredentialLifecycleError("CREDENTIAL_REFERENCE_INVALID", "Credential reference is missing, revoked, or stale");
-      const selected = selectCatalogModel(modelRuntime, body.model, identity?.tenantId, material, provider);
-      if (modelRuntime.selector !== undefined && modelRuntime.catalog.profile(selected.config.provider, identity?.tenantId)?.source !== "custom" && modelRuntime.availableModels.length > 0 && !modelRuntime.availableModels.includes(body.model)) throw new HttpError(400, "unsupported model");
-      if (identity === undefined) {
+      const selected = selectCatalogModel(modelRuntime, body.model, tenantIdentity?.tenantId, material, provider);
+      if (modelRuntime.selector !== undefined && modelRuntime.catalog.profile(selected.config.provider, tenantIdentity?.tenantId)?.source !== "custom" && modelRuntime.availableModels.length > 0 && !modelRuntime.availableModels.includes(body.model)) throw new HttpError(400, "unsupported model");
+      if (tenantIdentity === undefined) {
         host.setModel(selected.model);
         modelRuntime.info = selected.config;
         sendJson(response, 200, { model: selected.config, reasoning: reasoningCapability(selected.config.provider, host.currentReasoningEffort()) });
         return;
       }
       const route: ModelRouteRecord = {
-        tenantId: identity.tenantId,
+        tenantId: tenantIdentity.tenantId,
         provider: selected.config.provider,
         model: selected.config.model,
         ...(selected.config.baseUrl === undefined ? {} : { baseUrl: selected.config.baseUrl }),
         ...(selected.model.contextCapability === undefined ? {} : { contextCapability: selected.model.contextCapability }),
-        ...(effectiveCredential === undefined ? {} : { credentialRef: credentials.reference(credentials.requireReference(identity.tenantId, effectiveCredential)) }),
+        ...(effectiveCredential === undefined ? {} : { credentialRef: credentials.reference(credentials.requireReference(tenantIdentity.tenantId, effectiveCredential)) }),
         updatedAt: new Date().toISOString(),
       };
       if (modelRuntime.routeBackend === undefined) throw new HttpError(409, "tenant model routing persistence is not configured");
       const persisted = modelRuntime.routeBackend.upsertModelRoute(route);
-      host.setTenantModel(identity.tenantId, selected.model, routeSelection(persisted));
-      modelRuntime.routes.set(identity.tenantId, persisted);
+      host.setTenantModel(tenantIdentity.tenantId, selected.model, routeSelection(persisted));
+      modelRuntime.routes.set(tenantIdentity.tenantId, persisted);
       sendJson(response, 200, { model: selected.config, route: publicModelRoute(persisted), reasoning: reasoningCapability(selected.config.provider, host.currentReasoningEffort()) });
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/tools") {
-      sendJson(response, 200, { tools: host.listTools(undefined, identity?.tenantId) });
+      sendJson(response, 200, { tools: host.listTools(undefined, tenantIdentity?.tenantId) });
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/capabilities") {
-        sendJson(response, 200, { attachments: currentAttachmentCapability(attachmentPolicy, modelRuntime, identity?.tenantId), context: host.contextSettings(identity?.tenantId), codeMode: host.codeModeSettings(), lsp: host.lspSettings(), plugins: host.pluginsSettings(), productization: productizationCapability(host.productizationSettings(identity?.tenantId), productization, principals, credentials) });
+        sendJson(response, 200, { attachments: currentAttachmentCapability(attachmentPolicy, modelRuntime, tenantIdentity?.tenantId), context: host.contextSettings(tenantIdentity?.tenantId), codeMode: host.codeModeSettings(), lsp: host.lspSettings(), plugins: host.pluginsSettings(), productization: productizationCapability(host.productizationSettings(tenantIdentity?.tenantId), productization, principals, credentials) });
       return;
     }
     if (request.method === "GET" && (url.pathname === "/v1/principals" || url.pathname.startsWith("/v1/principals/"))) {
@@ -1332,7 +1363,7 @@ function routeSelection(route: ModelRouteRecord): TenantModelRoute {
 }
 
 async function restoreSessionSelections(store: SessionEventStore | undefined, host: AgentHost, modelRuntime: ModelRuntimeState): Promise<void> {
-  if (store === undefined || modelRuntime.selector === undefined) return;
+  if (store === undefined) return;
   for (const summary of await store.listSessions(true)) {
     const projection = await store.project(summary.id);
     const selection = projection?.modelSelection;
@@ -1342,7 +1373,7 @@ async function restoreSessionSelections(store: SessionEventStore | undefined, ho
     const material = route?.credentialRef === undefined || tenantId === undefined ? undefined : modelRuntime.credentials.resolve(route.credentialRef, tenantId);
     if (route?.credentialRef !== undefined && material === undefined) continue;
     try {
-      const selected = modelRuntime.selector(selection.model, tenantId, material);
+      const selected = selectCatalogModel(modelRuntime, selection.model, tenantId, material, selection.provider);
       const restoredRoute: TenantModelRoute | undefined = route === undefined
         ? selected.config.baseUrl === undefined && selected.model.contextCapability === undefined ? undefined : {
           provider: selected.config.provider,

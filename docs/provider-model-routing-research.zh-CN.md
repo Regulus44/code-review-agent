@@ -868,3 +868,32 @@ Contract 变化：<Event / Tool / Task / Permission / Workspace / Provider>
 ```
 
 如果实现无法映射到本文某个切片，先更新 ADR 或本文的实施索引，再开始编码。
+
+## 14. 本地凭据与可视化切换实施说明（P8.5-MR7）
+
+本切片补齐以下产品链路：
+
+```text
+Web Settings 输入 token
+  → API host-owned CredentialVault
+  → .data/credentials.secrets.json（原子写入）
+  → ProviderProfile + opaque credentialRef
+  → /v1/models 立即构造并绑定新 route
+  → SQLite model_routes + provider-profiles.json
+  → API 重启后恢复 metadata、profile 和 secret material
+```
+
+实现对照与边界：
+
+- DSH 参考 `D:/Develop/deepseek-harness-fork/packages/client/connection/src/index.ts` 的 `credentials.describe/set/unset` 特权边界，以及 `packages/llm/llm-pi-ai/tests/loader-composition.spec.ts` 中 `.credentials.yaml`、`0600` 文件权限和 host-owned provider；本项目自行实现 `apps/api/src/credentials.ts:LocalFileSecretProvider`，不复制 DSH 代码。
+- Claude Code 参考 `D:/Develop/claude-code/src/utils/auth.ts` 的 keychain→文件 fallback、缓存失效后重新解析和 401 后清缓存行为；本项目当前使用 host-owned 本地文件，不把 secret 放入浏览器 state、EventStore、SSE、ProviderProfile 或 `.env`。
+- `apps/api/src/provider-profiles.ts:LocalProviderProfileStore` 只持久化自定义 ProviderProfile 元数据和 opaque credential reference；`apps/api/src/server.ts:createApiServer` 在 SQLite host 默认启用两个本地文件，并在无远程认证时限定 `local` scope。
+- `apps/web/index.html:renderSettings` 新增 password token 输入、header 名称/前缀、凭据状态和 Provider credential 下拉选择；保存后刷新 credential catalog，后续 Provider/Model 选择立即使用新版本。
+
+验收与回滚：
+
+- 单元：本地 secret 文件重启读取、原子更新、删除和 malformed fail-closed；
+- API：无认证本地 host 创建 credential→创建 Provider→选择 Model→关闭并重启→恢复 route/profile/credential；认证 tenant 仍保持原有隔离；
+- Web：Settings 可输入 token、显示 active/version 状态、选择 Provider/Model，公开响应只显示 configured/version；
+- 验证命令：`pnpm typecheck`、API credential/server 定向测试、Web 全量测试、`pnpm build:web`、`pnpm test:phase8:settings`、`git diff --check`；
+- 回滚：回滚本切片 checkpoint 即可恢复进程内 host-only secret provider 和原有认证凭据 API；SQLite metadata、model route 和事件格式保持向后兼容。

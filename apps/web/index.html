@@ -799,7 +799,7 @@
       (() => {
         const typedRuntime = window.CodeReviewAgentWeb;
         const typedConnection = typedRuntime?.connection || null;
-        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, stoppingTurnId: null, composer: typedRuntime?.createComposerState?.() || { phase: 'idle', attemptId: 0 }, composerEpoch: 0, requestActions: typedRuntime?.createRequestActionGate?.() || null, workspaces: null, lastWorkspaceOrderSequence: 0, conversationScrollTop: 0, trajectoryScrollTop: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 280, details: 'closed', detailsWidthPx: 0, narrow: false, narrowExpanded: false, mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sessionView: 'conversation', trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
+        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, credentials: [], pendingCredentialId: '', modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, stoppingTurnId: null, composer: typedRuntime?.createComposerState?.() || { phase: 'idle', attemptId: 0 }, composerEpoch: 0, requestActions: typedRuntime?.createRequestActionGate?.() || null, workspaces: null, lastWorkspaceOrderSequence: 0, conversationScrollTop: 0, trajectoryScrollTop: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 280, details: 'closed', detailsWidthPx: 0, narrow: false, narrowExpanded: false, mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sessionView: 'conversation', trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
         let usageDrawerOpen = false;
         let renderedSessionView = state.sessionView;
         let modelMenuPane = 'root';
@@ -1105,7 +1105,8 @@
         const refreshWorktrees = async () => { if (!state.session || !typedRuntime?.api?.listWorktrees) { state.worktrees = []; return; } try { state.worktrees = (await typedRuntime.api.listWorktrees(state.session.id)).worktrees || []; } catch { state.worktrees = []; } };
          const setStatus = (text, connected = true) => { status.textContent = text; status.classList.toggle('disconnected', !connected); };
          const applyAttachmentCapability = () => { const capability = state.capabilities?.attachments; attach.disabled = capability?.enabled !== true; attach.title = capability?.enabled === true ? `Attach files (max ${Math.floor(capability.maxBytes / 1024)} KiB)` : capability?.reason || 'Attachments are unavailable'; attachmentInput.accept = capability?.enabled === true ? capability.allowedMediaTypes.filter((type) => capability.imagesEnabled || !type.startsWith('image/')).join(',') : ''; };
-          const refreshCapabilities = async () => { state.capabilities = typedRuntime?.api?.listCapabilities ? await typedRuntime.api.listCapabilities() : await api('/v1/capabilities'); applyAttachmentCapability(); renderDetails(); renderModelSeatMenu?.(); };
+         const refreshCapabilities = async () => { state.capabilities = typedRuntime?.api?.listCapabilities ? await typedRuntime.api.listCapabilities() : await api('/v1/capabilities'); applyAttachmentCapability(); renderDetails(); renderModelSeatMenu?.(); };
+         const refreshCredentials = async () => { try { const payload = typedRuntime?.api?.listCredentials ? await typedRuntime.api.listCredentials() : await api('/v1/credentials'); state.credentials = payload.credentials || []; } catch { state.credentials = []; } };
          const bytesToBase64 = (bytes) => { let result = ''; const chunkSize = 0x8000; for (let offset = 0; offset < bytes.length; offset += chunkSize) result += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length))); return btoa(result); };
          const renderConnectionBanner = (snapshot) => {
            if (!typedRuntime?.presentConnection || !connectionBanner || !connectionBannerMessage || !connectionRetry) return;
@@ -1785,6 +1786,54 @@
           for (const failure of view.model.providerErrors) {
             const error = document.createElement('p'); error.className = 'settings-error'; error.textContent = `${failure.provider}: ${failure.error}`; model.append(error);
           }
+          const credentialSection = section('Credentials');
+          const credentialSummary = document.createElement('p'); credentialSummary.className = 'settings-muted'; credentialSummary.textContent = state.credentials.length ? `${state.credentials.length} host-local credential${state.credentials.length === 1 ? '' : 's'} configured. Secret material never leaves the API host.` : 'No host-local credentials configured.'; credentialSection.append(credentialSummary);
+          const credentialList = document.createElement('div'); credentialList.className = 'settings-credential-list';
+          for (const credential of state.credentials) {
+            const row = document.createElement('div'); row.className = 'settings-line';
+            const caption = document.createElement('span'); caption.textContent = `${credential.label || credential.id} · ${credential.kind}`;
+            const status = document.createElement('strong'); status.textContent = `${credential.status} · v${credential.version}`;
+            row.append(caption, status); credentialList.append(row);
+          }
+          credentialSection.append(credentialList);
+          const credentialForm = document.createElement('form'); credentialForm.className = 'settings-provider-form';
+          const credentialFields = [
+            ['label', 'Label', 'A provider token'],
+            ['headerName', 'Header name', 'authorization'],
+            ['prefix', 'Header prefix', 'Bearer'],
+            ['token', 'Token', 'Paste token here'],
+          ];
+          const credentialInputs = {};
+          for (const [key, label, placeholder] of credentialFields) {
+            const field = document.createElement('label'); field.className = 'settings-line';
+            const caption = document.createElement('span'); caption.textContent = label;
+            const input = document.createElement('input'); input.type = key === 'token' ? 'password' : 'text'; input.placeholder = placeholder; input.name = key; input.autocomplete = key === 'token' ? 'new-password' : 'off'; input.className = 'settings-input';
+            if (key === 'headerName') input.value = 'authorization';
+            if (key === 'prefix') input.value = 'Bearer';
+            field.append(caption, input); credentialForm.append(field); credentialInputs[key] = input;
+          }
+          const credentialActions = document.createElement('div'); credentialActions.className = 'settings-actions';
+          const saveCredential = document.createElement('button'); saveCredential.type = 'submit'; saveCredential.className = 'workspace-create'; saveCredential.textContent = 'Save credential'; credentialActions.append(saveCredential); credentialForm.append(credentialActions); credentialSection.append(credentialForm);
+          credentialForm.onsubmit = async (event) => {
+            event.preventDefault(); saveCredential.disabled = true;
+            try {
+              const token = String(credentialInputs.token.value || '').trim();
+              const headerName = String(credentialInputs.headerName.value || 'authorization').trim().toLowerCase();
+              const prefix = String(credentialInputs.prefix.value || '').trim();
+              if (!token || !/^[A-Za-z0-9_.-]{1,128}$/.test(headerName)) throw new Error('Enter a token and a valid header name.');
+              const value = prefix ? `${prefix} ${token}` : token;
+              const created = typedRuntime?.api?.createCredential
+                ? await typedRuntime.api.createCredential({ kind: 'header', label: String(credentialInputs.label.value || '').trim() || undefined, material: { headers: { [headerName]: value } } })
+                : await api('/v1/credentials', { method: 'POST', headers: { 'content-type': 'application/json' }, body: { kind: 'header', label: String(credentialInputs.label.value || '').trim() || undefined, material: { headers: { [headerName]: value } } } });
+              state.pendingCredentialId = created.credential.id;
+              credentialInputs.token.value = '';
+              await refreshCredentials();
+              state.modelReceipt = 'Credential saved on the local API host';
+              renderSettings();
+              setStatus('Credential saved', true);
+            } catch (error) { state.modelStatus = 'error'; state.modelError = error instanceof Error ? error.message : String(error); renderSettings(); setStatus(state.modelError, false); }
+            finally { saveCredential.disabled = false; }
+          };
           const providerForm = document.createElement('form'); providerForm.className = 'settings-provider-form'; providerForm.hidden = true;
           const providerFields = [
             ['id', 'Provider id', 'custom-provider'],
@@ -1798,7 +1847,12 @@
           for (const [key, label, placeholder] of providerFields) {
             const field = document.createElement('label'); field.className = 'settings-line';
             const caption = document.createElement('span'); caption.textContent = label;
-            const input = document.createElement('input'); input.type = 'text'; input.placeholder = placeholder; input.name = key; input.autocomplete = 'off'; input.className = 'settings-input';
+            const input = key === 'credentialRefId' ? document.createElement('select') : document.createElement('input'); if (key !== 'credentialRefId') input.type = 'text'; input.placeholder = placeholder; input.name = key; input.autocomplete = 'off'; input.className = 'settings-input';
+            if (key === 'credentialRefId') {
+              const none = document.createElement('option'); none.value = ''; none.textContent = 'No credential'; input.append(none);
+              for (const credential of state.credentials.filter((item) => item.status === 'active')) { const option = document.createElement('option'); option.value = credential.id; option.textContent = `${credential.label || credential.id} · v${credential.version}`; input.append(option); }
+              input.value = state.pendingCredentialId || '';
+            }
             field.append(caption, input); providerForm.append(field); providerInputs[key] = input;
           }
           const providerActions = document.createElement('div'); providerActions.className = 'settings-actions';
@@ -1819,7 +1873,7 @@
                 models,
                 ...(credentialRefId ? { credentialRef: { id: credentialRefId, kind: 'header' } } : {}),
               } });
-              providerForm.reset(); providerForm.hidden = true; addProvider.hidden = false; state.modelReceipt = 'Custom provider saved'; await refreshModelCatalog();
+              providerForm.reset(); providerForm.hidden = true; addProvider.hidden = false; state.pendingCredentialId = ''; state.modelReceipt = 'Custom provider saved'; await refreshModelCatalog();
             } catch (error) { state.modelStatus = 'error'; state.modelError = error instanceof Error ? error.message : String(error); renderSettings(); setStatus(state.modelError, false); }
             finally { saveProvider.disabled = false; }
           };
@@ -2621,7 +2675,7 @@
         const createSession = async (workspaceRoot) => { const checked = await api('/v1/workspaces/validate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspaceRoot }) }); const session = await api('/v1/sessions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspaceRoot: checked.workspaceRoot, permissionPreset: permissionPreset.value }) }); await openSession(session.id); };
         const newSession = () => openWorkspacePicker();
         modeTrigger.textContent = '◉ Mode · Ask on write';
-        async function boot() { transitionBoot({ type: 'booting' }); const result = await api('/v1/sessions'); const tools = await api('/v1/tools'); state.tools = new Map((tools.tools || []).map((tool) => [tool.name, tool])); await refreshCapabilities(); await refreshModelCatalog(); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); if (result.sessions?.length) await openSession(result.sessions[0].id); else await createSession('.'); transitionBoot({ type: 'ready' }); render(); }
+        async function boot() { transitionBoot({ type: 'booting' }); const result = await api('/v1/sessions'); const tools = await api('/v1/tools'); state.tools = new Map((tools.tools || []).map((tool) => [tool.name, tool])); await refreshCredentials(); await refreshCapabilities(); await refreshModelCatalog(); state.mcp = (await api('/v1/mcp/servers')).servers || []; renderMcp(); if (result.sessions?.length) await openSession(result.sessions[0].id); else await createSession('.'); transitionBoot({ type: 'ready' }); render(); }
         const startBoot = () => boot().catch((error) => { transitionBoot({ type: 'failed', error }); setStatus(typedRuntime?.normalizeBootError ? typedRuntime.normalizeBootError(error) : error instanceof Error ? error.message : String(error), false); });
         document.querySelector('#sidebar-toggle').onclick = () => { dispatchShellLayout({ type: 'toggle-sidebar' }); };
         document.querySelector('#details-toggle').onclick = () => { dispatchShellLayout({ type: 'toggle-details' }); };
