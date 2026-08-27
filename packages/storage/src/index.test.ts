@@ -18,6 +18,16 @@ describe("InMemoryEventStore", () => {
     expect((await store.project(sessionId))?.messages.map((message) => message.content)).toEqual(["hello", "hi"]);
   });
 
+  it("replays session model selection and inherits it when a session is forked", async () => {
+    const store = new InMemoryEventStore();
+    const sessionId = await store.createSession("D:/selection");
+    await store.append({ sessionId, type: "session/model_selected", payload: { provider: "anthropic", model: "claude-fixture", reasoningEffort: "high" } });
+    expect((await store.project(sessionId))?.modelSelection).toEqual({ provider: "anthropic", model: "claude-fixture", reasoningEffort: "high" });
+    const forked = await store.forkSession(sessionId);
+    expect((await store.project(forked))?.modelSelection).toEqual({ provider: "anthropic", model: "claude-fixture", reasoningEffort: "high" });
+    expect((await store.list(forked)).some((event) => event.type === "session/model_selected")).toBe(true);
+  });
+
   it("keeps whole-log stats stable when history is paged", async () => {
     const store = new InMemoryEventStore();
     const sessionId = await store.createSession("D:/stats");

@@ -166,6 +166,7 @@ export function applyConversationEvent(projection: MutableConversationProjection
   switch (event.type) {
     case "session/created":
     case "session/updated":
+    case "session/model_selected":
     case "session/deleted":
     case "workspace/updated":
     case "workspace/reordered":

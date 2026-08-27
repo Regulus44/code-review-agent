@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { createInProcessSubagentProvider, sessionId, AgentHost, turnId, type TenantModelRoute } from "@code-review-agent/runtime";
 import { SqliteEventStore } from "@code-review-agent/storage";
-import { brand, type AgentEvent, type ChatModel, type ContextBudgetConfig, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem, type ProductizationCapability, type SessionOwnership, type ModelRouteBackend, type ModelRouteRecord, type CredentialBackend, type McpCredentialReference, type PrincipalBackend } from "@code-review-agent/contracts";
+import { brand, type AgentEvent, type ChatModel, type ContextBudgetConfig, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem, type ProductizationCapability, type SessionOwnership, type ModelRouteBackend, type ModelRouteRecord, type CredentialBackend, type McpCredentialReference, type PrincipalBackend, type ModelSelection as ContractModelSelection } from "@code-review-agent/contracts";
 import { SubagentRuntime } from "@code-review-agent/subagent";
 import { createConfiguredModelBootstrap, type ModelConfigView } from "@code-review-agent/llm";
 import { McpConnectionManager, type McpServerConfig } from "@code-review-agent/mcp-client";
@@ -107,6 +107,7 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
     const selected = modelRuntime.selector(route.model, route.tenantId, material);
     host.setTenantModel(route.tenantId, selected.model, routeSelection(route));
   }
+  modelRuntime.selectionRestore = restoreSessionSelections(store as SessionEventStore | undefined, host, modelRuntime);
   const ownsMcp = options.mcp === undefined;
   const mcp = options.mcp ?? new McpConnectionManager({
     registry: host.toolRegistry(),
@@ -162,6 +163,7 @@ interface ModelRuntimeState {
   readonly credentials: CredentialVault;
   readonly routes: Map<string, ModelRouteRecord>;
   remainingCatalogFailures: number;
+  selectionRestore?: Promise<void>;
 }
 
 function currentAttachmentCapability(policy: AttachmentPolicy | undefined, modelRuntime: ModelRuntimeState, tenantId?: string) {
@@ -288,6 +290,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
   try {
     const identity = await authenticateRequest(request, url.pathname, productization, principals);
+    await modelRuntime.selectionRestore;
     const sessionResource = url.pathname.match(/^\/v1\/sessions\/([^/]+)/u);
     if (identity !== undefined && sessionResource?.[1] !== undefined) {
       await assertSessionAccess(host, sessionId(decodeURIComponent(sessionResource[1])), identity);
@@ -343,6 +346,59 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       throw new HttpError(404, "credential endpoint not found");
     }
+    const sessionModelMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/model$/u);
+    if (sessionModelMatch?.[1] !== undefined) {
+      const targetSessionId = sessionId(decodeURIComponent(sessionModelMatch[1]));
+      const projection = await host.getSession(targetSessionId);
+      if (projection === undefined) throw new HttpError(404, "session not found");
+      if (request.method === "GET") {
+        const inherited = projection.modelSelection === undefined;
+        const tenantRoute = projection.ownership?.tenantId === undefined ? undefined : modelRuntime.routes.get(projection.ownership.tenantId);
+        sendJson(response, 200, {
+          sessionId: targetSessionId,
+          selection: projection.modelSelection ?? null,
+          inherited,
+          ...(inherited && tenantRoute === undefined && modelRuntime.info === undefined ? {} : {
+            effective: {
+              provider: tenantRoute?.provider ?? modelRuntime.info?.provider ?? "custom",
+              model: tenantRoute?.model ?? modelRuntime.info?.model ?? "custom",
+            },
+          }),
+        });
+        return;
+      }
+      if (request.method !== "POST") throw new HttpError(405, "method not allowed");
+      const body = await readJson(request);
+      if (typeof body.model !== "string" || body.model.trim() === "") throw new HttpError(400, "model is required");
+      if (modelRuntime.selector === undefined) throw new HttpError(409, "model switching is not configured");
+      const requestedModel = body.model.trim();
+      if (modelRuntime.availableModels.length > 0 && !modelRuntime.availableModels.includes(requestedModel)) throw new HttpError(400, "unsupported model");
+      const reasoningEffort = body.reasoningEffort === undefined ? undefined : requireReasoningEffort(body.reasoningEffort);
+      const tenantId = projection.ownership?.tenantId;
+      const currentRoute = tenantId === undefined ? undefined : modelRuntime.routes.get(tenantId);
+      const requestedCredential = body.credentialRef === undefined
+        ? currentRoute?.credentialRef
+        : tenantId === undefined ? undefined : parseCredentialReference(body.credentialRef);
+      const material = requestedCredential === undefined || tenantId === undefined ? undefined : modelRuntime.credentials.resolve(requestedCredential, tenantId);
+      if (requestedCredential !== undefined && material === undefined) throw new CredentialLifecycleError("CREDENTIAL_REFERENCE_INVALID", "Credential reference is missing, revoked, or stale");
+      const selected = modelRuntime.selector(requestedModel, tenantId, material);
+      if (body.provider !== undefined && (typeof body.provider !== "string" || body.provider.trim() !== selected.config.provider)) throw new HttpError(400, "provider does not match the selected model");
+      const selection: ContractModelSelection = {
+        provider: selected.config.provider,
+        model: selected.config.model,
+        ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+      };
+      const route: TenantModelRoute = {
+        provider: selected.config.provider,
+        model: selected.config.model,
+        ...(selected.config.baseUrl === undefined ? {} : { baseUrl: selected.config.baseUrl }),
+        ...(selected.model.contextCapability === undefined ? {} : { contextCapability: selected.model.contextCapability }),
+        ...(currentRoute?.credentialRef === undefined ? {} : { credentialRef: currentRoute.credentialRef }),
+      };
+      const updated = await host.selectSessionModel(targetSessionId, selection, selected.model, route, commandId(request, body));
+      sendJson(response, 200, { sessionId: targetSessionId, selection: updated.modelSelection ?? selection, model: selected.config, effective: { provider: selection.provider, model: selection.model } });
+      return;
+    }
     if (request.method === "GET" && url.pathname === "/v1/models") {
       if (modelRuntime.remainingCatalogFailures > 0) {
         modelRuntime.remainingCatalogFailures -= 1;
@@ -374,7 +430,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       if (modelRuntime.selector === undefined) throw new HttpError(409, "model switching is not configured");
       if (typeof body.model !== "string" || body.model.length === 0) throw new HttpError(400, "model is required");
-      if (!modelRuntime.availableModels.includes(body.model)) throw new HttpError(400, "unsupported model");
+      if (modelRuntime.availableModels.length > 0 && !modelRuntime.availableModels.includes(body.model)) throw new HttpError(400, "unsupported model");
       const requestedCredential = identity === undefined || body.credentialRef === undefined ? undefined : parseCredentialReference(body.credentialRef);
       const material = requestedCredential === undefined ? undefined : credentials.resolve(requestedCredential, identity?.tenantId);
       if (requestedCredential !== undefined && material === undefined) throw new CredentialLifecycleError("CREDENTIAL_REFERENCE_INVALID", "Credential reference is missing, revoked, or stale");
@@ -1055,6 +1111,34 @@ function routeSelection(route: ModelRouteRecord): TenantModelRoute {
     ...(route.credentialRef === undefined ? {} : { credentialRef: route.credentialRef }),
     ...(route.contextCapability === undefined ? {} : { contextCapability: route.contextCapability }),
   };
+}
+
+async function restoreSessionSelections(store: SessionEventStore | undefined, host: AgentHost, modelRuntime: ModelRuntimeState): Promise<void> {
+  if (store === undefined || modelRuntime.selector === undefined) return;
+  for (const summary of await store.listSessions(true)) {
+    const projection = await store.project(summary.id);
+    const selection = projection?.modelSelection;
+    if (selection === undefined) continue;
+    const tenantId = projection?.ownership?.tenantId;
+    const route = tenantId === undefined ? undefined : modelRuntime.routes.get(tenantId);
+    const material = route?.credentialRef === undefined || tenantId === undefined ? undefined : modelRuntime.credentials.resolve(route.credentialRef, tenantId);
+    if (route?.credentialRef !== undefined && material === undefined) continue;
+    try {
+      const selected = modelRuntime.selector(selection.model, tenantId, material);
+      const restoredRoute: TenantModelRoute | undefined = route === undefined
+        ? selected.config.baseUrl === undefined && selected.model.contextCapability === undefined ? undefined : {
+          provider: selected.config.provider,
+          model: selected.config.model,
+          ...(selected.config.baseUrl === undefined ? {} : { baseUrl: selected.config.baseUrl }),
+          ...(selected.model.contextCapability === undefined ? {} : { contextCapability: selected.model.contextCapability }),
+        }
+        : routeSelection(route);
+      host.setSessionModel(summary.id, selected.model, selection, restoredRoute);
+    } catch {
+      // Keep the durable selection visible, but fail closed to the tenant/default
+      // route until credentials or the provider configuration become available.
+    }
+  }
 }
 
 function publicModelRoute(route: ModelRouteRecord): Record<string, unknown> {

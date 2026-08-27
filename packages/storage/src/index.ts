@@ -67,6 +67,7 @@ import {
   type WorktreeProjection,
   type WorktreeStatus,
   type SessionOwnership,
+  type ModelSelection,
   type PrincipalBackend,
   type PrincipalRecord,
 } from "@code-review-agent/contracts";
@@ -81,6 +82,18 @@ export const SQLITE_SCHEMA_VERSION = SCHEMA_VERSION;
 
 function isPermissionPreset(value: unknown): value is PermissionPreset {
   return value === "read-only" || value === "workspace-write" || value === "ask-on-write" || value === "ask-on-execute" || value === "danger-full-access";
+}
+
+function modelSelection(value: unknown): ModelSelection | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (typeof record["provider"] !== "string" || record["provider"].trim() === "" || typeof record["model"] !== "string" || record["model"].trim() === "") return undefined;
+  if (record["reasoningEffort"] !== undefined && (typeof record["reasoningEffort"] !== "string" || record["reasoningEffort"].trim() === "")) return undefined;
+  return {
+    provider: record["provider"].trim(),
+    model: record["model"].trim(),
+    ...(record["reasoningEffort"] === undefined ? {} : { reasoningEffort: (record["reasoningEffort"] as string).trim() }),
+  };
 }
 
 function now(): string {
@@ -573,6 +586,11 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
     }
     if (typeof event.payload["archived"] === "boolean") next = { ...next, archived: event.payload["archived"] };
     if (event.type === "session/deleted" || event.payload["deleted"] === true) next = { ...next, deleted: true };
+  }
+
+  if (event.type === "session/model_selected") {
+    const selection = modelSelection(event.payload);
+    if (selection !== undefined) next = { ...next, modelSelection: selection };
   }
 
   const turnId = event.turnId;
@@ -1252,6 +1270,9 @@ export class InMemoryEventStore implements SessionEventStore, ModelRouteBackend,
     const source = await this.project(sessionId);
     if (source === undefined) throw new Error(`Unknown session: ${sessionId}`);
     const forked = await this.createSession(workspaceRoot ?? source.workspaceRoot, permissionPreset ?? source.permissionPreset, id, undefined, source.ownership);
+    if (source.modelSelection !== undefined) {
+      await this.append({ sessionId: forked, type: "session/model_selected", payload: { provider: source.modelSelection.provider, model: source.modelSelection.model, ...(source.modelSelection.reasoningEffort === undefined ? {} : { reasoningEffort: source.modelSelection.reasoningEffort }), forkedFrom: sessionId } });
+    }
     for (const message of source.messages) {
       await this.append({
         sessionId: forked,
@@ -1558,6 +1579,9 @@ export class SqliteEventStore implements SessionEventStore, McpConfigBackend, Mo
     const source = await this.project(sessionId);
     if (source === undefined) throw new Error(`Unknown session: ${sessionId}`);
     const forked = await this.createSession(workspaceRoot ?? source.workspaceRoot, permissionPreset ?? source.permissionPreset, id, undefined, source.ownership);
+    if (source.modelSelection !== undefined) {
+      await this.append({ sessionId: forked, type: "session/model_selected", payload: { provider: source.modelSelection.provider, model: source.modelSelection.model, ...(source.modelSelection.reasoningEffort === undefined ? {} : { reasoningEffort: source.modelSelection.reasoningEffort }), forkedFrom: sessionId } });
+    }
     for (const message of source.messages) {
       await this.append({
         sessionId: forked,

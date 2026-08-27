@@ -83,9 +83,14 @@
 ## Phase 8.5 Provider/model routing 演进（in_progress）
 
 - P8.5-MR0 已接受 provider、protocol、model 三层标识和 `ModelSelection`、`ModelCatalogEntry`、`ResolvedModelInfo`、`PreparedModelRoute` 的公共边界；完整决定见 [Provider/model routing ADR](adr/phase-8-provider-model-routing.zh-CN.md)。
-- 本切片未新增 ProviderProfile 持久化、Session selection event、Turn route snapshot 或新的 HTTP protocol；这些内容分别保留给 P8.5-MR2、MR3 和 MR4。第三方凭据继续只保存在 host-owned resolver，`yayienv.txt` 已被 Git 忽略。
+- 本切片未新增 ProviderProfile 持久化；第三方凭据继续只保存在 host-owned resolver，`yayienv.txt` 已被 Git 忽略。
 - P8.5-MR1 新增 `ModelProtocolRegistry`，以 fail-fast 的 protocol 注册、重复保护和 identity-safe disposal 承载 Echo 与 `openai-chat-completions` adapter；`createConfiguredModelBootstrap()` 将旧环境变量路径封装为 LLM 边界，API Host 从该边界取得 catalog 和 selector，不再拼接 DeepSeek provider 环境变量。
 - MR1 没有注册新的 protocol、读取第三方 Token Plan 或改变 ProviderProfile / Session selection / EventStore schema。验证：`pnpm typecheck`、LLM 12 项与 API 43 项测试、`git diff --check`。
+
+- P8.5-MR3 已新增原生 `anthropic-messages` adapter：`POST /v1/messages` wire、system/user/assistant/tool/tool_result 转换、tool_use 与 `input_json_delta` 流、usage/stop 归一、max_tokens、401/403/413/429/529 错误分类、abort 与 idle timeout；支持 `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`、根域名或 `/v1` 的 `ANTHROPIC_BASE_URL`，不把凭据写入 request body、事件或 projection。参考入口：DSH `packages/llm/llm-pi-ai/src/{provider,adapter,stream}.ts`，行为参考 Claude Code `src/services/api/claude.ts`。独立 checkpoint：`a38dc9e feat(phase8): add anthropic messages adapter`。
+- MR3 验证：`pnpm typecheck`、LLM 20 项、Runtime 54 项、Storage 28 项、API 45 项定向测试；本地 Token Plan smoke 已确认根 URL 返回 Web Shell、`/v1/messages` 返回 Anthropic SSE（仅记录状态/事件元数据，未写入 secret）。
+
+- P8.5-MR4 已新增 `session/model_selected` 事件和 `SessionProjection.modelSelection`；Runtime 提供 Session 级选择命令、command idempotency、fork inheritance，并在 Turn 启动时固定 model/route/reasoning snapshot，后续切换只影响下一 Turn。API 新增 `GET/POST /v1/sessions/:id/model`，认证请求沿用 Session tenant ownership，响应不返回 credential material；无 Session selection 时继续回退现有 tenant route/host model。参考入口：DSH `packages/host/apiproxy/src/api-proxy.ts:selectionFor()`、`sessions.models()`、`sessions.selectModel()` 与 `packages/llm/llm/src/index.ts:prepareCall()`；Claude Code `src/query.ts`/`src/services/api/claude.ts` 的一次 query 固定 model 语义。MR4 当前已通过 InMemory/SQLite replay、Runtime 在途切换/下一 Turn/fork、API 重启恢复、幂等与 projection 测试，独立 checkpoint：`3af875a feat(phase8): add session model selection snapshots`。
 
 ## Phase 8.5 tenant-scoped Workspace slice（implemented，未完成整体 8.5）
 

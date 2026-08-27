@@ -36,6 +36,7 @@ import {
   type ContextBudgetSnapshot,
   type ContextWarningState,
   type ModelContextCapability,
+  type ModelSelection,
   type ContextCollapseCapability,
   type ContextBoundaryKind,
   type ContextRecoveryErrorClass,
@@ -200,6 +201,12 @@ interface PreparedModelContext {
 
 export type TenantModelRoute = Pick<ModelRouteRecord, "provider" | "model" | "baseUrl" | "credentialRef" | "contextCapability">;
 
+interface SessionModelBinding {
+  readonly model: ChatModel;
+  readonly selection: ModelSelection;
+  readonly route?: TenantModelRoute;
+}
+
 /** Coordinates durable sessions, queued turns and model execution behind storage/model interfaces. */
 export class AgentHost {
   private model: ChatModel;
@@ -249,6 +256,7 @@ export class AgentHost {
   private readonly metricCounters = { turnsStarted: 0, turnsCompleted: 0, turnsFailed: 0, turnsStopped: 0, modelFallbacks: 0, toolCalls: 0, toolFailures: 0 };
   private readonly tenantModels = new Map<string, ChatModel>();
   private readonly tenantModelRoutes = new Map<string, TenantModelRoute>();
+  private readonly sessionModels = new Map<SessionId, SessionModelBinding>();
 
   constructor(private readonly options: AgentHostOptions) {
     this.model = options.model ?? new EchoChatModel();
@@ -318,6 +326,53 @@ export class AgentHost {
     this.tenantModelRoutes.delete(tenantId);
   }
 
+  /** Binds a model to one Session. The binding affects future turns only. */
+  setSessionModel(sessionId: SessionId, model: ChatModel, selection: ModelSelection, route?: TenantModelRoute): void {
+    if (selection.provider.trim() === "" || selection.model.trim() === "") throw new Error("session model selection provider and model are required");
+    this.sessionModels.set(sessionId, { model, selection: { provider: selection.provider.trim(), model: selection.model.trim(), ...(selection.reasoningEffort === undefined ? {} : { reasoningEffort: selection.reasoningEffort.trim() }) }, ...(route === undefined ? {} : { route }) });
+  }
+
+  clearSessionModel(sessionId: SessionId): void {
+    this.sessionModels.delete(sessionId);
+  }
+
+  sessionModelSelection(sessionId: SessionId): ModelSelection | undefined {
+    return this.sessionModels.get(sessionId)?.selection;
+  }
+
+  /** Idempotently records the durable Session model selection before applying the in-process binding. */
+  async selectSessionModel(sessionId: SessionId, selection: ModelSelection, model: ChatModel, route?: TenantModelRoute, commandId?: string): Promise<SessionProjection> {
+    await this.ready;
+    const projection = await this.options.store.project(sessionId);
+    if (projection === undefined) throw new Error(`Unknown session: ${sessionId}`);
+    const normalized: ModelSelection = {
+      provider: selection.provider.trim(),
+      model: selection.model.trim(),
+      ...(selection.reasoningEffort === undefined ? {} : { reasoningEffort: selection.reasoningEffort.trim() }),
+    };
+    if (normalized.provider === "" || normalized.model === "") throw new Error("session model selection provider and model are required");
+    const idempotencyKey = commandId ?? `cmd_${randomUUID()}`;
+    const claim = await this.options.store.claimCommand({
+      sessionId,
+      commandId: idempotencyKey,
+      kind: "select_session_model",
+      request: normalized,
+      result: { selection: normalized },
+    });
+    if (!claim.created) {
+      const saved = claim.record.result as { selection?: unknown };
+      const savedSelection = parseModelSelection(saved.selection) ?? projection.modelSelection;
+      if (savedSelection !== undefined) {
+        const binding = this.sessionModels.get(sessionId);
+        if (binding === undefined || binding.selection.model !== savedSelection.model || binding.selection.provider !== savedSelection.provider) this.setSessionModel(sessionId, model, savedSelection, route);
+      }
+      return (await this.options.store.project(sessionId)) ?? projection;
+    }
+    await this.options.store.append({ sessionId, correlationId: idempotencyKey, type: "session/model_selected", payload: { provider: normalized.provider, model: normalized.model, ...(normalized.reasoningEffort === undefined ? {} : { reasoningEffort: normalized.reasoningEffort }) } });
+    this.setSessionModel(sessionId, model, normalized, route);
+    return (await this.options.store.project(sessionId)) ?? projection;
+  }
+
   contextSettings(tenantId?: string): ContextSettings {
     const snapshot = this.contextBudgetSnapshot(tenantId);
     return {
@@ -376,8 +431,27 @@ export class AgentHost {
     );
   }
 
+  private contextBudgetSnapshotForModel(model: ChatModel, routeCapability?: ModelContextCapability): ContextBudgetSnapshot {
+    const capability = model.contextCapability ?? routeCapability ?? fallbackModelContextCapability("unknown", "unknown", this.contextPolicyWithLegacyFallback());
+    return resolveContextBudget(capability, this.contextPolicyWithLegacyFallback());
+  }
+
   private modelForTenant(tenantId?: string): ChatModel {
     return tenantId === undefined ? this.model : this.tenantModels.get(tenantId) ?? this.model;
+  }
+
+  private modelBindingForSession(sessionId: SessionId, projection: SessionProjection | undefined): SessionModelBinding | undefined {
+    const explicit = this.sessionModels.get(sessionId);
+    if (explicit !== undefined) return explicit;
+    const tenantId = projection?.ownership?.tenantId;
+    const model = this.modelForTenant(tenantId);
+    const route = this.modelRouteForTenant(tenantId);
+    if (route === undefined) return undefined;
+    return {
+      model,
+      selection: { provider: route.provider, model: route.model },
+      route,
+    };
   }
 
   codeModeSettings(): CodeModeSettings {
@@ -1453,7 +1527,10 @@ export class AgentHost {
       if (typeof savedId !== "string") throw new Error(`Command ${idempotencyKey} has an invalid result`);
       return sessionIdFrom(savedId);
     }
-    return this.options.store.forkSession(sessionId, workspaceRoot, forkedId, source.permissionPreset);
+    const created = await this.options.store.forkSession(sessionId, workspaceRoot, forkedId, source.permissionPreset);
+    const binding = this.sessionModels.get(sessionId);
+    if (binding !== undefined) this.sessionModels.set(created, binding);
+    return created;
   }
 
   async waitForTurn(turnId: TurnId, timeoutMs = 10_000): Promise<void> {
@@ -2101,12 +2178,14 @@ export class AgentHost {
       const traceId = `trace_${randomUUID()}`;
       this.turnTraces.set(turnId, traceId);
       const projection = await this.options.store.project(sessionId);
-      const route = this.modelRouteForTenant(projection?.ownership?.tenantId);
-      await this.options.store.append({ sessionId, turnId, type: "turn/started", payload: { traceId, ...(route === undefined ? {} : route), ...(reasoningEffort === undefined ? {} : { reasoningEffort }) } });
+      const binding = this.modelBindingForSession(sessionId, projection);
+      const route = binding?.route ?? this.modelRouteForTenant(projection?.ownership?.tenantId);
+      const selectedReasoning = reasoningEffort ?? binding?.selection.reasoningEffort;
+      await this.options.store.append({ sessionId, turnId, type: "turn/started", payload: { traceId, ...(route === undefined ? {} : route), ...(binding?.selection === undefined ? {} : binding.selection), ...(selectedReasoning === undefined ? {} : { reasoningEffort: selectedReasoning }) } });
       await this.recordSessionRestore(sessionId, turnId, previousMessages);
       const assembly = await this.assembleTurnContext(sessionId, [...previousMessages, { role: "user", content, ...(userMessageId === undefined ? { messageId: String(turnId) } : { messageId: userMessageId }) }], false, turnId);
       const messages: ChatMessage[] = [...assembly.messages];
-      await this.runSteps(sessionId, turnId, controller, messages, reasoningEffort);
+      await this.runSteps(sessionId, turnId, controller, messages, selectedReasoning, false, binding?.model, binding?.route?.contextCapability);
       this.scheduleSessionMemoryExtraction(sessionId, turnId);
     } catch (error) {
       await this.finishTurnAfterError(sessionId, turnId, controller, error);
@@ -2122,13 +2201,14 @@ export class AgentHost {
       const traceId = `trace_${randomUUID()}`;
       this.turnTraces.set(turnId, traceId);
       const projection = await this.options.store.project(sessionId);
-      const route = this.modelRouteForTenant(projection?.ownership?.tenantId);
-      await this.options.store.append({ sessionId, turnId, type: "agent/status", payload: { status: "running", reason: "permission_resolved_after_restart", traceId, ...(route === undefined ? {} : route) } });
+      const binding = this.modelBindingForSession(sessionId, projection);
+      const route = binding?.route ?? this.modelRouteForTenant(projection?.ownership?.tenantId);
+      await this.options.store.append({ sessionId, turnId, type: "agent/status", payload: { status: "running", reason: "permission_resolved_after_restart", traceId, ...(route === undefined ? {} : route), ...(binding?.selection === undefined ? {} : binding.selection) } });
       const previousMessages = await this.conversationMessages(sessionId);
       await this.recordSessionRestore(sessionId, turnId, previousMessages);
       const assembly = await this.assembleTurnContext(sessionId, previousMessages, true, turnId);
       const messages: ChatMessage[] = [...assembly.messages];
-      await this.runSteps(sessionId, turnId, controller, messages, undefined, true);
+      await this.runSteps(sessionId, turnId, controller, messages, binding?.selection.reasoningEffort, true, binding?.model, binding?.route?.contextCapability);
       this.scheduleSessionMemoryExtraction(sessionId, turnId);
     } catch (error) {
       await this.finishTurnAfterError(sessionId, turnId, controller, error);
@@ -2138,7 +2218,7 @@ export class AgentHost {
     }
   }
 
-  private async runSteps(sessionId: SessionId, turnId: TurnId, controller: AbortController, messages: ChatMessage[], reasoningEffort?: string, recovery = false): Promise<void> {
+  private async runSteps(sessionId: SessionId, turnId: TurnId, controller: AbortController, messages: ChatMessage[], reasoningEffort?: string, recovery = false, turnModel?: ChatModel, turnCapability?: ModelContextCapability): Promise<void> {
     const alreadyClearedToolCallIds = new Set<string>();
     const reportedBudgetToolCallIds = new Set<string>();
     const reportedMicrocompactToolCallIds = new Set<string>();
@@ -2151,8 +2231,8 @@ export class AgentHost {
       this.appendSteers(messages, turnId);
       const projection = await this.options.store.project(sessionId);
       const tenantId = projection?.ownership?.tenantId;
-      const budgetSnapshot = this.contextBudgetSnapshot(tenantId);
-      const primaryModel = this.modelForTenant(tenantId);
+      const primaryModel = turnModel ?? this.modelForTenant(tenantId);
+      const budgetSnapshot = this.contextBudgetSnapshotForModel(primaryModel, turnCapability);
       let assembly = await this.assembleTurnContext(sessionId, messages, recovery, turnId);
       const protectedToolCallIds = pendingToolCallIds(projection);
       const toolResultTimestamps = await this.toolResultTimestamps(sessionId);
@@ -2178,7 +2258,7 @@ export class AgentHost {
           attemptedModules: ["proactive_compact"],
           transitionReason: "proactive_compact",
         });
-        const compacted = await this.compactTurnContext(sessionId, turnId, messages, budgetSnapshot, beforeUsage, beforeState, controller.signal);
+        const compacted = await this.compactTurnContext(sessionId, turnId, messages, budgetSnapshot, beforeUsage, beforeState, controller.signal, primaryModel);
         if (compacted) {
           recoveryGuard.recordCompactionSuccess("proactive_compact");
           await this.appendContextRecoveryEvent(sessionId, turnId, "context/recovery_succeeded", {
@@ -2265,7 +2345,7 @@ export class AgentHost {
       });
       let response: CollectedModelResponse;
       try {
-        response = await this.collectModelResponse(sessionId, turnId, controller, prepared.view, tenantId, modelRequestId, reasoningEffort);
+        response = await this.collectModelResponse(sessionId, turnId, controller, prepared.view, tenantId, modelRequestId, reasoningEffort, primaryModel);
       } catch (error) {
         const classified = classifyProviderContextError(error);
         const requestHash = fingerprintModelRequest({ purpose: "agent", messages: prepared.view.messages, tools: prepared.view.tools, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) });
@@ -2282,7 +2362,7 @@ export class AgentHost {
               attemptedModules: recoveryGuard.snapshot().attemptedModules,
               transitionReason: "reactive_compact_retry",
             });
-            const compacted = await this.compactTurnContext(sessionId, turnId, messages, budgetSnapshot, beforeUsage, beforeState, controller.signal);
+            const compacted = await this.compactTurnContext(sessionId, turnId, messages, budgetSnapshot, beforeUsage, beforeState, controller.signal, primaryModel);
             if (compacted) {
               recoveryGuard.recordCompactionSuccess("reactive_compact");
               await this.appendContextRecoveryEvent(sessionId, turnId, "context/recovery_transition", {
@@ -2433,6 +2513,7 @@ export class AgentHost {
     tokenUsage?: number,
     warningState?: ContextWarningState,
     signal?: AbortSignal,
+    turnModel?: ChatModel,
   ): Promise<boolean> {
     if (!this.compactionEnabled) return false;
     const projection = await this.options.store.project(sessionId);
@@ -2446,7 +2527,7 @@ export class AgentHost {
         await this.rebuildPostCompactView(sessionId, turnId, messages, preCompactMessages, "session_memory", preCompactTokens, projection, protectedToolCallIds);
         return true;
       }
-      const summaryResult = await this.compactWithSummaryModel(sessionId, turnId, messages, protectedToolCallIds, signal);
+      const summaryResult = await this.compactWithSummaryModel(sessionId, turnId, messages, protectedToolCallIds, signal, turnModel);
       if (summaryResult === true) {
         await this.rebuildPostCompactView(sessionId, turnId, messages, preCompactMessages, "summary", preCompactTokens, projection, protectedToolCallIds);
         return true;
@@ -2701,6 +2782,7 @@ export class AgentHost {
     messages: ChatMessage[],
     protectedToolCallIds: ReadonlySet<string>,
     signal?: AbortSignal,
+    turnModel?: ChatModel,
   ): Promise<boolean> {
     const projection = await this.options.store.project(sessionId);
     const tenantId = projection?.ownership?.tenantId;
@@ -2715,7 +2797,7 @@ export class AgentHost {
         ...(this.summaryCompact === undefined ? {} : { config: this.summaryCompact }),
       },
     });
-    const model = this.modelForTenant(tenantId);
+    const model = turnModel ?? this.modelForTenant(tenantId);
     const result = await compactWithSummaryModel(messages, {
       runner: (request) => this.runSummaryModel(model, request),
       ...(this.summaryCompact === undefined ? {} : { config: this.summaryCompact }),
@@ -2854,8 +2936,9 @@ export class AgentHost {
     tenantId: string | undefined,
     requestId: string,
     reasoningEffort?: string,
+    turnModel?: ChatModel,
   ): Promise<CollectedModelResponse> {
-    const candidates = [this.tenantModels.get(tenantId ?? "") ?? this.model, ...this.fallbackModels];
+    const candidates = [turnModel ?? this.tenantModels.get(tenantId ?? "") ?? this.model, ...this.fallbackModels];
     let lastError: unknown = new Error("No model configured");
     for (let modelIndex = 0; modelIndex < candidates.length; modelIndex += 1) {
       const model = candidates[modelIndex];
@@ -3279,6 +3362,19 @@ function stableWorktreeId(commandId: string): string {
 
 function effectiveWorkspaceRoot(projection: SessionProjection): string {
   return projection.activeWorkspaceRoot ?? projection.workspaceRoot;
+}
+
+function parseModelSelection(value: unknown): ModelSelection | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (typeof record["provider"] !== "string" || typeof record["model"] !== "string") return undefined;
+  if (record["provider"].trim() === "" || record["model"].trim() === "") return undefined;
+  if (record["reasoningEffort"] !== undefined && typeof record["reasoningEffort"] !== "string") return undefined;
+  return {
+    provider: record["provider"].trim(),
+    model: record["model"].trim(),
+    ...(record["reasoningEffort"] === undefined ? {} : { reasoningEffort: (record["reasoningEffort"] as string).trim() }),
+  };
 }
 
 function createProjectMemoryScope(

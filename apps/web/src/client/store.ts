@@ -326,6 +326,18 @@ function foldProjection(session: SessionProjection, event: AgentEvent): SessionP
 function foldProjectionCore(session: SessionProjection, event: AgentEvent): SessionProjection {
   const payload = event.payload;
   switch (event.type) {
+    case "session/model_selected": {
+      const provider = stringValue(payload["provider"]);
+      const model = stringValue(payload["model"]);
+      if (provider === undefined || model === undefined) return session;
+      const reasoningEffort = stringValue(payload["reasoningEffort"]);
+      return {
+        ...session,
+        modelSelection: { provider, model, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) },
+        updatedAt: event.createdAt,
+        lastSequence: event.sequence,
+      };
+    }
     case "session/updated":
       {
         const title = stringValue(payload["title"]);

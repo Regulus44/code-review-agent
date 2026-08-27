@@ -87,6 +87,46 @@ describe("AgentHost", () => {
     expect(host.productizationSettings("tenant-b").routing).toMatchObject({ status: "available", modelSelector: "host-local" });
   });
 
+  it("keeps a session model selection durable and snapshots the route for an in-flight turn", async () => {
+    const store = new InMemoryEventStore();
+    let releaseFirst!: () => void;
+    let startedFirst!: () => void;
+    const firstStarted = new Promise<void>((resolve) => { startedFirst = resolve; });
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const first: ChatModel = {
+      async *stream(): AsyncIterable<ModelStreamPart> {
+        startedFirst();
+        await firstGate;
+        yield { type: "text_delta", text: "first-model" };
+        yield { type: "done" };
+      },
+    };
+    const second: ChatModel = {
+      async *stream(): AsyncIterable<ModelStreamPart> {
+        yield { type: "text_delta", text: "second-model" };
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store, model: first, compactionEnabled: false });
+    const session = await host.createSession("D:/session-selection");
+    const turn = await host.sendMessage(session.id, "in flight");
+    await firstStarted;
+    await host.selectSessionModel(session.id, { provider: "fixture", model: "second" }, second, { provider: "fixture", model: "second" }, "select-second");
+    await host.selectSessionModel(session.id, { provider: "fixture", model: "second" }, second, { provider: "fixture", model: "second" }, "select-second");
+    releaseFirst();
+    await host.waitForTurn(turn);
+    expect((await host.getSession(session.id))?.messages.at(-1)?.content).toBe("first-model");
+    const firstEvents = await host.events(session.id);
+    expect(firstEvents.filter((event) => event.type === "session/model_selected")).toHaveLength(1);
+    expect((await host.getSession(session.id))?.modelSelection).toEqual({ provider: "fixture", model: "second" });
+
+    const nextTurn = await host.sendMessage(session.id, "next turn");
+    await host.waitForTurn(nextTurn);
+    expect((await host.getSession(session.id))?.messages.at(-1)?.content).toBe("second-model");
+    const forkedId = await host.forkSession(session.id);
+    expect((await host.getSession(forkedId))?.modelSelection).toEqual({ provider: "fixture", model: "second" });
+  });
+
   it("gives the model an explicit workspace and tool-use contract", async () => {
     const requests: ModelRequest[] = [];
     const model: ChatModel = {

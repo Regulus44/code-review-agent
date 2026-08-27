@@ -20,6 +20,7 @@ export function brand<Value, Name extends string>(value: Value): Brand<Value, Na
 export type AgentEventType =
   | "session/created"
   | "session/updated"
+  | "session/model_selected"
   | "session/deleted"
   | "workspace/updated"
   | "workspace/reordered"
@@ -114,7 +115,7 @@ export type AgentEventType =
  * list in lockstep with AgentEventType so a newly added event cannot silently
  * disappear at the Web boundary. */
 export const AGENT_EVENT_TYPES: readonly AgentEventType[] = [
-  "session/created", "session/updated", "session/deleted", "workspace/updated", "workspace/reordered",
+  "session/created", "session/updated", "session/model_selected", "session/deleted", "workspace/updated", "workspace/reordered",
   "user/message", "turn/steered", "attachment/received", "attachment/rejected", "turn/queued", "queue/changed",
   "turn/started", "step/started", "step/ended", "turn/ended", "assistant/chunk", "assistant/message",
   "task/created", "task/updated", "task/input-required", "task/report", "task/artifact", "task/ended",
@@ -631,6 +632,8 @@ export interface SessionProjection extends SessionSummary {
   readonly worktrees?: readonly WorktreeProjection[];
   /** Whole-log projection; absent only for legacy projection JSON. */
   readonly stats?: SessionStatsProjection;
+  /** Durable provider/model selection for future turns; credentials are never stored here. */
+  readonly modelSelection?: ModelSelection;
 }
 
 export type ContextCompactionStatus = "completed" | "failed";

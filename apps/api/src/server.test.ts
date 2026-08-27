@@ -826,6 +826,92 @@ describe("Phase 2 API", () => {
     }
   });
 
+  it("persists a Session-scoped model selection and exposes it without credentials", async () => {
+    const store = new InMemoryEventStore();
+    const selectedModels: string[] = [];
+    const makeModel = (text: string) => ({
+      async *stream() {
+        selectedModels.push(text);
+        yield { type: "text_delta" as const, text };
+        yield { type: "done" as const };
+      },
+    });
+    const server = createApiServer({
+      store,
+      model: makeModel("default"),
+      modelInfo: { provider: "fixture", model: "default", configured: true },
+      availableModels: ["one", "two"],
+      modelSelector: (model) => ({ model: makeModel(model), config: { provider: "fixture", model, configured: true } }),
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("Session model API did not bind");
+    const url = `http://127.0.0.1:${address.port}`;
+    try {
+      const session = await (await fetch(`${url}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: "D:/session-model-api" }) })).json() as { id: string };
+      const selected = await fetch(`${url}/v1/sessions/${session.id}/model`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "session-model-1" }, body: JSON.stringify({ model: "two" }) });
+      expect(selected.status).toBe(200);
+      expect(await selected.json()).toMatchObject({ selection: { provider: "fixture", model: "two" } });
+      const repeated = await fetch(`${url}/v1/sessions/${session.id}/model`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "session-model-1" }, body: JSON.stringify({ model: "two" }) });
+      expect(repeated.status).toBe(200);
+      const visible = await (await fetch(`${url}/v1/sessions/${session.id}/model`)).json() as { selection: { model: string } };
+      expect(visible.selection.model).toBe("two");
+      await fetch(`${url}/v1/sessions/${session.id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: "use selected model" }) });
+      for (let attempt = 0; attempt < 50 && selectedModels.length === 0; attempt += 1) await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      expect(selectedModels).toContain("two");
+      const events = await (await fetch(`${url}/v1/sessions/${session.id}/events?format=json`)).json() as { type: string }[];
+      expect(events.filter((event) => event.type === "session/model_selected")).toHaveLength(1);
+      expect(JSON.stringify(events)).not.toContain("secret");
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it("restores a Session model selection after an API restart", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "cra-api-session-model-restart-"));
+    const databasePath = join(directory, "agent.sqlite");
+    const makeModel = (text: string) => ({
+      async *stream() {
+        yield { type: "text_delta" as const, text };
+        yield { type: "done" as const };
+      },
+    });
+    const options = {
+      databasePath,
+      model: makeModel("default"),
+      modelInfo: { provider: "fixture", model: "default", configured: true },
+      availableModels: ["one", "two"],
+      modelSelector: (model: string) => ({ model: makeModel(model), config: { provider: "fixture", model, configured: true } }),
+    };
+    const start = async () => {
+      const server = createApiServer(options);
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("Restart fixture API did not bind");
+      return { server, url: `http://127.0.0.1:${address.port}` };
+    };
+    let current = await start();
+    try {
+      const created = await (await fetch(`${current.url}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: "D:/session-model-restart" }) })).json() as { id: string };
+      expect((await fetch(`${current.url}/v1/sessions/${created.id}/model`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "two" }) })).status).toBe(200);
+      await new Promise<void>((resolve, reject) => current.server.close((error) => error ? reject(error) : resolve()));
+      current = await start();
+      const visible = await (await fetch(`${current.url}/v1/sessions/${created.id}/model`)).json() as { selection: { model: string } };
+      expect(visible.selection.model).toBe("two");
+      await fetch(`${current.url}/v1/sessions/${created.id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: "after restart" }) });
+      let projection: { messages: { content: string }[] } | undefined;
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        projection = await (await fetch(`${current.url}/v1/sessions/${created.id}`)).json() as typeof projection;
+        if (projection?.messages.at(-1)?.content === "two") break;
+        await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      }
+      expect(projection?.messages.at(-1)?.content).toBe("two");
+    } finally {
+      await new Promise<void>((resolve, reject) => current.server.close((error) => error ? reject(error) : resolve()));
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("manages tenant credential references without exposing material and invalidates consumers on rotation or revoke", async () => {
     const scopedStore = new InMemoryEventStore();
     let lastMaterial: Record<string, unknown> | undefined;

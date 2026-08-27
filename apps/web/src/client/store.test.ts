@@ -77,6 +77,14 @@ describe("SessionStore", () => {
     expect(store.getSnapshot().session?.turns).toMatchObject([{ id: turnId, status: "completed", userMessage: "hello", assistantMessage: "hi" }]);
   });
 
+  it("projects a live Session model selection without exposing credentials", () => {
+    const store = new SessionStore();
+    store.open(session());
+    store.apply(event(1, "session/model_selected", { provider: "anthropic", model: "claude-fixture", reasoningEffort: "high" }, false));
+    expect(store.getSnapshot().session?.modelSelection).toEqual({ provider: "anthropic", model: "claude-fixture", reasoningEffort: "high" });
+    expect(JSON.stringify(store.getSnapshot())).not.toContain("token");
+  });
+
   it("updates whole-log stats on a live tail without recounting older-page events", () => {
     const store = new SessionStore();
     const initialStats = reduceSessionStats(createSessionStatsProjection("2026-08-23T00:00:00.000Z"), event(1, "user/message", { content: "older" }));
