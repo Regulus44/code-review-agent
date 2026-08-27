@@ -99,6 +99,13 @@
 - Web typed client、Settings presenter 和 composer model picker 已消费 provider 分组、状态和失败信息；每次 refresh 重新触发 discovery，局部失败不会隐藏其他 provider。
 - 参考 DSH `packages/llm/llm/src/index.ts:listModels()/resolveModelInfo()`、`packages/host/apiproxy/src/api/sessions.ts:SessionModels`、`packages/client/ui-model-selection/src/client/directory.ts:ModelDirectory`；Claude Code 仅作脱敏错误文案行为参考。验证：`pnpm typecheck`、LLM 22 项、API 36 项、Web 139 项、browser bundle build、`git diff --check`。
 
+## P8.5-MR6 Retry、Fallback 与模型发现收敛（implemented，未完成整体 8.5）
+
+- `packages/llm/src/failures.ts` 建立 provider-neutral failure taxonomy、bounded retry-after/date 解析、退避和诊断脱敏；`ModelProviderError` 与 Anthropic error 保留 provider code，同时提供稳定 `failureCode`、`retryable`、`retryAfterMs`、`requestId`、`partialOutput`。
+- OpenAI-compatible 与 Anthropic adapter 的 retry 归属固定在 LLM 边界：主 Agent 请求最多两次，`context_summary` 辅助请求一次；429/529/5xx/网络错误按 bounded backoff 处理，abort 不重试，响应 body 不进入事件。
+- `packages/runtime/src/index.ts:collectModelResponse()` 仅在 pre-output failure 时切换 fallback；文本或工具调用增量后禁止 fallback，并把稳定失败信息写入 `agent/error`。413/context-window 继续进入 M09 reactive Context recovery。
+- 参考 DSH `packages/llm/llm/src/index.ts:LlmError`、`adapterFailureChunk()`、provider retry policy；Claude Code `src/services/api/withRetry.ts` 的 retry-after/backoff 与 `src/services/api/errors.ts` 分类。实施说明见 [P8.5-MR6 实施说明](provider-model-routing-mr6-implementation.zh-CN.md)。验证：`pnpm typecheck`、LLM/Context/Runtime 定向测试、`git diff --check`。
+
 ## Phase 8.5 tenant-scoped Workspace slice（implemented，未完成整体 8.5）
 
 - `AgentHost` 的 Workspace catalog、reorder、rename、archive/restore 和 soft delete 接受可选 `SessionOwnership` scope；认证 API 仅投影调用者 tenant 的 Session members。

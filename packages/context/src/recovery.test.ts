@@ -8,6 +8,7 @@ describe("context recovery", () => {
     expect(classifyProviderContextError(Object.assign(new Error("image payload too large"), { status: 413 })).errorClass).toBe("media_too_large");
     expect(classifyProviderContextError(new Error("tool_result is missing a matching tool_call")).errorClass).toBe("tool_pairing");
     expect(classifyProviderContextError(new Error("invalid request schema")).errorClass).toBe("schema");
+    expect(classifyProviderContextError({ failureCode: "CONTEXT_WINDOW_EXCEEDED", message: "provider rejected request" }).errorClass).toBe("prompt_too_long");
     expect(isReactiveContextError(Object.assign(new Error("HTTP 413"), { status: 413 }))).toBe(true);
   });
 

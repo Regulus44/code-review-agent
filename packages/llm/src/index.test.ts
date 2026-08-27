@@ -53,6 +53,19 @@ describe("EchoChatModel", () => {
     ]);
   });
 
+  it("retries bounded capacity responses and honors retry-after", async () => {
+    let calls = 0;
+    const modelFetch: typeof fetch = async () => {
+      calls += 1;
+      if (calls === 1) return new Response(JSON.stringify({ error: { message: "busy" } }), { status: 429, headers: { "retry-after": "0", "x-request-id": "req-rate" } });
+      return new Response("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]", { headers: { "content-type": "text/event-stream" } });
+    };
+    const parts = [];
+    for await (const part of new OpenAICompatibleChatModel({ baseUrl: "https://example.test", model: "coder", fetch: modelFetch }).stream({ messages: [{ role: "user", content: "hi" }] })) parts.push(part);
+    expect(calls).toBe(2);
+    expect(parts).toEqual([{ type: "text_delta", text: "ok" }, { type: "done" }]);
+  });
+
   it("passes provider reasoning effort through the wire request", async () => {
     let requestInit: RequestInit | undefined;
     const modelFetch: typeof fetch = async (_input, init) => {

@@ -72,6 +72,7 @@ AgentHost、EventStore 或工具权限管线。第三方 Anthropic Messages 调�
 | MR3 | `packages/llm/src/providers/anthropic-messages/` | DSH `llm-pi-ai/src/provider.ts`、`adapter.ts`、`stream.ts`、`context.ts`；Claude Code `D:/Develop/claude-code/src/services/api/claude.ts` | Anthropic Messages request/stream/tool JSON/usage/stop 行为 |
 | MR4 | contracts/storage/runtime/API session routes | DSH `packages/host/apiproxy/src/api-proxy.ts`：`selectionFor()`、`sessions.models()`、`sessions.selectModel()`；`packages/llm/llm/src/index.ts:prepareCall()` | event-first Session selection 与不可变 Turn route snapshot |
 | MR5 | `packages/llm/src/catalog.ts`、`apps/api/src/server.ts`、`apps/web/src/client/api.ts`、Settings/model picker | DSH `packages/llm/llm/src/index.ts:listModels()/resolveModelInfo()`、`packages/host/apiproxy/src/api/sessions.ts:SessionModels`、`packages/client/ui-model-selection/src/client/directory.ts:ModelDirectory` | provider 分组、局部 discovery failure、advisory catalog、custom profile 与 Web 选择 |
+| MR6 | `packages/llm/src/failures.ts`、provider adapters、`packages/runtime/src/index.ts:collectModelResponse()`、M09 recovery | DSH `packages/llm/llm/src/index.ts:LlmError`、`adapterFailureChunk()`、provider retry policy；Claude Code `src/services/api/withRetry.ts`、`src/services/api/errors.ts` | 统一 failure taxonomy、bounded retry-after/backoff、partial-output fallback gate、主/辅助请求预算与脱敏诊断 |
 
 DSH 根仓库为 MIT。本 ADR 仅记录结构与行为参考，未复制或改编 DSH 源码，因此此切片不需要
 新增 source-reuse register 条目。Claude Code 本地快照没有明确兼容根许可；仅在 MR3 参考

@@ -1328,7 +1328,19 @@ export type ModelStreamPart =
   | { readonly type: "tool_call_delta"; readonly index: number; readonly arguments: string }
   | { readonly type: "tool_call_end"; readonly index: number }
   | { readonly type: "usage"; readonly usage: ModelUsage }
-  | { readonly type: "error"; readonly code: string; readonly message: string; readonly status?: number; readonly providerCode?: string }
+  | {
+    readonly type: "error";
+    readonly code: string;
+    readonly message: string;
+    readonly status?: number;
+    readonly providerCode?: string;
+    /** Provider-neutral MR6 failure taxonomy code. */
+    readonly failureCode?: string;
+    readonly retryable?: boolean;
+    readonly retryAfterMs?: number;
+    readonly requestId?: string;
+    readonly partialOutput?: boolean;
+  }
   | { readonly type: "done" };
 
 export interface ModelUsage {

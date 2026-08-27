@@ -1,5 +1,6 @@
 import type { ChatModel, ModelContextCapability, ModelRequest, ModelStreamPart } from "@code-review-agent/contracts";
 import { AnthropicMessagesError, anthropicHttpError } from "./errors.js";
+import { parseRetryAfter, retryDelayMs } from "../../failures.js";
 import { serializeAnthropicRequest } from "./serialize.js";
 import { AnthropicStreamState, parseSseFrames } from "./stream.js";
 import type { AnthropicMessagesOptions } from "./types.js";
@@ -28,16 +29,22 @@ export class AnthropicMessagesChatModel implements ChatModel {
     const fetchImpl = this.options.fetch ?? globalThis.fetch;
     if (typeof fetchImpl !== "function") throw new AnthropicMessagesError("ANTHROPIC_FETCH_UNAVAILABLE", "Fetch API is unavailable in this runtime");
     const watchdog = createIdleWatchdog(request.signal, this.idleTimeoutMs);
+    let emittedOutput = false;
     try {
-      const response = await fetchImpl(this.endpoint, {
+      const response = await fetchWithRetry(fetchImpl, this.endpoint, {
         method: "POST",
         headers: requestHeaders(this.options, this.apiVersion),
         body: JSON.stringify(serializeAnthropicRequest(request, this.options.model, this.maxOutputTokens)),
         signal: watchdog.signal,
-      });
+      }, request.purpose === "context_summary" ? 1 : 2, watchdog.signal);
       if (!response.ok) {
         const detail = await providerErrorDetail(response);
-        throw anthropicHttpError(response.status, detail.providerCode, detail.message);
+        const retryAfterMs = parseRetryAfter(response.headers.get("retry-after"));
+        const requestId = response.headers.get("request-id") ?? response.headers.get("x-request-id") ?? undefined;
+        throw anthropicHttpError(response.status, detail.providerCode, detail.message, {
+          ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+          ...(requestId === undefined ? {} : { requestId }),
+        });
       }
       if (response.body === null) throw new AnthropicMessagesError("ANTHROPIC_STREAM_CLOSED", "Anthropic Messages response did not contain a stream body");
       const reader = response.body.getReader();
@@ -57,23 +64,76 @@ export class AnthropicMessagesChatModel implements ChatModel {
         const parsed = parseSseFrames(remainder);
         remainder = parsed.remainder;
         for (const event of parsed.frames) {
-          for (const part of state.consume(event)) yield part;
+          for (const part of state.consume(event)) {
+            if (part.type === "text_delta" || part.type === "tool_call_start" || part.type === "tool_call_delta") emittedOutput = true;
+            yield part;
+          }
         }
         if (chunk.done) break;
       }
       if (remainder.trim().length > 0) {
         const parsed = parseSseFrames(`${remainder}\n\n`);
         for (const event of parsed.frames) {
-          for (const part of state.consume(event)) yield part;
+          for (const part of state.consume(event)) {
+            if (part.type === "text_delta" || part.type === "tool_call_start" || part.type === "tool_call_delta") emittedOutput = true;
+            yield part;
+          }
         }
       }
       if (!state.isTerminal()) throw new AnthropicMessagesError("ANTHROPIC_STREAM_CLOSED", "Anthropic Messages stream closed before message_stop");
     } catch (error) {
-      throw watchdog.error(error);
+      const normalized = watchdog.error(error);
+      if (normalized instanceof AnthropicMessagesError) {
+        if (emittedOutput && normalized.partialOutput !== true) throw new AnthropicMessagesError(normalized.code, normalized.message, {
+          ...(normalized.status === undefined ? {} : { status: normalized.status }),
+          ...(normalized.providerCode === undefined ? {} : { providerCode: normalized.providerCode }),
+          failureCode: normalized.failureCode,
+          retryable: normalized.retryable,
+          ...(normalized.retryAfterMs === undefined ? {} : { retryAfterMs: normalized.retryAfterMs }),
+          ...(normalized.requestId === undefined ? {} : { requestId: normalized.requestId }),
+          partialOutput: true,
+        });
+        throw normalized;
+      }
+      if (request.signal?.aborted) throw new AnthropicMessagesError("ANTHROPIC_ABORTED", "Anthropic Messages request was cancelled", { failureCode: "ABORTED", retryable: false, partialOutput: emittedOutput });
+      throw new AnthropicMessagesError("ANTHROPIC_NETWORK_ERROR", "Anthropic Messages request failed before completion", { failureCode: "NETWORK", retryable: true, partialOutput: emittedOutput });
     } finally {
       watchdog.dispose();
     }
   }
+}
+
+async function fetchWithRetry(
+  fetchImpl: typeof globalThis.fetch,
+  input: string,
+  init: RequestInit,
+  maxAttempts: number,
+  signal: AbortSignal,
+): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await fetchImpl(input, init);
+      if (attempt < maxAttempts && (response.status === 429 || response.status === 529 || response.status >= 500)) {
+        await waitForRetry(retryDelayMs(attempt, parseRetryAfter(response.headers.get("retry-after"))), signal);
+        continue;
+      }
+      return response;
+    } catch (error) {
+      lastError = error;
+      if (signal.aborted || attempt === maxAttempts) throw error;
+      await waitForRetry(retryDelayMs(attempt), signal);
+    }
+  }
+  throw lastError ?? new Error("Unknown network failure");
+}
+
+async function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) throw signal.reason ?? new Error("Request cancelled");
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, delayMs);
+    signal.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason ?? new Error("Request cancelled")); }, { once: true });
+  });
 }
 
 function readChunk(reader: ReadableStreamDefaultReader<Uint8Array>, signal: AbortSignal): Promise<ReadableStreamReadResult<Uint8Array>> {

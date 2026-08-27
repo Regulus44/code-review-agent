@@ -1,6 +1,6 @@
 # Provider / Model 路由与 Anthropic 协议适配调研草案
 
-状态：`research-draft`（调研和实施索引，不代表已接受的公共契约）；P8.5-MR0–MR5 已按本索引落地，MR6 保持后续切片
+状态：`research-draft`（调研和实施索引，不代表已接受的公共契约）；P8.5-MR0–MR6 已按本索引落地
 
 日期：2026-08-27
 
@@ -703,6 +703,13 @@ provider 使用同一协议 Adapter。
 | 明确不包含 | subscriber fast mode、unattended persistent retry、账户 cooldown、内部 telemetry |
 | 验收 | retry-after 生效；413 进入 context recovery；部分输出后不 fallback；辅助模型和主 Agent 各有预算；错误事件不含 provider body/token |
 | 回滚 | 关闭新 policy，保留现有一次网络 retry 和 AgentHost fallback |
+
+实施状态：已完成。对应实现说明见
+[P8.5-MR6 实施说明](provider-model-routing-mr6-implementation.zh-CN.md)。
+`packages/llm/src/failures.ts` 提供统一 failure taxonomy、脱敏和 retry-after 解析；
+OpenAI-compatible 与 Anthropic adapter 在该边界执行有限的 pre-response retry；
+`packages/runtime/src/index.ts:collectModelResponse()` 负责 partial-output gate、fallback
+诊断和 M09 Context recovery 衔接。主 Agent 请求最多两次，`context_summary` 辅助请求一次。
 
 ## 9. Anthropic Adapter 合同清单
 

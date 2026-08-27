@@ -260,6 +260,26 @@ describe("AgentHost", () => {
     expect(host.metrics()).toMatchObject({ turnsStarted: 1, turnsCompleted: 1, modelFallbacks: 1 });
   });
 
+  it("does not fall back after a tool-call delta has been emitted", async () => {
+    const store = new InMemoryEventStore();
+    const primary: ChatModel = {
+      async *stream(): AsyncIterable<ModelStreamPart> {
+        yield { type: "tool_call_start", index: 0, id: "call_partial", name: "read_file" };
+        yield { type: "tool_call_delta", index: 0, arguments: "{\"path\":\"README.md\"}" };
+        throw Object.assign(new Error("stream interrupted"), { code: "STREAM_CLOSED" });
+      },
+    };
+    const fallback: ChatModel = { async *stream(): AsyncIterable<ModelStreamPart> { yield { type: "text_delta", text: "must-not-run" }; yield { type: "done" }; } };
+    const host = new AgentHost({ store, model: primary, fallbackModels: [fallback] });
+    const session = await host.createSession("D:/partial-tool-fallback-fixture");
+    const turn = await host.sendMessage(session.id, "read safely");
+    await host.waitForTurn(turn);
+    const events = await host.events(session.id);
+    expect(events.some((event) => event.type === "assistant/message" && event.payload["content"] === "must-not-run")).toBe(false);
+    expect(events.find((event) => event.type === "agent/error")?.payload).toMatchObject({ partialOutput: true, failureCode: "STREAM_CLOSED" });
+    expect(host.metrics()).toMatchObject({ modelFallbacks: 0, turnsFailed: 1 });
+  });
+
   it("claims background job cancellation commands so repeated actions do not repeat the side effect", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "cra-runtime-job-command-"));
     const store = new InMemoryEventStore();

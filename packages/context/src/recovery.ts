@@ -95,12 +95,12 @@ export function classifyProviderContextError(error: unknown): ProviderContextErr
   const record = asRecord(error);
   const nestedResponse = asRecord(record?.["response"]);
   const status = firstInteger(record?.["status"], record?.["statusCode"], record?.["httpStatus"], nestedResponse?.["status"]);
-  const code = firstString(record?.["code"], record?.["errorCode"]);
+  const code = firstString(record?.["code"], record?.["failureCode"], record?.["errorCode"]);
   const providerCode = firstString(record?.["providerCode"], asRecord(record?.["error"])?.["code"]);
   const message = boundedMessage(error);
   const haystack = `${code ?? ""} ${providerCode ?? ""} ${message}`.toLowerCase();
   const media = /(?:image|media|mime|document|pdf|vision|attachment|payload\s+too\s+large)/u.test(haystack);
-  const promptTooLong = status === 413 || /(?:prompt\s*(?:is\s*)?too\s*long|context(?:\s+window|\s+length)?\s*(?:exceeded|too\s*large|limit)|maximum\s+context|too\s+many\s+tokens|context_length_exceeded|request\s+too\s+large)/u.test(haystack);
+  const promptTooLong = status === 413 || /(?:prompt\s*(?:is\s*)?too\s*long|context(?:\s+window|\s+length)?\s*(?:exceeded|too\s*large|limit)|context[_ -]window[_ -]exceeded|maximum\s+context|too\s+many\s+tokens|context_length_exceeded|request\s+too\s+large)/u.test(haystack);
   const toolPairing = /(?:tool(?:_call)?|tool_use|tool_result).*(?:pair|match|orphan|missing|invalid)|(?:pair|match).*(?:tool(?:_call)?|tool_use|tool_result)/u.test(haystack);
   const schema = /(?:schema|validation|invalid\s+(?:request|message|parameter)|malformed)/u.test(haystack);
   const errorClass: ContextRecoveryErrorClass = media && promptTooLong

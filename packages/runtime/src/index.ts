@@ -41,7 +41,7 @@ import {
   type ContextBoundaryKind,
   type ContextRecoveryErrorClass,
 } from "@code-review-agent/contracts";
-import { EchoChatModel } from "@code-review-agent/llm";
+import { EchoChatModel, modelFailureMetadata, sanitizeFailureMessage } from "@code-review-agent/llm";
 import { compactMessages, DEFAULT_CONTEXT_BUDGET, type ContextBudget } from "@code-review-agent/compaction";
 import { applyToolResultBudget, assembleContext, buildPostCompactMessages, buildProjectMemoryPrompt, calculateContextWarningState, classifyProviderContextError, compactWithSessionMemory, compactWithSummaryModel, ContextRecoveryGuard, countContextTokens, createSessionMemoryFileWriteGuard, createTokenCounter, ensureToolResultPairing, estimateContextTokens, extractContextAttachmentIds, fallbackModelContextCapability, fingerprintModelRequest, groupMessagesByApiRound, isReactiveContextError, normalizeMessagesForAPI, normalizeExtractionConfig, recallRelevantProjectMemory, resolveContextBudget, restoreModelViewFromTranscript, selectPostCompactAttachments, SessionMemoryExtractionScheduler, sessionMemoryStats, shouldCompactBeforeRequest, shouldExtractSessionMemory, shouldUseExactTokenCount, truncateProjectMemoryEntrypoint, validateProjectMemoryTopic, type ApiRound, type ContextAssembly, type ContextAttachment, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type PostCompactAttachmentConfig, type PostCompactAttachmentProvider, type ProjectMemoryScope, type ProjectMemoryStore, type ProjectMemoryTopic, type SessionMemoryCompactConfig, type SessionMemoryExtractionConfig, type SessionMemoryExtractionState, type SessionMemoryExtractor, type SessionMemoryStore, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport } from "@code-review-agent/context";
 import { createHash, randomUUID } from "node:crypto";
@@ -2898,10 +2898,16 @@ export class AgentHost {
       await this.options.store.append({ sessionId, turnId, type: "turn/ended", payload: { status: "stopped", ...(traceId === undefined ? {} : { traceId }) } });
     } else {
       this.metricCounters.turnsFailed += 1;
-      const message = error instanceof Error ? error.message : String(error);
+      const message = sanitizeFailureMessage(error instanceof Error ? error.message : String(error));
       const classified = classifyProviderContextError(error);
+      const failure = modelFailureMetadata(error);
       await this.options.store.append({ sessionId, turnId, type: "agent/error", payload: {
         message,
+        failureCode: failure.code,
+        retryable: failure.retryable,
+        ...(failure.retryAfterMs === undefined ? {} : { retryAfterMs: failure.retryAfterMs }),
+        ...(failure.requestId === undefined ? {} : { requestId: failure.requestId }),
+        ...(failure.partialOutput === undefined ? {} : { partialOutput: failure.partialOutput }),
         errorClass: classified.errorClass,
         ...(classified.status === undefined ? {} : { providerStatus: classified.status }),
         ...((classified.providerCode ?? classified.code) === undefined ? {} : { providerCode: classified.providerCode ?? classified.code }),
@@ -2964,8 +2970,13 @@ export class AgentHost {
             const providerError = new Error(`${part.code}: ${part.message}`);
             Object.assign(providerError, {
               code: part.code,
+              ...(part.failureCode === undefined ? {} : { failureCode: part.failureCode }),
+              ...(part.retryable === undefined ? {} : { retryable: part.retryable }),
+              ...(part.retryAfterMs === undefined ? {} : { retryAfterMs: part.retryAfterMs }),
+              ...(part.requestId === undefined ? {} : { requestId: part.requestId }),
               ...(part.status === undefined ? {} : { status: part.status }),
               ...(part.providerCode === undefined ? {} : { providerCode: part.providerCode }),
+              ...(part.partialOutput === undefined ? {} : { partialOutput: part.partialOutput }),
             });
             throw providerError;
           }
@@ -2978,10 +2989,21 @@ export class AgentHost {
         return { text: textParts.join(""), toolCalls, responseId: `response_${requestId.replace(/^request_/u, "")}`, ...(usage === undefined ? {} : { usage }) };
       } catch (error) {
         lastError = error;
-        if (textParts.length > 0 && typeof error === "object" && error !== null) Object.assign(error, { partialOutput: true });
-        if (controller.signal.aborted || textParts.length > 0 || isReactiveContextError(error) || modelIndex >= candidates.length - 1) throw error;
+        const partialOutput = textParts.length > 0 || calls.size > 0;
+        if (partialOutput && typeof error === "object" && error !== null) Object.assign(error, { partialOutput: true });
+        if (controller.signal.aborted || partialOutput || isReactiveContextError(error) || modelIndex >= candidates.length - 1) throw error;
         this.metricCounters.modelFallbacks += 1;
-        await this.options.store.append({ sessionId, turnId, type: "agent/error", payload: { code: "MODEL_FALLBACK", message: error instanceof Error ? error.message : String(error), failedModelIndex: modelIndex, fallbackModelIndex: modelIndex + 1 } });
+        const failure = modelFailureMetadata(error);
+        await this.options.store.append({ sessionId, turnId, type: "agent/error", payload: {
+          code: "MODEL_FALLBACK",
+          message: sanitizeFailureMessage(error instanceof Error ? error.message : String(error)),
+          failureCode: failure.code,
+          retryable: failure.retryable,
+          ...(failure.retryAfterMs === undefined ? {} : { retryAfterMs: failure.retryAfterMs }),
+          ...(failure.requestId === undefined ? {} : { requestId: failure.requestId }),
+          failedModelIndex: modelIndex,
+          fallbackModelIndex: modelIndex + 1,
+        } });
       }
     }
     throw lastError;

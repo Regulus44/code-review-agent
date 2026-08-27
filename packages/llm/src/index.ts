@@ -1,6 +1,7 @@
 import type { ChatMessage, ChatModel, ModelContextCapability, ModelRequest, ModelStreamPart, ModelToolCall, ModelUsage } from "@code-review-agent/contracts";
 import { ModelProtocolRegistry, type ModelProtocolModelConfig } from "./registry.js";
 import { AnthropicMessagesChatModel } from "./providers/anthropic-messages/adapter.js";
+import { ModelFailureError, modelFailureMetadata, parseRetryAfter, retryDelayMs, sanitizeFailureMessage, type ModelFailureCode } from "./failures.js";
 
 export { ModelCatalog, createModelFromProviderProfile, type ModelCatalogSnapshot, type ProviderCatalogDiscovery, type ProviderCredentialMaterial } from "./catalog.js";
 
@@ -12,6 +13,7 @@ export const ANTHROPIC_MESSAGES_PROTOCOL = "anthropic-messages";
 
 export { AnthropicMessagesChatModel } from "./providers/anthropic-messages/adapter.js";
 export { AnthropicMessagesError, AnthropicMessagesError as AnthropicProtocolError } from "./providers/anthropic-messages/errors.js";
+export * from "./failures.js";
 
 export interface OpenAICompatibleOptions {
   readonly baseUrl: string;
@@ -62,14 +64,43 @@ export class ModelConfigurationError extends Error {
 
 /** Provider response failure with bounded metadata used by M09 recovery. */
 export class ModelProviderError extends Error {
-  readonly status: number;
+  readonly status?: number;
   readonly providerCode?: string;
+  /** Stable provider-neutral code; kept on `code` for conventional Error consumers. */
+  readonly code: ModelFailureCode;
+  readonly failureCode: ModelFailureCode;
+  readonly retryable: boolean;
+  readonly retryAfterMs?: number;
+  readonly requestId?: string;
+  readonly partialOutput?: boolean;
 
-  constructor(message: string, status: number, providerCode?: string) {
-    super(message);
+  constructor(message: string, status?: number, providerCode?: string, options: {
+    readonly failureCode?: ModelFailureCode;
+    readonly retryable?: boolean;
+    readonly retryAfterMs?: number;
+    readonly requestId?: string;
+    readonly partialOutput?: boolean;
+  } = {}) {
+    const metadata = modelFailureMetadata({
+      status,
+      providerCode,
+      code: options.failureCode,
+      retryable: options.retryable,
+      retryAfterMs: options.retryAfterMs,
+      requestId: options.requestId,
+      partialOutput: options.partialOutput,
+      message,
+    });
+    super(sanitizeFailureMessage(message));
     this.name = "ModelProviderError";
-    this.status = status;
+    this.failureCode = metadata.code;
+    this.code = metadata.code;
+    this.retryable = options.retryable ?? metadata.retryable;
+    if (status !== undefined) this.status = status;
     if (providerCode !== undefined) this.providerCode = providerCode;
+    if (metadata.retryAfterMs !== undefined) this.retryAfterMs = metadata.retryAfterMs;
+    if (metadata.requestId !== undefined) this.requestId = metadata.requestId;
+    if (metadata.partialOutput !== undefined) this.partialOutput = metadata.partialOutput;
   }
 }
 
@@ -139,44 +170,71 @@ export class OpenAICompatibleChatModel implements ChatModel {
             : { reasoning_effort: request.reasoningEffort }),
         }),
         ...(request.signal === undefined ? {} : { signal: request.signal }),
-      }, request.signal);
+      }, request.signal, request.purpose === "context_summary" ? 1 : 2);
     } catch (error) {
-      throw new Error(`LLM request failed before receiving a response from ${url}: ${describeNetworkError(error)}`);
+      if (error instanceof ModelFailureError || error instanceof ModelProviderError) throw error;
+      if (request.signal?.aborted) throw new ModelProviderError("LLM request was cancelled", undefined, undefined, { failureCode: "ABORTED", retryable: false });
+      throw new ModelProviderError(`LLM request failed before receiving a response: ${describeNetworkError(error)}`, undefined, undefined, { failureCode: "NETWORK", retryable: true });
     }
     if (!response.ok) {
       const detail = await readProviderErrorDetail(response);
+      const retryAfterMs = parseRetryAfter(response.headers.get("retry-after"));
+      const requestId = requestIdFromHeaders(response);
       throw new ModelProviderError(
         "LLM request failed with HTTP " + response.status + (detail.message === undefined ? "" : ": " + detail.message),
         response.status,
         detail.code,
+        {
+          failureCode: failureCodeForStatus(response.status),
+          retryable: response.status === 429 || response.status === 529 || response.status >= 500,
+          ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+          ...(requestId === undefined ? {} : { requestId }),
+        },
       );
     }
     if (response.body === null) {
-      throw new Error("LLM response did not contain a body");
+      throw new ModelProviderError("LLM response did not contain a body", undefined, undefined, { failureCode: "STREAM_CLOSED", retryable: true });
     }
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    const openToolIndices = new Set<number>();
-    while (true) {
-      const chunk = await reader.read();
-      buffer += decoder.decode(chunk.value ?? new Uint8Array(), { stream: !chunk.done });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        const parsed = parseSseLine(line);
-        for (const part of partsForParsedSse(parsed, openToolIndices)) yield part;
-        if (parsed?.kind === "done") return;
+    let emittedOutput = false;
+    try {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const openToolIndices = new Set<number>();
+      while (true) {
+        const chunk = await reader.read();
+        buffer += decoder.decode(chunk.value ?? new Uint8Array(), { stream: !chunk.done });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const parsed = parseSseLine(line);
+          for (const part of partsForParsedSse(parsed, openToolIndices)) {
+            if (part.type === "text_delta" || part.type === "tool_call_start" || part.type === "tool_call_delta") emittedOutput = true;
+            yield part;
+          }
+          if (parsed?.kind === "done") return;
+        }
+        if (chunk.done) {
+          const parsed = parseSseLine(buffer);
+          for (const part of partsForParsedSse(parsed, openToolIndices)) {
+            if (part.type === "text_delta" || part.type === "tool_call_start" || part.type === "tool_call_delta") emittedOutput = true;
+            yield part;
+          }
+          if (parsed?.kind === "done") return;
+          break;
+        }
       }
-      if (chunk.done) {
-        const parsed = parseSseLine(buffer);
-        for (const part of partsForParsedSse(parsed, openToolIndices)) yield part;
-        if (parsed?.kind === "done") return;
-        break;
+      for (const index of openToolIndices) yield { type: "tool_call_end", index };
+      throw new ModelProviderError("LLM response stream closed before [DONE]", undefined, undefined, { failureCode: "STREAM_CLOSED", retryable: true, partialOutput: emittedOutput });
+    } catch (error) {
+      if (error instanceof SyntaxError) throw error;
+      if (error instanceof ModelProviderError) {
+        if (emittedOutput && error.partialOutput !== true) throw new ModelProviderError(error.message, error.status, error.providerCode, { failureCode: error.failureCode, retryable: error.retryable, ...(error.retryAfterMs === undefined ? {} : { retryAfterMs: error.retryAfterMs }), ...(error.requestId === undefined ? {} : { requestId: error.requestId }), partialOutput: true });
+        throw error;
       }
+      if (request.signal?.aborted) throw new ModelProviderError("LLM request was cancelled", undefined, undefined, { failureCode: "ABORTED", retryable: false, partialOutput: emittedOutput });
+      throw new ModelProviderError("LLM response stream failed before completion", undefined, undefined, { failureCode: "NETWORK", retryable: true, partialOutput: emittedOutput });
     }
-    for (const index of openToolIndices) yield { type: "tool_call_end", index };
-    yield { type: "done" };
   }
 }
 
@@ -230,7 +288,7 @@ async function readProviderErrorDetail(response: Response): Promise<{ readonly m
     const raw = await response.text();
     if (raw.trim().length === 0) return {};
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null) return { message: raw.slice(0, 300) };
+    if (typeof parsed !== "object" || parsed === null) return {};
     const root = parsed as Record<string, unknown>;
     const nested = typeof root["error"] === "object" && root["error"] !== null ? root["error"] as Record<string, unknown> : undefined;
     const message = typeof nested?.["message"] === "string" ? nested["message"] : typeof root["message"] === "string" ? root["message"] : undefined;
@@ -244,21 +302,45 @@ async function readProviderErrorDetail(response: Response): Promise<{ readonly m
   }
 }
 
-async function fetchWithRetry(fetchImpl: typeof globalThis.fetch, url: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
+async function fetchWithRetry(fetchImpl: typeof globalThis.fetch, url: string, init: RequestInit, signal?: AbortSignal, maxAttempts = 2): Promise<Response> {
   let lastError: unknown;
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      return await fetchImpl(url, init);
+      const response = await fetchImpl(url, init);
+      if (attempt < maxAttempts && (response.status === 429 || response.status === 529 || response.status >= 500)) {
+        const delay = retryDelayMs(attempt, parseRetryAfter(response.headers.get("retry-after")));
+        await waitForRetry(delay, signal);
+        continue;
+      }
+      return response;
     } catch (error) {
       lastError = error;
-      if (signal?.aborted || attempt === 2) throw error;
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(resolve, 250);
-        signal?.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason ?? new Error("Request cancelled")); }, { once: true });
-      });
+      if (signal?.aborted || attempt === maxAttempts) throw error;
+      await waitForRetry(retryDelayMs(attempt), signal);
     }
   }
   throw lastError ?? new Error("Unknown network failure");
+}
+
+async function waitForRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) throw signal.reason ?? new Error("Request cancelled");
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, delayMs);
+    signal?.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason ?? new Error("Request cancelled")); }, { once: true });
+  });
+}
+
+function failureCodeForStatus(status: number): ModelFailureCode {
+  if (status === 401 || status === 403) return "AUTH";
+  if (status === 413) return "CONTEXT_WINDOW_EXCEEDED";
+  if (status === 429) return "RATE_LIMIT";
+  if (status === 529) return "OVERLOADED";
+  if (status >= 500) return "PROVIDER_ERROR";
+  return "PROVIDER_ERROR";
+}
+
+function requestIdFromHeaders(response: Response): string | undefined {
+  return response.headers.get("x-request-id") ?? response.headers.get("request-id") ?? response.headers.get("anthropic-request-id") ?? undefined;
 }
 
 function describeNetworkError(error: unknown): string {

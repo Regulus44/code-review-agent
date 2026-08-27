@@ -149,7 +149,9 @@ function streamError(data: Readonly<Record<string, unknown>>): Extract<ModelStre
   const error = valueRecord(data["error"]);
   const providerCode = typeof error?.["type"] === "string" ? error["type"] : undefined;
   const message = typeof error?.["message"] === "string" ? error["message"].slice(0, 300) : "Anthropic Messages stream returned an error";
-  return { type: "error", code: "ANTHROPIC_STREAM_ERROR", message, ...(providerCode === undefined ? {} : { providerCode }) };
+  const status = typeof error?.["status"] === "number" && Number.isInteger(error["status"]) ? error["status"] : undefined;
+  const failureCode = status === 429 ? "RATE_LIMIT" : status === 529 ? "OVERLOADED" : status === 413 ? "CONTEXT_WINDOW_EXCEEDED" : "PROVIDER_ERROR";
+  return { type: "error", code: "ANTHROPIC_STREAM_ERROR", failureCode, retryable: status === 429 || status === 529 || (status !== undefined && status >= 500), message, ...(status === undefined ? {} : { status }), ...(providerCode === undefined ? {} : { providerCode }) };
 }
 
 function valueRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
