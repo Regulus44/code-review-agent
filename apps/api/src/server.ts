@@ -131,7 +131,7 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
       // file or provider profile is unavailable during host restart.
     }
   }
-  modelRuntime.selectionRestore = restoreSessionSelections(store as SessionEventStore | undefined, host, modelRuntime);
+  modelRuntime.selectionRestore = restoreSessionSelections(store as SessionEventStore | undefined, host, modelRuntime, localHostMode);
   const ownsMcp = options.mcp === undefined;
   const mcp = options.mcp ?? new McpConnectionManager({
     registry: host.toolRegistry(),
@@ -576,8 +576,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const targetSessionId = sessionId(decodeURIComponent(sessionModelsMatch[1]));
       const projection = await host.getSession(targetSessionId);
       if (projection === undefined) throw new HttpError(404, "session not found");
-      const snapshot = await modelRuntime.catalog.refresh(projection.ownership?.tenantId);
-      const effective = projection.modelSelection ?? (projection.ownership?.tenantId === undefined ? undefined : modelRuntime.routes.get(projection.ownership.tenantId));
+      const effectiveTenantId = projection.ownership?.tenantId ?? (localHostMode ? tenantIdentity?.tenantId : undefined);
+      const snapshot = await modelRuntime.catalog.refresh(effectiveTenantId);
+      const effective = projection.modelSelection ?? (effectiveTenantId === undefined ? undefined : modelRuntime.routes.get(effectiveTenantId));
       sendJson(response, 200, {
         sessionId: targetSessionId,
         selection: projection.modelSelection ?? null,
@@ -593,7 +594,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       if (projection === undefined) throw new HttpError(404, "session not found");
       if (request.method === "GET") {
         const inherited = projection.modelSelection === undefined;
-        const tenantRoute = projection.ownership?.tenantId === undefined ? undefined : modelRuntime.routes.get(projection.ownership.tenantId);
+        const effectiveTenantId = projection.ownership?.tenantId ?? (localHostMode ? tenantIdentity?.tenantId : undefined);
+        const tenantRoute = effectiveTenantId === undefined ? undefined : modelRuntime.routes.get(effectiveTenantId);
         sendJson(response, 200, {
           sessionId: targetSessionId,
           selection: projection.modelSelection ?? null,
@@ -612,7 +614,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       if (typeof body.model !== "string" || body.model.trim() === "") throw new HttpError(400, "model is required");
       const requestedModel = body.model.trim();
       const reasoningEffort = body.reasoningEffort === undefined ? undefined : requireReasoningEffort(body.reasoningEffort);
-      const tenantId = projection.ownership?.tenantId;
+      const tenantId = projection.ownership?.tenantId ?? (localHostMode ? tenantIdentity?.tenantId : undefined);
       const currentRoute = tenantId === undefined ? undefined : modelRuntime.routes.get(tenantId);
       const requestedCredential = body.credentialRef === undefined
         ? currentRoute?.credentialRef
@@ -1362,13 +1364,13 @@ function routeSelection(route: ModelRouteRecord): TenantModelRoute {
   };
 }
 
-async function restoreSessionSelections(store: SessionEventStore | undefined, host: AgentHost, modelRuntime: ModelRuntimeState): Promise<void> {
+async function restoreSessionSelections(store: SessionEventStore | undefined, host: AgentHost, modelRuntime: ModelRuntimeState, localHostMode: boolean): Promise<void> {
   if (store === undefined) return;
   for (const summary of await store.listSessions(true)) {
     const projection = await store.project(summary.id);
     const selection = projection?.modelSelection;
     if (selection === undefined) continue;
-    const tenantId = projection?.ownership?.tenantId;
+    const tenantId = projection?.ownership?.tenantId ?? (localHostMode ? "local" : undefined);
     const route = tenantId === undefined ? undefined : modelRuntime.routes.get(tenantId);
     const material = route?.credentialRef === undefined || tenantId === undefined ? undefined : modelRuntime.credentials.resolve(route.credentialRef, tenantId);
     if (route?.credentialRef !== undefined && material === undefined) continue;

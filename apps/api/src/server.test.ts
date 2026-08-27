@@ -1316,4 +1316,44 @@ describe("Phase 2 API", () => {
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
   });
+
+  it("restores a local Provider-backed Session selection after an API restart", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "cra-local-session-provider-restart-"));
+    const databasePath = join(directory, "events.sqlite");
+    const credentialSecretsPath = join(directory, "credentials.secrets.json");
+    const providerProfilesPath = join(directory, "provider-profiles.json");
+    const options = { databasePath, credentialSecretsPath, providerProfilesPath };
+    let current: Server | undefined;
+    const start = async () => {
+      const next = createApiServer(options);
+      await new Promise<void>((resolve) => next.listen(0, "127.0.0.1", resolve));
+      const address = next.address();
+      if (address === null || typeof address === "string") throw new Error("Local Session provider API did not bind");
+      current = next;
+      return { server: next, url: `http://127.0.0.1:${address.port}` };
+    };
+    try {
+      let running = await start();
+      const createdSession = await (await fetch(`${running.url}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: "D:/local-session-provider" }) })).json() as { id: string };
+      const credential = await (await fetch(`${running.url}/v1/credentials`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "header", label: "Local session provider", material: { headers: { authorization: "Bearer m5-local-secret" } } }) })).json() as { credential: { id: string; kind: "header"; version: number } };
+      const profile = await fetch(`${running.url}/v1/providers`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "local-session-echo", displayName: "Local Session Echo", protocol: "echo", models: ["session-model"], credentialRef: credential.credential }) });
+      expect(profile.status).toBe(201);
+      const selected = await fetch(`${running.url}/v1/sessions/${createdSession.id}/model`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "m5-local-session-select" }, body: JSON.stringify({ provider: "local-session-echo", model: "session-model" }) });
+      expect(selected.status).toBe(200);
+      expect(await selected.json()).toMatchObject({ selection: { provider: "local-session-echo", model: "session-model" } });
+      const directoryBefore = await (await fetch(`${running.url}/v1/sessions/${createdSession.id}/models`)).json() as { providers: { provider: string }[] };
+      expect(directoryBefore.providers.some((provider) => provider.provider === "local-session-echo")).toBe(true);
+      await new Promise<void>((resolve, reject) => running.server.close((error) => error ? reject(error) : resolve()));
+      running = await start();
+      const restored = await (await fetch(`${running.url}/v1/sessions/${createdSession.id}/model`)).json() as { selection: { provider: string; model: string } };
+      expect(restored.selection).toEqual({ provider: "local-session-echo", model: "session-model" });
+      const directoryAfter = await (await fetch(`${running.url}/v1/sessions/${createdSession.id}/models`)).json() as { providers: { provider: string; status: string }[] };
+      expect(directoryAfter.providers.find((provider) => provider.provider === "local-session-echo")).toMatchObject({ status: "ready" });
+      const publicPayload = JSON.stringify({ restored, directoryAfter });
+      expect(publicPayload).not.toContain("m5-local-secret");
+    } finally {
+      if (current?.listening) await new Promise<void>((resolve, reject) => current!.close((error) => error ? reject(error) : resolve()));
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });

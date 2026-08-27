@@ -81,4 +81,39 @@ describe("ModelDirectory", () => {
     await expect(directory.select({ provider: "echo", model: "second" })).rejects.toThrow("provider unavailable");
     expect(directory.getSnapshot()).toMatchObject({ current: { provider: "echo", model: "first" }, status: "error" });
   });
+
+  it("keeps a newer catalog response when concurrent loads resolve out of order", async () => {
+    const first = deferred<SessionModelsResponse>();
+    const second = deferred<SessionModelsResponse>();
+    let calls = 0;
+    const api = {
+      listSessionModels: () => (calls++ === 0 ? first.promise : second.promise),
+      selectSessionModel: async (_sessionId: never, selection: ModelSelection) => ({
+        sessionId: "ses_1" as never,
+        selection,
+        providers: [],
+        model: {},
+        effective: { provider: selection.provider, model: selection.model },
+      }),
+    };
+    const directory = new ModelDirectory(api, "ses_1" as never);
+    const older = directory.load();
+    const newer = directory.load();
+    second.resolve({
+      sessionId: "ses_1" as never,
+      selection: { provider: "new-provider", model: "new-model" },
+      providers: [],
+    });
+    await newer;
+    first.resolve({
+      sessionId: "ses_1" as never,
+      selection: { provider: "old-provider", model: "old-model" },
+      providers: [],
+    });
+    await older;
+    expect(directory.getSnapshot()).toMatchObject({
+      current: { provider: "new-provider", model: "new-model" },
+      status: "ready",
+    });
+  });
 });

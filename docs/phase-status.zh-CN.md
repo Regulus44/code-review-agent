@@ -173,6 +173,15 @@
 - 验证：`pnpm typecheck`、API credential/server 定向测试（含无认证本地 host 重启恢复）、Web 146 项测试、`pnpm build:web`、`pnpm test:phase8:settings`（包含 Provider row/editor、write-only token、discovery flow 静态门禁）、`pnpm test:phase8:parity`、`git diff --check`；独立 checkpoint 需在本 slice 完成后建立。
 - 回滚：移除本地 file provider、profile store 和 Settings mutation surface，恢复进程内 host-only provider；已有 SQLite credential metadata、model route 和事件 schema 保持可读。
 
+## Phase 8.5 UI-M5 Provider/Model 测试与恢复门禁（implemented，整体 8.5 仍未完成）
+
+- `apps/web/src/client/model-directory.test.ts` 增加并发 catalog response 的 generation 防旧响应覆盖测试；`apps/web/src/client/model-popup.test.ts` 增加同名模型按 `provider + model` 双键解析、Provider failure 跳过和 active reasoning effort 保持测试。
+- `apps/api/src/server.ts` 修复本地无认证 host 的 Session model route：Provider/Credential 使用 `local` scope 时，Session model directory、选择和 API 重启恢复均按同一 scope 解析。
+- `apps/api/src/server.test.ts` 增加本地 Provider-backed Session selection 重启恢复测试，验证 Provider catalog、opaque credentialRef 和下一 Turn route 绑定。
+- `scripts/phase8-provider-model-gate.mjs` 通过公开 HTTP/SSE 边界覆盖：Settings Provider profile 保存后立即进入 Session model directory、Session selection 幂等、SSE replay、API restart recovery、下一 Turn 使用新 route、Provider-local discovery failure、跨 tenant Provider 隔离、公开响应/事件/profile/DOM shell 不泄露 secret。
+- 新增 `pnpm test:phase8:provider-model` 作为 UI-M5 独立门禁；本轮验证 Web 148 项测试、API 51 项测试、`pnpm typecheck`、`pnpm build:web`、`pnpm test:phase8:settings`、`pnpm test:phase8:parity` 和 Provider/Model M5 gate 均通过。
+- 回滚：移除 M5 gate 与新增测试即可恢复此前 M4 UI；本地 Provider profile、Credential metadata、secret file 和 `session/model_selected` 事件保持向后可读。
+
 ## Phase 8.3 OS/container isolation 与 deployment evidence slice（implemented，宿主能力依赖）
 
 - `packages/tools/src/code-mode.ts` 新增 `CodeModeIsolationAdapter`，将真正的 OS/container network boundary 与现有 process-policy 分开；`os-required` 在 adapter 缺失或探测失败时保持 `CODE_MODE_OS_ISOLATION_UNAVAILABLE`。
