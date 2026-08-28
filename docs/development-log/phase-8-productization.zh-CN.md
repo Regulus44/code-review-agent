@@ -1,5 +1,23 @@
 # Phase 8 开发日志
 
+## 2026-08-28：收敛本地启动变量与 Composer 模型标签
+
+本项属于 Phase 8.5 Provider/model routing 的本地配置和 Web 表达收敛。它让 Settings 持久化的 Provider 成为第三方凭据和模型配置的唯一来源，同时减少 Composer 主操作区的重复 Provider 信息；未改变 Event、Tool、Task、Permission 或 Workspace contract。
+
+### 已完成
+
+- `.env` 删除 12 个当前 TypeScript Runtime 没有读取点的旧变量：SiliconFlow、旧默认路由、泛用旧 API key、Python Runtime/workspace、数据库、超时、并发和工具开关变量；文件仍保留 `MODEL_PROVIDER` 与 `DEEPSEEK_*` 四项，为 API bootstrap default/fallback 与评测入口提供配置。`.env` 继续由 Git 忽略。
+- `apps/web/index.html` 的 Composer `#model-trigger` 现在只显示当前 `model`；Provider 身份继续仅在点击后出现的 Provider 分组标题和模型条目，以及 Settings 中显示，以保证相同模型 ID 的可辨识性。
+- `scripts/phase8-provider-model-gate.mjs` 将静态 Web 契约更新为 Composer 仅投影当前模型的要求。
+
+### 验证与回滚
+
+- `.env` 变量名审计确认仅保留四项 bootstrap 配置，已移除的旧变量均不存在；
+- `pnpm typecheck` ✓；`pnpm build:web` ✓；
+- `pnpm --filter @code-review-agent/web test` ✓（36 files、148 tests）；
+- `pnpm test:phase8:provider-model` ✓；
+- 回滚本次代码 checkpoint 可恢复 Composer 的 Provider + model 标签；`.env` 的已删除旧变量只在确有兼容需求时手动恢复，不能从 Git 获得其值。
+
 ## 2026-08-28：清理本地 Fixture Provider 配置
 
 本项是 Phase 8.5 Provider/model routing 的本地运行配置清理。Composer 中出现 `fixture-model-a` 和 `fixture-model-b` 的原因是 API host 的持久化自定义 Provider profile 中残留了用于早期测试的 `Fixture Provider`，前端只是在正常投影该目录。未修改 Event、Tool、Task、Permission 或 Workspace contract，也不删除仓库测试中的 fixture。

@@ -2666,8 +2666,11 @@
         const renderModelSeatMenu = () => {
           if (!modelPopover || !modelTrigger) return;
           if (modelEntryMode === 'command') { renderModelCommandPopup(); return; }
-          modelTrigger.textContent = state.models ? `${currentProvider()} · ${currentModel()}` : 'Provider · Model · Loading…';
-          modelTrigger.title = state.models ? `${currentProvider()} · ${currentModel()}` : 'Provider/model catalog loading';
+          // The Composer seat identifies the current model concisely. Provider
+          // identity remains available where it disambiguates choices: the
+          // provider-grouped model menu and Settings.
+          modelTrigger.textContent = state.models ? currentModel() : 'Model · Loading…';
+          modelTrigger.title = state.models ? currentModel() : 'Model catalog loading';
           modelTrigger.disabled = state.modelStatus === 'loading';
           modelPopover.setAttribute('role', 'menu');
           modelPopover.setAttribute('aria-label', 'Model selection');

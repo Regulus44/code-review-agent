@@ -217,7 +217,7 @@ async function runWebContractScenario() {
   try {
     const shell = await request(server.baseUrl, "/");
     const browser = await request(server.baseUrl, "/web/browser.js");
-    for (const marker of ["settings-provider-row", "settings-provider-editor", "API token (write-only)", "createCredential", "discoverProvider", "model-command-search", "Provider · Model", "event.stopPropagation(); modelMenuPane = 'models'"]) {
+    for (const marker of ["settings-provider-row", "settings-provider-editor", "API token (write-only)", "createCredential", "discoverProvider", "model-command-search", "modelTrigger.textContent = state.models ? currentModel() : 'Model · Loading…'", "event.stopPropagation(); modelMenuPane = 'models'"]) {
       assert(shell.text.includes(marker), `Web shell is missing ${marker}`);
     }
     assert(
