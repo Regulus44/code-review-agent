@@ -13,6 +13,11 @@ import { SubagentRuntime } from "@code-review-agent/subagent";
 import { createDelegationFixtureProvider, seedDelegationFixture } from "./fixtures/delegation.js";
 
 describe("Phase 2 API", () => {
+  it("passes the unified 512-step boundary to AgentHost", () => {
+    expect(() => createApiServer({ store: new InMemoryEventStore(), maxSteps: 512 })).not.toThrow();
+    expect(() => createApiServer({ store: new InMemoryEventStore(), maxSteps: 513 })).toThrow("maxSteps must be an integer between 1 and 512");
+  });
+
   let server: Server;
   let baseUrl: string;
   const store = new InMemoryEventStore();

@@ -281,8 +281,8 @@ export class AgentHost {
     this.quota = options.quota;
     this.operations = options.operations ?? { backup: "deferred", migration: "deferred", upgrade: "deferred" };
     this.customSystemPrompt = options.systemPrompt;
-    this.maxSteps = options.maxSteps ?? 12;
-    if (!Number.isInteger(this.maxSteps) || this.maxSteps < 1 || this.maxSteps > 100) throw new Error("maxSteps must be an integer between 1 and 100");
+    this.maxSteps = options.maxSteps ?? 32;
+    if (!Number.isInteger(this.maxSteps) || this.maxSteps < 1 || this.maxSteps > 512) throw new Error("maxSteps must be an integer between 1 and 512");
     const registry = options.toolRegistry ?? new ToolRegistry();
     this.toolPromptRegistry = options.toolPromptRegistry ?? new ToolPromptRegistry();
     if (options.toolPromptRegistry === undefined) this.toolPromptRegistry.registerMany(BUILTIN_TOOL_PROMPT_SPECS);

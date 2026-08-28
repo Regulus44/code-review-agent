@@ -25,10 +25,10 @@ export interface CompactionResult {
 }
 
 export const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
-  maxTokens: 16_000,
+  maxTokens: 200_000,
   recentMessageTokens: 8_000,
   maxToolResultChars: 8_000,
-  maxSummaryChars: 4_000,
+  maxSummaryChars: 8_192,
 };
 
 /**

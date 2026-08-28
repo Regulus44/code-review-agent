@@ -413,3 +413,16 @@ EventStore 的完整 `tool/result` 不被替换或删除。落盘、预览和 mi
 - 测试覆盖默认 `max_tokens=32000`、显式 `64000`、`64001` 请求前拒绝、模型 upper `8192` 的一致/不一致配置，以及 Yayi profile 的 `32000/64000` 解析。
 
 验证结果：`pnpm --filter @code-review-agent/llm test`（33 项通过）、`pnpm --filter @code-review-agent/api test`（51 项通过）、`pnpm typecheck`、`git diff --check` 均通过。阶段 2 的 200K context fallback、512 step、8192 字符 summary，以及阶段 3–5 的工具结果和并行调度本次未实施。
+
+## 阶段 2 实施结果（2026-08-28）
+
+阶段 2 已按本文件入口完成，改动范围限定在 fallback、step budget 和 summary 字符预算：
+
+- `packages/context/src/index.ts` 的未知能力 fallback 改为 `maxInputTokens=200000`、`maxOutputTokens=64000`、`defaultMaxOutputTokens=32000`；默认 context budget 计算得到 `effectiveWindowTokens=180000`，仍保留摘要请求预留 `20000` tokens。
+- `packages/compaction/src/index.ts` 的 legacy `DEFAULT_CONTEXT_BUDGET.maxTokens` 改为 `200000`，`maxSummaryChars` 改为 `8192`，避免旧 facade 重新形成 16K/4K 瓶颈。
+- `packages/context/src/summary-compact.ts` 的默认 `maxSummaryChars` 改为 `8192`，`recentMessageTokens=8000`、`maxPtlRetries=3` 保持不变。
+- `packages/runtime/src/index.ts` 的 AgentHost 默认 `maxSteps` 改为 `32`，合法硬上限统一为 `512`；`packages/runtime/src/subagent-provider.ts` 继续复用 AgentHost 校验，不保留隐藏的 100 上限。
+- `apps/api/src/server.test.ts`、`packages/runtime/src/index.test.ts` 和评测 Runner 同步覆盖 `512` 可用、`513` 拒绝；`scripts/eval-mvp/run-pilot.ps1` 与 `run-agent-task.ts` 使用同一 `1–512` 范围。
+- 评测文档将旧的 12-step 运行标为历史结果，当前默认与硬上限更新为 `32/512`。
+
+验证结果：`pnpm test` 全 workspace 通过；阶段 2 新增 fallback、summary、compaction、Runtime/API step boundary 测试通过；`pnpm typecheck`、`git diff --check` 通过。阶段 3–5 的工具结果落盘/聚合、时间型 microcompact 和 10 并行 scheduler 本次未实施。

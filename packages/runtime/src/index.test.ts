@@ -14,6 +14,21 @@ import { AgentHost } from "./index.js";
 const execFileAsync = promisify(execFile);
 
 describe("AgentHost", () => {
+  it("uses a 32-step default and accepts the 512-step hard boundary", () => {
+    expect(() => new AgentHost({ store: new InMemoryEventStore() })).not.toThrow();
+    expect(() => new AgentHost({ store: new InMemoryEventStore(), maxSteps: 512 })).not.toThrow();
+    expect(() => new AgentHost({ store: new InMemoryEventStore(), maxSteps: 513 })).toThrow("maxSteps must be an integer between 1 and 512");
+  });
+
+  it("exposes the 200K/64K/32K fallback through the Host context budget", () => {
+    const host = new AgentHost({ store: new InMemoryEventStore() });
+    expect(host.contextBudgetSnapshot()).toMatchObject({
+      capability: { maxInputTokens: 200_000, maxOutputTokens: 64_000, defaultMaxOutputTokens: 32_000, source: "estimate" },
+      reservedOutputTokens: 20_000,
+      effectiveWindowTokens: 180_000,
+    });
+  });
+
   it("enforces tenant session and turn quotas without affecting unowned local sessions", async () => {
     const store = new InMemoryEventStore();
     const host = new AgentHost({ store, quota: { maxSessionsPerTenant: 1, maxTurnsPerTenant: 1 } });
@@ -416,7 +431,7 @@ describe("AgentHost", () => {
     };
     const explodingBudget = {} as Partial<import("@code-review-agent/compaction").ContextBudget>;
     Object.defineProperty(explodingBudget, "maxTokens", { enumerable: true, get: () => { throw new Error("budget fixture unavailable"); } });
-    const host = new AgentHost({ store, model, contextBudget: explodingBudget });
+    const host = new AgentHost({ store, model, contextBudget: explodingBudget, contextPolicy: { contextWindowTokens: 30_000 } });
     const session = await host.createSession("D:/compaction-failure-fixture");
     await store.append({ sessionId: session.id, type: "user/message", payload: { content: "history " + "x".repeat(500) } });
     const turn = await host.sendMessage(session.id, "continue despite compaction failure");
@@ -668,7 +683,7 @@ describe("AgentHost", () => {
     const host = new AgentHost({
       store,
       model,
-      contextPolicy: { contextWindowTokens: 10_000, autoCompactBufferTokens: 1_000 },
+      contextPolicy: { contextWindowTokens: 30_000, autoCompactBufferTokens: 1_000 },
       sessionMemory: { get: async () => ({ content: "Goal: preserve the review plan", lastSummarizedMessageId: boundaryId }) },
       sessionMemoryCompact: { minTokens: 1, minTextBlockMessages: 1, maxTokens: 1_000, maxMemoryChars: 200 },
     });

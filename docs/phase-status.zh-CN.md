@@ -11,6 +11,13 @@
 - 验证：`pnpm --filter @code-review-agent/llm test`（33）、`pnpm --filter @code-review-agent/api test`（51）、`pnpm typecheck`、`git diff --check`；独立 checkpoint `0369891`。
 - 下一阶段入口：实施基线中的阶段 2，仅修改 context fallback、step 上限和 summary 字符预算。
 
+### Phase 8.5-MR8：Context fallback、Step 上限与 Summary 预算（阶段 2，completed，2026-08-28）
+
+- 无 capability 的 context fallback 已统一为 `200000/64000/32000`，默认摘要预留后 effective window 为 `180000`；legacy compaction context 默认改为 `200000`；
+- Runtime、子 Agent、API 和评测 Runner 的 step 范围统一为 `1–512`，普通默认 `32`；summary 最终正文默认上限统一为 `8192` 字符；
+- 验证：`pnpm test`、`pnpm typecheck`、`git diff --check`；独立 checkpoint `ec48dc9`。
+- 下一阶段入口：实施基线中的阶段 3，开始单工具结果落盘、artifact 预览和 model-visible replacement。
+
 | 阶段 | 状态 | Checkpoint/证据 |
 |---|---|---|
 | Phase 0：TypeScript 基线与契约 | completed | `codex/phase-0-typescript-foundation`；workspace、strict TS、contracts、依赖图检查通过 |

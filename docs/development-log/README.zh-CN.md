@@ -21,6 +21,7 @@
 - [Phase 7：DSH Web 前端收敛](phase-7-web-convergence.zh-CN.md)
 - [Phase 8：高级能力与产品化](phase-8-productization.zh-CN.md)
 - [阶段 1：Anthropic-compatible 输出能力实施日志（2026-08-28）](phase-1-anthropic-output-limits-2026-08-28.zh-CN.md)
+- [阶段 2：Context fallback、Step 上限与 Summary 预算实施日志（2026-08-28）](phase-2-context-step-summary-2026-08-28.zh-CN.md)
 - [M01：Claude Code 式 Context Window 与 Auto-Compact Budget](m01-context-budget.zh-CN.md)
 - [M02：Claude Code 式 Token Estimation 与 Provider Exact Count](m02-token-estimation.zh-CN.md)
 - [M03：Claude Code 式 Context Assembly 与 System Prompt Sections](m03-context-assembly.zh-CN.md)

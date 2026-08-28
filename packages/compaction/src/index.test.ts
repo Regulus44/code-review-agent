@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { compactMessages, estimateMessagesTokens } from "./index.js";
+import { DEFAULT_CONTEXT_BUDGET, compactMessages, estimateMessagesTokens } from "./index.js";
 
 describe("context compaction", () => {
+  it("uses the 200K context and 8192-character summary defaults", () => {
+    expect(DEFAULT_CONTEXT_BUDGET).toMatchObject({ maxTokens: 200_000, maxSummaryChars: 8_192 });
+  });
+
   it("keeps system and recent messages while replacing older context with a bounded summary", () => {
     const messages = [
       { role: "system", content: "system" } as const,

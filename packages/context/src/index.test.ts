@@ -48,4 +48,13 @@ describe("Claude Code-style context budget", () => {
     expect(state.isAboveAutoCompactThreshold).toBe(false);
     expect(shouldCompactBeforeRequest(state, { autoCompactEnabled: false })).toBe(false);
   });
+
+  it("uses the 200K/64K/32K fallback contract when capability metadata is absent", () => {
+    const capability = fallbackModelContextCapability();
+    expect(capability).toMatchObject({ maxInputTokens: 200_000, maxOutputTokens: 64_000, defaultMaxOutputTokens: 32_000, source: "estimate" });
+    const snapshot = resolveContextBudget(capability);
+    expect(snapshot.reservedOutputTokens).toBe(20_000);
+    expect(snapshot.effectiveWindowTokens).toBe(180_000);
+    expect(snapshot.source).toBe("estimate");
+  });
 });

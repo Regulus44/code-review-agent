@@ -14,6 +14,14 @@ function messages(): ChatMessage[] {
 }
 
 describe("summary compact", () => {
+  it("bounds the default summary text at 8192 characters", async () => {
+    const result = await compactWithSummaryModel(messages(), {
+      config: { recentMessageTokens: 10 },
+      runner: async () => ({ text: "x".repeat(10_000) }),
+    });
+    expect(result.summary?.length).toBe(8_192);
+  });
+
   it("builds a provider-safe summary input without internal IDs or reinjected skill content", () => {
     const input = buildSummaryInput([
       { role: "user", content: "<image>pixels</image> [document: report.pdf]", messageId: "internal" },

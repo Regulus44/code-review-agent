@@ -176,8 +176,9 @@ export type {
   ModelContextCapability,
 } from "@code-review-agent/contracts";
 
-export const DEFAULT_CONTEXT_WINDOW_TOKENS = 16_000;
-export const DEFAULT_MAX_OUTPUT_TOKENS = 0;
+export const DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000;
+export const DEFAULT_MAX_OUTPUT_TOKENS = 64_000;
+export const DEFAULT_MAX_OUTPUT_REQUEST_TOKENS = 32_000;
 export const MAX_SUMMARY_OUTPUT_TOKENS = 20_000;
 export const DEFAULT_AUTOCOMPACT_BUFFER_TOKENS = 13_000;
 export const DEFAULT_WARNING_BUFFER_TOKENS = 20_000;
@@ -199,6 +200,10 @@ export function fallbackModelContextCapability(
     model,
     maxInputTokens: positiveInteger(config.contextWindowTokens, DEFAULT_CONTEXT_WINDOW_TOKENS),
     maxOutputTokens: nonNegativeInteger(config.maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS),
+    defaultMaxOutputTokens: Math.min(
+      nonNegativeInteger(config.defaultMaxOutputTokens, DEFAULT_MAX_OUTPUT_REQUEST_TOKENS),
+      nonNegativeInteger(config.maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS),
+    ),
     supportsExactCount: false,
     supportsPromptCache: false,
     source: "estimate",
@@ -210,8 +215,9 @@ export function resolveContextBudget(
   capability: ModelContextCapability,
   config: ContextBudgetConfig = {},
 ): ContextBudgetSnapshot {
+  const resolvedMaxOutputTokens = nonNegativeInteger(config.maxOutputTokens, positiveOrZero(capability.maxOutputTokens));
   const reservedOutputTokens = Math.min(
-    positiveOrZero(capability.maxOutputTokens),
+    resolvedMaxOutputTokens,
     positiveInteger(config.summaryOutputReservationTokens, MAX_SUMMARY_OUTPUT_TOKENS),
   );
   const effectiveWindowTokens = Math.max(1, positiveInteger(capability.maxInputTokens, DEFAULT_CONTEXT_WINDOW_TOKENS) - reservedOutputTokens);
@@ -222,7 +228,7 @@ export function resolveContextBudget(
   const warningBufferTokens = positiveInteger(config.warningBufferTokens, DEFAULT_WARNING_BUFFER_TOKENS);
   const errorBufferTokens = positiveInteger(config.errorBufferTokens, DEFAULT_ERROR_BUFFER_TOKENS);
   const blockingBufferTokens = positiveInteger(config.blockingBufferTokens, DEFAULT_BLOCKING_BUFFER_TOKENS);
-  const source = config.contextWindowTokens !== undefined || config.maxOutputTokens !== undefined
+  const source = config.contextWindowTokens !== undefined || config.maxOutputTokens !== undefined || config.defaultMaxOutputTokens !== undefined
     ? "hybrid"
     : capability.source ?? (capability.supportsExactCount || capability.provider !== "unknown"
       ? "provider"

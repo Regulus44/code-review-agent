@@ -28,7 +28,7 @@ export interface SummaryCompactConfig {
 
 export const DEFAULT_SUMMARY_COMPACT_CONFIG: SummaryCompactConfig = {
   recentMessageTokens: 8_000,
-  maxSummaryChars: 4_000,
+  maxSummaryChars: 8_192,
   maxPtlRetries: 3,
 };
 
