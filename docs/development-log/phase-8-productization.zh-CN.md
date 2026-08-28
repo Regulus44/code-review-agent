@@ -1,5 +1,22 @@
 # Phase 8 开发日志
 
+## 2026-08-28：清理本地 Fixture Provider 配置
+
+本项是 Phase 8.5 Provider/model routing 的本地运行配置清理。Composer 中出现 `fixture-model-a` 和 `fixture-model-b` 的原因是 API host 的持久化自定义 Provider profile 中残留了用于早期测试的 `Fixture Provider`，前端只是在正常投影该目录。未修改 Event、Tool、Task、Permission 或 Workspace contract，也不删除仓库测试中的 fixture。
+
+### 已完成与验证
+
+- 从 API host-owned `apps/api/.data/provider-profiles.json` 删除本地 `Fixture Provider` profile，保留四个 Yayi Provider；该配置文件由 `.gitignore` 排除，不会进入 Git；
+- 清理与该已删除 profile 对应的孤立本地测试凭据 material；未读取、记录或提交任何 secret；
+- 重启本地 API 后，`GET /v1/providers` 确认 `fixture-provider` 和两个 fixture model 均不存在，目录保留 builtin DeepSeek 与四个 Yayi Provider；
+- `GET /v1/credentials` 确认不再投影该 Fixture credential；
+- 前端刷新即可从同一 Provider catalog 得到清理后的列表。浏览器自动化连接在 API 重启时被关闭，因此最终验证以重启后的 API catalog 为准。
+
+### 回滚与下一步
+
+- 如需恢复该本地测试 Provider，应通过 Settings 创建新的测试 profile/凭据，不能从 Git 恢复本地凭据文件。
+- 后续 Profile 删除 UI/API 工作应作为独立切片，先补齐 provider profile 的显式删除契约、credential reference 清理语义和测试门禁。
+
 ## 2026-08-28：Composer Provider 分组模型菜单校正
 
 本项属于 Phase 8.5 Provider/model routing 的 Web 入口修复，解决 Composer 模型按钮首次打开时只显示当前模型、容易误以为目录只有 `deepseek-v4-flash` 的问题。它推进了 DSH 风格 Web 工作台中的会话级 Provider/Model 选择，不改变 Event、Tool、Task、Permission 或 Workspace contract。
