@@ -8,7 +8,7 @@ import { createInProcessSubagentProvider, sessionId, AgentHost, turnId, type Ten
 import { SqliteEventStore } from "@code-review-agent/storage";
 import { brand, type AgentEvent, type ChatModel, type ContextBudgetConfig, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem, type ProductizationCapability, type SessionOwnership, type ModelRouteBackend, type ModelRouteRecord, type CredentialBackend, type McpCredentialReference, type PrincipalBackend, type ModelSelection as ContractModelSelection, type ModelCatalogEntry, type ProviderCatalogGroup, type ProviderProfileRecord } from "@code-review-agent/contracts";
 import { SubagentRuntime } from "@code-review-agent/subagent";
-import { createBuiltInModelProtocolRegistry, createConfiguredModelBootstrap, createModelFromProviderProfile, ModelCatalog, type ModelConfigView, type ProviderCredentialMaterial } from "@code-review-agent/llm";
+import { ANTHROPIC_MESSAGES_DEFAULT_MAX_OUTPUT_TOKENS, ANTHROPIC_MESSAGES_MAX_OUTPUT_TOKENS, createBuiltInModelProtocolRegistry, createConfiguredModelBootstrap, createModelFromProviderProfile, ModelCatalog, type ModelConfigView, type ProviderCredentialMaterial } from "@code-review-agent/llm";
 import { McpConnectionManager, type McpServerConfig } from "@code-review-agent/mcp-client";
 import type { CodeModeSandbox, PermissionPreset } from "@code-review-agent/tools";
 import { artifactAccessResponse, inspectArtifact, isAvailableArtifact, type ArtifactAccess } from "./artifacts.js";
@@ -247,7 +247,8 @@ function registerBootstrapCatalog(modelRuntime: ModelRuntimeState, info: ModelCo
         provider: "anthropic",
         model,
         maxInputTokens: 200_000,
-        maxOutputTokens: 8_192,
+        maxOutputTokens: ANTHROPIC_MESSAGES_MAX_OUTPUT_TOKENS,
+        defaultMaxOutputTokens: ANTHROPIC_MESSAGES_DEFAULT_MAX_OUTPUT_TOKENS,
         supportsExactCount: false,
         supportsPromptCache: false,
         source: "provider" as const,

@@ -66,7 +66,53 @@ describe("AnthropicMessagesChatModel", () => {
     expect(new Headers(init?.headers).get("x-api-key")).toBe("token-test-only");
     expect(new Headers(init?.headers).get("anthropic-version")).toBe("2023-06-01");
     expect(String(init?.body)).not.toContain("token-test-only");
-    expect(String(init?.body)).toContain('"max_tokens":8192');
+    expect(String(init?.body)).toContain('"max_tokens":32000');
+  });
+
+  it("accepts the 64000 protocol boundary and rejects 64001 before fetch", async () => {
+    let calls = 0;
+    let body = "";
+    const fetch: typeof globalThis.fetch = async (_input, init) => {
+      calls += 1;
+      body = String(init?.body ?? "");
+      return new Response(frame("message_stop", {}), { headers: { "content-type": "text/event-stream" } });
+    };
+    const model = new AnthropicMessagesChatModel({ baseUrl: "https://provider.example.test/v1", model: "claude-fixture", maxOutputTokens: 64_000, fetch });
+    await expect(collect(model)).resolves.toEqual([{ type: "done" }]);
+    expect(calls).toBe(1);
+    expect(body).toContain('"max_tokens":64000');
+    expect(() => new AnthropicMessagesChatModel({ baseUrl: "https://provider.example.test/v1", model: "claude-fixture", maxOutputTokens: 64_001, fetch })).toThrow(/64000/);
+    expect(calls).toBe(1);
+  });
+
+  it("enforces the model capability upper bound independently from the protocol cap", () => {
+    expect(() => new AnthropicMessagesChatModel({
+      baseUrl: "https://provider.example.test/v1",
+      model: "small-model",
+      contextCapability: {
+        provider: "fixture",
+        model: "small-model",
+        maxInputTokens: 200_000,
+        maxOutputTokens: 8_192,
+        defaultMaxOutputTokens: 32_000,
+        supportsExactCount: false,
+        supportsPromptCache: false,
+      },
+    })).toThrow(/defaultMaxOutputTokens must not exceed contextCapability.maxOutputTokens/);
+    expect(() => new AnthropicMessagesChatModel({
+      baseUrl: "https://provider.example.test/v1",
+      model: "small-model",
+      maxOutputTokens: 8_192,
+      contextCapability: {
+        provider: "fixture",
+        model: "small-model",
+        maxInputTokens: 200_000,
+        maxOutputTokens: 8_192,
+        defaultMaxOutputTokens: 8_192,
+        supportsExactCount: false,
+        supportsPromptCache: false,
+      },
+    })).not.toThrow();
   });
 
   it("uses the standard /v1/messages suffix when a gateway base URL is root-scoped", async () => {

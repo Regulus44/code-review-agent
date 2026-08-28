@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ProviderProfileRecord } from "@code-review-agent/contracts";
 import { ModelCatalog, createModelFromProviderProfile } from "./catalog.js";
-import { createBuiltInModelProtocolRegistry } from "./index.js";
+import { EchoChatModel, ModelProtocolRegistry, createBuiltInModelProtocolRegistry } from "./index.js";
 
 function profile(id: string, models: string[] = ["listed"]): ProviderProfileRecord {
   const now = new Date().toISOString();
@@ -29,11 +29,49 @@ describe("Yayi context capability defaults", () => {
     const catalog = new ModelCatalog([profile("yayi-deepreasoning-ds-v4pro", ["deepreasoning-ds-v4pro"]), profile("yayi-deepreasoning-gl-5-2", ["deepreasoning-gl-5.2"])]);
     const snapshot = await catalog.refresh("local");
     expect(snapshot.groups.find((group) => group.provider.endsWith("ds-v4pro"))?.models[0]?.contextCapability?.maxInputTokens).toBe(1_000_000);
+    expect(snapshot.groups.find((group) => group.provider.endsWith("ds-v4pro"))?.models[0]?.contextCapability).toMatchObject({ maxOutputTokens: 64_000, defaultMaxOutputTokens: 32_000 });
     expect(snapshot.groups.find((group) => group.provider.endsWith("gl-5-2"))?.models[0]?.contextCapability?.maxInputTokens).toBe(200_000);
   });
   it("applies the estimate when creating a model from a custom profile", () => {
     const yayi = profile("yayi-deepreasoning-qw-3-8-max", ["deepreasoning-qw-3.8-max"]);
     expect(createModelFromProviderProfile(yayi, "deepreasoning-qw-3.8-max", undefined, createBuiltInModelProtocolRegistry()).capability?.maxInputTokens).toBe(200_000);
+    expect(createModelFromProviderProfile(yayi, "deepreasoning-qw-3.8-max", undefined, createBuiltInModelProtocolRegistry()).capability).toMatchObject({ maxOutputTokens: 64_000, defaultMaxOutputTokens: 32_000 });
+  });
+
+  it("passes the inferred 32000 request default and 64000 model upper to an Anthropic adapter", () => {
+    const yayi = { ...profile("yayi-deepreasoning-ds-v4pro", ["deepreasoning-ds-v4pro"]), protocol: "anthropic-messages", baseUrl: "https://provider.example.test/v1" } satisfies ProviderProfileRecord;
+    const registry = new ModelProtocolRegistry();
+    let received: { maxOutputTokens?: number; capability?: { maxOutputTokens: number; defaultMaxOutputTokens?: number } } = {};
+    registry.register({ protocol: "anthropic-messages", createModel: (config) => {
+      received = {
+        ...(config.maxOutputTokens === undefined ? {} : { maxOutputTokens: config.maxOutputTokens }),
+        ...(config.contextCapability === undefined ? {} : { capability: config.contextCapability }),
+      };
+      return new EchoChatModel();
+    } });
+    createModelFromProviderProfile(yayi, "deepreasoning-ds-v4pro", undefined, registry);
+    expect(received).toEqual({ maxOutputTokens: 32_000, capability: expect.objectContaining({ maxOutputTokens: 64_000, defaultMaxOutputTokens: 32_000 }) });
+  });
+
+  it("rejects an Anthropic-compatible default that exceeds the model upper bound", () => {
+    const incompatible = {
+      ...profile("custom-anthropic", ["small"]),
+      protocol: "anthropic-messages",
+      baseUrl: "https://provider.example.test/v1",
+      models: [{
+        provider: "custom-anthropic",
+        model: "small",
+        contextCapability: {
+          provider: "custom-anthropic",
+          model: "small",
+          maxInputTokens: 200_000,
+          maxOutputTokens: 8_192,
+          supportsExactCount: false,
+          supportsPromptCache: false,
+        },
+      }],
+    } satisfies ProviderProfileRecord;
+    expect(() => createModelFromProviderProfile(incompatible, "small", undefined, createBuiltInModelProtocolRegistry())).toThrow(/defaultMaxOutputTokens/);
   });
   it("does not enlarge unrelated custom providers", async () => {
     const snapshot = await new ModelCatalog([profile("fixture-provider", ["fixture-model"])]).refresh("local");

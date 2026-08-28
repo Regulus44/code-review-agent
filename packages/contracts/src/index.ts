@@ -1197,6 +1197,8 @@ export interface ModelContextCapability {
   readonly maxInputTokens: number;
   /** Maximum output tokens available to a normal model request. */
   readonly maxOutputTokens: number;
+  /** Default output reservation used when a request does not provide an override. */
+  readonly defaultMaxOutputTokens?: number;
   readonly supportsExactCount: boolean;
   readonly supportsPromptCache: boolean;
   /** Optional provenance supplied by a host registry or adapter. */
@@ -1285,8 +1287,10 @@ export interface ContextCollapseCapability {
 export interface ContextBudgetConfig {
   /** Fallback input window when the adapter does not expose capability metadata. */
   readonly contextWindowTokens?: number;
-  /** Fallback output reservation when the adapter does not expose capability metadata. */
+  /** Fallback model output capability when the adapter does not expose metadata. */
   readonly maxOutputTokens?: number;
+  /** Fallback default request output when the adapter does not expose metadata. */
+  readonly defaultMaxOutputTokens?: number;
   readonly autoCompactEnabled?: boolean;
   readonly autoCompactBufferTokens?: number;
   readonly warningBufferTokens?: number;

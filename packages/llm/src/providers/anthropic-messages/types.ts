@@ -1,5 +1,9 @@
 import type { ModelContextCapability, ModelRequest, ModelToolDefinition, ModelUsage } from "@code-review-agent/contracts";
 
+/** Anthropic-compatible request defaults and protocol guardrails. */
+export const ANTHROPIC_MESSAGES_DEFAULT_MAX_OUTPUT_TOKENS = 32_000;
+export const ANTHROPIC_MESSAGES_MAX_OUTPUT_TOKENS = 64_000;
+
 export interface AnthropicMessagesOptions {
   readonly baseUrl: string;
   readonly model: string;

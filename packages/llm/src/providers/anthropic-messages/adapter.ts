@@ -3,9 +3,8 @@ import { AnthropicMessagesError, anthropicHttpError } from "./errors.js";
 import { parseRetryAfter, retryDelayMs } from "../../failures.js";
 import { serializeAnthropicRequest } from "./serialize.js";
 import { AnthropicStreamState, parseSseFrames } from "./stream.js";
-import type { AnthropicMessagesOptions } from "./types.js";
+import { ANTHROPIC_MESSAGES_DEFAULT_MAX_OUTPUT_TOKENS, ANTHROPIC_MESSAGES_MAX_OUTPUT_TOKENS, type AnthropicMessagesOptions } from "./types.js";
 
-const DEFAULT_MAX_OUTPUT_TOKENS = 8_192;
 const DEFAULT_API_VERSION = "2023-06-01";
 const DEFAULT_IDLE_TIMEOUT_MS = 60_000;
 
@@ -19,7 +18,21 @@ export class AnthropicMessagesChatModel implements ChatModel {
 
   constructor(private readonly options: AnthropicMessagesOptions) {
     this.endpoint = messagesEndpoint(options.baseUrl);
-    this.maxOutputTokens = positiveInteger(options.maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS, "maxOutputTokens");
+    const capabilityMax = options.contextCapability?.maxOutputTokens;
+    if (capabilityMax !== undefined) validateCapabilityLimit(capabilityMax, "contextCapability.maxOutputTokens");
+    const capabilityDefault = options.contextCapability?.defaultMaxOutputTokens;
+    if (capabilityDefault !== undefined) validateCapabilityLimit(capabilityDefault, "contextCapability.defaultMaxOutputTokens");
+    if (capabilityMax !== undefined && capabilityDefault !== undefined && capabilityDefault > capabilityMax) {
+      throw new AnthropicMessagesError("ANTHROPIC_CONFIGURATION_ERROR", "contextCapability.defaultMaxOutputTokens must not exceed contextCapability.maxOutputTokens");
+    }
+    const requestedMax = options.maxOutputTokens ?? capabilityDefault ?? ANTHROPIC_MESSAGES_DEFAULT_MAX_OUTPUT_TOKENS;
+    this.maxOutputTokens = positiveInteger(requestedMax, ANTHROPIC_MESSAGES_DEFAULT_MAX_OUTPUT_TOKENS, "maxOutputTokens");
+    if (this.maxOutputTokens > ANTHROPIC_MESSAGES_MAX_OUTPUT_TOKENS) {
+      throw new AnthropicMessagesError("ANTHROPIC_CONFIGURATION_ERROR", `maxOutputTokens must not exceed ${ANTHROPIC_MESSAGES_MAX_OUTPUT_TOKENS}`);
+    }
+    if (capabilityMax !== undefined && this.maxOutputTokens > capabilityMax) {
+      throw new AnthropicMessagesError("ANTHROPIC_CONFIGURATION_ERROR", "maxOutputTokens must not exceed contextCapability.maxOutputTokens");
+    }
     this.apiVersion = options.apiVersion?.trim() || DEFAULT_API_VERSION;
     this.idleTimeoutMs = positiveInteger(options.idleTimeoutMs, DEFAULT_IDLE_TIMEOUT_MS, "idleTimeoutMs");
     if (options.contextCapability !== undefined) this.contextCapability = options.contextCapability;
@@ -174,8 +187,14 @@ function messagesEndpoint(baseUrl: string): string {
 
 function positiveInteger(value: number | undefined, fallback: number, field: string): number {
   if (value === undefined) return fallback;
-  if (!Number.isInteger(value) || value <= 0 || value > 1_000_000) throw new AnthropicMessagesError("ANTHROPIC_CONFIGURATION_ERROR", `${field} must be a positive integer`);
+  if (!Number.isInteger(value) || value <= 0) throw new AnthropicMessagesError("ANTHROPIC_CONFIGURATION_ERROR", `${field} must be a positive integer`);
   return value;
+}
+
+function validateCapabilityLimit(value: number, field: string): void {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new AnthropicMessagesError("ANTHROPIC_CONFIGURATION_ERROR", `${field} must be a positive integer`);
+  }
 }
 
 async function providerErrorDetail(response: Response): Promise<{ readonly message?: string; readonly providerCode?: string }> {

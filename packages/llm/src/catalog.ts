@@ -6,6 +6,7 @@ import type {
   ProviderProfileRecord,
 } from "@code-review-agent/contracts";
 import { createBuiltInModelProtocolRegistry, ModelConfigurationError, type ModelProtocolRegistry } from "./index.js";
+import { ANTHROPIC_MESSAGES_DEFAULT_MAX_OUTPUT_TOKENS, ANTHROPIC_MESSAGES_MAX_OUTPUT_TOKENS } from "./providers/anthropic-messages/types.js";
 
 /** Secret material is deliberately structural and never part of a profile/catalog DTO. */
 export interface ProviderCredentialMaterial {
@@ -31,7 +32,8 @@ export function inferModelContextCapability(profile: ProviderProfileRecord, mode
     provider: profile.id,
     model,
     maxInputTokens: deepSeek ? 1_000_000 : 200_000,
-    maxOutputTokens: 8_000,
+    maxOutputTokens: ANTHROPIC_MESSAGES_MAX_OUTPUT_TOKENS,
+    defaultMaxOutputTokens: ANTHROPIC_MESSAGES_DEFAULT_MAX_OUTPUT_TOKENS,
     supportsExactCount: false,
     supportsPromptCache: false,
     source: "estimate",
@@ -147,13 +149,20 @@ export function createModelFromProviderProfile(
   const headers = credential?.headers;
   const apiKey = env["API_KEY"] ?? env["apiKey"] ?? env["ANTHROPIC_API_KEY"] ?? env["ANTHROPIC_AUTH_TOKEN"] ?? env["DEEPSEEK_API_KEY"] ?? env["OPENAI_API_KEY"];
   const inferredCapability = entry?.contextCapability ?? inferModelContextCapability(profile, model);
+  const defaultMaxOutputTokens = entry?.defaultMaxOutputTokens ?? inferredCapability?.defaultMaxOutputTokens
+    ?? (profile.protocol === "anthropic-messages" ? ANTHROPIC_MESSAGES_DEFAULT_MAX_OUTPUT_TOKENS : undefined);
+  if (defaultMaxOutputTokens !== undefined) {
+    if (!Number.isInteger(defaultMaxOutputTokens) || defaultMaxOutputTokens <= 0) throw new ModelConfigurationError("defaultMaxOutputTokens must be a positive integer");
+    if (profile.protocol === "anthropic-messages" && defaultMaxOutputTokens > ANTHROPIC_MESSAGES_MAX_OUTPUT_TOKENS) throw new ModelConfigurationError(`defaultMaxOutputTokens must not exceed ${ANTHROPIC_MESSAGES_MAX_OUTPUT_TOKENS}`);
+    if (inferredCapability !== undefined && defaultMaxOutputTokens > inferredCapability.maxOutputTokens) throw new ModelConfigurationError("defaultMaxOutputTokens must not exceed model maxOutputTokens");
+  }
   const modelConfig = {
     model,
     ...(profile.baseUrl === undefined ? {} : { baseUrl: profile.baseUrl }),
     ...(apiKey === undefined ? {} : { apiKey }),
     ...(headers === undefined ? {} : { headers }),
     ...(inferredCapability === undefined ? {} : { contextCapability: inferredCapability }),
-    ...(entry?.defaultMaxOutputTokens === undefined ? {} : { maxOutputTokens: entry.defaultMaxOutputTokens }),
+    ...(defaultMaxOutputTokens === undefined ? {} : { maxOutputTokens: defaultMaxOutputTokens }),
   };
   const created = registry.create(profile.protocol, modelConfig);
   return {

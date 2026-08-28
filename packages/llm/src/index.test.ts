@@ -202,6 +202,6 @@ describe("EchoChatModel", () => {
     }, registry);
 
     expect(configured.config).toEqual({ provider: "anthropic", model: "claude-fixture", baseUrl: "https://provider.example.test/v1", configured: true });
-    expect(received).toEqual({ protocol: ANTHROPIC_MESSAGES_PROTOCOL, model: "claude-fixture", baseUrl: "https://provider.example.test/v1", maxOutputTokens: 8192 });
+    expect(received).toEqual({ protocol: ANTHROPIC_MESSAGES_PROTOCOL, model: "claude-fixture", baseUrl: "https://provider.example.test/v1", maxOutputTokens: 32000 });
   });
 });

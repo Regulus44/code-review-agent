@@ -1,6 +1,7 @@
 import type { ChatMessage, ChatModel, ModelContextCapability, ModelRequest, ModelStreamPart, ModelToolCall, ModelUsage } from "@code-review-agent/contracts";
 import { ModelProtocolRegistry, type ModelProtocolModelConfig } from "./registry.js";
 import { AnthropicMessagesChatModel } from "./providers/anthropic-messages/adapter.js";
+import { ANTHROPIC_MESSAGES_DEFAULT_MAX_OUTPUT_TOKENS, ANTHROPIC_MESSAGES_MAX_OUTPUT_TOKENS } from "./providers/anthropic-messages/types.js";
 import { ModelFailureError, modelFailureMetadata, parseRetryAfter, retryDelayMs, sanitizeFailureMessage, type ModelFailureCode } from "./failures.js";
 
 export { ModelCatalog, createModelFromProviderProfile, type ModelCatalogSnapshot, type ProviderCatalogDiscovery, type ProviderCredentialMaterial } from "./catalog.js";
@@ -12,6 +13,7 @@ export const OPENAI_CHAT_COMPLETIONS_PROTOCOL = "openai-chat-completions";
 export const ANTHROPIC_MESSAGES_PROTOCOL = "anthropic-messages";
 
 export { AnthropicMessagesChatModel } from "./providers/anthropic-messages/adapter.js";
+export { ANTHROPIC_MESSAGES_DEFAULT_MAX_OUTPUT_TOKENS, ANTHROPIC_MESSAGES_MAX_OUTPUT_TOKENS } from "./providers/anthropic-messages/types.js";
 export { AnthropicMessagesError, AnthropicMessagesError as AnthropicProtocolError } from "./providers/anthropic-messages/errors.js";
 export * from "./failures.js";
 
@@ -392,13 +394,14 @@ export function createConfiguredChatModel(
       provider: "anthropic",
       model,
       maxInputTokens: 200_000,
-      maxOutputTokens: 8_192,
+      maxOutputTokens: ANTHROPIC_MESSAGES_MAX_OUTPUT_TOKENS,
+      defaultMaxOutputTokens: ANTHROPIC_MESSAGES_DEFAULT_MAX_OUTPUT_TOKENS,
       supportsExactCount: false,
       supportsPromptCache: false,
       source: "provider",
     };
     return {
-      model: registry.create(ANTHROPIC_MESSAGES_PROTOCOL, { baseUrl: safeBaseUrl, model, contextCapability, apiKey: anthropicApiKey, maxOutputTokens: contextCapability.maxOutputTokens }),
+      model: registry.create(ANTHROPIC_MESSAGES_PROTOCOL, { baseUrl: safeBaseUrl, model, contextCapability, apiKey: anthropicApiKey, ...(contextCapability.defaultMaxOutputTokens === undefined ? {} : { maxOutputTokens: contextCapability.defaultMaxOutputTokens }) }),
       config: { provider: "anthropic", model, baseUrl: safeBaseUrl, configured: true },
     };
   }

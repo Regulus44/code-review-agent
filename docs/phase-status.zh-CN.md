@@ -4,6 +4,13 @@
 
 ## 当前状态
 
+### Phase 8.5-MR7：Anthropic-compatible 输出能力（阶段 1，completed，2026-08-28）
+
+- 按实施基线完成 `ModelContextCapability` 的 default/upper 双值表达；Anthropic-compatible 默认请求输出为 `32000`，协议硬上限为 `64000`，模型级 upper 校验保留并在 HTTP 请求前 fail fast；
+- 内置 Anthropic、Yayi DS/GL/QW profile、API bootstrap catalog 和实际 adapter 请求使用同一解析链路；DeepSeek OpenAI-compatible 路由保持 `8000`，未引入 DSH `256000`；
+- 验证：`pnpm --filter @code-review-agent/llm test`（33）、`pnpm --filter @code-review-agent/api test`（51）、`pnpm typecheck`、`git diff --check`；独立 checkpoint `0369891`。
+- 下一阶段入口：实施基线中的阶段 2，仅修改 context fallback、step 上限和 summary 字符预算。
+
 | 阶段 | 状态 | Checkpoint/证据 |
 |---|---|---|
 | Phase 0：TypeScript 基线与契约 | completed | `codex/phase-0-typescript-foundation`；workspace、strict TS、contracts、依赖图检查通过 |
