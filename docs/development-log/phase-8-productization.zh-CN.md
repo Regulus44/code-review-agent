@@ -1,5 +1,30 @@
 # Phase 8 开发日志
 
+## 2026-08-28：Composer Provider 分组模型菜单校正
+
+本项属于 Phase 8.5 Provider/model routing 的 Web 入口修复，解决 Composer 模型按钮首次打开时只显示当前模型、容易误以为目录只有 `deepseek-v4-flash` 的问题。它推进了 DSH 风格 Web 工作台中的会话级 Provider/Model 选择，不改变 Event、Tool、Task、Permission 或 Workspace contract。
+
+### 参考与实现
+
+- 行为参考：`D:/Develop/deepseek-harness-fork/packages/client/ui-model-selection/src/client/ModelSelect.tsx` 与 `tests/model-select.client.spec.tsx`。DSH 的 Model 入口会进入 Provider 分组模型目录；本项目当前没有独立的 Effort 面板，因此不保留只重复当前选择的中间页。
+- `apps/web/index.html` 的 Composer `#model-trigger` 现在直接将 `modelMenuPane` 设为 `models`，展示现有 `ModelDirectory` 提供的 Provider 分组；`/model` 命令仍保留自己的搜索式入口。
+- `scripts/phase8-provider-model-gate.mjs` 增加静态断言，确保 Composer trigger 直接打开 Provider 分组 pane，防止回退为仅显示当前选择的摘要页。
+
+### 验证与 checkpoint
+
+- 既有关闭缺陷 checkpoint：`4d90f5d fix(web): keep model menu open when entering provider list`；
+- 本次实现 checkpoint：`012a25e fix(web): open grouped model list from composer`；
+- `pnpm typecheck` ✓；
+- `pnpm build:web` ✓；
+- `pnpm --filter @code-review-agent/web test` ✓（36 files、148 tests）；
+- `pnpm test:phase8:provider-model` ✓；
+- 真实本地 Web 验证：重新加载后点击一次 Composer 模型按钮即可显示 DeepSeek、Fixture 和四个 Yayi Provider 分组；选择 `yayi-deepreasoning-ds-v4pro` 后 Composer 标签、状态栏及 `session/model_selected` 事件同步更新。
+
+### 回滚与下一步
+
+- 回滚 `012a25e` 即可恢复旧的摘要页入口；不会回滚已持久化的 Provider、credential reference 或 Session `session/model_selected` 事件。
+- 后续 Web 模型选择改动继续沿用 `ModelDirectory` 作为唯一目录/选择入口，并同步更新本日志与相应 gate；若新增独立 reasoning effort UI，再按 DSH 的 Model/Effort 根菜单恢复分层，而非复制当前模型摘要页。
+
 ## 2026-08-25：实现 DSH 风格权限请求与用户问题 Composer takeover
 
 本次工作属于 Phase 8 Web 收敛，按照 [权限请求与用户问题 Composer takeover 调研与实施指导](../dsh-permission-question-composer-research.zh-CN.md) 将等待型 permission/interaction 从 Conversation 尾部迁移到 Composer 主操作入口。变更只涉及 Web presenter、DOM renderer 和本地 action gate，不改变 Event、Tool、Task、Permission 或 Workspace contract。
