@@ -156,74 +156,103 @@ DSH 还在 `apps/cli/tests/windows-shell.spec.ts` 中验证同一份 patch 在 `
 
 DSH 的本地 Bash executor 没有 Windows fallback；若部署确实需要 Bash，需提供能运行 Bash 的 executor/provider（例如 Git Bash、容器或其他 sandbox runner），然后在 composition 中显式启用对应 row。DSH 不把 PowerShell 文本翻译成 Bash，也不把 Bash 文本翻译成 PowerShell。
 
-## 5. 对照 DSH 的改造方案（当前不编码）
+## 5. 对照 DSH 的实施改造与文件清单（当前不编码）
 
-本项目采用与 DSH 相同的“一个宿主只组装一个默认 shell stack”规则：Windows 组装 `pwsh` 工具和 PowerShell 执行器；POSIX 组装 `bash` 工具和 Bash 执行器。平台不匹配的工具不注册到 `ToolRegistry`，因此不会进入 `ToolRuntime.listTools()`、`AgentHost.modelTools()`、模型 schema 或系统提示词中的可见工具目录。
+本项目直接采用 DSH 的“一个宿主只组装一个默认 shell stack”规则：Windows 只组装 `pwsh`，POSIX 只组装 `bash`。下面每一项同时规定本仓库的改动、禁止改动、DSH 学习入口和验收方式；实施时不得在这些边界之外自行扩展。
 
-本次改造的目标状态如下：
+### 5.1 工具组装与平台 roster：必须修改 `packages/tools/src/builtin.ts`
 
-```text
-Windows
-  createBuiltinTools(platform=win32)
-    → 注册 pwsh
-    → 不注册 bash
-    → AgentHost.modelTools() 仅输出 pwsh schema
-    → pwsh -NoLogo -NoProfile -NonInteractive -Command <command>
+1. 在 `createBuiltinTools()` 的 options 中增加 `platform?: NodeJS.Platform`，默认值为 `process.platform`；该参数只用于宿主组合和测试，不进入公共 `ToolDefinition` contract。
+2. 将当前 `name: "bash"` 和 `name: "pwsh"` 两个定义拆成独立 factory。`platform === "win32"` 时只把 `pwsh` factory 加入 tools 数组；`platform !== "win32"` 时只把 `bash` factory 加入 tools 数组。
+3. 保留其他内置工具的注册顺序、schema、permission、executionMode 和事件语义。
+4. 让 `shellLaunch()` 接收已选择的平台和 shell kind；Windows `pwsh` 使用 PowerShell argv，POSIX `bash` 使用 `bash -lc`。禁止在运行时把 Bash 文本静默改写成 PowerShell 或 `cmd.exe`。
+5. 直接调用未注册的跨平台 shell 必须沿用现有 registry `TOOL_NOT_FOUND` 的 fail-closed 语义，不自动切换到另一种 shell。
 
-POSIX
-  createBuiltinTools(platform=linux|darwin)
-    → 注册 bash
-    → 不注册 pwsh
-    → AgentHost.modelTools() 仅输出 bash schema
-    → bash -lc <command>
-```
+DSH 学习入口：
 
-实施步骤固定如下：
+- `packages/bundle/base/cordis.patch.yml`：`bash-sandbox`/`tool-bash` 与 `pwsh-sandbox`/`tool-pwsh` 的 `process.platform` 门控；
+- `packages/shell/tool-bash/src/index.ts:apply()`、`packages/shell/tool-pwsh/src/index.ts:apply()`：模型侧工具只消费当前 `ctx.shell` provider；
+- `apps/cli/tests/windows-shell.spec.ts`：同一份 composition 在 `win32`/`linux` 上形成相反 roster 的合同测试。
 
-1. 在 `packages/tools/src/builtin.ts` 的 `createBuiltinTools()` 引入仅供宿主和测试使用的 `platform` 参数，默认值为 `process.platform`。
-2. 将现有 `bash` 与 `pwsh` 定义拆成独立的 factory，并由 `platform` 决定只加入其中一个定义：`win32` 加入 `pwsh`，其他受支持平台加入 `bash`。`ToolDefinition`、`packages/contracts` 和 `ToolRegistry` 的公共接口保持不变。
-3. 将 PowerShell executable 解析从现有 `shellLaunch()` 中抽出为纯函数，按 DSH `resolvePwshPath()` 的顺序处理：显式 `CODE_REVIEW_AGENT_PWSH` → PowerShell 7 默认安装目录 → PATH 中的 `pwsh.exe` → Windows PowerShell 5.1。解析结果继续以 `spawn(..., { shell: false })` 执行。
-4. 保留 `executeShellCommand()` 对 workspace cwd、timeout、取消、输出预算、background job、permission 和审计事件的现有责任；不在 `shellLaunch()` 中把 Bash 方言命令替换为 PowerShell，也不经 `cmd.exe` 中转。
-5. 通过 `packages/runtime/src/index.ts` 已有的 `modelTools() → ToolRuntime.listTools()` 链路发布过滤后的 roster。Runtime 不新增另一套平台判断，避免模型可见性和执行器选择分叉。
-6. 只为实际可见的工具保留对应的 `ToolPromptRegistry` 指引：Windows 请求只接收 `pwsh` 的 PowerShell 方言说明，POSIX 请求只接收 `bash` 的 Bash 方言说明。
-7. 直接 API 调用一个未注册的跨平台 shell 时，沿用 registry 的 `TOOL_NOT_FOUND` fail-closed 语义。该行为与 DSH 的 composition gating 一致；不得改用另一种 shell 代为执行。
+### 5.2 PowerShell executable 解析：新增 `packages/tools/src/pwsh-path.ts`，并修改 `builtin.ts`
 
-Windows 若将来需要 Git Bash、WSL 或容器 Bash，必须新增一个独立的、显式配置的 Bash executor/provider 和对应工具注册 row，再按 DSH 的 composition 规则替换 `pwsh` stack；它不属于本次默认 Windows 执行环境改造。
+1. 新增无副作用的 `candidatePwshPaths(env, platform)` 与 `resolvePwshPath(configured, env, platform)`；`platform !== "win32"` 时返回裸 `pwsh`，`win32` 时按固定顺序探测：显式 `CODE_REVIEW_AGENT_PWSH` → PowerShell 7 默认安装目录 → PATH 中的 `pwsh.exe` → Windows PowerShell 5.1。
+2. `builtin.ts:shellLaunch("pwsh", ...)` 只调用该解析函数并把结果作为 `spawn()` 的 executable；继续使用 `{ shell: false, windowsHide: true }`。
+3. 不把 `WindowsApps\\bash.exe` 的存在当成 WSL 可用性证明；本次默认 Windows roster 不注册 Bash，因此不增加 WSL 探测或 Bash 自动 fallback。
 
-## 6. 后续实现需要修改/参照的文件
+DSH 学习入口：`packages/shell/pwsh-local/src/resolve.ts` 的 `candidatePwshPaths()`、`resolvePwshPath()`，以及 `packages/shell/pwsh-local/src/index.ts:PwshLocalExecutor.argv()`。
 
-### 6.1 当前仓库：修改点与 DSH 学习点
+### 5.3 执行生命周期：只修改 `builtin.ts` 中的 shell 适配，不改变统一工具管线
 
-| 文件 | 实现职责 | 需要参照的 DSH 文件 |
+保留 `executeShellCommand()` 对 workspace cwd、timeout、取消、输出预算、background job、permission 和审计事件的现有责任。不得把执行器选择放入 `AgentHost`，不得绕过 `ToolRuntime`，不得修改 `shell: false` 为 true。
+
+DSH 学习入口：
+
+- `packages/shell/shell/src/index.ts:ShellExecutor`：`resolve()`、`run()`、`start()` 的 seam 边界；
+- `packages/shell/bash-local/src/index.ts:LocalBashExecutor.resolve/run/start`：Bash fresh process、输出预算、deadline 和后台句柄；
+- `packages/shell/pwsh-local/src/index.ts:PwshLocalExecutor.resolve/run/start`：PowerShell 非交互启动、编码和 Windows 路径语义；
+- `packages/subprocess/subprocess-local/src/spawn.ts`：输出收集、spill、进程树终止和 Windows `taskkill`。
+
+### 5.4 AgentHost 与模型可见性：生产代码不修改，测试必须覆盖
+
+保留 `packages/runtime/src/index.ts` 当前构造链：`createBuiltinTools()` → `ToolRegistry` → `ToolRuntime.listTools()` → `modelTools()` → `collectModelResponse()`。不在 `AgentHost` 或 `runSteps()` 中新增第二套平台判断。
+
+必须补充的测试位于 `packages/runtime/src/index.test.ts`：使用注入了 `createBuiltinTools({ platform })` 的 registry 和 scripted model，验证 win32 请求只包含 `pwsh` schema、POSIX 请求只包含 `bash` schema；验证未注册跨平台 tool 返回 `TOOL_NOT_FOUND`，且既有 `tool/call`/`tool/result` 回放语义不变。
+
+DSH 学习入口：`packages/core/agent-loop/src/index.ts` 的 AgentLoop service、`packages/core/agent-loop/src/tool-calls.ts:executeToolCalls()` 的工具调度边界。DSH 的原则是 AgentLoop 读取 composition 已经决定的工具，不在 loop 内解释操作系统。
+
+### 5.5 Prompt：保留现有过滤逻辑，仅在文案需要时修改 `packages/tools/src/prompt-catalog.ts`
+
+`ToolPromptRegistry.assemble()` 已按传入的可见工具过滤 prompt，因此平台 roster 完成后，Windows 不会组装 `bash` guidance，POSIX 不会组装 `pwsh` guidance。本项默认不修改 `packages/runtime/src/system-prompt.ts` 和 `packages/tools/src/prompt.ts`；若需调整方言文字，只修改 `prompt-catalog.ts` 中对应的 `bash`/`pwsh` spec，不新增平台分支。
+
+DSH 学习入口：`packages/shell/tool-bash/src/index.ts` 的 `tool:bash` system-prompt section、`packages/shell/tool-pwsh/src/index.ts` 的 `tool:pwsh` section，以及两个工具的 description/README 对方言、cwd、exit marker 和 background 语义的说明。
+
+### 5.6 测试文件：逐项修改并绑定 DSH 测试
+
+| 当前仓库文件 | 必须增加的测试 | DSH 对照 |
 |---|---|---|
-| `packages/tools/src/builtin.ts` | 为 `createBuiltinTools()` 增加可注入 `platform`；拆出 Bash/Pwsh tool factory；按平台注册单一 shell tool；实现 PowerShell executable 纯解析函数；保留 `shell=false`、cwd、超时、取消和审计 | `packages/shell/bash-local/src/index.ts`、`packages/shell/pwsh-local/src/index.ts`、`packages/shell/pwsh-local/src/resolve.ts` |
-| `packages/tools/src/prompt-catalog.ts` | 将 Bash/Pwsh 指引与实际注册的 tool factory 对齐；Windows 只提供 PowerShell 方言语义 | `packages/shell/tool-bash/src/index.ts`、`packages/shell/tool-pwsh/src/index.ts` 的 description 和 system-prompt section |
-| `packages/runtime/src/index.ts` | 验证构造 `AgentHost` 时只把过滤后的 builtin roster 注入 `ToolRegistry`；保持 `modelTools()` 只转换 `ToolRuntime.listTools()` 的结果 | `packages/core/agent-loop/src/index.ts`、`packages/core/agent-loop/src/tool-calls.ts` |
-| `packages/tools/src/p1.test.ts` | 添加 PowerShell path resolution、win32 roster 和前台 `pwsh` smoke | `packages/shell/pwsh-local/tests/executor.spec.ts` |
-| `packages/tools/src/index.test.ts` | 添加 win32/linux 工具目录、模型可见性前置条件和未注册跨平台 tool 的 fail-closed 测试 | `apps/cli/tests/windows-shell.spec.ts` |
-| `packages/tools/src/jobs.test.ts` | 验证 Windows `pwsh` background job 仍保留 cwd、输出、取消和恢复语义 | `packages/shell/tool-pwsh/tests/tools.spec.ts`、`packages/subprocess/subprocess-local/tests/spawn.spec.ts` |
-| `packages/runtime/src/index.test.ts` | 使用 scripted model 验证 Windows 模型请求 schema 仅含 `pwsh`、POSIX 仅含 `bash`，并验证 tool/result 事件回放不变 | `packages/core/agent-loop/tests/tool-calls.spec.ts`、`apps/cli/tests/windows-shell.spec.ts` |
-| `docs/tool-contract.md` | 记录默认 shell roster：Windows=`pwsh`，POSIX=`bash`，以及未注册 tool 的 fail-closed 行为 | `packages/shell/tool-bash/README.zh.md`、`packages/shell/tool-pwsh/README.zh.md` |
+| `packages/tools/src/p1.test.ts` | `resolvePwshPath`/候选路径纯函数、win32 roster、真实 `pwsh` 前台 smoke | `packages/shell/pwsh-local/tests/executor.spec.ts` |
+| `packages/tools/src/index.test.ts` | 注入 `platform=win32/linux` 的工具目录；未注册跨平台 shell 的 `TOOL_NOT_FOUND` | `apps/cli/tests/windows-shell.spec.ts` |
+| `packages/tools/src/jobs.test.ts` | Windows `pwsh` background job 的 cwd、输出、取消、结束和恢复 | `packages/shell/tool-pwsh/tests/tools.spec.ts`、`packages/subprocess/subprocess-local/tests/spawn.spec.ts` |
+| `packages/runtime/src/index.test.ts` | scripted model 的可见 schema、工具调用链和 tool/result replay | `packages/core/agent-loop/tests/tool-calls.spec.ts` |
+| `packages/tools/src/pwsh-path.test.ts`（新增） | 注入 env/platform 的路径解析顺序、无候选时裸 `pwsh` 回退 | `packages/shell/pwsh-local/tests/executor.spec.ts` |
 
-本实现不修改 `packages/contracts/src/index.ts`、`packages/tools/src/registry.ts`、`packages/tools/src/runtime.ts`、`packages/runtime/src/system-prompt.ts` 或 `apps/api/src/server.ts`：平台选择在内置工具组装时完成；现有 registry、runtime、modelTools 和 API 会自然消费单一 roster。只有在后续引入可插拔的多 shell provider 时，才新建独立 executor seam；届时再通过 ADR 定义公共 contract，不在本项提前扩张 Runtime 边界。
+### 5.7 文档和明确不修改项
 
-### 6.2 程序和代码入口顺序
+必须修改 `docs/tool-contract.md`，写明默认 roster：Windows=`pwsh`、POSIX=`bash`，以及未注册跨平台 shell 的 `TOOL_NOT_FOUND` 行为；文案依据 `packages/shell/tool-bash/README.zh.md` 和 `packages/shell/tool-pwsh/README.zh.md`。
 
-后续编码应按以下调用链定位和验证：
+本项明确不修改：`packages/contracts/src/index.ts`、`packages/tools/src/registry.ts`、`packages/tools/src/runtime.ts`、`packages/runtime/src/system-prompt.ts`、`apps/api/src/server.ts`、`docs/event-contract.md`。原因是平台选择在内置工具组装阶段完成，现有 registry、runtime、AgentHost 和 API 已经消费该 roster；没有新增事件或公共字段。
+
+### 5.8 程序入口和代码学习顺序
+
+本项目实施时按以下调用链阅读和验证：
 
 ```text
-apps/api/src/server.ts
+apps/api/src/server.ts:105
   → new AgentHost()
-  → packages/runtime/src/index.ts:runSteps()
-  → modelTools() / collectModelResponse()
+  → packages/runtime/src/index.ts:292
+  → createBuiltinTools({ platform })
+  → packages/runtime/src/index.ts:modelTools()
   → packages/tools/src/runtime.ts:listTools()/execute()
   → packages/tools/src/builtin.ts:executeShellCommand()
   → shellLaunch() / spawn()
 ```
 
-DSH 的对应启动链路为：`apps/cli/src/bin.ts` → `apps/cli/src/profile-boot.ts:runProfile()` → `packages/bundle/base/cordis.patch.yml` 的平台门控 row → `packages/shell/pwsh-sandbox/src/index.ts` 或 `packages/shell/bash-sandbox/src/index.ts` → `packages/shell/tool-pwsh/src/index.ts` 或 `packages/shell/tool-bash/src/index.ts`。本项目不复制 Cordis composition，但应学习其“先完成平台 roster，再让 AgentLoop 读取可见工具”的责任顺序。
+DSH 对应链路：
 
-### 6.3 测试入口
+```text
+apps/cli/src/bin.ts
+  → apps/cli/src/profile-boot.ts:runProfile()
+  → packages/bundle/base/cordis.patch.yml 的 process.platform 门控 row
+  → packages/shell/pwsh-sandbox/src/index.ts 或 bash-sandbox/src/index.ts
+  → packages/shell/tool-pwsh/src/index.ts:apply() 或 tool-bash/src/index.ts:apply()
+  → packages/shell/*-local/src/index.ts
+  → packages/subprocess/subprocess-local/src/spawn.ts
+```
+
+必须学习的责任顺序是：先由 composition/provider 决定平台工具 roster，再由 AgentLoop 消费可见 schema，最后由 shell executor 负责 argv、进程生命周期和结果分类。当前项目只吸收该边界，不复制 Cordis composition。
+
+### 5.9 验收测试矩阵
 
 最小验证矩阵：
 
@@ -238,7 +267,7 @@ DSH 的对应启动链路为：`apps/cli/src/bin.ts` → `apps/cli/src/profile-b
 
 提交前应运行与改动范围匹配的 `pnpm typecheck`、`pnpm test`，以及新增的 tools/runtime 合同测试。Windows 上无需安装或配置 WSL；默认 roster 测试必须证明无论 `WindowsApps\\bash.exe` 是否存在，Agent 都不会看到或调用 `bash`。
 
-## 7. 不属于本轮的内容
+## 6. 不属于本轮的内容
 
 - 不恢复旧 Python Runtime 作为执行底座；
 - 不把 DSH Cordis、插件系统或品牌资源复制进当前仓库；
@@ -246,6 +275,6 @@ DSH 的对应启动链路为：`apps/cli/src/bin.ts` → `apps/cli/src/profile-b
 - 不把 `cmd.exe`、PowerShell 和 Bash 合并为一个没有方言声明的通用字符串工具；
 - 不通过关闭 `shell=false`、放宽 workspace 或绕过 approval 来“修复”执行失败。
 
-## 8. 结论
+## 7. 结论
 
 本项目按 DSH 直接落地“平台感知工具 roster + Windows 默认 `pwsh` + POSIX 默认 `bash`”。平台选择在内置工具组装阶段完成，AgentLoop 只消费已经筛选的工具 schema；执行器继续保留 workspace、permission、timeout、cancel、output budget 和 audit 语义，事件事实来源不变。
