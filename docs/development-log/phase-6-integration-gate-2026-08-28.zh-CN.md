@@ -58,3 +58,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/eval-mvp/verify-grad
 阶段 6 文档可整体回滚到前一文档 checkpoint；不删除历史事件、artifact、评测结果或阶段 1–5 的代码 checkpoint。Runtime 新增的组合测试可单独移除，不影响生产运行时。
 
 阶段 6 完成后，后续工作回到 [阶段状态](../phase-status.zh-CN.md) 中的 Phase 8 剩余部署环境 smoke 和产品化边界；A2A 仍按既有 ADR deferred，不作为本阶段前置。
+
+## Checkpoint
+
+- 代码与组合测试：`61e3064 test(phase6): cover cross-stage integration`；
+- 文档与阶段状态：`d15a2ae docs(phase6): close integration gate and migration baseline`。

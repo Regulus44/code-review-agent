@@ -9,7 +9,7 @@
 - 已将阶段 1–5 的实际参数、代码入口、上游行为参考、回滚边界和评测配置收敛到 M01/M05/总调研、README、Bench 和来源登记；M14 Context Collapse 继续保持 deferred；
 - 新增 Windows PowerShell 并行大结果组合测试，覆盖 `50000` 字符 artifact、`tool/result` 顺序、Session workspace 文件和 Host 重启后的相同 model view；
 - Grader gold/empty 自检均通过；Echo Runner 的 `maxSteps=32` 与 `maxSteps=512` smoke 均 completed；全 workspace 测试、类型检查和 diff 检查通过；
-- 代码与测试 checkpoint `61e3064`；详细记录见 [阶段 6 集成门禁实施日志](development-log/phase-6-integration-gate-2026-08-28.zh-CN.md)；
+- 代码与测试 checkpoint `61e3064`，文档 checkpoint `d15a2ae`；详细记录见 [阶段 6 集成门禁实施日志](development-log/phase-6-integration-gate-2026-08-28.zh-CN.md)；
 - 下一阶段入口：继续按 Phase 8 剩余部署环境 smoke 和产品化边界推进；A2A 仍按既有 ADR deferred。
 
 ### Phase 8.5-MR11：最多 10 个并行工具调用 Scheduler（阶段 5，completed，2026-08-28）
