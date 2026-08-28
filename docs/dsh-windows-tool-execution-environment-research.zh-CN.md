@@ -1,6 +1,6 @@
 # Windows 工具执行环境不匹配调研与改造指导
 
-状态：调研完成，当前只新增文档，未修改运行时代码。
+状态：阶段 1–6 已实施并完成验收（2026-08-28）。本轮实现只改动平台 shell 组装、PowerShell 路径解析、合同测试和工具契约文档；未修改 EventStore、AgentHost 生产逻辑或 Web。
 
 调研仓库：
 
@@ -277,6 +277,28 @@ apps/cli/src/bin.ts
 | 权限 preset | 平台过滤先于模型可见性，不能借平台切换绕过 permission/approval |
 
 提交前应运行与改动范围匹配的 `pnpm typecheck`、`pnpm test`，以及新增的 tools/runtime 合同测试。Windows 上无需安装或配置 WSL；默认 roster 测试必须证明无论 `WindowsApps\\bash.exe` 是否存在，Agent 都不会看到或调用 `bash`。
+
+### 5.10 阶段 5–6 实施与验收结果
+
+阶段 5 已按上表逐项完成：
+
+- `packages/tools/src/index.test.ts` 增加 win32/linux roster 和未注册 shell 的 `ToolNotFoundError`/`TOOL_NOT_FOUND` 合同测试；
+- `packages/tools/src/jobs.test.ts` 增加 Windows `pwsh` background job 的 workspace cwd、stdout、`job/started`/`job/output`/`job/ended`、durable event recovery、spill 读取和取消终态测试；
+- `packages/tools/src/pwsh-path.test.ts`、`packages/tools/src/p1.test.ts` 覆盖路径解析、前台 PowerShell smoke、环境变量、argv、cwd、exit/audit；
+- `packages/runtime/src/index.test.ts` 覆盖 AgentHost 模型请求中的平台 shell schema 和 prompt guidance，验证平台过滤发生在模型可见性之前；
+- `docs/tool-contract.md` 固化 Windows=`pwsh`、POSIX=`bash` 的 roster、未注册工具错误码和不做 shell 方言转换的边界。
+
+阶段 6 验收命令及结果：
+
+```text
+pnpm --filter @code-review-agent/tools test   ✓ 9 files / 68 tests
+pnpm --filter @code-review-agent/runtime test ✓ 1 file / 56 tests
+pnpm typecheck                                ✓
+pnpm test                                      ✓ workspace 全部通过
+git diff --check                               ✓
+```
+
+当前 Windows 主机的 `pwsh` 前台和后台 fixture 均通过；未访问 WSL `/bin/bash`。阶段 5–6 的独立 Git checkpoint 记录在本次提交中；回滚只涉及本节列出的测试、shell roster/path 实现和工具契约，不改变公共 Event/Tool/Task/Permission/Workspace contract。
 
 ## 6. 不属于本轮的内容
 

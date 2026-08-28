@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { JobManager } from "./jobs.js";
+import { resolvePwshPath } from "./pwsh-path.js";
 
 async function removeTempTree(root: string): Promise<void> {
   for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -85,16 +86,37 @@ describe("JobManager", () => {
     } finally { await removeTempTree(root); }
   });
 
-  it("captures output from the Windows PowerShell background adapter", async () => {
+  it("captures, cancels, and recovers a Windows PowerShell background job", async () => {
     if (process.platform !== "win32") return;
     const root = await mkdtemp(path.join(tmpdir(), "cra-job-pwsh-"));
     try {
+      const sessionId = "ses_job_pwsh";
+      const durableEvents: { readonly sessionId: string; readonly type: string; readonly sequence: number; readonly createdAt: string; readonly payload: Readonly<Record<string, unknown>> }[] = [];
+      let sequence = 0;
+      const appendEvent = async (type: string, payload: Readonly<Record<string, unknown>>): Promise<void> => {
+        durableEvents.push({ sessionId, type, sequence: ++sequence, createdAt: new Date().toISOString(), payload });
+      };
       const jobs = new JobManager();
-      const started = await jobs.start({ sessionId: "ses_job_pwsh", workspaceRoot: root, cwd: root, executable: process.env["CODE_REVIEW_AGENT_PWSH"] ?? "pwsh", args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "Write-Output 'job-pwsh-output'"], command: "pwsh fixture" });
+      const executable = resolvePwshPath(undefined, process.env, "win32");
+      const started = await jobs.start({ sessionId, workspaceRoot: root, cwd: root, executable, args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "Write-Output (Get-Location).Path; Write-Output 'job-pwsh-output'"], command: "pwsh fixture", env: { NO_COLOR: "1", PAGER: "cat", GIT_PAGER: "cat" }, appendEvent });
       const jobId = (started.output as { jobId: string }).jobId;
-      for (let attempt = 0; attempt < 40 && jobs.list("ses_job_pwsh", root)[0]?.status === "running"; attempt += 1) await new Promise<void>((resolve) => setTimeout(resolve, 25));
-      const output = await jobs.read("ses_job_pwsh", jobId, 100);
+      for (let attempt = 0; attempt < 80 && jobs.list(sessionId, root)[0]?.status === "running"; attempt += 1) await new Promise<void>((resolve) => setTimeout(resolve, 25));
+      const summary = jobs.list(sessionId, root)[0];
+      expect(summary).toMatchObject({ jobId, status: "completed", cwd: root, executable });
+      const output = await jobs.read(sessionId, jobId, 1_000);
       expect((output.output as { output: string }).output).toContain("job-pwsh-output");
+      expect((output.output as { output: string }).output.toLowerCase()).toContain(root.toLowerCase());
+      expect(durableEvents.map((event) => event.type)).toEqual(expect.arrayContaining(["job/started", "job/output", "job/ended"]));
+
+      const restored = new JobManager({ eventStore: { list: async () => durableEvents as never } });
+      expect(await restored.listForSession(sessionId, root)).toMatchObject([{ jobId, status: "completed", cwd: root }]);
+      expect((await restored.read(sessionId, jobId, 1_000).then((result) => result.output as { output: string })).output).toContain("job-pwsh-output");
+
+      const long = await jobs.start({ sessionId, workspaceRoot: root, cwd: root, executable, args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"], command: "pwsh long", appendEvent });
+      const longJobId = (long.output as { jobId: string }).jobId;
+      await jobs.kill(sessionId, longJobId);
+      for (let attempt = 0; attempt < 80 && jobs.list(sessionId, root).find((job) => job.jobId === longJobId)?.status === "running"; attempt += 1) await new Promise<void>((resolve) => setTimeout(resolve, 25));
+      expect(jobs.list(sessionId, root).find((job) => job.jobId === longJobId)).toMatchObject({ status: "cancelled", cwd: root, executable });
     } finally { await removeTempTree(root); }
   });
 

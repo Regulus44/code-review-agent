@@ -72,8 +72,8 @@ discover
 | `git_diff` | read | auto | 限制输出，避免泄露 workspace 外内容 |
 | `run_command` | execute | ask | argv 优先、超时、输出截断、进程树终止 |
 | `run_tests` | execute | ask | 复用 command policy，记录 exit/stdout/stderr |
-| `bash` | execute | ask | 显式 fresh shell、workspace cwd、stdout/stderr、timeout、取消；长任务可返回 job id |
-| `pwsh` | execute | ask | 显式 PowerShell、native cwd/环境语义、非交互约束、exit/timeout/cancel |
+| `bash`（POSIX roster） | execute | ask | 显式 fresh shell、workspace cwd、stdout/stderr、timeout、取消；长任务可返回 job id |
+| `pwsh`（Windows roster） | execute | ask | 显式 PowerShell、native cwd/环境语义、非交互约束、exit/timeout/cancel |
 | `job_output` | read | auto | session/workspace 归属、增量输出、状态、truncated/spill 边界 |
 | `job_kill` | execute | ask | 只终止当前 session 的 background job，记录取消和最终状态 |
 | `job_retry` | execute | ask | 仅使用 durable executable/args 元数据创建 bounded replacement attempt；原失败保留审计 |
@@ -155,6 +155,17 @@ LSP 只读工具必须遵守以下不变量：
 进程工具的 `audit` 至少记录 `stdout`、`stderr`、`exitCode` 和终止 signal。取消或超时必须终止进程树，而不仅是顶层 shell/child process。
 
 `bash` 和 `pwsh` 是显式 shell 工具：每次前台调用使用 fresh shell，`workdir` 由 workspace resolver 解析，shell 字符串不会进入默认 `run_command` argv 接口。`pwsh` 使用非交互、无 profile 启动，并注入受控 LanguageMode 约束；环境变量使用 PowerShell 原生 `$env:NAME` 语义。长任务通过 `run_in_background` 返回 `jobId`，后续只通过 `job_output`/`job_kill`/`job_retry`/`job_list` 操作，job 状态和输出通过 `job/started`、`job/output`、`job/ended` 事件审计。`job/started` 可携带 bounded executable/args、attempt/maxAttempts 和 deadlineAt；不得写入环境变量或凭据。deadline、调用方取消和 host shutdown 必须在最终 job error/status 中可区分。
+
+### 平台 shell roster
+
+内置工具组装按宿主平台固定选择一个 shell：
+
+| 宿主平台 | 注册并暴露给 Agent 的 shell | 启动方式 |
+|---|---|---|
+| `win32` | `pwsh` | 解析 `CODE_REVIEW_AGENT_PWSH`、PowerShell 7 默认目录、PATH 和 Windows PowerShell 5.1，使用 `-NoLogo -NoProfile -NonInteractive -Command` |
+| `linux` / `darwin` / 其他 POSIX | `bash` | 使用 `bash -lc` |
+
+未选中的 shell 不进入 `ToolRegistry.list()`、`ToolRuntime.listTools()`、模型 schema 或工具 Prompt。直接查找未注册 shell 时，`ToolRegistry` 抛出 `ToolNotFoundError`，稳定错误码为 `TOOL_NOT_FOUND`；AgentHost 的模型工具调用边界会将该错误记录为失败的 `tool/result`。系统不会把 Bash 文本转换为 PowerShell，也不会把 PowerShell 文本转换为 Bash 或 `cmd.exe`；Windows 应用别名的存在不代表 WSL `/bin/bash` 可用。
 
 ## 调度与禁用
 

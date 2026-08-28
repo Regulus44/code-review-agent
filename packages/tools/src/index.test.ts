@@ -6,7 +6,7 @@ import path from "node:path";
 import { brand, type AgentEvent, type EventStore, type SessionId, type SessionProjection, type ToolDefinition } from "@code-review-agent/contracts";
 import { createBuiltinTools, TerminalManager } from "./builtin.js";
 import { P0_TOOL_FIXTURES } from "./behavior-fixtures.js";
-import { ToolDisabledError, ToolRegistry } from "./registry.js";
+import { ToolDisabledError, ToolNotFoundError, ToolRegistry } from "./registry.js";
 import { ToolRuntime } from "./runtime.js";
 import { DefaultPermissionPolicy } from "./permissions.js";
 import { assertValidInput, SchemaValidationError } from "./schema.js";
@@ -26,6 +26,26 @@ class MemoryStore implements EventStore {
 describe("ToolRuntime", () => {
   it("validates schemas and rejects extra fields", () => {
     expect(() => assertValidInput({ type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false }, { path: "a", extra: true })).toThrow(SchemaValidationError);
+  });
+
+  it("fails closed when a shell is absent from the selected platform roster", () => {
+    const windows = new ToolRegistry();
+    windows.registerMany(createBuiltinTools({ platform: "win32" }));
+    expect(windows.list().some((tool) => tool.name === "pwsh")).toBe(true);
+    expect(windows.list().some((tool) => tool.name === "bash")).toBe(false);
+    let error: unknown;
+    try {
+      windows.get("bash");
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(ToolNotFoundError);
+    expect((error as ToolNotFoundError).code).toBe("TOOL_NOT_FOUND");
+
+    const posix = new ToolRegistry();
+    posix.registerMany(createBuiltinTools({ platform: "linux" }));
+    expect(posix.list().some((tool) => tool.name === "bash")).toBe(true);
+    expect(posix.list().some((tool) => tool.name === "pwsh")).toBe(false);
   });
 
   it("keeps the P0 behavior fixture matrix aligned with the TypeScript registry", () => {
