@@ -64,4 +64,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/eval-mvp/verify-grad
 ## Checkpoint
 
 - 代码与组合测试：`61e3064 test(phase6): cover cross-stage integration`；
-- 文档与阶段状态：`d15a2ae docs(phase6): close integration gate and migration baseline`。
+- 文档与阶段状态：`c5b747e docs(phase6): record provider smoke boundary`（基线文档提交 `d15a2ae`）。
