@@ -48,10 +48,11 @@ import { applyToolResultBudgetAsync, assembleContext, buildPostCompactMessages, 
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModePolicySnapshot, type CodeModeSandbox, type ExecuteToolOutput, type JobSummary, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
+import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, FileObservationPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModePolicySnapshot, type CodeModeSandbox, type ExecuteToolOutput, type JobSummary, type LspServerConfig, type PermissionPreset } from "@code-review-agent/tools";
 import type { SubagentRuntime } from "@code-review-agent/subagent";
 import { GitWorktreeManager, WorkspaceResolver } from "@code-review-agent/workspace";
 import { buildAgentSystemPromptSections } from "./system-prompt.js";
+import { RepeatToolReminder, type RepeatToolReminderConfig, type RepeatToolNotice } from "./repeat-tool-reminder.js";
 import { resolveMaxParallelToolCalls, scheduleToolCalls } from "./tool-call-scheduler.js";
 
 export interface AgentHostOptions {
@@ -64,6 +65,8 @@ export interface AgentHostOptions {
   readonly maxSteps?: number;
   /** Maximum in-flight parallel-safe tool calls per assistant step. */
   readonly maxParallelToolCalls?: number;
+  /** DSH-style advisory reminder for exact repeated tool calls. */
+  readonly repeatToolReminder?: RepeatToolReminderConfig;
   readonly toolRuntime?: ToolRuntime;
   readonly toolRegistry?: ToolRegistry;
   readonly permissionPreset?: PermissionPreset;
@@ -247,6 +250,8 @@ export class AgentHost {
   private readonly maxParallelToolCallsLimit: number;
   private readonly ready: Promise<void>;
   private readonly toolRuntime: ToolRuntime;
+  private readonly fileObservationPolicy?: FileObservationPolicy;
+  private readonly repeatToolReminder: RepeatToolReminder;
   private readonly terminalManager?: TerminalManager;
   private readonly jobManager?: JobManager;
   private readonly toolPromptRegistry: ToolPromptRegistry;
@@ -308,13 +313,17 @@ export class AgentHost {
     this.maxSteps = options.maxSteps ?? 32;
     if (!Number.isInteger(this.maxSteps) || this.maxSteps < 1 || this.maxSteps > 512) throw new Error("maxSteps must be an integer between 1 and 512");
     this.maxParallelToolCallsLimit = resolveMaxParallelToolCalls(options.maxParallelToolCalls);
+    this.repeatToolReminder = new RepeatToolReminder(options.repeatToolReminder);
     const registry = options.toolRegistry ?? new ToolRegistry();
     this.toolPromptRegistry = options.toolPromptRegistry ?? new ToolPromptRegistry();
     if (options.toolPromptRegistry === undefined) this.toolPromptRegistry.registerMany(BUILTIN_TOOL_PROMPT_SPECS);
     if (options.toolRuntime === undefined) {
       this.terminalManager = new TerminalManager();
       this.jobManager = new JobManager({ eventStore: options.store });
-      if (options.toolRegistry === undefined) registry.registerMany(createBuiltinTools({ terminalManager: this.terminalManager, jobManager: this.jobManager, eventStore: options.store, ...(options.visionEnabled === undefined ? {} : { visionEnabled: options.visionEnabled }), ...(options.lspServers === undefined ? {} : { lspServers: options.lspServers }), ...(options.codeMode === undefined ? {} : { codeMode: options.codeMode }), ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }) }));
+      if (options.toolRegistry === undefined) {
+        this.fileObservationPolicy = new FileObservationPolicy();
+        registry.registerMany(createBuiltinTools({ terminalManager: this.terminalManager, jobManager: this.jobManager, eventStore: options.store, fileObservationPolicy: this.fileObservationPolicy, ...(options.visionEnabled === undefined ? {} : { visionEnabled: options.visionEnabled }), ...(options.lspServers === undefined ? {} : { lspServers: options.lspServers }), ...(options.codeMode === undefined ? {} : { codeMode: options.codeMode }), ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }) }));
+      }
       this.permissionPreset = options.permissionPreset ?? "ask-on-write";
     } else {
       this.permissionPreset = options.permissionPreset;
@@ -672,6 +681,7 @@ export class AgentHost {
     for (const [turnId, controller] of this.controllers) if (!waitingTurnIds.has(turnId)) controller.abort();
     await this.terminalManager?.shutdown();
     await this.jobManager?.shutdown();
+    this.fileObservationPolicy?.clear();
   }
 
   /**
@@ -904,6 +914,8 @@ export class AgentHost {
     if (current === undefined) throw new Error(`Unknown session: ${sessionId}`);
     if (current.deleted) return current;
     await this.options.store.append({ sessionId, type: "session/deleted", payload: { deleted: true } });
+    this.fileObservationPolicy?.clearSession(sessionId);
+    this.repeatToolReminder.reset(sessionId);
     const updated = await this.options.store.project(sessionId);
     if (updated === undefined) throw new Error(`Session disappeared: ${sessionId}`);
     return updated;
@@ -1340,6 +1352,8 @@ export class AgentHost {
       if (typeof savedTurnId !== "string") throw new Error(`Command ${idempotencyKey} has an invalid result`);
       return turnIdFrom(savedTurnId);
     }
+
+    this.repeatToolReminder.reset(sessionId);
 
     const pendingMessages = await this.conversationMessages(sessionId);
     const userMessageEvent = await this.options.store.append({
@@ -2585,12 +2599,24 @@ export class AgentHost {
       });
       const outputs = scheduled.results.map((scheduledOutput) => scheduledOutput.output);
       const toolResultEvents = await this.options.store.list(sessionId);
+      const notices: { readonly content: string; readonly source: RepeatToolNotice["source"] }[] = [];
       for (let index = 0; index < outputs.length; index += 1) {
         const output = outputs[index];
         const toolCall = response.toolCalls[index];
         if (output === undefined || toolCall === undefined) throw new Error("TOOL_RESULT_MISMATCH: tool result count did not match tool call count");
         const resultEvent = [...toolResultEvents].reverse().find(event => event.turnId === turnId && event.type === "tool/result" && event.payload["toolCallId"] === toolCall.id);
         messages.push({ role: "tool", toolCallId: toolCall.id, content: modelToolResult(output), messageId: resultEvent?.eventId ?? toolCall.id });
+        const notice = this.repeatToolReminder.observe(sessionId, toolCall.name, toolCall.arguments);
+        if (notice !== undefined) notices.push(notice);
+      }
+      for (const notice of notices) {
+        const noticeEvent = await this.options.store.append({
+          sessionId,
+          turnId,
+          type: "user/message",
+          payload: { content: notice.content, source: notice.source },
+        });
+        messages.push({ role: "user", content: notice.content, messageId: noticeEvent.eventId });
       }
       if (scheduled.aborted) {
         await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "stopped", toolCalls: response.toolCalls.length } });
@@ -3285,6 +3311,7 @@ export class AgentHost {
 }
 
 export { createInProcessSubagentProvider, type InProcessProviderOptions } from "./subagent-provider.js";
+export { RepeatToolReminder, type RepeatToolNotice, type RepeatToolReminderConfig } from "./repeat-tool-reminder.js";
 export {
   DEFAULT_MAX_PARALLEL_TOOL_CALLS,
   MAX_PARALLEL_TOOL_CALLS,

@@ -76,6 +76,8 @@ mcp/prompt
 
 `step/started` / `step/ended` 标记一个 turn 内的模型请求和工具执行边界。`assistant/message` 的 payload 可以包含 `toolCalls`，每个元素至少包含 `id`、`name` 和 JSON `arguments`；后续 `tool/result` 通过 `toolCallId` 关联到该调用。`plan/updated` 是当前实施计划的全量替换事件，`todo/updated` 是当前待办列表的全量替换事件。`interaction/requested` / `interaction/resolved` 表示 `ask_user` 暂停和恢复，不等同于工具权限审批。工具、权限、交互和 queue 事件都必须经过同一事件存储和 SSE 回放管线。
 
+`user/message` 的 payload 至少包含 `content`。Host 生成的模型可见提示可以复用该事件并附带可选 `source`，例如 DSH-style 重复工具调用提醒：`{ kind: "plugin", plugin: "repeat-tool-reminder", form: "notice", summary: "<tool> × <count>" }`。这类 notice 必须在触发它的 `tool/result` 之后追加，重放时按 Session `sequence` 作为普通 user message 提供给模型；它不改变原始 `tool/result`，也不新增事件类型。观察 hash 和重复调用计数属于 host 内存状态，不从事件日志恢复。
+
 Credential metadata 是 Phase 8.5 的 control-plane 配置事实，不属于 Session event 集合。`CredentialRecord` 只保存 tenant、kind、状态、版本和时间；secret material 只能存在 host-owned resolver 中，不能写入 EventStore、SQLite metadata、route、MCP config、SSE、diagnostics 或 Web projection。model route 的实际使用仍通过所属 Session 的 `turn/started` 或恢复 `agent/status` bounded metadata 记录；credential create/rotate/revoke/delete 本身不伪造一条 Session event。rotation 递增 credential version，旧 reference 必须 fail closed；revocation 要先停止可控的 live consumer，随后清除或标记不可用的 route。
 
 P8.5-MR0 为后续 provider/model routing 追加了 `ModelSelection`、`ModelCatalogEntry`、`ResolvedModelInfo` 与 `PreparedModelRoute` 公共类型。前两者和解析结果不携带 credential material；`PreparedModelRoute` 是执行期对象，不能写入事件、projection、SSE 或 SQLite。Provider catalog 只用于展示和能力提示，不能作为路由的硬 allowlist。MR4 的 `session/model_selected` payload 为 `{ provider, model, reasoningEffort? }`，只保存无秘密的 Session 选择；`turn/started` 或恢复 `agent/status` 同时记录当次不可变 route snapshot，后续 model/provider 切换不得改变已启动 Turn。旧事件和 tenant `ModelRouteRecord` 在没有 Session 选择时继续保持兼容回退。

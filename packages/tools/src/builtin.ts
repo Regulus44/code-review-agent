@@ -11,6 +11,7 @@ import path from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { WorkspaceResolver } from "@code-review-agent/workspace";
+import { FileObservationPolicy } from "./file-observation.js";
 import { JobManager } from "./jobs.js";
 import { readWorkspaceImage } from "./image.js";
 import { LspManager, type LspServerConfig } from "./lsp.js";
@@ -290,18 +291,19 @@ export class TerminalManager {
   }
 }
 
-export function createBuiltinTools(options: { readonly terminalManager?: TerminalManager; readonly jobManager?: JobManager; readonly eventStore?: Pick<EventStore, "list" | "project">; readonly visionEnabled?: boolean; readonly lspServers?: Readonly<Record<string, LspServerConfig>>; readonly lspManager?: LspManager; readonly codeMode?: CodeModeSandbox; readonly capabilities?: CapabilityRegistry; readonly platform?: NodeJS.Platform; readonly modelOutputChars?: number } = {}): readonly ToolDefinition[] {
+export function createBuiltinTools(options: { readonly terminalManager?: TerminalManager; readonly jobManager?: JobManager; readonly eventStore?: Pick<EventStore, "list" | "project">; readonly visionEnabled?: boolean; readonly lspServers?: Readonly<Record<string, LspServerConfig>>; readonly lspManager?: LspManager; readonly codeMode?: CodeModeSandbox; readonly capabilities?: CapabilityRegistry; readonly platform?: NodeJS.Platform; readonly modelOutputChars?: number; readonly fileObservationPolicy?: FileObservationPolicy } = {}): readonly ToolDefinition[] {
   const modelOutputChars = normalizeModelOutputChars(options.modelOutputChars);
   const terminals = options.terminalManager ?? new TerminalManager({ modelOutputChars });
   const jobs = options.jobManager ?? new JobManager(options.eventStore === undefined ? { modelOutputChars } : { eventStore: options.eventStore, modelOutputChars });
   const lsp = options.lspManager ?? new LspManager(options.lspServers);
   const capabilities = options.capabilities ?? new CapabilityRegistry();
   const platform = options.platform ?? process.platform;
+  const fileObservationPolicy = options.fileObservationPolicy ?? new FileObservationPolicy();
   const patches = new Map<string, AppliedPatch>();
   const tools: ToolDefinition[] = [
     {
       name: "read_file", description: "Read a bounded, line-numbered UTF-8 text range inside the workspace.", inputSchema: object({ path: string, offset: integer(1, Number.MAX_SAFE_INTEGER), limit: integer(1, MAX_READ_LINES) }, ["path"]), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
-      execute: async (input, context) => { const args = input as { path: string; offset?: number; limit?: number }; return readWorkspaceFile(context.workspaceRoot, args, context.signal); },
+      execute: async (input, context) => { const args = input as { path: string; offset?: number; limit?: number }; return readWorkspaceFile(context.sessionId, context.workspaceRoot, args, context.signal, fileObservationPolicy); },
     },
     {
       name: "glob", description: "List bounded, sorted files under the workspace matching a glob pattern.", inputSchema: object({ pattern: string, maxResults: integer(1, 5_000) }), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
@@ -313,7 +315,7 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
     },
     {
       name: "edit_file", description: "Apply one or more unique exact replacements with stale detection and a unified diff. Read the current file first; if a replacement is not found or is not unique, reread the file and use fresh unique context instead of repeating the same call.", inputSchema: object({ path: string, oldText: string, newText: string, expectedHash: string, edits: { type: "array" as const, maxItems: 50, items: object({ oldText: string, newText: string }, ["oldText", "newText"]) } }, ["path"]), executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "cancel",
-      execute: async (input, context) => editFile(context.workspaceRoot, input as { path: string; oldText?: string; newText?: string; expectedHash?: string; edits?: readonly { oldText: string; newText: string }[] }),
+      execute: async (input, context) => editFile(context.sessionId, context.workspaceRoot, input as { path: string; oldText?: string; newText?: string; expectedHash?: string; edits?: readonly { oldText: string; newText: string }[] }, fileObservationPolicy),
     },
     {
       name: "apply_patch", description: "Parse, preview, and apply a workspace-bound multi-file unified patch with stale-base and conflict checks.", inputSchema: object({ patch: string, dryRun: boolean, expectedHashes: { type: "object" as const, additionalProperties: true } }, ["patch"]), executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "cancel",
@@ -624,9 +626,13 @@ async function loadEditableFile(root: string, filePath: string): Promise<Editabl
   return { target, before, hash: hashText(before) };
 }
 
-async function editFile(root: string, args: { path: string; oldText?: string; newText?: string; expectedHash?: string; edits?: readonly { oldText: string; newText: string }[] }): Promise<ToolResult> {
+async function editFile(sessionId: string, root: string, args: { path: string; oldText?: string; newText?: string; expectedHash?: string; edits?: readonly { oldText: string; newText: string }[] }, observationPolicy: FileObservationPolicy): Promise<ToolResult> {
+  const observed = observationPolicy.get(sessionId, root, args.path);
+  if (observed === undefined) return fail("EDIT_NOT_OBSERVED", `Edit requires reading the current file first: ${args.path}`, "Read the target file, then retry the edit with fresh context.");
+  if (observed.kind === "absent") return fail("FILE_NOT_FOUND", `File was not found: ${args.path}`, "Read the target file again before attempting an edit.");
   const loaded = await loadEditableFile(root, args.path);
   if ("ok" in loaded) return loaded;
+  if (observed.hash !== loaded.hash) return editFailure("EDIT_STALE", args.path, loaded.before, `File hash changed after observation (expected ${observed.hash}, current ${loaded.hash})`, 0);
   if (args.expectedHash !== undefined && args.expectedHash !== loaded.hash) return editFailure("EDIT_STALE", args.path, loaded.before, `File hash changed before edit (expected ${args.expectedHash}, current ${loaded.hash})`, 0);
   const operations = args.edits ?? (args.oldText === undefined || args.newText === undefined ? [] : [{ oldText: args.oldText, newText: args.newText }]);
   if (operations.length === 0) return fail("EDIT_INPUT_INVALID", "Provide oldText/newText or at least one edits item", "Provide an exact replacement or a non-empty edits array.");
@@ -652,10 +658,12 @@ async function editFile(root: string, args: { path: string; oldText?: string; ne
   const afterText = restoreLineEndings(after, lineEnding);
   if (afterText === loaded.before) return fail("EDIT_NOOP", `Edit produced no change: ${args.path}`, "Reread the file and provide a replacement that changes the current content.");
   await writeFile(loaded.target, afterText, "utf8");
+  const afterHash = hashText(afterText);
+  observationPolicy.observe(sessionId, root, args.path, { kind: "present", hash: afterHash });
   const unifiedDiff = buildUnifiedDiff(args.path, loaded.before, afterText);
   return {
     ok: true,
-    output: { path: args.path, beforeHash: loaded.hash, afterHash: hashText(afterText), operations: statuses, changed: true, unifiedDiff },
+    output: { path: args.path, beforeHash: loaded.hash, afterHash, operations: statuses, changed: true, unifiedDiff },
     diff: { path: args.path, before: loaded.before, after: afterText },
     presentation: { kind: "diff", title: `Updated ${args.path}`, text: unifiedDiff, data: { path: args.path, operations: statuses, unifiedDiff } },
   };
@@ -693,13 +701,17 @@ async function writeWorkspaceFile(root: string, args: { path: string; content: s
   };
 }
 
-async function readWorkspaceFile(root: string, args: { path: string; offset?: number; limit?: number }, signal: AbortSignal): Promise<ToolResult> {
+async function readWorkspaceFile(sessionId: string, root: string, args: { path: string; offset?: number; limit?: number }, signal: AbortSignal, observationPolicy: FileObservationPolicy): Promise<ToolResult> {
   if (signal.aborted) return fail("TOOL_CANCELLED", "File read was cancelled");
   const offset = args.offset ?? 1;
   const limit = args.limit ?? DEFAULT_READ_LINES;
   const resolver = new WorkspaceResolver(root);
+  try { resolver.resolve(args.path); } catch { return fail("FILE_NOT_FOUND", `File was not found: ${args.path}`); }
   let target: string;
-  try { target = await resolver.resolveExisting(args.path); } catch { return fail("FILE_NOT_FOUND", `File was not found: ${args.path}`); }
+  try { target = await resolver.resolveExisting(args.path); } catch {
+    observationPolicy.observe(sessionId, root, args.path, { kind: "absent" });
+    return fail("FILE_NOT_FOUND", `File was not found: ${args.path}`);
+  }
   const info = await stat(target);
   if (!info.isFile()) return fail("FILE_NOT_REGULAR", `Target is not a regular file: ${args.path}`);
   if (info.size > MAX_FILE_BYTES) return fail("FILE_TOO_LARGE", `File exceeds ${MAX_FILE_BYTES} bytes`);
@@ -723,6 +735,7 @@ async function readWorkspaceFile(root: string, args: { path: string; offset?: nu
   const truncated = endLine < totalLines;
   const footer = truncated ? `(Output capped. Showing lines ${offset}-${endLine}. Use offset=${endLine + 1} to continue.)` : `(End of file - total ${totalLines} lines)`;
   const modelView = `<path>${args.path}</path>\n${selected.map((line) => `${line.number}: ${line.text}`).join("\n")}\n\n${footer}`;
+  observationPolicy.observe(sessionId, root, args.path, { kind: "present", hash: hashText(text) });
   return {
     ok: true,
     output: { path: args.path, offset, limit, totalLines, lines: selected, truncated, ...(truncated ? { nextOffset: endLine + 1 } : {}) },

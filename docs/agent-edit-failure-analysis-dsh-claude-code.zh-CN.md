@@ -1,6 +1,6 @@
 # Django 16046 评测失败分析与 DSH / Claude Code 参考方案
 
-> 文档状态：阶段二实施准备版  
+> 文档状态：阶段二实施完成（2A/2B）
 > 更新时间：2026-08-29  
 > 适用范围：当前 Coding Agent 的 SWE-bench Lite 评测、日常代码修改流程，以及后续编辑工具和 Runner 的改进
 

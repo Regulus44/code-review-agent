@@ -27,7 +27,8 @@ describe("Phase 7 coding browser fixture", () => {
       expect(editResult.status).toBe("completed");
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(await readFile(join(fixture.edit.workspaceRoot, "notes.txt"), "utf8")).toBe("after\n");
-      expect((await store.project(fixture.edit.sessionId))?.toolCalls[0]?.result?.diff).toMatchObject({ before: "before\n", after: "after\n" });
+      const editToolCall = (await store.project(fixture.edit.sessionId))?.toolCalls.find((toolCall) => toolCall.name === "edit_file");
+      expect(editToolCall?.result?.diff).toMatchObject({ before: "before\n", after: "after\n" });
 
       const testProjection = await store.project(fixture.testRecovery.sessionId);
       expect(testProjection?.permissionPreset).toBe("ask-on-execute");

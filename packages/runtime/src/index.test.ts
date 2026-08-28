@@ -261,6 +261,42 @@ describe("AgentHost", () => {
     expect(assemblies[0]?.fingerprint).not.toBe(assemblies[1]?.fingerprint);
   });
 
+  it("adds a DSH-style advisory notice after an exact repeated tool call without blocking it", async () => {
+    const store = new InMemoryEventStore();
+    const registry = new ToolRegistry();
+    registry.register({ name: "probe", description: "fixture", inputSchema: { type: "object" }, executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel", execute: async () => ({ ok: true, output: "ok" }) });
+    const requests: ModelRequest[] = [];
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        requests.push(request);
+        const toolResults = request.messages.filter((message) => message.role === "tool").length;
+        if (toolResults < 3) {
+          const argumentsValue = toolResults === 1 ? '{"a":1,"b":2}' : '{"b":2,"a":1}';
+          yield { type: "tool_call_start", index: 0, id: `call_probe_${toolResults + 1}`, name: "probe" };
+          yield { type: "tool_call_delta", index: 0, arguments: argumentsValue };
+          yield { type: "tool_call_end", index: 0 };
+        } else {
+          yield { type: "text_delta", text: "finished" };
+        }
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store, model, toolRuntime: new ToolRuntime({ store, registry }) });
+    const session = await host.createSession("D:/repeat-reminder-fixture");
+    const turn = await host.sendMessage(session.id, "repeat the probe");
+    await host.waitForTurn(turn);
+
+    const events = await host.events(session.id);
+    const notice = events.find((event) => event.type === "user/message" && event.payload["source"] !== undefined);
+    expect(notice?.payload).toMatchObject({ source: { kind: "plugin", plugin: "repeat-tool-reminder", form: "notice" } });
+    const noticeSequence = notice?.sequence ?? 0;
+    const toolResultSequences = events.filter((event) => event.type === "tool/result").map((event) => event.sequence);
+    expect(toolResultSequences).toHaveLength(3);
+    expect(noticeSequence).toBeGreaterThan(toolResultSequences.at(-1) ?? 0);
+    expect(requests.at(-1)?.messages.some((message) => message.role === "user" && message.content.includes("repeating the exact same tool call"))).toBe(true);
+    expect(events.some((event) => event.type === "turn/ended" && event.payload["status"] === "completed")).toBe(true);
+  });
+
   it("records M04 request/response identities and message validation metadata", async () => {
     const requests: ModelRequest[] = [];
     const model: ChatModel = {

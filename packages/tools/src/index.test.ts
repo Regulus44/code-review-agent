@@ -173,6 +173,50 @@ describe("ToolRuntime", () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
+  it("requires a prior read and refreshes the observed version after a successful edit", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-edit-observation-"));
+    try {
+      await writeFile(path.join(root, "observed.txt"), "before", "utf8");
+      const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools()); const runtime = new ToolRuntime({ store, registry }); const sessionId = brand<string, "SessionId">("ses_edit_observation");
+      const unread = await runtime.execute({ sessionId, workspaceRoot: root, name: "edit_file", input: { path: "observed.txt", oldText: "before", newText: "after" } });
+      const unreadResult = await runtime.resolvePermission(unread.permission!.id, "approved");
+      expect(unreadResult.result?.error).toMatchObject({ code: "EDIT_NOT_OBSERVED" });
+      expect(await readFile(path.join(root, "observed.txt"), "utf8")).toBe("before");
+
+      const read = await runtime.execute({ sessionId, workspaceRoot: root, name: "read_file", input: { path: "observed.txt", offset: 1, limit: 1 } });
+      expect(read.result?.ok).toBe(true);
+      const firstEdit = await runtime.execute({ sessionId, workspaceRoot: root, name: "edit_file", input: { path: "observed.txt", oldText: "before", newText: "after" } });
+      const firstEditResult = await runtime.resolvePermission(firstEdit.permission!.id, "approved");
+      expect(firstEditResult.status).toBe("completed");
+
+      const secondEdit = await runtime.execute({ sessionId, workspaceRoot: root, name: "edit_file", input: { path: "observed.txt", oldText: "after", newText: "final" } });
+      const secondEditResult = await runtime.resolvePermission(secondEdit.permission!.id, "approved");
+      expect(secondEditResult.status).toBe("completed");
+      expect(await readFile(path.join(root, "observed.txt"), "utf8")).toBe("final");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("rejects an edit against an externally changed observed file until it is reread", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-edit-observation-stale-"));
+    try {
+      await writeFile(path.join(root, "stale.txt"), "before", "utf8");
+      const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools()); const runtime = new ToolRuntime({ store, registry }); const sessionId = brand<string, "SessionId">("ses_edit_observation_stale");
+      await runtime.execute({ sessionId, workspaceRoot: root, name: "read_file", input: { path: "stale.txt" } });
+      await writeFile(path.join(root, "stale.txt"), "changed", "utf8");
+      const currentHash = createHash("sha256").update("changed", "utf8").digest("hex");
+      const stale = await runtime.execute({ sessionId, workspaceRoot: root, name: "edit_file", input: { path: "stale.txt", expectedHash: currentHash, oldText: "changed", newText: "edited" } });
+      const staleResult = await runtime.resolvePermission(stale.permission!.id, "approved");
+      expect(staleResult.result?.error).toMatchObject({ code: "EDIT_STALE" });
+      expect(await readFile(path.join(root, "stale.txt"), "utf8")).toBe("changed");
+
+      await runtime.execute({ sessionId, workspaceRoot: root, name: "read_file", input: { path: "stale.txt" } });
+      const retried = await runtime.execute({ sessionId, workspaceRoot: root, name: "edit_file", input: { path: "stale.txt", oldText: "changed", newText: "edited" } });
+      const retriedResult = await runtime.resolvePermission(retried.permission!.id, "approved");
+      expect(retriedResult.status).toBe("completed");
+      expect(await readFile(path.join(root, "stale.txt"), "utf8")).toBe("edited");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it("applies structured edits only against the expected current version", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "cra-edit-contract-"));
     try {
@@ -180,6 +224,7 @@ describe("ToolRuntime", () => {
       await writeFile(path.join(root, "multi.txt"), before, "utf8");
       const expectedHash = createHash("sha256").update(before, "utf8").digest("hex");
       const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools()); const runtime = new ToolRuntime({ store, registry }); const sessionId = brand<string, "SessionId">("ses_edit_contract");
+      await runtime.execute({ sessionId, workspaceRoot: root, name: "read_file", input: { path: "multi.txt" } });
       const pending = await runtime.execute({ sessionId, workspaceRoot: root, name: "edit_file", input: { path: "multi.txt", expectedHash, edits: [{ oldText: "alpha", newText: "ALPHA" }, { oldText: "gamma", newText: "GAMMA" }] } });
       const result = await runtime.resolvePermission(pending.permission!.id, "approved");
       expect(result.status).toBe("completed");
@@ -196,6 +241,7 @@ describe("ToolRuntime", () => {
       await writeFile(path.join(root, "conflict.txt"), before, "utf8");
       const expectedHash = createHash("sha256").update(before, "utf8").digest("hex");
       const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools()); const runtime = new ToolRuntime({ store, registry }); const sessionId = brand<string, "SessionId">("ses_edit_conflict");
+      await runtime.execute({ sessionId, workspaceRoot: root, name: "read_file", input: { path: "conflict.txt" } });
       const pending = await runtime.execute({ sessionId, workspaceRoot: root, name: "edit_file", input: { path: "conflict.txt", expectedHash, oldText: "before", newText: "after" } });
       await writeFile(path.join(root, "conflict.txt"), "user change", "utf8");
       const result = await runtime.resolvePermission(pending.permission!.id, "approved");
@@ -210,6 +256,7 @@ describe("ToolRuntime", () => {
       const before = "alpha\nbeta\ngamma";
       await writeFile(path.join(root, "missing.txt"), before, "utf8");
       const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools()); const runtime = new ToolRuntime({ store, registry }); const sessionId = brand<string, "SessionId">("ses_edit_not_found");
+      await runtime.execute({ sessionId, workspaceRoot: root, name: "read_file", input: { path: "missing.txt" } });
       const pending = await runtime.execute({ sessionId, workspaceRoot: root, name: "edit_file", input: { path: "missing.txt", oldText: "delta", newText: "DELTA" } });
       const result = await runtime.resolvePermission(pending.permission!.id, "approved");
       const toolResult = result.result!;
@@ -227,6 +274,7 @@ describe("ToolRuntime", () => {
       const before = "same\nmiddle\nsame";
       await writeFile(path.join(root, "ambiguous.txt"), before, "utf8");
       const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools()); const runtime = new ToolRuntime({ store, registry }); const sessionId = brand<string, "SessionId">("ses_edit_ambiguous");
+      await runtime.execute({ sessionId, workspaceRoot: root, name: "read_file", input: { path: "ambiguous.txt" } });
       const pending = await runtime.execute({ sessionId, workspaceRoot: root, name: "edit_file", input: { path: "ambiguous.txt", oldText: "same", newText: "changed" } });
       const result = await runtime.resolvePermission(pending.permission!.id, "approved");
       expect(result.status).toBe("failed");
@@ -242,6 +290,7 @@ describe("ToolRuntime", () => {
       const before = "before\r\nmiddle\r\n";
       await writeFile(path.join(root, "crlf.txt"), before, "utf8");
       const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools()); const runtime = new ToolRuntime({ store, registry }); const sessionId = brand<string, "SessionId">("ses_edit_crlf");
+      await runtime.execute({ sessionId, workspaceRoot: root, name: "read_file", input: { path: "crlf.txt" } });
       const pending = await runtime.execute({ sessionId, workspaceRoot: root, name: "edit_file", input: { path: "crlf.txt", oldText: "before\nmiddle", newText: "after\nmiddle" } });
       const result = await runtime.resolvePermission(pending.permission!.id, "approved");
       expect(result.status).toBe("completed");

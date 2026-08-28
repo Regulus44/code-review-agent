@@ -110,6 +110,8 @@ export async function seedCodingFixture(options: CodingFixtureSeedOptions): Prom
   const editSession = await options.host.createSession(editRoot, "ask-on-write");
   const editTurn = turnId("edit");
   await appendTurnPrelude(options.store, editSession.id, editTurn, "Edit fixture: change notes.txt after approval, then report the diff.");
+  const editReadOutput = await options.host.executeTool(editSession.id, "read_file", { path: "notes.txt", offset: 1, limit: 20 }, editTurn, `${prefix}-edit-read`, undefined, "agent");
+  if (editReadOutput.status !== "completed") throw new Error(`Edit fixture observation did not complete: ${editReadOutput.status}`);
   const editOutput = await options.host.executeTool(editSession.id, "edit_file", {
     path: "notes.txt",
     expectedHash: hash(editBefore),
