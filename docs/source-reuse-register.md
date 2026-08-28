@@ -474,3 +474,19 @@ ID:
 明确未复用：Claude Code 的 collapse 算法、commit log、persist 实现、snip、后台折叠、账户/遥测、provider cache edit 或商业服务；M14 不追加虚假 collapse 事件。
 
 新增测试：`packages/runtime/src/index.test.ts` 和 `apps/web/src/presentation/settings-presenter.test.ts` 的 deferred capability、feature 全 false 与缺失 metadata fallback。
+
+### CC-016
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`src/utils/toolResultStorage.ts`、`src/constants/toolLimits.ts`、`src/query.ts` 的 content replacement state
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；本次没有复制 Claude Code 实现，只重新实现单工具结果阈值、exclusive create、preview 和 durable receipt。
+
+本项目路径：`packages/context/src/tool-result-storage.ts`、`packages/runtime/src/index.ts`、`packages/contracts/src/index.ts`、`packages/storage/src/index.ts`、`apps/api/src/artifacts.ts`。
+
+范围：`50000` 字符、`100000` token hard cap、`2000` UTF-8 bytes preview、`.txt/.json` artifact、失败 fail-closed、重启 replacement replay；本项目使用 workspace-relative path、EventStore 和 WorkspaceResolver，未暴露宿主绝对路径。
+
+新增测试：`packages/context/src/tool-result-storage.test.ts`、`packages/runtime/src/index.test.ts`、`apps/api/src/artifacts.test.ts` 的阈值、JSON/media、EEXIST、恢复和 workspace 越界场景。

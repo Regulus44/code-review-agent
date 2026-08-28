@@ -57,6 +57,7 @@ export type AgentEventType =
   | "context/messages_normalized"
   | "context/tool_pairing_repaired"
   | "context/tool_results_budgeted"
+  | "context/tool_result_persisted"
   | "context/microcompacted"
   | "context/session_memory_compacted"
   | "context/session_memory_compaction_failed"
@@ -122,7 +123,7 @@ export const AGENT_EVENT_TYPES: readonly AgentEventType[] = [
   "subagent/descriptor", "subagent/start", "subagent/end", "subagent/inbox", "subagent/settlement",
   "goal/created", "goal/updated", "goal/ended", "plan/updated", "todo/updated",
   "context/compacted", "context/compaction_failed", "context/messages_normalized", "context/tool_pairing_repaired",
-  "context/tool_results_budgeted", "context/microcompacted", "context/session_memory_compacted",
+  "context/tool_results_budgeted", "context/tool_result_persisted", "context/microcompacted", "context/session_memory_compacted",
   "context/session_memory_compaction_failed", "context/session_memory_extraction_started",
   "context/session_memory_extraction_completed", "context/session_memory_extraction_failed",
   "context/session_memory_extraction_cancelled", "context/project_memory_loaded", "context/project_memory_recalled",
@@ -169,6 +170,25 @@ export interface ArtifactRef {
   readonly sizeBytes?: number;
   readonly digest?: string;
   readonly preview?: string;
+}
+
+export type ToolResultReplacementReason = "max-chars" | "max-tokens" | "persistence-failed";
+
+/** Provider-neutral durable receipt for a model-visible tool-result replacement. */
+export interface ToolResultReplacementRecord {
+  readonly kind: "tool-result";
+  readonly toolCallId: string;
+  readonly toolName?: string;
+  readonly artifact: ArtifactRef;
+  /** Workspace-relative path; never a host absolute path. */
+  readonly relativePath: string;
+  readonly originalChars: number;
+  readonly originalBytes: number;
+  readonly originalTokens: number;
+  readonly thresholdChars: number;
+  readonly preview: string;
+  readonly previewBytes: number;
+  readonly reason: ToolResultReplacementReason;
 }
 
 export interface TaskBudget {
@@ -629,6 +649,8 @@ export interface SessionProjection extends SessionSummary {
   readonly contextRecovery?: ContextRecoveryProjection;
   readonly contextTranscript?: ContextTranscriptSegment;
   readonly contextRestore?: ContextSessionRestoreProjection;
+  /** Durable receipts for large tool-result model-view replacements. */
+  readonly toolResultReplacements?: readonly ToolResultReplacementRecord[];
   readonly worktrees?: readonly WorktreeProjection[];
   /** Whole-log projection; absent only for legacy projection JSON. */
   readonly stats?: SessionStatsProjection;

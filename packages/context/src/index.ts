@@ -12,6 +12,17 @@ export { groupMessagesByApiRound } from "./api-round.js";
 export { normalizeMessagesForAPI } from "./api-normalize.js";
 export { ensureToolResultPairing } from "./tool-pairing.js";
 export { applyToolResultBudget, DEFAULT_COMPACTABLE_TOOLS, DEFAULT_MICROCOMPACT_MESSAGE } from "./tool-result-budget.js";
+export {
+  buildToolResultModelView,
+  containsNonTextContent,
+  createToolResultStorage,
+  estimateToolResultTokens,
+  truncateUtf8,
+  DEFAULT_TOOL_RESULT_MAX_TOKENS,
+  DEFAULT_TOOL_RESULT_PERSIST_THRESHOLD_CHARS,
+  DEFAULT_TOOL_RESULT_PREVIEW_BYTES,
+  TOOL_RESULT_ARTIFACTS_ROOT,
+} from "./tool-result-storage.js";
 export { adjustIndexToPreserveAPIInvariants, calculateMessagesToKeepIndex, compactWithSessionMemory, DEFAULT_SESSION_MEMORY_COMPACT_CONFIG } from "./session-memory-compact.js";
 export {
   createSessionMemoryFileWriteGuard,
@@ -111,6 +122,14 @@ export type {
   ToolResultBudgetTrigger,
   ToolResultContextView,
 } from "./tool-result-budget.js";
+export type {
+  ToolResultStorage,
+  ToolResultStorageConfig,
+  ToolResultStorageInput,
+  ToolResultStorageOutcome,
+  ToolResultStorageStatus,
+  ToolResultStorageWriter,
+} from "./tool-result-storage.js";
 export type {
   SessionMemoryCompactConfig,
   SessionMemoryCompactOptions,

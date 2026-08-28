@@ -262,7 +262,7 @@ EventStore 的完整 `tool/result` 不被替换或删除。落盘、预览和 mi
 
 阶段 2 回滚：回滚默认常量和校验范围；事件 schema 不变，旧事件继续可回放。
 
-### 阶段 3：按 Claude Code 实现单工具结果落盘与预览
+### 阶段 3：按 Claude Code 实现单工具结果落盘与预览（已完成，2026-08-28）
 
 本阶段修改以下内容：
 
@@ -288,6 +288,8 @@ EventStore 的完整 `tool/result` 不被替换或删除。落盘、预览和 mi
 - 落盘失败时 fail closed：保留有界错误结果，不把无限大原文继续发送给模型。
 
 阶段 3 回滚：停止创建新 replacement，保留已有 artifact 和事件可读；model view 回退到 EventStore 原始结果与现有 microcompact。
+
+阶段 3 已按上述入口完成。实际实现固定使用 `.agent-artifacts/tool-results/<session>/<toolCallId>.(txt|json)` 的 workspace-relative 路径，`context/tool_result_persisted` 只保存 receipt metadata；Runtime 在 `prepareModelContext()` 的 normalize/tool pairing 后执行单结果持久化，重启回放从完整 `tool/result` 和 receipt 重建相同 preview。阶段 4 的单消息聚合、时间型 microcompact 和阶段 5 的并行 scheduler 未提前实现。详细过程见 [阶段 3 单工具结果落盘实施日志](development-log/phase-3-tool-result-storage-2026-08-28.zh-CN.md)。
 
 ### 阶段 4：实现单消息工具结果聚合预算和 Claude Code 时间型 microcompact
 

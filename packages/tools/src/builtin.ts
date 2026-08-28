@@ -21,6 +21,8 @@ import { resolvePwshPath } from "./pwsh-path.js";
 
 const ALLOWED_EXECUTABLES = new Set(["git", "node", "npm", "pnpm", "vitest"]);
 const MAX_PROCESS_OUTPUT_BYTES = 512 * 1024;
+export const DEFAULT_MODEL_OUTPUT_CHARS = 30_000;
+export const MAX_MODEL_OUTPUT_CHARS = 150_000;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_SEARCH_FILE_BYTES = 1 * 1024 * 1024;
 const DEFAULT_GLOB_RESULTS = 1_000;
@@ -54,6 +56,10 @@ export interface TerminalSummary {
   readonly bufferedBytes: number;
 }
 
+export interface TerminalManagerOptions {
+  readonly modelOutputChars?: number;
+}
+
 interface ManagedTerminal extends Omit<TerminalSummary, "status" | "exitCode" | "signal" | "bufferedBytes"> {
   status: TerminalStatus;
   exitCode: number | undefined;
@@ -68,6 +74,14 @@ interface ManagedTerminal extends Omit<TerminalSummary, "status" | "exitCode" | 
 /** In-process terminal session manager. State is scoped by session/workspace and exposed through tool events. */
 export class TerminalManager {
   private readonly sessions = new Map<string, ManagedTerminal>();
+  private readonly modelOutputChars: number;
+
+  constructor(options: TerminalManagerOptions = {}) {
+    const requested = options.modelOutputChars;
+    this.modelOutputChars = requested !== undefined && Number.isFinite(requested) && requested > 0
+      ? Math.min(MAX_MODEL_OUTPUT_CHARS, Math.floor(requested))
+      : DEFAULT_MODEL_OUTPUT_CHARS;
+  }
 
   /** Rebuild terminal metadata from durable events after a host restart. */
   async restore(
@@ -175,7 +189,7 @@ export class TerminalManager {
 
   async read(input: { sessionId: string; terminalId: string; maxBytes?: number; waitMs?: number }, signal: AbortSignal): Promise<ToolResult> {
     const terminal = this.get(input.sessionId, input.terminalId);
-    const maxBytes = Math.min(Math.max(input.maxBytes ?? DEFAULT_TERMINAL_READ_BYTES, 1), MAX_PROCESS_OUTPUT_BYTES);
+    const maxBytes = Math.min(Math.max(input.maxBytes ?? DEFAULT_TERMINAL_READ_BYTES, 1), this.modelOutputChars, MAX_PROCESS_OUTPUT_BYTES);
     const waitMs = Math.min(Math.max(input.waitMs ?? 0, 0), 5_000);
     if (waitMs > 0 && terminal.readOffset >= terminal.output.length && terminal.status === "running") await waitForTerminalOutput(terminal, waitMs, signal);
     if (signal.aborted) return fail("TERMINAL_CANCELLED", "Terminal read was cancelled");
@@ -276,9 +290,10 @@ export class TerminalManager {
   }
 }
 
-export function createBuiltinTools(options: { readonly terminalManager?: TerminalManager; readonly jobManager?: JobManager; readonly eventStore?: Pick<EventStore, "list" | "project">; readonly visionEnabled?: boolean; readonly lspServers?: Readonly<Record<string, LspServerConfig>>; readonly lspManager?: LspManager; readonly codeMode?: CodeModeSandbox; readonly capabilities?: CapabilityRegistry; readonly platform?: NodeJS.Platform } = {}): readonly ToolDefinition[] {
-  const terminals = options.terminalManager ?? new TerminalManager();
-  const jobs = options.jobManager ?? new JobManager(options.eventStore === undefined ? {} : { eventStore: options.eventStore });
+export function createBuiltinTools(options: { readonly terminalManager?: TerminalManager; readonly jobManager?: JobManager; readonly eventStore?: Pick<EventStore, "list" | "project">; readonly visionEnabled?: boolean; readonly lspServers?: Readonly<Record<string, LspServerConfig>>; readonly lspManager?: LspManager; readonly codeMode?: CodeModeSandbox; readonly capabilities?: CapabilityRegistry; readonly platform?: NodeJS.Platform; readonly modelOutputChars?: number } = {}): readonly ToolDefinition[] {
+  const modelOutputChars = normalizeModelOutputChars(options.modelOutputChars);
+  const terminals = options.terminalManager ?? new TerminalManager({ modelOutputChars });
+  const jobs = options.jobManager ?? new JobManager(options.eventStore === undefined ? { modelOutputChars } : { eventStore: options.eventStore, modelOutputChars });
   const lsp = options.lspManager ?? new LspManager(options.lspServers);
   const capabilities = options.capabilities ?? new CapabilityRegistry();
   const platform = options.platform ?? process.platform;
@@ -366,13 +381,13 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
     },
     {
       name: "run_command", description: "Run an allowlisted executable with argv inside the workspace.", inputSchema: object({ executable: string, args: { type: "array" as const, items: string, maxItems: 32 } }, ["executable"]), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
-      execute: async (input, context) => { const args = input as { executable: string; args?: string[] }; if (!isAllowedExecutable(args.executable)) return fail("COMMAND_NOT_ALLOWED", "Executable is not on the allowlist"); return runArgv(args.executable, args.args ?? [], context.workspaceRoot, context.signal); },
+      execute: async (input, context) => { const args = input as { executable: string; args?: string[] }; if (!isAllowedExecutable(args.executable)) return fail("COMMAND_NOT_ALLOWED", "Executable is not on the allowlist"); return runArgv(args.executable, args.args ?? [], context.workspaceRoot, context.signal, modelOutputChars); },
     },
     {
       name: "run_tests", description: "Run the repository test command using argv.", inputSchema: object({ command: string, args: { type: "array" as const, items: string, maxItems: 32 } }, ["command"]), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
-      execute: async (input, context) => { const args = input as { command: string; args?: string[] }; if (!isAllowedExecutable(args.command)) return fail("COMMAND_NOT_ALLOWED", "Test command is not on the allowlist"); return runArgv(args.command, args.args ?? [], context.workspaceRoot, context.signal); },
+      execute: async (input, context) => { const args = input as { command: string; args?: string[] }; if (!isAllowedExecutable(args.command)) return fail("COMMAND_NOT_ALLOWED", "Test command is not on the allowlist"); return runArgv(args.command, args.args ?? [], context.workspaceRoot, context.signal, modelOutputChars); },
     },
-    ...(platform === "win32" ? [createShellTool("pwsh", jobs, platform)] : [createShellTool("bash", jobs, platform)]),
+    ...(platform === "win32" ? [createShellTool("pwsh", jobs, platform, modelOutputChars)] : [createShellTool("bash", jobs, platform, modelOutputChars)]),
     {
       name: "job_output", description: "Read bounded incremental output and status from a background job in this session.", inputSchema: object({ jobId: string, maxBytes: integer(1, MAX_PROCESS_OUTPUT_BYTES) }, ["jobId"]), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
       execute: async (input, context) => jobs.read(context.sessionId, (input as { jobId: string }).jobId, (input as { maxBytes?: number }).maxBytes),
@@ -529,7 +544,7 @@ interface ShellToolInput {
 
 type ShellKind = "bash" | "pwsh";
 
-function createShellTool(kind: ShellKind, jobs: JobManager, platform: NodeJS.Platform): ToolDefinition {
+function createShellTool(kind: ShellKind, jobs: JobManager, platform: NodeJS.Platform, modelOutputChars: number): ToolDefinition {
   const isPwsh = kind === "pwsh";
   return {
     name: kind,
@@ -541,11 +556,11 @@ function createShellTool(kind: ShellKind, jobs: JobManager, platform: NodeJS.Pla
     riskLevel: "execute",
     approvalMode: "ask",
     interruptBehavior: "cancel",
-    execute: async (input, context) => executeShellCommand(kind, input as ShellToolInput, context, jobs, platform),
+    execute: async (input, context) => executeShellCommand(kind, input as ShellToolInput, context, jobs, platform, modelOutputChars),
   };
 }
 
-async function executeShellCommand(kind: ShellKind, args: ShellToolInput, context: ToolContext, jobs: JobManager, platform: NodeJS.Platform): Promise<ToolResult> {
+async function executeShellCommand(kind: ShellKind, args: ShellToolInput, context: ToolContext, jobs: JobManager, platform: NodeJS.Platform, modelOutputChars: number): Promise<ToolResult> {
   if (args.command.trim().length === 0) return fail("COMMAND_REQUIRED", "Shell command cannot be empty");
   const resolver = new WorkspaceResolver(context.workspaceRoot);
   let cwd: string;
@@ -557,7 +572,7 @@ async function executeShellCommand(kind: ShellKind, args: ShellToolInput, contex
   if (args.run_in_background === true) {
     return jobs.start({ sessionId: context.sessionId, workspaceRoot: context.workspaceRoot, cwd, executable: launch.executable, args: launch.args, command: args.command, env, ...(args.maxAttempts === undefined ? {} : { retry: { maxAttempts: args.maxAttempts, ...(args.retryBackoffMs === undefined ? {} : { backoffMs: args.retryBackoffMs }) } }), ...(args.deadlineMs === undefined ? {} : { deadlineMs: args.deadlineMs }), signal: context.signal, appendEvent: async (type, payload) => context.appendEvent(type, payload) });
   }
-  return runShellForeground(kind, args.command, label, cwd, launch.executable, launch.args, args.timeoutMs ?? 120_000, context.signal, env);
+  return runShellForeground(kind, args.command, label, cwd, launch.executable, launch.args, args.timeoutMs ?? 120_000, context.signal, env, modelOutputChars);
 }
 
 function shellLaunch(kind: ShellKind, command: string, platform: NodeJS.Platform): { readonly executable: string; readonly args: readonly string[] } {
@@ -566,7 +581,7 @@ function shellLaunch(kind: ShellKind, command: string, platform: NodeJS.Platform
   return { executable: resolvePwshPath(undefined, process.env, platform), args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", constrained] };
 }
 
-function runShellForeground(kind: ShellKind, command: string, label: string, cwd: string, executable: string, args: readonly string[], timeoutMs: number, signal: AbortSignal, env: Readonly<Record<string, string>>): Promise<ToolResult> {
+function runShellForeground(kind: ShellKind, command: string, label: string, cwd: string, executable: string, args: readonly string[], timeoutMs: number, signal: AbortSignal, env: Readonly<Record<string, string>>, modelOutputChars: number): Promise<ToolResult> {
   return new Promise((resolve) => {
     const child = spawn(executable, [...args], { cwd, detached: false, shell: false, windowsHide: true, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...env } });
     let stdout = "";
@@ -589,8 +604,8 @@ function runShellForeground(kind: ShellKind, command: string, label: string, cwd
       if (signal.aborted) finish({ ...fail("COMMAND_CANCELLED", `${kind} command was cancelled`), output, audit, usage: { bytes, truncated } });
       else if (timedOut) finish({ ...fail("TIMEOUT", `${kind} command exceeded ${timeoutMs}ms`), output, audit, usage: { bytes, truncated } });
       else if (truncated) finish({ ...fail("OUTPUT_TRUNCATED", `${kind} output exceeded ${MAX_PROCESS_OUTPUT_BYTES} bytes`), output, audit, usage: { bytes, truncated } });
-      else if (exitCode === 0) finish({ ...ok(output), audit, usage: { bytes, truncated }, presentation: { kind: "terminal", title: label, text: output, data: audit } });
-      else finish({ ok: false, output, audit, usage: { bytes, truncated }, error: { code: "NON_ZERO_EXIT", message: `${kind} exited with code ${exitCode}`, remedy: "Inspect stdout/stderr and adjust the command only when the failure supports it." }, presentation: { kind: "terminal", title: label, text: output, data: audit } });
+      else if (exitCode === 0) finish({ ...ok(output), audit, usage: { bytes, truncated }, modelView: boundModelOutput(output, modelOutputChars), presentation: { kind: "terminal", title: label, text: boundModelOutput(output, modelOutputChars), data: audit } });
+      else finish({ ok: false, output, audit, usage: { bytes, truncated }, modelView: boundModelOutput(output, modelOutputChars), error: { code: "NON_ZERO_EXIT", message: `${kind} exited with code ${exitCode}`, remedy: "Inspect stdout/stderr and adjust the command only when the failure supports it." }, presentation: { kind: "terminal", title: label, text: boundModelOutput(output, modelOutputChars), data: audit } });
     });
     signal.addEventListener("abort", abort, { once: true });
   });
@@ -785,7 +800,7 @@ function relativeGitPath(cwd: string, value: string): string { const resolver = 
 
 async function deleteWorkspacePath(root: string, args: { path: string; recursive?: boolean; permanent?: boolean }): Promise<ToolResult> { const resolver = new WorkspaceResolver(root); const candidate = resolver.resolve(args.path); if (candidate === resolver.rootPath) return fail("DELETE_WORKSPACE_ROOT", "Refusing to delete the workspace root"); const existing = await resolver.resolveExisting(args.path); const info = await stat(existing); if (args.permanent === true) { await rm(candidate, { force: false, recursive: args.recursive ?? info.isDirectory() }); return ok({ path: args.path, permanent: true, type: info.isDirectory() ? "directory" : "file" }); } const trashRoot = path.join(resolver.rootPath, ".agent-trash"); await mkdir(trashRoot, { recursive: true }); const trashPath = path.join(trashRoot, `${Date.now()}-${randomUUID()}-${path.basename(candidate)}`); await rename(candidate, trashPath); return ok({ path: args.path, permanent: false, trashedTo: path.relative(resolver.rootPath, trashPath).replaceAll("\\", "/"), type: info.isDirectory() ? "directory" : "file" }); }
 
-async function runArgv(command: string, args: string[], cwd: string, signal: AbortSignal): Promise<ToolResult> {
+async function runArgv(command: string, args: string[], cwd: string, signal: AbortSignal, modelOutputChars = Number.POSITIVE_INFINITY): Promise<ToolResult> {
   try {
     if (!(await stat(cwd)).isDirectory()) return fail("WORKDIR_INVALID", `Working directory is not a directory: ${cwd}`);
   } catch { return fail("WORKDIR_INVALID", `Working directory does not exist: ${cwd}`); }
@@ -806,21 +821,22 @@ async function runArgv(command: string, args: string[], cwd: string, signal: Abo
     };
     child.stdout.on("data", (chunk: Buffer) => append("stdout", chunk));
     child.stderr.on("data", (chunk: Buffer) => append("stderr", chunk));
+    const present = (result: ToolResult): ToolResult => modelOutputChars !== Number.POSITIVE_INFINITY && typeof result.output === "string" ? { ...result, modelView: boundModelOutput(result.output, modelOutputChars) } : result;
     const abort = () => terminateProcessTree(child);
     signal.addEventListener("abort", abort, { once: true });
     child.on("error", (error) => {
       signal.removeEventListener("abort", abort);
       const code = (error as NodeJS.ErrnoException).code === "ENOENT" ? "COMMAND_NOT_FOUND" : "COMMAND_FAILED";
-      resolve(fail(code, error.message));
+      resolve(present(fail(code, error.message)));
     });
     child.on("close", (code, signalName) => {
       signal.removeEventListener("abort", abort);
       const usage = { bytes, truncated };
       const audit = { stdout, stderr, exitCode: code, signal: signalName ?? undefined };
-      if (signal.aborted || signalName) resolve({ ...fail("COMMAND_CANCELLED", "Command was cancelled"), output, audit, usage });
-      else if (truncated) resolve({ ok: false, output, audit, usage, error: { code: "OUTPUT_TRUNCATED", message: `Command output exceeded ${MAX_PROCESS_OUTPUT_BYTES} bytes`, remedy: "Narrow the command or use a bounded output path." }, presentation: { kind: "terminal", title: "Command output truncated", text: output } });
-      else if (code === 0) resolve({ ...ok(output), audit, usage });
-      else resolve({ ok: false, output, audit, usage, error: { code: "NON_ZERO_EXIT", message: `Command exited with code ${code}`, remedy: "Inspect stdout/stderr and exit metadata before selecting the next command." }, presentation: { kind: "terminal", title: "Command failed", text: output } });
+      if (signal.aborted || signalName) resolve(present({ ...fail("COMMAND_CANCELLED", "Command was cancelled"), output, audit, usage }));
+      else if (truncated) resolve(present({ ok: false, output, audit, usage, error: { code: "OUTPUT_TRUNCATED", message: `Command output exceeded ${MAX_PROCESS_OUTPUT_BYTES} bytes`, remedy: "Narrow the command or use a bounded output path." }, presentation: { kind: "terminal", title: "Command output truncated", text: output } }));
+      else if (code === 0) resolve(present({ ...ok(output), audit, usage }));
+      else resolve(present({ ok: false, output, audit, usage, error: { code: "NON_ZERO_EXIT", message: `Command exited with code ${code}`, remedy: "Inspect stdout/stderr and exit metadata before selecting the next command." }, presentation: { kind: "terminal", title: "Command failed", text: output } }));
     });
   });
 }
@@ -829,6 +845,13 @@ function terminateProcessTree(child: ChildProcessWithoutNullStreams | ReturnType
 function defaultShell(): string { return process.platform === "win32" ? (process.env["ComSpec"] ?? "cmd.exe") : (process.env["SHELL"] ?? "/bin/sh"); }
 function defaultShellArgs(): string[] { return process.platform === "win32" ? ["/d", "/q"] : ["-i"]; }
 function isAllowedExecutable(command: string): boolean { return /^[a-zA-Z0-9._-]+$/u.test(command) && ALLOWED_EXECUTABLES.has(command.toLowerCase()); }
+function normalizeModelOutputChars(value: number | undefined): number { return value !== undefined && Number.isFinite(value) && value > 0 ? Math.min(MAX_MODEL_OUTPUT_CHARS, Math.floor(value)) : DEFAULT_MODEL_OUTPUT_CHARS; }
+function boundModelOutput(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  const marker = "\n[model output bounded; use the reported artifact or follow-up read to inspect more]";
+  if (maxChars <= marker.length) return marker.slice(0, maxChars);
+  return `${value.slice(0, maxChars - marker.length)}${marker}`;
+}
 function terminalStatus(value: unknown): TerminalStatus { return value === "exited" || value === "closed" || value === "interrupted" ? value : "running"; }
 function waitForTerminalOutput(terminal: ManagedTerminal, waitMs: number, signal: AbortSignal): Promise<void> { return new Promise((resolve) => { const started = Date.now(); const timer = setInterval(() => { if (signal.aborted || terminal.readOffset < terminal.output.length || terminal.status !== "running" || Date.now() - started >= waitMs) { clearInterval(timer); resolve(); } }, 25); }); }
 function waitForChildClose(child: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<void> { if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(); return new Promise((resolve) => { let settled = false; const finish = () => { if (settled) return; settled = true; clearTimeout(timer); resolve(); }; const timer = setTimeout(finish, timeoutMs); child.once("close", finish); }); }

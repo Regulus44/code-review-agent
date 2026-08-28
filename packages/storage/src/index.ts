@@ -28,6 +28,7 @@ import {
   type PermissionPreset,
   type ChildSessionMetadata,
   type ArtifactRef,
+  type ToolResultReplacementRecord,
   type TaskReport,
   type TaskBudget,
   type ToolError,
@@ -328,6 +329,39 @@ function contextAttachmentProjections(value: unknown): readonly ContextAttachmen
       ? [{ id: record["id"], kind: record["kind"], tokenEstimate: Math.max(0, Math.floor(record["tokenEstimate"])) }]
       : [];
   }).slice(0, 256);
+}
+
+function toolResultReplacementRecord(value: Readonly<Record<string, unknown>>): ToolResultReplacementRecord | undefined {
+  const artifactRaw = value["artifact"];
+  if (typeof value["toolCallId"] !== "string" || typeof value["relativePath"] !== "string" || typeof value["originalChars"] !== "number" || typeof value["originalBytes"] !== "number" || typeof value["originalTokens"] !== "number" || typeof value["thresholdChars"] !== "number" || typeof value["preview"] !== "string" || typeof value["previewBytes"] !== "number" || (value["reason"] !== "max-chars" && value["reason"] !== "max-tokens" && value["reason"] !== "persistence-failed") || typeof artifactRaw !== "object" || artifactRaw === null) return undefined;
+  const artifact = artifactRaw as Record<string, unknown>;
+  if (typeof artifact["id"] !== "string" || typeof artifact["label"] !== "string" || typeof artifact["kind"] !== "string") return undefined;
+  const kind = artifact["kind"];
+  if (kind !== "file" && kind !== "diff" && kind !== "log" && kind !== "url" && kind !== "json" && kind !== "other") return undefined;
+  const artifactRef: ArtifactRef = {
+    id: artifact["id"],
+    kind,
+    label: artifact["label"],
+    ...(typeof artifact["path"] === "string" ? { path: artifact["path"] } : {}),
+    ...(typeof artifact["mediaType"] === "string" ? { mediaType: artifact["mediaType"] } : {}),
+    ...(typeof artifact["sizeBytes"] === "number" ? { sizeBytes: Math.max(0, Math.floor(artifact["sizeBytes"])) } : {}),
+    ...(typeof artifact["digest"] === "string" ? { digest: artifact["digest"] } : {}),
+    ...(typeof artifact["preview"] === "string" ? { preview: artifact["preview"] } : {}),
+  };
+  return {
+    kind: "tool-result",
+    toolCallId: value["toolCallId"],
+    ...(typeof value["toolName"] === "string" ? { toolName: value["toolName"] } : {}),
+    artifact: artifactRef,
+    relativePath: value["relativePath"],
+    originalChars: Math.max(0, Math.floor(value["originalChars"])),
+    originalBytes: Math.max(0, Math.floor(value["originalBytes"])),
+    originalTokens: Math.max(0, Math.floor(value["originalTokens"])),
+    thresholdChars: Math.max(1, Math.floor(value["thresholdChars"])),
+    preview: value["preview"],
+    previewBytes: Math.max(0, Math.floor(value["previewBytes"])),
+    reason: value["reason"],
+  };
 }
 
 function contextSessionMemoryProjection(value: unknown, event: AgentEvent, previous?: ContextSessionMemoryProjection): ContextSessionMemoryProjection | undefined {
@@ -938,6 +972,15 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
         lastSequence: event.sequence,
       };
       next = { ...next, contextRestore: restore };
+    }
+  }
+
+  if (event.type === "context/tool_result_persisted") {
+    const replacement = toolResultReplacementRecord(event.payload);
+    if (replacement !== undefined) {
+      const current = next.toolResultReplacements ?? [];
+      const withoutCurrent = current.filter((item) => item.toolCallId !== replacement.toolCallId);
+      next = { ...next, toolResultReplacements: [...withoutCurrent, replacement] };
     }
   }
 

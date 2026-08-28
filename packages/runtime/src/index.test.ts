@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -667,6 +667,70 @@ describe("AgentHost", () => {
     const durable = events.filter((event) => event.type === "tool/result");
     expect(durable).toHaveLength(6);
     expect(JSON.stringify(durable)).toContain("durable-0-");
+  });
+
+  it("persists oversized single tool results and replays the same bounded model view", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-runtime-tool-result-"));
+    try {
+      const store = new InMemoryEventStore();
+      const registry = new ToolRegistry();
+      const content = "x".repeat(50_001);
+      registry.register({
+        name: "huge_fixture",
+        description: "Return a large deterministic fixture.",
+        inputSchema: { type: "object", additionalProperties: false },
+        executionMode: "parallel",
+        riskLevel: "read",
+        approvalMode: "auto",
+        interruptBehavior: "cancel",
+        execute: async () => ({ ok: true, output: content, modelView: content }),
+      });
+      const requests: ModelRequest[] = [];
+      const model: ChatModel = {
+        async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+          requests.push(request);
+          if (requests.length === 1) {
+            yield { type: "tool_call_start", index: 0, id: "call_huge", name: "huge_fixture" };
+            yield { type: "tool_call_delta", index: 0, arguments: "{}" };
+            yield { type: "tool_call_end", index: 0 };
+          } else {
+            yield { type: "text_delta", text: "bounded result observed" };
+          }
+          yield { type: "done" };
+        },
+      };
+      const host = new AgentHost({ store, model, compactionEnabled: false, toolRuntime: new ToolRuntime({ store, registry }) });
+      const session = await host.createSession(root);
+      const turn = await host.sendMessage(session.id, "inspect the huge fixture");
+      await host.waitForTurn(turn);
+      const events = await host.events(session.id);
+      const receipt = events.find((event) => event.type === "context/tool_result_persisted");
+      expect(receipt?.payload["relativePath"]).toBe(`.agent-artifacts/tool-results/${String(session.id)}/call_huge.txt`);
+      expect(JSON.stringify(receipt)).not.toContain(content);
+      const durable = events.find((event) => event.type === "tool/result");
+      expect(JSON.stringify(durable)).toContain(content);
+      const modelToolMessage = requests[1]?.messages.find((message) => message.role === "tool");
+      expect(modelToolMessage?.content).toContain("persisted-tool-result");
+      expect(modelToolMessage?.content).toContain("preview");
+      expect(modelToolMessage?.content).not.toContain(content.slice(0, 10_000));
+      expect((await stat(path.join(root, ".agent-artifacts", "tool-results", String(session.id), "call_huge.txt"))).isFile()).toBe(true);
+
+      const restartedRequests: ModelRequest[] = [];
+      const restartedModel: ChatModel = {
+        async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+          restartedRequests.push(request);
+          yield { type: "text_delta", text: "replayed" };
+          yield { type: "done" };
+        },
+      };
+      const restarted = new AgentHost({ store, model: restartedModel, compactionEnabled: false });
+      const nextTurn = await restarted.sendMessage(session.id, "replay the fixture");
+      await restarted.waitForTurn(nextTurn);
+      const replayed = restartedRequests[0]?.messages.find((message) => message.role === "tool");
+      expect(replayed?.content).toBe(modelToolMessage?.content);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("uses existing session memory for M06 compaction and records a bounded receipt", async () => {

@@ -87,7 +87,12 @@ const MAX_RETRY_BACKOFF_MS = 60_000;
 export class JobManager {
   private readonly jobs = new Map<string, JobRecord>();
 
-  constructor(private readonly options: { readonly eventStore?: Pick<EventStore, "list"> } = {}) {}
+  private readonly modelOutputChars: number;
+
+  constructor(private readonly options: { readonly eventStore?: Pick<EventStore, "list">; readonly modelOutputChars?: number } = {}) {
+    const requested = options.modelOutputChars;
+    this.modelOutputChars = requested !== undefined && Number.isFinite(requested) && requested > 0 ? Math.min(150_000, Math.floor(requested)) : 30_000;
+  }
 
   async start(input: StartJobInput): Promise<ToolResult> {
     try { if (!(await stat(input.cwd)).isDirectory()) return fail("WORKDIR_INVALID", `Job cwd is not a directory: ${input.cwd}`); }
@@ -158,7 +163,7 @@ export class JobManager {
 
   async read(sessionId: string, jobId: string, maxBytes = 64 * 1024): Promise<ToolResult> {
     const record = await this.getOrRecover(sessionId, jobId);
-    const bounded = Math.min(Math.max(maxBytes, 1), MAX_JOB_OUTPUT_BYTES);
+    const bounded = Math.min(Math.max(maxBytes, 1), this.modelOutputChars, MAX_JOB_OUTPUT_BYTES);
     await record.spillWrite;
     if (record.spillError !== undefined) return fail("JOB_SPILL_UNAVAILABLE", `Durable job output is unavailable: ${record.spillError}`);
     const spilled = await readSpill(record, bounded);

@@ -9,7 +9,7 @@ export type ArtifactAvailability = "available" | "external" | "blocked" | "missi
 
 export interface ArtifactAccessBase {
   readonly artifact: ArtifactRef;
-  readonly taskId: TaskId;
+  readonly taskId?: TaskId;
   readonly availability: ArtifactAvailability;
   readonly reason: string;
 }
@@ -29,7 +29,7 @@ export interface UnavailableArtifactAccess extends ArtifactAccessBase {
 export type ArtifactAccess = AvailableArtifactAccess | UnavailableArtifactAccess;
 
 export interface ArtifactAccessResponse {
-  readonly taskId: TaskId;
+  readonly taskId?: TaskId;
   readonly artifact: ArtifactRef;
   readonly availability: ArtifactAvailability;
   readonly reason: string;
@@ -89,7 +89,7 @@ export async function inspectArtifact(session: SessionProjection, artifactId: st
   }
   return {
     artifact,
-    taskId,
+    ...(taskId === undefined ? {} : { taskId }),
     availability: "available",
     reason: "Workspace path is validated by the host for inline view or download.",
     filePath,
@@ -101,7 +101,7 @@ export async function inspectArtifact(session: SessionProjection, artifactId: st
 
 export function artifactAccessResponse(access: ArtifactAccess): ArtifactAccessResponse {
   return {
-    taskId: access.taskId,
+    ...(access.taskId === undefined ? {} : { taskId: access.taskId }),
     artifact: access.artifact,
     availability: access.availability,
     reason: access.reason,
@@ -113,16 +113,20 @@ export function isAvailableArtifact(access: ArtifactAccess): access is Available
   return access.availability === "available";
 }
 
-function findArtifact(session: SessionProjection, artifactId: string): { readonly artifact: ArtifactRef; readonly taskId: TaskId } | undefined {
-  const matches = session.tasks.flatMap((task) => task.artifacts
+function findArtifact(session: SessionProjection, artifactId: string): { readonly artifact: ArtifactRef; readonly taskId?: TaskId } | undefined {
+  const taskMatches = session.tasks.flatMap((task) => task.artifacts
     .filter((artifact) => artifact.id === artifactId)
     .map((artifact) => ({ artifact, taskId: task.id })));
+  const replacementMatches = (session.toolResultReplacements ?? [])
+    .filter((replacement) => replacement.artifact.id === artifactId || replacement.toolCallId === artifactId)
+    .map((replacement) => ({ artifact: replacement.artifact }));
+  const matches = [...taskMatches, ...replacementMatches];
   if (matches.length <= 1) return matches[0];
   throw new ArtifactLookupError(`Artifact id is ambiguous in session: ${artifactId}`);
 }
 
-function unavailable(artifact: ArtifactRef, taskId: TaskId, availability: UnavailableArtifactAccess["availability"], reason: string): UnavailableArtifactAccess {
-  return { artifact, taskId, availability, reason };
+function unavailable(artifact: ArtifactRef, taskId: TaskId | undefined, availability: UnavailableArtifactAccess["availability"], reason: string): UnavailableArtifactAccess {
+  return { artifact, ...(taskId === undefined ? {} : { taskId }), availability, reason };
 }
 
 function isHttpUrl(value: string | undefined): boolean {

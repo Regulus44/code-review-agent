@@ -4,6 +4,14 @@
 
 ## 当前状态
 
+### Phase 8.5-MR9：单工具结果落盘与 artifact 预览（阶段 3，completed，2026-08-28）
+
+- 已完成 Claude Code 风格单工具结果 artifact 化：超过 `50000` 字符或 `100000` token hard cap 时写入 `.agent-artifacts/tool-results/<session>/<toolCallId>.(txt|json)`，模型只看到 relative path 和最多 `2000` UTF-8 bytes preview；非文本 image/document block 不强制序列化；
+- `tool/result` 事件继续保存完整结果，`context/tool_result_persisted` 只保存 receipt metadata；Runtime 重启/回放按 receipt 重建相同 model-visible view，artifact 缺失或写入失败均 fail closed；WorkspaceResolver 和 API artifact lookup 继续执行 workspace/symlink/Session 边界；
+- shell/terminal/job 默认 model-visible 读取为 `30000` 字符，允许上限 `150000`，底层 host buffer 保持 `512 KiB`；
+- 验证：`pnpm test`、`pnpm typecheck`、`git diff --check`；阶段日志见 [阶段 3 单工具结果落盘实施日志](development-log/phase-3-tool-result-storage-2026-08-28.zh-CN.md)；独立 checkpoint `1474cee`；
+- 下一阶段入口：实施基线中的阶段 4，单消息工具结果聚合预算与 Claude Code 时间型 microcompact。
+
 ### Phase 8.5-MR7：Anthropic-compatible 输出能力（阶段 1，completed，2026-08-28）
 
 - 按实施基线完成 `ModelContextCapability` 的 default/upper 双值表达；Anthropic-compatible 默认请求输出为 `32000`，协议硬上限为 `64000`，模型级 upper 校验保留并在 HTTP 请求前 fail fast；

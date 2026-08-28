@@ -97,7 +97,11 @@ export class ToolRuntime {
   constructor(private readonly options: ToolRuntimeOptions) {
     this.policy = options.policy ?? new DefaultPermissionPolicy();
     this.defaultTimeoutMs = options.defaultTimeoutMs ?? 120_000;
-    this.outputBudgetBytes = options.outputBudgetBytes ?? 64 * 1024;
+    // Preserve the complete host-buffered result for Runtime's Phase 3
+    // single-result artifact persistence. The model-visible view is bounded
+    // later by the Context storage adapter; this limit matches the existing
+    // 512 KiB process/job safety boundary when callers do not opt in.
+    this.outputBudgetBytes = options.outputBudgetBytes ?? 512 * 1024;
     this.permissionTtlMs = options.permissionTtlMs ?? 15 * 60_000;
     for (const [sessionId, preset] of options.sessionPermissionPresets ?? []) this.sessionPermissionPresets.set(sessionId, preset);
   }

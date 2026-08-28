@@ -18,7 +18,7 @@ export type ToolResultBudgetTrigger = "none" | "per-result" | "count" | "tokens"
 
 export interface ToolResultBudgetPolicy {
   readonly enabled?: boolean;
-  /** Maximum model-visible characters for one eligible result. */
+  /** Optional legacy maximum for one eligible result. Single-result overflow is handled by artifact storage. */
   readonly maxResultChars?: number;
   /** Optional per-tool override; an absent entry uses maxResultChars. */
   readonly perToolResultChars?: Readonly<Record<string, number>>;
@@ -209,10 +209,10 @@ export function applyToolResultBudget(
   };
 }
 
-function normalizePolicy(policy: ToolResultBudgetPolicy | undefined): Required<Pick<ToolResultBudgetPolicy, "enabled" | "maxResultChars" | "microcompactTriggerToolCount" | "microcompactTriggerTokens" | "keepRecentResults" | "timeBasedGapMs">> & Pick<ToolResultBudgetPolicy, "perToolResultChars" | "compactableTools"> {
+function normalizePolicy(policy: ToolResultBudgetPolicy | undefined): Pick<ToolResultBudgetPolicy, "enabled" | "maxResultChars" | "microcompactTriggerToolCount" | "microcompactTriggerTokens" | "keepRecentResults" | "timeBasedGapMs"> & Required<Pick<ToolResultBudgetPolicy, "enabled" | "microcompactTriggerToolCount" | "microcompactTriggerTokens" | "keepRecentResults" | "timeBasedGapMs">> & Pick<ToolResultBudgetPolicy, "perToolResultChars" | "compactableTools"> {
   return {
     enabled: policy?.enabled !== false,
-    maxResultChars: positive(policy?.maxResultChars, 8_000),
+    ...(policy?.maxResultChars === undefined ? {} : { maxResultChars: positive(policy.maxResultChars, 8_000) }),
     microcompactTriggerToolCount: positive(policy?.microcompactTriggerToolCount, 10),
     microcompactTriggerTokens: positive(policy?.microcompactTriggerTokens, 20_000),
     keepRecentResults: nonNegative(policy?.keepRecentResults, 5),
@@ -224,7 +224,7 @@ function normalizePolicy(policy: ToolResultBudgetPolicy | undefined): Required<P
 
 function resultLimit(toolName: string | undefined, policy: ReturnType<typeof normalizePolicy>): number | undefined {
   const value = toolName === undefined ? policy.maxResultChars : policy.perToolResultChars?.[toolName] ?? policy.maxResultChars;
-  return value > 0 ? Math.floor(value) : undefined;
+  return value !== undefined && value > 0 ? Math.floor(value) : undefined;
 }
 
 function microcompactTrigger(
