@@ -160,6 +160,17 @@ DSH 的本地 Bash executor 没有 Windows fallback；若部署确实需要 Bash
 
 本项目直接采用 DSH 的“一个宿主只组装一个默认 shell stack”规则：Windows 只组装 `pwsh`，POSIX 只组装 `bash`。下面每一项同时规定本仓库的改动、禁止改动、DSH 学习入口和验收方式；实施时不得在这些边界之外自行扩展。
 
+实施顺序固定为以下阶段；前一阶段的文件和测试完成后才能进入下一阶段，不跨阶段混入其他 Runtime、协议或 Web 改动：
+
+| 阶段 | 模块与唯一目标 | 当前仓库操作 | DSH 对照入口 | 阶段完成标志 |
+|---|---|---|---|---|
+| 1 | 平台工具 roster | 修改 `packages/tools/src/builtin.ts`，注入 `platform`，按平台只注册一个 shell tool | `packages/bundle/base/cordis.patch.yml`、`apps/cli/tests/windows-shell.spec.ts` | win32 仅有 `pwsh`，POSIX 仅有 `bash`；未注册工具返回 `TOOL_NOT_FOUND` |
+| 2 | PowerShell executable 解析 | 新增 `packages/tools/src/pwsh-path.ts`，并在 `builtin.ts` 接入解析结果 | `packages/shell/pwsh-local/src/resolve.ts`、`packages/shell/pwsh-local/src/index.ts` | 显式配置、默认安装目录、PATH 和 Windows PowerShell 的解析顺序有纯函数测试 |
+| 3 | Shell 执行适配 | 只在 `packages/tools/src/builtin.ts` 调整 argv/启动参数；保留 cwd、timeout、cancel、job、audit 和 `shell:false` | `packages/shell/shell/src/index.ts`、`packages/shell/bash-local/src/index.ts`、`packages/shell/pwsh-local/src/index.ts`、`packages/subprocess/subprocess-local/src/spawn.ts` | pwsh/bash 的命令方言不转换，前台和后台生命周期语义保持不变 |
+| 4 | Agent 可见性与 Prompt 校验 | 不修改 `packages/runtime/src/index.ts`；验证现有 `modelTools()` 链路只发布过滤后的 roster；不修改 `packages/tools/src/prompt-catalog.ts` | `packages/core/agent-loop/src/index.ts`、`packages/core/agent-loop/src/tool-calls.ts`、`packages/shell/tool-bash/src/index.ts`、`packages/shell/tool-pwsh/src/index.ts` | 模型 schema 和 prompt 只包含当前平台 shell，AgentHost 不新增平台分支 |
+| 5 | 合同、恢复与安全测试 | 修改/新增 `packages/tools/src/p1.test.ts`、`packages/tools/src/index.test.ts`、`packages/tools/src/jobs.test.ts`、`packages/tools/src/pwsh-path.test.ts`、`packages/runtime/src/index.test.ts`；修改 `docs/tool-contract.md` | `apps/cli/tests/windows-shell.spec.ts`、`packages/shell/pwsh-local/tests/executor.spec.ts`、`packages/shell/tool-pwsh/tests/tools.spec.ts`、`packages/core/agent-loop/tests/tool-calls.spec.ts` | roster、路径解析、前后台执行、权限、`TOOL_NOT_FOUND`、事件回放测试全部通过 |
+| 6 | 阶段验收与 checkpoint | 运行 `pnpm typecheck`、`pnpm test` 和新增合同测试；只提交本阶段文件 | DSH Windows shell 合同测试的 win32/linux 双平台断言 | 通过第 5.9 节矩阵并创建独立 Git checkpoint，才允许进入后续阶段 |
+
 ### 5.1 工具组装与平台 roster：必须修改 `packages/tools/src/builtin.ts`
 
 1. 在 `createBuiltinTools()` 的 options 中增加 `platform?: NodeJS.Platform`，默认值为 `process.platform`；该参数只用于宿主组合和测试，不进入公共 `ToolDefinition` contract。
@@ -201,9 +212,9 @@ DSH 学习入口：
 
 DSH 学习入口：`packages/core/agent-loop/src/index.ts` 的 AgentLoop service、`packages/core/agent-loop/src/tool-calls.ts:executeToolCalls()` 的工具调度边界。DSH 的原则是 AgentLoop 读取 composition 已经决定的工具，不在 loop 内解释操作系统。
 
-### 5.5 Prompt：保留现有过滤逻辑，仅在文案需要时修改 `packages/tools/src/prompt-catalog.ts`
+### 5.5 Prompt：本轮只验证，不修改 `packages/tools/src/prompt-catalog.ts`
 
-`ToolPromptRegistry.assemble()` 已按传入的可见工具过滤 prompt，因此平台 roster 完成后，Windows 不会组装 `bash` guidance，POSIX 不会组装 `pwsh` guidance。本项默认不修改 `packages/runtime/src/system-prompt.ts` 和 `packages/tools/src/prompt.ts`；若需调整方言文字，只修改 `prompt-catalog.ts` 中对应的 `bash`/`pwsh` spec，不新增平台分支。
+`ToolPromptRegistry.assemble()` 已按传入的可见工具过滤 prompt，因此平台 roster 完成后，Windows 不会组装 `bash` guidance，POSIX 不会组装 `pwsh` guidance。本轮不修改 `packages/tools/src/prompt-catalog.ts`、`packages/runtime/src/system-prompt.ts` 或 `packages/tools/src/prompt.ts`；测试只验证现有方言说明与实际可见工具一致。
 
 DSH 学习入口：`packages/shell/tool-bash/src/index.ts` 的 `tool:bash` system-prompt section、`packages/shell/tool-pwsh/src/index.ts` 的 `tool:pwsh` section，以及两个工具的 description/README 对方言、cwd、exit marker 和 background 语义的说明。
 
