@@ -20,6 +20,16 @@ class QueryStore implements EventStore {
 }
 
 describe("Phase 3B.4 tools", () => {
+  it("registers only the shell roster matching the requested platform", () => {
+    const windowsNames = new Set(createBuiltinTools({ platform: "win32" }).map((tool) => tool.name));
+    expect(windowsNames.has("pwsh")).toBe(true);
+    expect(windowsNames.has("bash")).toBe(false);
+
+    const posixNames = new Set(createBuiltinTools({ platform: "linux" }).map((tool) => tool.name));
+    expect(posixNames.has("bash")).toBe(true);
+    expect(posixNames.has("pwsh")).toBe(false);
+  });
+
   it("persists goals and supports bounded session recovery queries", async () => {
     const store = new QueryStore();
     const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools({ eventStore: store }));
@@ -45,6 +55,7 @@ describe("Phase 3B.4 tools", () => {
   });
 
   it("runs the Windows PowerShell smoke path when the host exposes pwsh", async () => {
+    if (process.platform !== "win32") return;
     const store = new QueryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools({ eventStore: store }));
     const runtime = new ToolRuntime({ store, registry }); const sessionId = brand<string, "SessionId">("ses_pwsh_smoke");
     const pending = await runtime.execute({ sessionId, workspaceRoot: process.cwd(), name: "pwsh", input: { command: "Write-Output 'pwsh-smoke'" } });

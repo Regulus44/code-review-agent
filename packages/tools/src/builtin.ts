@@ -17,6 +17,7 @@ import { LspManager, type LspServerConfig } from "./lsp.js";
 import type { CodeModeSandbox } from "./code-mode.js";
 import { CapabilityRegistry, CapabilityError } from "./capabilities.js";
 import { applyPreview, loadPatchRecord, PatchConflictError, PatchParseError, persistPatchRecord, previewUnifiedPatch, removePatchRecord, type AppliedPatch } from "./patch.js";
+import { resolvePwshPath } from "./pwsh-path.js";
 
 const ALLOWED_EXECUTABLES = new Set(["git", "node", "npm", "pnpm", "vitest"]);
 const MAX_PROCESS_OUTPUT_BYTES = 512 * 1024;
@@ -270,11 +271,12 @@ export class TerminalManager {
   }
 }
 
-export function createBuiltinTools(options: { readonly terminalManager?: TerminalManager; readonly jobManager?: JobManager; readonly eventStore?: Pick<EventStore, "list" | "project">; readonly visionEnabled?: boolean; readonly lspServers?: Readonly<Record<string, LspServerConfig>>; readonly lspManager?: LspManager; readonly codeMode?: CodeModeSandbox; readonly capabilities?: CapabilityRegistry } = {}): readonly ToolDefinition[] {
+export function createBuiltinTools(options: { readonly terminalManager?: TerminalManager; readonly jobManager?: JobManager; readonly eventStore?: Pick<EventStore, "list" | "project">; readonly visionEnabled?: boolean; readonly lspServers?: Readonly<Record<string, LspServerConfig>>; readonly lspManager?: LspManager; readonly codeMode?: CodeModeSandbox; readonly capabilities?: CapabilityRegistry; readonly platform?: NodeJS.Platform } = {}): readonly ToolDefinition[] {
   const terminals = options.terminalManager ?? new TerminalManager();
   const jobs = options.jobManager ?? new JobManager(options.eventStore === undefined ? {} : { eventStore: options.eventStore });
   const lsp = options.lspManager ?? new LspManager(options.lspServers);
   const capabilities = options.capabilities ?? new CapabilityRegistry();
+  const platform = options.platform ?? process.platform;
   const patches = new Map<string, AppliedPatch>();
   const tools: ToolDefinition[] = [
     {
@@ -365,14 +367,7 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
       name: "run_tests", description: "Run the repository test command using argv.", inputSchema: object({ command: string, args: { type: "array" as const, items: string, maxItems: 32 } }, ["command"]), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
       execute: async (input, context) => { const args = input as { command: string; args?: string[] }; if (!isAllowedExecutable(args.command)) return fail("COMMAND_NOT_ALLOWED", "Test command is not on the allowlist"); return runArgv(args.command, args.args ?? [], context.workspaceRoot, context.signal); },
     },
-    {
-      name: "bash", description: "Run an explicit bash command in a fresh workspace-bound shell, optionally as a background job.", inputSchema: object({ command: string, description: string, workdir: string, timeoutMs: integer(1, 600_000), deadlineMs: integer(1, 86_400_000), maxAttempts: integer(1, 5), retryBackoffMs: integer(0, 60_000), run_in_background: boolean }, ["command"]), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
-      execute: async (input, context) => executeShellCommand("bash", input as ShellToolInput, context, jobs),
-    },
-    {
-      name: "pwsh", description: "Run an explicit PowerShell command with native Windows path and environment semantics, optionally as a background job.", inputSchema: object({ command: string, description: string, workdir: string, timeoutMs: integer(1, 600_000), deadlineMs: integer(1, 86_400_000), maxAttempts: integer(1, 5), retryBackoffMs: integer(0, 60_000), run_in_background: boolean }, ["command"]), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
-      execute: async (input, context) => executeShellCommand("pwsh", input as ShellToolInput, context, jobs),
-    },
+    ...(platform === "win32" ? [createShellTool("pwsh", jobs, platform)] : [createShellTool("bash", jobs, platform)]),
     {
       name: "job_output", description: "Read bounded incremental output and status from a background job in this session.", inputSchema: object({ jobId: string, maxBytes: integer(1, MAX_PROCESS_OUTPUT_BYTES) }, ["jobId"]), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
       execute: async (input, context) => jobs.read(context.sessionId, (input as { jobId: string }).jobId, (input as { maxBytes?: number }).maxBytes),
@@ -529,13 +524,29 @@ interface ShellToolInput {
 
 type ShellKind = "bash" | "pwsh";
 
-async function executeShellCommand(kind: ShellKind, args: ShellToolInput, context: ToolContext, jobs: JobManager): Promise<ToolResult> {
+function createShellTool(kind: ShellKind, jobs: JobManager, platform: NodeJS.Platform): ToolDefinition {
+  const isPwsh = kind === "pwsh";
+  return {
+    name: kind,
+    description: isPwsh
+      ? "Run an explicit PowerShell command with native Windows path and environment semantics, optionally as a background job."
+      : "Run an explicit bash command in a fresh workspace-bound shell, optionally as a background job.",
+    inputSchema: object({ command: string, description: string, workdir: string, timeoutMs: integer(1, 600_000), deadlineMs: integer(1, 86_400_000), maxAttempts: integer(1, 5), retryBackoffMs: integer(0, 60_000), run_in_background: boolean }, ["command"]),
+    executionMode: "exclusive",
+    riskLevel: "execute",
+    approvalMode: "ask",
+    interruptBehavior: "cancel",
+    execute: async (input, context) => executeShellCommand(kind, input as ShellToolInput, context, jobs, platform),
+  };
+}
+
+async function executeShellCommand(kind: ShellKind, args: ShellToolInput, context: ToolContext, jobs: JobManager, platform: NodeJS.Platform): Promise<ToolResult> {
   if (args.command.trim().length === 0) return fail("COMMAND_REQUIRED", "Shell command cannot be empty");
   const resolver = new WorkspaceResolver(context.workspaceRoot);
   let cwd: string;
   try { cwd = args.workdir === undefined ? resolver.rootPath : await resolver.resolveExisting(args.workdir); if (!(await stat(cwd)).isDirectory()) return fail("WORKDIR_INVALID", `Shell workdir is not a directory: ${args.workdir}`); }
   catch { return fail("WORKDIR_INVALID", `Shell workdir is invalid: ${args.workdir ?? context.workspaceRoot}`); }
-  const launch = shellLaunch(kind, args.command);
+  const launch = shellLaunch(kind, args.command, platform);
   const label = args.description?.trim() || args.command;
   if (args.run_in_background === true) {
     return jobs.start({ sessionId: context.sessionId, workspaceRoot: context.workspaceRoot, cwd, executable: launch.executable, args: launch.args, command: args.command, ...(args.maxAttempts === undefined ? {} : { retry: { maxAttempts: args.maxAttempts, ...(args.retryBackoffMs === undefined ? {} : { backoffMs: args.retryBackoffMs }) } }), ...(args.deadlineMs === undefined ? {} : { deadlineMs: args.deadlineMs }), signal: context.signal, appendEvent: async (type, payload) => context.appendEvent(type, payload) });
@@ -543,10 +554,10 @@ async function executeShellCommand(kind: ShellKind, args: ShellToolInput, contex
   return runShellForeground(kind, args.command, label, cwd, launch.executable, launch.args, args.timeoutMs ?? 120_000, context.signal);
 }
 
-function shellLaunch(kind: ShellKind, command: string): { readonly executable: string; readonly args: readonly string[] } {
+function shellLaunch(kind: ShellKind, command: string, platform: NodeJS.Platform): { readonly executable: string; readonly args: readonly string[] } {
   if (kind === "bash") return { executable: "bash", args: ["-lc", command] };
   const constrained = "$ExecutionContext.SessionState.LanguageMode = 'ConstrainedLanguage'; " + command;
-  return { executable: process.platform === "win32" ? (process.env["CODE_REVIEW_AGENT_PWSH"] ?? "pwsh") : "pwsh", args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", constrained] };
+  return { executable: resolvePwshPath(undefined, process.env, platform), args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", constrained] };
 }
 
 function runShellForeground(kind: ShellKind, command: string, label: string, cwd: string, executable: string, args: readonly string[], timeoutMs: number, signal: AbortSignal): Promise<ToolResult> {

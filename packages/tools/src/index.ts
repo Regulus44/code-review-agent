@@ -12,3 +12,4 @@ export * from "./registry.js";
 export * from "./runtime.js";
 export * from "./subagent.js";
 export * from "./schema.js";
+export * from "./pwsh-path.js";
