@@ -20,6 +20,13 @@ describe("AgentHost", () => {
     expect(() => new AgentHost({ store: new InMemoryEventStore(), maxSteps: 513 })).toThrow("maxSteps must be an integer between 1 and 512");
   });
 
+  it("uses a ten-call parallel default and validates the host-owned scheduler cap", () => {
+    expect(new AgentHost({ store: new InMemoryEventStore() }).toolExecutionSettings()).toEqual({ maxParallelToolCalls: 10 });
+    expect(new AgentHost({ store: new InMemoryEventStore(), maxParallelToolCalls: 3 }).toolExecutionSettings()).toEqual({ maxParallelToolCalls: 3 });
+    expect(() => new AgentHost({ store: new InMemoryEventStore(), maxParallelToolCalls: 0 })).toThrow("maxParallelToolCalls must be an integer between 1 and 512");
+    expect(() => new AgentHost({ store: new InMemoryEventStore(), maxParallelToolCalls: 513 })).toThrow("maxParallelToolCalls must be an integer between 1 and 512");
+  });
+
   it("exposes the 200K/64K/32K fallback through the Host context budget", () => {
     const host = new AgentHost({ store: new InMemoryEventStore() });
     expect(host.contextBudgetSnapshot()).toMatchObject({
@@ -756,6 +763,108 @@ describe("AgentHost", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it("limits parallel tool execution to ten and preserves model call order", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-runtime-tool-scheduler-"));
+    try {
+      const store = new InMemoryEventStore();
+      const registry = new ToolRegistry();
+      let active = 0;
+      let maximum = 0;
+      registry.register({
+        name: "scheduler_fixture",
+        description: "Return a deterministic scheduler fixture.",
+        inputSchema: { type: "object", additionalProperties: false },
+        executionMode: "parallel",
+        riskLevel: "read",
+        approvalMode: "auto",
+        interruptBehavior: "cancel",
+        execute: async (input) => {
+          active += 1;
+          maximum = Math.max(maximum, active);
+          await new Promise<void>((resolve) => setTimeout(resolve, 5));
+          active -= 1;
+          return { ok: true, output: input };
+        },
+      });
+      const requests: ModelRequest[] = [];
+      const model: ChatModel = {
+        async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+          requests.push(request);
+          if (requests.length === 1) {
+            for (let index = 0; index < 25; index += 1) {
+              yield { type: "tool_call_start", index, id: `scheduler-call-${index}`, name: "scheduler_fixture" };
+              yield { type: "tool_call_delta", index, arguments: JSON.stringify({ index }) };
+              yield { type: "tool_call_end", index };
+            }
+          } else {
+            yield { type: "text_delta", text: "scheduler complete" };
+          }
+          yield { type: "done" };
+        },
+      };
+      const host = new AgentHost({ store, model, compactionEnabled: false, toolRuntime: new ToolRuntime({ store, registry }) });
+      const session = await host.createSession(root);
+      const turn = await host.sendMessage(session.id, "run scheduler fixtures");
+      await host.waitForTurn(turn);
+
+      expect(maximum).toBeLessThanOrEqual(10);
+      const toolMessages = requests[1]?.messages.filter((message) => message.role === "tool") ?? [];
+      expect(toolMessages).toHaveLength(25);
+      expect(toolMessages.map((message) => JSON.parse(message.content) as { index: number }).map((item) => item.index)).toEqual(Array.from({ length: 25 }, (_, index) => index));
+      const resultEvents = (await host.events(session.id))
+        .filter((event) => event.type === "tool/result")
+        .map((event) => String(event.payload["toolCallId"]));
+      expect(resultEvents).toEqual(Array.from({ length: 25 }, (_, index) => `scheduler-call-${index}`));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("stops replenishing parallel calls after turn cancellation and drains the started calls", async () => {
+    const store = new InMemoryEventStore();
+    const registry = new ToolRegistry();
+    const started: string[] = [];
+    registry.register({
+      name: "cancel_scheduler_fixture",
+      description: "Block until the scheduler cancels this call.",
+      inputSchema: { type: "object", additionalProperties: false },
+      executionMode: "parallel",
+      riskLevel: "read",
+      approvalMode: "auto",
+      interruptBehavior: "cancel",
+      execute: async (_input, context) => {
+        started.push(String(context.toolCallId));
+        await new Promise<void>((_resolve, reject) => {
+          if (context.signal.aborted) { reject(context.signal.reason ?? new Error("cancelled")); return; }
+          context.signal.addEventListener("abort", () => reject(context.signal.reason ?? new Error("cancelled")), { once: true });
+        });
+        return { ok: true };
+      },
+    });
+    const requests: ModelRequest[] = [];
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        requests.push(request);
+        for (let index = 0; index < 4; index += 1) {
+          yield { type: "tool_call_start", index, id: `cancel-scheduler-${index}`, name: "cancel_scheduler_fixture" };
+          yield { type: "tool_call_delta", index, arguments: "{}" };
+          yield { type: "tool_call_end", index };
+        }
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store, model, compactionEnabled: false, maxParallelToolCalls: 2, toolRuntime: new ToolRuntime({ store, registry }) });
+    const session = await host.createSession("D:/scheduler-cancel");
+    const turn = await host.sendMessage(session.id, "cancel scheduler");
+    for (let attempt = 0; attempt < 100 && started.length < 2; attempt += 1) await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    expect(started).toHaveLength(2);
+    expect(await host.cancelTurn(session.id, turn)).toBe(true);
+    await host.waitForTurn(turn);
+    expect(requests).toHaveLength(1);
+    expect((await host.events(session.id)).filter((event) => event.type === "tool/result")).toHaveLength(4);
+    expect((await host.getSession(session.id))?.status).toBe("stopped");
   });
 
   it("persists oversized single tool results and replays the same bounded model view", async () => {

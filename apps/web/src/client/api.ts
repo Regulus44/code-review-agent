@@ -190,6 +190,9 @@ export type ProductizationCapabilityResponse = ProductizationCapability;
 export interface CapabilityResponse {
   readonly attachments: AttachmentCapability;
   readonly context: ContextCapability;
+  readonly toolExecution: {
+    readonly maxParallelToolCalls: number;
+  };
   readonly codeMode: CodeModeCapability;
   readonly lsp: LspCapability;
   readonly plugins: PluginsCapability;

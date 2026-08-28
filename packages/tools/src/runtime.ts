@@ -48,6 +48,8 @@ export interface ExecuteToolInput {
   readonly signal?: AbortSignal;
   readonly toolCallId?: ToolCallId;
   readonly caller?: ToolCaller;
+  /** Scheduler-only: defer durable result/diff events until model-order commit. */
+  readonly deferResultEvents?: boolean;
 }
 
 export interface ExecuteToolOutput {
@@ -224,8 +226,7 @@ export class ToolRuntime {
       const result = this.errorResult("MCP_TENANT_SCOPE_DENIED", "MCP tool is outside the session tenant scope");
       const toolCallId = input.toolCallId ?? brand<string, "ToolCallId">(`tool_${randomUUID()}`);
       await this.append(input, "tool/call", { toolCallId, name: definition.name, input: input.input, riskLevel: definition.riskLevel, approvalMode: "deny", caller: input.caller ?? "agent", workspaceRoot: input.workspaceRoot, presentation: definition.presentCall?.(input.input) ?? defaultCallPresentation(definition) });
-      await this.append(input, "tool/result", { toolCallId, status: "denied", result });
-      return { toolCallId, status: "denied", result };
+      return this.finishToolResult(input, { toolCallId, status: "denied", result });
     }
     const toolCallId = input.toolCallId ?? brand<string, "ToolCallId">(`tool_${randomUUID()}`);
     const caller = input.caller ?? "agent";
@@ -243,8 +244,7 @@ export class ToolRuntime {
     });
     if (evaluation.mode === "deny") {
       const result = this.errorResult("PERMISSION_DENIED", evaluation.reason);
-      await this.append(input, "tool/result", { toolCallId, status: "denied", result });
-      return { toolCallId, status: "denied", result };
+      return this.finishToolResult(input, { toolCallId, status: "denied", result });
     }
     if (evaluation.mode === "ask") {
       const permissionId = brand<string, "PermissionId">(`perm_${randomUUID()}`);
@@ -323,13 +323,8 @@ export class ToolRuntime {
     });
     if (resolutionStatus !== "approved") {
       const result = this.errorResult(resolutionStatus === "expired" ? "PERMISSION_EXPIRED" : resolutionStatus === "cancelled" ? "PERMISSION_CANCELLED" : "PERMISSION_DENIED", `Permission ${resolutionStatus}`);
-      await this.options.store.append({
-        sessionId: pending.permission.sessionId,
-        ...(pending.permission.turnId === undefined ? {} : { turnId: pending.permission.turnId }),
-        type: "tool/result",
-        payload: { toolCallId: pending.permission.toolCallId, status: resolutionStatus === "cancelled" ? "cancelled" : "denied", result },
-      });
       const output = { toolCallId: pending.permission.toolCallId, status: resolutionStatus === "cancelled" ? "cancelled" : "denied", result } as const;
+      await this.finishToolResult(pending.request, output);
       this.resolved.set(permissionId, output);
       return output;
     }
@@ -416,8 +411,7 @@ export class ToolRuntime {
     const execute = async (): Promise<ExecuteToolOutput> => {
       if (controller.signal.aborted) {
         const result = this.errorResult("TOOL_CANCELLED", "Tool was cancelled before execution");
-        await this.append(request, "tool/result", { toolCallId, status: "cancelled", result });
-        return { toolCallId, status: "cancelled", result };
+        return this.finishToolResult(request, { toolCallId, status: "cancelled", result });
       }
       await this.append(request, "tool/progress", { toolCallId, status: "running", phase: "started" });
       try {
@@ -436,17 +430,14 @@ export class ToolRuntime {
         const presented = result.presentation ?? definition.presentResult?.(result);
         const enriched = presented === undefined ? result : { ...result, presentation: presented };
         const bounded = boundResult(enriched, this.outputBudgetBytes);
-        await this.append(request, "tool/result", { toolCallId, status: bounded.ok ? "completed" : "failed", result: bounded });
-        if (bounded.diff !== undefined) await this.append(request, "diff/preview", { toolCallId, diff: bounded.diff });
-        return { toolCallId, status: bounded.ok ? "completed" : "failed", result: bounded };
+        return this.finishToolResult(request, { toolCallId, status: bounded.ok ? "completed" : "failed", result: bounded });
       } catch (error) {
         const reason = controller.signal.reason;
         const timedOut = reason instanceof Error && reason.message === "Tool execution timed out";
         const cancelled = controller.signal.aborted && !timedOut;
         const errorCode = timedOut ? "TOOL_TIMEOUT" : cancelled ? "TOOL_CANCELLED" : errorCodeOf(error) ?? "TOOL_EXECUTION_FAILED";
         const result = this.errorResult(errorCode, error instanceof Error ? error.message : String(error));
-        await this.append(request, "tool/result", { toolCallId, status: cancelled ? "cancelled" : "failed", result });
-        return { toolCallId, status: cancelled ? "cancelled" : "failed", result };
+        return this.finishToolResult(request, { toolCallId, status: cancelled ? "cancelled" : "failed", result });
       } finally {
         clearTimeout(timeout);
         this.running.delete(toolCallId);
@@ -459,6 +450,37 @@ export class ToolRuntime {
     const tracked = current.then(() => undefined, () => undefined);
     this.activeExclusive.set(request.sessionId, tracked);
     try { return await current; } finally { if (this.activeExclusive.get(request.sessionId) === tracked) this.activeExclusive.delete(request.sessionId); }
+  }
+
+  /** Commits a scheduler-deferred tool result and its diff preview exactly once. */
+  async commitDeferredResult(
+    input: Pick<ExecuteToolInput, "sessionId" | "turnId" | "commandId">,
+    output: ExecuteToolOutput,
+  ): Promise<void> {
+    if (output.result === undefined || output.status === "awaiting_permission" || output.status === "awaiting_interaction") {
+      throw new Error("TOOL_RESULT_COMMIT_INVALID: a deferred tool result must be settled");
+    }
+    await this.options.store.append({
+      sessionId: input.sessionId,
+      ...(input.turnId === undefined ? {} : { turnId: input.turnId }),
+      ...(input.commandId === undefined ? {} : { correlationId: input.commandId }),
+      type: "tool/result",
+      payload: { toolCallId: output.toolCallId, status: output.status, result: output.result },
+    });
+    if (output.result.diff !== undefined) {
+      await this.options.store.append({
+        sessionId: input.sessionId,
+        ...(input.turnId === undefined ? {} : { turnId: input.turnId }),
+        ...(input.commandId === undefined ? {} : { correlationId: input.commandId }),
+        type: "diff/preview",
+        payload: { toolCallId: output.toolCallId, diff: output.result.diff },
+      });
+    }
+  }
+
+  private async finishToolResult(input: ExecuteToolInput, output: ExecuteToolOutput): Promise<ExecuteToolOutput> {
+    if (!input.deferResultEvents) await this.commitDeferredResult(input, output);
+    return output;
   }
 
   private async append(input: ExecuteToolInput, type: AgentEvent["type"], payload: Record<string, unknown>): Promise<void> {

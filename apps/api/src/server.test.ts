@@ -18,6 +18,20 @@ describe("Phase 2 API", () => {
     expect(() => createApiServer({ store: new InMemoryEventStore(), maxSteps: 513 })).toThrow("maxSteps must be an integer between 1 and 512");
   });
 
+  it("passes and projects the host-owned ten-call scheduler cap", async () => {
+    const configured = createApiServer({ store: new InMemoryEventStore(), maxParallelToolCalls: 3 });
+    await new Promise<void>((resolve) => configured.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = configured.address();
+      if (address === null || typeof address === "string") throw new Error("Scheduler API did not bind");
+      const capability = await (await fetch(`http://127.0.0.1:${address.port}/v1/capabilities`)).json() as { toolExecution: { maxParallelToolCalls: number } };
+      expect(capability.toolExecution).toEqual({ maxParallelToolCalls: 3 });
+    } finally {
+      await new Promise<void>((resolve, reject) => configured.close((error) => error ? reject(error) : resolve()));
+    }
+    expect(() => createApiServer({ store: new InMemoryEventStore(), maxParallelToolCalls: 513 })).toThrow("maxParallelToolCalls must be an integer between 1 and 512");
+  });
+
   let server: Server;
   let baseUrl: string;
   const store = new InMemoryEventStore();
@@ -470,13 +484,14 @@ describe("Phase 2 API", () => {
   });
 
   it("exposes configured context compaction budget metadata without leaking defaults", async () => {
-    const configured = createApiServer({ store: new InMemoryEventStore(), contextBudget: { maxTokens: 120, recentMessageTokens: 40, maxToolResultChars: 200, maxSummaryChars: 100 } });
+    const configured = createApiServer({ store: new InMemoryEventStore(), maxParallelToolCalls: 3, contextBudget: { maxTokens: 120, recentMessageTokens: 40, maxToolResultChars: 200, maxSummaryChars: 100 } });
     await new Promise<void>((resolve) => configured.listen(0, "127.0.0.1", resolve));
     try {
       const address = configured.address();
       if (address === null || typeof address === "string") throw new Error("Context API did not bind");
-      const capability = await (await fetch(`http://127.0.0.1:${address.port}/v1/capabilities`)).json() as { context: { enabled: boolean; configured: boolean; budget?: { maxTokens?: number; recentMessageTokens?: number } }; plugins: { configured: boolean; enabled: boolean; status: string; reason: string }; productization: { enabled: boolean; status: string; reason: string; auth: { status: string; mode: string }; tenantIsolation: { status: string }; quota: { status: string; enforcement: string } } };
+      const capability = await (await fetch(`http://127.0.0.1:${address.port}/v1/capabilities`)).json() as { context: { enabled: boolean; configured: boolean; budget?: { maxTokens?: number; recentMessageTokens?: number } }; toolExecution: { maxParallelToolCalls: number }; plugins: { configured: boolean; enabled: boolean; status: string; reason: string }; productization: { enabled: boolean; status: string; reason: string; auth: { status: string; mode: string }; tenantIsolation: { status: string }; quota: { status: string; enforcement: string } } };
       expect(capability.context).toMatchObject({ enabled: true, configured: true, budget: { maxTokens: 120, recentMessageTokens: 40 } });
+      expect(capability.toolExecution).toEqual({ maxParallelToolCalls: 3 });
       expect(capability.plugins).toMatchObject({ configured: false, enabled: false, status: "deferred", reason: expect.stringContaining("Phase 8.5") });
       expect(capability.productization).toMatchObject({ enabled: false, status: "deferred", auth: { status: "deferred", mode: "disabled" }, tenantIsolation: { status: "deferred" }, quota: { status: "disabled", enforcement: "disabled" } });
     } finally {

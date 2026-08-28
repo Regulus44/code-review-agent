@@ -52,6 +52,7 @@ import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, Def
 import type { SubagentRuntime } from "@code-review-agent/subagent";
 import { GitWorktreeManager, WorkspaceResolver } from "@code-review-agent/workspace";
 import { buildAgentSystemPromptSections } from "./system-prompt.js";
+import { resolveMaxParallelToolCalls, scheduleToolCalls } from "./tool-call-scheduler.js";
 
 export interface AgentHostOptions {
   readonly store: SessionEventStore;
@@ -61,6 +62,8 @@ export interface AgentHostOptions {
   readonly fallbackModels?: readonly ChatModel[];
   readonly systemPrompt?: string;
   readonly maxSteps?: number;
+  /** Maximum in-flight parallel-safe tool calls per assistant step. */
+  readonly maxParallelToolCalls?: number;
   readonly toolRuntime?: ToolRuntime;
   readonly toolRegistry?: ToolRegistry;
   readonly permissionPreset?: PermissionPreset;
@@ -131,6 +134,10 @@ export interface ContextSettings {
   readonly collapse: ContextCollapseCapability;
 }
 
+export interface ToolExecutionSettings {
+  readonly maxParallelToolCalls: number;
+}
+
 export interface CodeModeSettings {
   readonly configured: boolean;
   readonly enabled: boolean;
@@ -196,6 +203,12 @@ interface CollectedModelResponse {
   readonly responseId: string;
 }
 
+interface ScheduledModelToolOutput {
+  readonly output: ExecuteToolOutput;
+  /** True when ToolRuntime deferred its durable result events for scheduler commit. */
+  readonly deferredResult: boolean;
+}
+
 interface PreparedModelContext {
   readonly view: ModelContextView;
   readonly rounds: readonly ApiRound[];
@@ -231,6 +244,7 @@ export class AgentHost {
   private readonly recoveredInteractionIndex = new Map<InteractionId, TurnId>();
   private readonly turnTraces = new Map<TurnId, string>();
   private readonly maxSteps: number;
+  private readonly maxParallelToolCallsLimit: number;
   private readonly ready: Promise<void>;
   private readonly toolRuntime: ToolRuntime;
   private readonly terminalManager?: TerminalManager;
@@ -293,6 +307,7 @@ export class AgentHost {
     this.customSystemPrompt = options.systemPrompt;
     this.maxSteps = options.maxSteps ?? 32;
     if (!Number.isInteger(this.maxSteps) || this.maxSteps < 1 || this.maxSteps > 512) throw new Error("maxSteps must be an integer between 1 and 512");
+    this.maxParallelToolCallsLimit = resolveMaxParallelToolCalls(options.maxParallelToolCalls);
     const registry = options.toolRegistry ?? new ToolRegistry();
     this.toolPromptRegistry = options.toolPromptRegistry ?? new ToolPromptRegistry();
     if (options.toolPromptRegistry === undefined) this.toolPromptRegistry.registerMany(BUILTIN_TOOL_PROMPT_SPECS);
@@ -404,6 +419,11 @@ export class AgentHost {
         },
       },
     };
+  }
+
+  /** Returns the Host-owned tool scheduler cap exposed by the API capability projection. */
+  toolExecutionSettings(): ToolExecutionSettings {
+    return { maxParallelToolCalls: this.maxParallelToolCallsLimit };
   }
 
   /** Returns the current model's resolved M01 budget for diagnostics and API consumers. */
@@ -2542,7 +2562,28 @@ export class AgentHost {
       }
       messages.push({ role: "assistant", content: response.text, toolCalls: response.toolCalls, responseId: response.responseId, messageId: assistantEvent.eventId });
       for (const steer of steersAfterResponse) messages.push({ role: "user", content: steer });
-      const outputs = await Promise.all(response.toolCalls.map((toolCall) => this.executeModelToolCall(sessionId, turnId, controller, toolCall)));
+      const scheduled = await scheduleToolCalls({
+        calls: response.toolCalls,
+        executionMode: (toolCall) => {
+          try { return this.toolRuntime.registry.get(toolCall.name).executionMode; }
+          catch { return "exclusive"; }
+        },
+        execute: (toolCall) => this.executeModelToolCall(sessionId, turnId, controller, toolCall),
+        skip: async (toolCall) => ({
+          output: await this.syntheticToolFailure(sessionId, turnId, toolCall, "TOOL_ABORTED_BEFORE_DISPATCH", "Tool call aborted before dispatch", "cancelled"),
+          deferredResult: false,
+        }),
+        commit: async (_toolCall, scheduledOutput) => {
+          if (!scheduledOutput.deferredResult) return;
+          await this.toolRuntime.commitDeferredResult(
+            { sessionId, turnId },
+            scheduledOutput.output,
+          );
+        },
+        signal: controller.signal,
+        maxParallelToolCalls: this.maxParallelToolCallsLimit,
+      });
+      const outputs = scheduled.results.map((scheduledOutput) => scheduledOutput.output);
       const toolResultEvents = await this.options.store.list(sessionId);
       for (let index = 0; index < outputs.length; index += 1) {
         const output = outputs[index];
@@ -2550,6 +2591,10 @@ export class AgentHost {
         if (output === undefined || toolCall === undefined) throw new Error("TOOL_RESULT_MISMATCH: tool result count did not match tool call count");
         const resultEvent = [...toolResultEvents].reverse().find(event => event.turnId === turnId && event.type === "tool/result" && event.payload["toolCallId"] === toolCall.id);
         messages.push({ role: "tool", toolCallId: toolCall.id, content: modelToolResult(output), messageId: resultEvent?.eventId ?? toolCall.id });
+      }
+      if (scheduled.aborted) {
+        await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "stopped", toolCalls: response.toolCalls.length } });
+        throw controller.signal.reason ?? new Error("Cancelled");
       }
       await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "completed", toolCalls: response.toolCalls.length } });
     }
@@ -3162,13 +3207,16 @@ export class AgentHost {
     turnId: TurnId,
     controller: AbortController,
     toolCall: ModelToolCall,
-  ): Promise<ExecuteToolOutput> {
+  ): Promise<ScheduledModelToolOutput> {
     this.metricCounters.toolCalls += 1;
     let input: unknown;
     try {
       input = toolCall.arguments.trim() === "" ? {} : JSON.parse(toolCall.arguments) as unknown;
     } catch (error) {
-      return this.syntheticToolFailure(sessionId, turnId, toolCall, "MALFORMED_TOOL_ARGUMENTS", error instanceof Error ? error.message : String(error));
+      return {
+        output: await this.syntheticToolFailure(sessionId, turnId, toolCall, "MALFORMED_TOOL_ARGUMENTS", error instanceof Error ? error.message : String(error)),
+        deferredResult: false,
+      };
     }
     try {
       const projection = await this.options.store.project(sessionId);
@@ -3182,22 +3230,26 @@ export class AgentHost {
         toolCallId: brand<string, "ToolCallId">(toolCall.id),
         signal: controller.signal,
         caller: "agent",
+        deferResultEvents: true,
       });
       if (output.status === "failed" || output.result?.ok === false) this.metricCounters.toolFailures += 1;
-      if (output.status !== "awaiting_permission" || output.permission === undefined) return output;
-      return this.waitForPermission(output.permission, controller);
+      if (output.status !== "awaiting_permission" || output.permission === undefined) return { output, deferredResult: true };
+      return { output: await this.waitForPermission(output.permission, controller), deferredResult: true };
     } catch (error) {
       this.metricCounters.toolFailures += 1;
-      return this.syntheticToolFailure(sessionId, turnId, toolCall, "TOOL_CALL_FAILED", error instanceof Error ? error.message : String(error));
+      return {
+        output: await this.syntheticToolFailure(sessionId, turnId, toolCall, "TOOL_CALL_FAILED", error instanceof Error ? error.message : String(error)),
+        deferredResult: false,
+      };
     }
   }
 
-  private async syntheticToolFailure(sessionId: SessionId, turnId: TurnId, toolCall: ModelToolCall, code: string, message: string): Promise<ExecuteToolOutput> {
+  private async syntheticToolFailure(sessionId: SessionId, turnId: TurnId, toolCall: ModelToolCall, code: string, message: string, status: "failed" | "cancelled" | "denied" = "failed"): Promise<ExecuteToolOutput> {
     const toolCallId = brand<string, "ToolCallId">(toolCall.id);
     const result: ToolResult = { ok: false, error: { code, message, remedy: "Check the tool name and JSON arguments, then retry." }, presentation: { kind: "tool", title: code, text: message } };
     await this.options.store.append({ sessionId, turnId, type: "tool/call", payload: { toolCallId, name: toolCall.name, input: toolCall.arguments, riskLevel: "read", approvalMode: "deny", caller: "agent" } });
-    await this.options.store.append({ sessionId, turnId, type: "tool/result", payload: { toolCallId, status: "failed", result } });
-    return { toolCallId, status: "failed", result };
+    await this.options.store.append({ sessionId, turnId, type: "tool/result", payload: { toolCallId, status, result } });
+    return { toolCallId, status, result };
   }
 
   private waitForPermission(permission: PermissionRequest, controller: AbortController): Promise<ExecuteToolOutput> {
@@ -3233,6 +3285,16 @@ export class AgentHost {
 }
 
 export { createInProcessSubagentProvider, type InProcessProviderOptions } from "./subagent-provider.js";
+export {
+  DEFAULT_MAX_PARALLEL_TOOL_CALLS,
+  MAX_PARALLEL_TOOL_CALLS,
+  resolveMaxParallelToolCalls,
+  scheduleToolCalls,
+} from "./tool-call-scheduler.js";
+export type {
+  ToolCallSchedulerOptions,
+  ToolCallSchedulerResult,
+} from "./tool-call-scheduler.js";
 
 export function sessionId(value: string): SessionId {
   return brand<string, "SessionId">(value);
