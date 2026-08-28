@@ -358,7 +358,7 @@ EventStore 的完整 `tool/result` 不被替换或删除。落盘、预览和 mi
 | `README.zh-CN.md`、评测文档 | 更新公开默认值、配置范围、artifact 位置和诊断方法 | 实际运行行为 |
 | `packages/runtime/src/index.test.ts` | 增加 Windows PowerShell 并行大结果、artifact 持久化、EventStore 顺序和 Host 重启 replay 的组合验收场景 | 阶段 3–5 组合 contract |
 | `docs/development-log/phase-6-integration-gate-2026-08-28.zh-CN.md` | 固化阶段 6 的修改范围、命令、证据、回滚和后续入口 | 阶段治理 |
-| `pnpm typecheck`、`pnpm test`、LLM/Context/Runtime/API 定向测试、评测 smoke、Windows e2e | 形成最终证据；真实 v4pro smoke 验证 32K 默认不会立即触发 `ANTHROPIC_MAX_TOKENS`，64K 只在服务端能力允许时启用 | 当前测试门禁 |
+| `pnpm typecheck`、`pnpm test`、LLM/Context/Runtime/API 定向测试、评测 smoke、Windows e2e | 形成最终证据；有 v4pro endpoint/credential 时再执行真实网络 smoke，验证 32K 默认不会立即触发 `ANTHROPIC_MAX_TOKENS`，64K 只在服务端能力允许时启用 | 当前测试门禁 |
 
 阶段 6 的必过场景：
 

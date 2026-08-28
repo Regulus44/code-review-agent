@@ -53,6 +53,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/eval-mvp/verify-grad
 
 两种 Grader 自检均通过；`gold` 结果通过，`empty` 结果按预期失败并由脚本报告自检通过。使用 Echo provider 分别运行 `EVAL_MVP_MAX_STEPS=32` 和 `EVAL_MVP_MAX_STEPS=512` 的 `pnpm eval:mvp:run-agent pallets__flask-4045`，两次 turn 均 completed，结果文件记录了对应 step budget。Windows 集成测试验证了两个 PowerShell 并行大结果的 artifact、EventStore 顺序及重启后的相同 model view。
 
+当前环境的 `.env` 只配置 `deepseek-v4-flash`，没有可用于 `v4pro` 的独立 provider endpoint/credential，因此没有执行真实 v4pro 网络 smoke；Anthropic-compatible 的 `32000/64000` wire、模型上限、413/429/529、partial output 和 abort 合同由 LLM adapter 测试覆盖。取得 v4pro 凭据后可直接复用同一 Runner 做外部 smoke，不需要修改阶段 1–5 的代码或契约。
+
 ## 回滚与后续入口
 
 阶段 6 文档可整体回滚到前一文档 checkpoint；不删除历史事件、artifact、评测结果或阶段 1–5 的代码 checkpoint。Runtime 新增的组合测试可单独移除，不影响生产运行时。
