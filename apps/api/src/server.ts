@@ -235,7 +235,7 @@ function registerBootstrapCatalog(modelRuntime: ModelRuntimeState, info: ModelCo
       contextCapability: {
         provider: "deepseek",
         model,
-        maxInputTokens: 128_000,
+        maxInputTokens: 1_000_000,
         maxOutputTokens: 8_000,
         supportsExactCount: false,
         supportsPromptCache: false,

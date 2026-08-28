@@ -22,6 +22,26 @@ export interface ModelCatalogSnapshot {
   readonly refreshedAt: string;
 }
 
+/** Host-owned context estimate for Yayi custom models. */
+export function inferModelContextCapability(profile: ProviderProfileRecord, model: string): ModelContextCapability | undefined {
+  if (profile.source !== "custom" || !isYayiProfile(profile)) return undefined;
+  const normalized = `${profile.id} ${model}`.toLowerCase();
+  const deepSeek = normalized.includes("deepseek") || /(?:^|[-_])ds(?:[-_]|$)/u.test(normalized);
+  return {
+    provider: profile.id,
+    model,
+    maxInputTokens: deepSeek ? 1_000_000 : 200_000,
+    maxOutputTokens: 8_000,
+    supportsExactCount: false,
+    supportsPromptCache: false,
+    source: "estimate",
+  };
+}
+
+function isYayiProfile(profile: ProviderProfileRecord): boolean {
+  return profile.id.toLowerCase().startsWith("yayi-") || profile.baseUrl?.toLowerCase().includes("aicoding.wenge.com") === true;
+}
+
 /**
  * Small host-owned provider directory. Catalog membership is advisory: resolve()
  * returns an unlisted model as long as its provider profile is enabled.
@@ -38,6 +58,11 @@ export class ModelCatalog {
 
   register(profile: ProviderProfileRecord, discovery?: ProviderCatalogDiscovery): void {
     validateProfile(profile);
+    profile = { ...profile, models: profile.models.map((entry) => {
+      if (entry.contextCapability !== undefined) return entry;
+      const capability = inferModelContextCapability(profile, entry.model);
+      return capability === undefined ? entry : { ...entry, contextCapability: capability };
+    }) };
     const key = profileKey(profile);
     this.profiles.set(key, profile);
     if (discovery === undefined) this.discoveries.delete(key);
@@ -78,7 +103,7 @@ export class ModelCatalog {
       }
       try {
         const discovered = await discovery.listModels(profile, signal);
-        const models = normalizeModels(profile.id, discovered);
+        const models = normalizeModels(profile, discovered);
         this.profiles.set(key, { ...profile, models, updatedAt: refreshedAt });
         this.failures.delete(key);
         groups.push(toGroup({ ...profile, models }, "ready", models, refreshedAt));
@@ -121,19 +146,20 @@ export function createModelFromProviderProfile(
   const env = credential?.env ?? {};
   const headers = credential?.headers;
   const apiKey = env["API_KEY"] ?? env["apiKey"] ?? env["ANTHROPIC_API_KEY"] ?? env["ANTHROPIC_AUTH_TOKEN"] ?? env["DEEPSEEK_API_KEY"] ?? env["OPENAI_API_KEY"];
+  const inferredCapability = entry?.contextCapability ?? inferModelContextCapability(profile, model);
   const modelConfig = {
     model,
     ...(profile.baseUrl === undefined ? {} : { baseUrl: profile.baseUrl }),
     ...(apiKey === undefined ? {} : { apiKey }),
     ...(headers === undefined ? {} : { headers }),
-    ...(entry?.contextCapability === undefined ? {} : { contextCapability: entry.contextCapability }),
+    ...(inferredCapability === undefined ? {} : { contextCapability: inferredCapability }),
     ...(entry?.defaultMaxOutputTokens === undefined ? {} : { maxOutputTokens: entry.defaultMaxOutputTokens }),
   };
   const created = registry.create(profile.protocol, modelConfig);
   return {
     model: created,
     config: { provider: profile.id, model, ...(profile.baseUrl === undefined ? {} : { baseUrl: profile.baseUrl }), configured: apiKey !== undefined || headers !== undefined || profile.source === "builtin" },
-    ...(entry?.contextCapability === undefined ? {} : { capability: entry.contextCapability }),
+    ...(inferredCapability === undefined ? {} : { capability: inferredCapability }),
   };
 }
 
@@ -159,13 +185,17 @@ function validateProfile(profile: ProviderProfileRecord): void {
   }
 }
 
-function normalizeModels(provider: string, models: readonly ModelCatalogEntry[]): readonly ModelCatalogEntry[] {
+function normalizeModels(profile: ProviderProfileRecord, models: readonly ModelCatalogEntry[]): readonly ModelCatalogEntry[] {
   const seen = new Set<string>();
   const result: ModelCatalogEntry[] = [];
   for (const model of models) {
-    if (model.provider !== provider || model.model.trim() === "" || seen.has(model.model)) continue;
+    if (model.provider !== profile.id || model.model.trim() === "" || seen.has(model.model)) continue;
     seen.add(model.model);
-    result.push(model);
+    if (model.contextCapability !== undefined) result.push(model);
+    else {
+      const capability = inferModelContextCapability(profile, model.model);
+      result.push(capability === undefined ? model : { ...model, contextCapability: capability });
+    }
   }
   return result;
 }

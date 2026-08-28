@@ -53,7 +53,7 @@ ModelContextCapability + ContextBudgetConfig
 
 ### 2.3 `packages/llm`
 
-`OpenAICompatibleOptions.contextCapability` 和 `OpenAICompatibleChatModel.contextCapability` 为 provider adapter 提供注入点。DeepSeek 配置目前登记为 host-owned provider estimate：128K input、8K output、`source: "provider"`；这不是从 provider API 精确探测得到的值，后续可由 model capability registry 替换。
+`OpenAICompatibleOptions.contextCapability` 和 `OpenAICompatibleChatModel.contextCapability` 为 provider adapter 提供注入点。内置 DeepSeek 配置登记为 1M input、8K output；Yayi 自定义模型由 Host 按模型名推导为 DeepSeek 系列 1M、其他模型 200K，来源标记为 `estimate`。
 
 能力元数据挂在 host-owned model adapter 上；model catalog/config view 仍只返回 provider/model/base URL 等安全字段，避免把 capability registry 与既有 catalog contract 强绑定。
 

@@ -412,7 +412,7 @@ export function createConfiguredChatModel(
     model,
     // DeepSeek's OpenAI-compatible route is treated as a host capability
     // estimate until a provider metadata endpoint is added.
-    maxInputTokens: 128_000,
+    maxInputTokens: 1_000_000,
     maxOutputTokens: 8_000,
     supportsExactCount: false,
     supportsPromptCache: false,

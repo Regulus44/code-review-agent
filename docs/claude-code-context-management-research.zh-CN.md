@@ -1027,7 +1027,7 @@ M01 已按上述分层落地，详细代码对照记录见 [`claude-code-context
 |---|---|---|
 | Contract | `packages/contracts/src/index.ts` 的 `ModelContextCapability`、`ContextBudgetConfig`、`ContextBudgetSnapshot`、`ContextWarningState` | model adapter、tenant route 和 runtime 使用同一份公共类型 |
 | Budget | `packages/context/src/index.ts` | 输出预留、effective window、13K/30K/50K buffer、warning/error/auto/blocking/predictive 状态 |
-| Adapter | `packages/llm/src/index.ts` 的 `contextCapability` | DeepSeek adapter 提供 host-owned 128K/8K capability；旧 adapter 可省略并走 estimate fallback |
+| Adapter | `packages/llm/src/index.ts`、`packages/llm/src/catalog.ts` 的 `contextCapability` | 内置 DeepSeek 提供 1M/8K capability；Yayi 自定义模型按 DeepSeek 系列 1M、其他模型 200K 推导，普通未声明 provider 继续走 fallback |
 | Runtime | `packages/runtime/src/index.ts` 的 `contextBudgetSnapshot()`、`runSteps()` preflight | 每次 `step/started` 写入非敏感预算快照和 warning state，并把 auto threshold 交给现有 compaction facade |
 | API | `apps/api/src/server.ts` 的 `contextPolicy`、`/v1/capabilities` | host policy 可注入；能力状态通过既有 capabilities projection 暴露 |
 

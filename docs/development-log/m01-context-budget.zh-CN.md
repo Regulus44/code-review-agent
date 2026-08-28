@@ -16,7 +16,7 @@
 
 - 新增 `packages/context` workspace package，集中实现 `resolveContextBudget()`、`calculateContextWarningState()`、`shouldCompactBeforeRequest()` 和 fallback capability；不把预算公式复制到 runtime。
 - `packages/contracts` 增加 capability/config/snapshot/warning 公共类型；`ChatModel.contextCapability` 和 `ModelRouteRecord.contextCapability` 都是可选字段，兼容旧模型和旧 route。
-- `packages/llm` 为 OpenAI-compatible adapter 增加 capability 注入点；DeepSeek 配置登记 128K input / 8K output 的 host-owned capability estimate。
+- `packages/llm` 为模型 adapter 增加 capability 注入点；内置 DeepSeek 登记 1M input / 8K output，Yayi 自定义模型按 DeepSeek 系列 1M、其他模型 200K 推导 capability。
 - `AgentHost` 增加 `contextPolicy`、`contextBudgetSnapshot()` 和每步 preflight；根据 snapshot 的 auto threshold 驱动现有 compaction facade；预测式增长只使用 M01 的保守 15K 估计。
 - 每个 `step/started` 事件增加 `contextBudget` 和 `contextWarning`，只写 provider/model、数字阈值、能力布尔值和 usage，不写 secrets 或原始 prompt。
 - API `createApiServer()` 支持 `contextPolicy`，`/v1/capabilities` 继续作为 host capability projection 入口。
