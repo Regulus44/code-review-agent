@@ -14,6 +14,7 @@
   - `SessionProjection` 增加 `toolResultReplacements`，用于 API 和恢复回放。
 - `packages/context/src/tool-result-storage.ts`
   - 实现 `50000` 字符阈值、`100000` token hard cap、`2000` bytes UTF-8 preview；
+  - preview 在进入 model view 和 replacement receipt 前脱敏常见 credential-shaped 字段；artifact writer 接收并保存完整原文；
   - JSON 使用 `.json`，普通文本使用 `.txt`；image/document block 保持 unsupported，不强行 stringify；
   - artifact 路径固定为 `.agent-artifacts/tool-results/<session>/<toolCallId>.(txt|json)`；
   - 通过 writer callback 执行写入，`wx`/EEXIST 语义由 Runtime writer 提供，生成可恢复的 bounded model view；
@@ -44,7 +45,7 @@
 
 ## 验收证据
 
-- `packages/context/src/tool-result-storage.test.ts`：阈值边界、token hard cap、UTF-8 preview、JSON、image/document 排除、写入失败、EEXIST 幂等；
+- `packages/context/src/tool-result-storage.test.ts`：阈值边界、token hard cap、UTF-8 preview、JSON、image/document 排除、写入失败、EEXIST 幂等和 preview 脱敏；
 - `packages/runtime/src/index.test.ts`：完整 `tool/result`、receipt 不含正文、artifact 创建、首轮和重启后的 preview 一致；
 - `apps/api/src/artifacts.test.ts`：replacement artifact 受控读取、响应不暴露绝对路径、workspace 越界拒绝；
 - `pnpm --filter @code-review-agent/context test`：通过；
@@ -54,6 +55,8 @@
 - `pnpm test`：全 workspace 通过；
 - `pnpm typecheck`：通过；
 - `git diff --check`：通过。
+
+preview 脱敏跟进 checkpoint：`2bfb2b2 fix(phase3): redact tool result previews`。该跟进只收紧 model-visible preview/receipt 的 secret 边界，不改变 artifact 完整原文、EventStore `tool/result` 或 workspace artifact API contract。
 
 ## 回滚与下一步
 

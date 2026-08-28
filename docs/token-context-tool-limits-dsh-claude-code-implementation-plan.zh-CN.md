@@ -269,7 +269,7 @@ EventStore 的完整 `tool/result` 不被替换或删除。落盘、预览和 mi
 | 本仓库文件/入口 | 直接修改内容 | 对照源码 |
 |---|---|---|
 | `packages/contracts/src/index.ts` | 增加 provider-neutral 的 `ToolResultReplacementRecord`、artifact reference 和 replacement reason；记录 `toolCallId`、artifact 相对路径、原始大小、preview、阈值，不把完整内容重复写入 receipt | Claude Code `ContentReplacementRecord` |
-| 新增 `packages/context/src/tool-result-storage.ts` | 实现 `50000` 字符落盘阈值、`100000` token 硬上限、`2000` bytes 预览、文本/JSON 后缀、原子或 exclusive create、已存在文件幂等；生成 model-visible preview reference | Claude Code `src/utils/toolResultStorage.ts:persistToolResult()`、`buildLargeToolResultMessage()` |
+| 新增 `packages/context/src/tool-result-storage.ts` | 实现 `50000` 字符落盘阈值、`100000` token 硬上限、`2000` bytes 预览、文本/JSON 后缀、原子或 exclusive create、已存在文件幂等；preview/receipt 先脱敏常见 credential-shaped 字段，artifact 仍保存完整原文；生成 model-visible preview reference | Claude Code `src/utils/toolResultStorage.ts:persistToolResult()`、`buildLargeToolResultMessage()` |
 | `packages/context/src/tool-result-budget.ts` | 移除以 `maxResultChars=8000` 为默认的直接前缀截断主路径；改为调用 storage adapter 获取完整/preview view；保留 protected tool result 排除和 token 估算 | Claude Code 单工具结果持久化 |
 | `packages/runtime/src/index.ts:prepareModelContext()` | 在 normalize/tool pairing 后、聚合预算前应用单结果持久化；使用 Session、workspace 和 toolCallId 构造稳定 artifact path | Claude Code query-loop 调用顺序 |
 | `packages/runtime/src/index.ts:conversationMessages()` 与恢复路径 | EventStore 仍读取完整 `tool/result`；同时重放 replacement receipt，使重启后的 model view 继续使用字节一致的 preview | Claude Code `reconstructContentReplacementState()` |
@@ -289,7 +289,7 @@ EventStore 的完整 `tool/result` 不被替换或删除。落盘、预览和 mi
 
 阶段 3 回滚：停止创建新 replacement，保留已有 artifact 和事件可读；model view 回退到 EventStore 原始结果与现有 microcompact。
 
-阶段 3 已按上述入口完成。实际实现固定使用 `.agent-artifacts/tool-results/<session>/<toolCallId>.(txt|json)` 的 workspace-relative 路径，`context/tool_result_persisted` 只保存 receipt metadata；Runtime 在 `prepareModelContext()` 的 normalize/tool pairing 后执行单结果持久化，重启回放从完整 `tool/result` 和 receipt 重建相同 preview。阶段 4 的单消息聚合、时间型 microcompact 和阶段 5 的并行 scheduler 未提前实现。详细过程见 [阶段 3 单工具结果落盘实施日志](development-log/phase-3-tool-result-storage-2026-08-28.zh-CN.md)。
+阶段 3 已按上述入口完成。实际实现固定使用 `.agent-artifacts/tool-results/<session>/<toolCallId>.(txt|json)` 的 workspace-relative 路径，`context/tool_result_persisted` 只保存 receipt metadata；Runtime 在 `prepareModelContext()` 的 normalize/tool pairing 后执行单结果持久化，preview/receipt 先做 credential-shaped 字段脱敏，重启回放从完整 `tool/result` 和 receipt 重建相同 preview。阶段 4 的单消息聚合、时间型 microcompact 和阶段 5 的并行 scheduler 未提前实现。详细过程见 [阶段 3 单工具结果落盘实施日志](development-log/phase-3-tool-result-storage-2026-08-28.zh-CN.md)。
 
 ### 阶段 4：实现单消息工具结果聚合预算和 Claude Code 时间型 microcompact
 
