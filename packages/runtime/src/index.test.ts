@@ -867,6 +867,75 @@ describe("AgentHost", () => {
     expect((await host.getSession(session.id))?.status).toBe("stopped");
   });
 
+  it("combines Windows PowerShell parallel results with artifact persistence and restart replay", async () => {
+    if (process.platform !== "win32") return;
+    const root = await mkdtemp(path.join(tmpdir(), "cra-phase6-pwsh-artifact-"));
+    try {
+      const store = new InMemoryEventStore();
+      const registry = new ToolRegistry();
+      registry.register({
+        name: "pwsh_large_fixture",
+        description: "Emit a large PowerShell result for integration coverage.",
+        inputSchema: { type: "object", additionalProperties: false },
+        executionMode: "parallel",
+        riskLevel: "read",
+        approvalMode: "auto",
+        interruptBehavior: "cancel",
+        execute: async (_input, context) => {
+          const result = await execFileAsync("pwsh", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "Write-Output ('x' * 50001)"], { cwd: context.workspaceRoot, maxBuffer: 200_000 });
+          return { ok: true, output: result.stdout, modelView: result.stdout };
+        },
+      });
+      const requests: ModelRequest[] = [];
+      const model: ChatModel = {
+        async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+          requests.push(request);
+          if (requests.length === 1) {
+            for (let index = 0; index < 2; index += 1) {
+              yield { type: "tool_call_start", index, id: `pwsh-large-${index}`, name: "pwsh_large_fixture" };
+              yield { type: "tool_call_delta", index, arguments: "{}" };
+              yield { type: "tool_call_end", index };
+            }
+          } else {
+            yield { type: "text_delta", text: "PowerShell artifacts persisted." };
+          }
+          yield { type: "done" };
+        },
+      };
+      const host = new AgentHost({ store, model, compactionEnabled: false, toolRuntime: new ToolRuntime({ store, registry }) });
+      const session = await host.createSession(root);
+      const turn = await host.sendMessage(session.id, "run the PowerShell fixtures");
+      await host.waitForTurn(turn);
+      const events = await host.events(session.id);
+      const receipts = events.filter((event) => event.type === "context/tool_result_persisted");
+      expect(receipts).toHaveLength(2);
+      expect(events.filter((event) => event.type === "tool/result").map((event) => String(event.payload["toolCallId"]))).toEqual(["pwsh-large-0", "pwsh-large-1"]);
+      const firstToolMessage = requests[1]?.messages.find((message) => message.role === "tool");
+      expect(firstToolMessage?.content).toContain("persisted-tool-result");
+      for (const receipt of receipts) {
+        const relativePath = receipt.payload["relativePath"];
+        expect(typeof relativePath).toBe("string");
+        expect((await stat(path.join(root, String(relativePath)))).isFile()).toBe(true);
+      }
+
+      const replayRequests: ModelRequest[] = [];
+      const replayModel: ChatModel = {
+        async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+          replayRequests.push(request);
+          yield { type: "text_delta", text: "replayed" };
+          yield { type: "done" };
+        },
+      };
+      const restarted = new AgentHost({ store, model: replayModel, compactionEnabled: false });
+      const replayTurn = await restarted.sendMessage(session.id, "replay the PowerShell artifacts");
+      await restarted.waitForTurn(replayTurn);
+      const replayToolMessage = replayRequests[0]?.messages.find((message) => message.role === "tool");
+      expect(replayToolMessage?.content).toBe(firstToolMessage?.content);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("persists oversized single tool results and replays the same bounded model view", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "cra-runtime-tool-result-"));
     try {
