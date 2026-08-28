@@ -57,6 +57,8 @@
 - `pnpm test`：全 workspace 通过；
 - `git diff --check`：通过。
 
+阶段 4 实现 checkpoint：`2f4fadf feat(phase4): aggregate tool results and time microcompact`。
+
 ## 回滚与下一步
 
 回滚时关闭或移除 aggregate/time budget gate，保留阶段 3 artifact、replacement receipt 和完整 `tool/result` 可读；EventStore、permission、workspace 和取消 contract 不回滚。

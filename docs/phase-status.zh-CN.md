@@ -10,7 +10,7 @@
 - Runtime 在每个 turn 内维护 `seenIds/replacements`，追加 `context/tool_result_persisted` receipt；完整 `tool/result` 仍保留在 EventStore，Storage/Web 只回放有界预算诊断；重启、resume 和后续 step 保持同一 model-visible tool view；
 - 时间型 microcompact 已独立为显式开关，默认关闭；启用后使用 `60` 分钟 gap 和 `keepRecentResults=5`，count/token/time trigger 在事件和 `step/started` 诊断中分开记录；
 - 阶段 4没有提前实现阶段 5 的并行 scheduler、provider-specific cached microcompact、Session Memory 或 Summary Compact；
-- 验证：`pnpm test`（全 workspace 547 项）、`pnpm typecheck`、`git diff --check`；详细记录见 [阶段 4 单消息工具结果聚合与时间型 MicroCompact 实施日志](development-log/phase-4-tool-result-aggregate-microcompact-2026-08-28.zh-CN.md)；实现 checkpoint 将在本次阶段提交后回填；
+- 验证：`pnpm test`（全 workspace 547 项）、`pnpm typecheck`、`git diff --check`；详细记录见 [阶段 4 单消息工具结果聚合与时间型 MicroCompact 实施日志](development-log/phase-4-tool-result-aggregate-microcompact-2026-08-28.zh-CN.md)；实现 checkpoint `2f4fadf`；
 - 下一阶段入口：实施基线中的阶段 5，按 DSH 默认最多 `10` 个并行工具调用实现统一 scheduler，并继续消费本阶段稳定的聚合预算与 replacement state。
 
 ### Phase 8.5-MR9：单工具结果落盘与 artifact 预览（阶段 3，completed，2026-08-28）
