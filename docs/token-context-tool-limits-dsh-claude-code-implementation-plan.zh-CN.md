@@ -344,7 +344,7 @@ EventStore 的完整 `tool/result` 不被替换或删除。落盘、预览和 mi
 
 阶段 5 已按上述入口完成。Host 默认 `maxParallelToolCalls=10`，允许范围固定为 `1–512`；`runSteps()` 通过 scheduler 在 parallel pool、exclusive barrier 和 abort drain 之间切换。`ToolRuntime` 对 scheduler 调用延迟 `tool/result`/`diff/preview` 写入，并由 scheduler 按 assistant 声明顺序 commit；下一次 model request 的 tool results 与 EventStore 顺序一致，阶段 4 的 aggregate budget/replacement state 保持不变。详细过程见 [阶段 5 并行工具调用 Scheduler 实施日志](development-log/phase-5-parallel-tool-scheduler-2026-08-28.zh-CN.md)。
 
-### 阶段 6：集成门禁、迁移说明和文档收敛
+### 阶段 6：集成门禁、迁移说明和文档收敛（已完成，2026-08-28）
 
 本阶段修改以下内容：
 
@@ -356,6 +356,8 @@ EventStore 的完整 `tool/result` 不被替换或删除。落盘、预览和 mi
 | `docs/source-reuse-register.md` | 登记 DSH scheduler 行为参考、Claude Code tool result storage/aggregate/time-based 行为参考；标明未复制 Claude Code 代码 | AGENTS.md 上游复用要求 |
 | `docs/phase-status.zh-CN.md` 和 Phase 8 计划 | 只有全部门禁通过并建立 checkpoint 后，记录对应 slice 为 completed；不得仅因默认值已改就宣布 Phase 8 完成 | 阶段治理 |
 | `README.zh-CN.md`、评测文档 | 更新公开默认值、配置范围、artifact 位置和诊断方法 | 实际运行行为 |
+| `packages/runtime/src/index.test.ts` | 增加 Windows PowerShell 并行大结果、artifact 持久化、EventStore 顺序和 Host 重启 replay 的组合验收场景 | 阶段 3–5 组合 contract |
+| `docs/development-log/phase-6-integration-gate-2026-08-28.zh-CN.md` | 固化阶段 6 的修改范围、命令、证据、回滚和后续入口 | 阶段治理 |
 | `pnpm typecheck`、`pnpm test`、LLM/Context/Runtime/API 定向测试、评测 smoke、Windows e2e | 形成最终证据；真实 v4pro smoke 验证 32K 默认不会立即触发 `ANTHROPIC_MAX_TOKENS`，64K 只在服务端能力允许时启用 | 当前测试门禁 |
 
 阶段 6 的必过场景：
@@ -371,6 +373,8 @@ EventStore 的完整 `tool/result` 不被替换或删除。落盘、预览和 mi
 9. **评测 smoke**：`maxSteps=32` 与 `maxSteps=512` 均可运行，Runner/Runtime 不再因 100 上限配置失败。
 
 阶段 6 完成标准：全部测试有命令和结果证据；阶段 1–5 各自有独立 checkpoint；文档、契约、默认值、API 诊断和实际请求保持一致。
+
+阶段 6 已按上述入口完成。M01/M05 和总调研文档已标记当前 accepted implementation baseline；README 与评测说明已同步 `32000/64000` 输出、`200000/180000` context、`32/512` steps、`8192` 字符 summary、artifact/aggregate/time-based microcompact 和 10 并行 scheduler。Grader gold/empty 自检、32/512 Runner smoke、Windows PowerShell 并行大结果重启 replay、全 workspace tests、typecheck 和 diff 检查均通过。详细证据见 [阶段 6 集成门禁实施日志](development-log/phase-6-integration-gate-2026-08-28.zh-CN.md)。
 
 ## 7. 实施顺序与依赖
 

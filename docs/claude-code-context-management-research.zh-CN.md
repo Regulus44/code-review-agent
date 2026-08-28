@@ -1,5 +1,18 @@
 # Claude Code 上下文管理机制调研与本项目演进依据
 
+## 当前 accepted implementation baseline（2026-08-28）
+
+阶段 1–5 已按本仓库的实施基线完成并建立独立 checkpoint：Anthropic-compatible 默认输出 `32000`、请求硬上限 `64000` 且保留模型级上限校验；未知模型 context fallback 为 `200000/64000/32000`，默认 effective window 为 `180000`；Agent step 默认 `32`、合法范围 `1–512`；summary 正文默认 `8192` 字符；单工具结果 artifact 阈值为 `50000` 字符或 `100000` token、预览最多 `2000` UTF-8 bytes；单消息工具结果聚合预算为 `200000` 字符；时间型 microcompact 默认关闭，启用时为 `60` 分钟 gap、保留最近 `5` 个；并行工具调用默认最多 `10` 个 in-flight，结果按模型声明顺序提交。
+
+当前实现、入口和验收证据由以下文档共同构成：
+
+- [Token/Context/Tool 实施基线](token-context-tool-limits-dsh-claude-code-implementation-plan.zh-CN.md)：参数裁决、文件级修改点和阶段顺序；
+- [阶段状态](phase-status.zh-CN.md)：checkpoint、测试命令和下一阶段入口；
+- [M01 实施记录](claude-code-context-m01-implementation.zh-CN.md) 与 [M05 实施说明](claude-code-context-m05-implementation.zh-CN.md)：模块级历史和当前修订；
+- [阶段 3–5 开发日志](development-log/README.zh-CN.md)：artifact、aggregate/microcompact 和 scheduler 的实际改造证据。
+
+阶段 6 只负责集成门禁、迁移说明、评测 smoke 和文档收敛；M14 Context Collapse 仍保持 deferred，不因本次收敛改变其状态。
+
 状态：`research`（仅调研，不代表已接受的实现决策）  
 日期：2026-08-26  
 归属：Phase 8 上下文管理能力的后续演进  

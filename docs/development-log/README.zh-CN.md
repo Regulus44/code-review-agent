@@ -25,6 +25,7 @@
 - [阶段 3：单工具结果落盘与预览实施日志（2026-08-28）](phase-3-tool-result-storage-2026-08-28.zh-CN.md)
 - [阶段 4：单消息工具结果聚合与时间型 MicroCompact 实施日志（2026-08-28）](phase-4-tool-result-aggregate-microcompact-2026-08-28.zh-CN.md)
 - [阶段 5：最多 10 个并行工具调用 Scheduler 实施日志（2026-08-28）](phase-5-parallel-tool-scheduler-2026-08-28.zh-CN.md)
+- [阶段 6：集成门禁、迁移说明和文档收敛实施日志（2026-08-28）](phase-6-integration-gate-2026-08-28.zh-CN.md)
 - [M01：Claude Code 式 Context Window 与 Auto-Compact Budget](m01-context-budget.zh-CN.md)
 - [M02：Claude Code 式 Token Estimation 与 Provider Exact Count](m02-token-estimation.zh-CN.md)
 - [M03：Claude Code 式 Context Assembly 与 System Prompt Sections](m03-context-assembly.zh-CN.md)

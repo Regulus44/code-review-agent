@@ -490,3 +490,39 @@ ID:
 范围：`50000` 字符、`100000` token hard cap、`2000` UTF-8 bytes preview、`.txt/.json` artifact、失败 fail-closed、重启 replacement replay；本项目使用 workspace-relative path、EventStore 和 WorkspaceResolver，未暴露宿主绝对路径。
 
 新增测试：`packages/context/src/tool-result-storage.test.ts`、`packages/runtime/src/index.test.ts`、`apps/api/src/artifacts.test.ts` 的阈值、JSON/media、EEXIST、恢复和 workspace 越界场景。
+
+### DSH-013
+
+来源仓库：`D:/Develop/deepseek-harness-fork`
+
+来源路径：`packages/core/agent-loop/src/constants.ts`、`packages/core/agent-loop/src/index.ts`、`packages/core/agent-loop/src/tool-calls.ts`、`packages/core/agent-loop/tests/tool-calls.spec.ts`
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：`D:/Develop/deepseek-harness-fork/LICENSE` 为 MIT；本项目没有复制 DSH scheduler、Cordis 类型或 AgentLoop 实现。
+
+本项目路径：`packages/runtime/src/tool-call-scheduler.ts`、`packages/runtime/src/index.ts`、`packages/runtime/src/tool-call-scheduler.test.ts`、`packages/runtime/src/index.test.ts`。
+
+范围：默认最多 `10` 个 parallel in-flight、rolling pool、exclusive barrier、未启动调用的 live execution mode 重分类、模型顺序 commit、abort 停止补充并 drain 已启动调用。
+
+改写部分：调度结果通过本项目 `ToolRuntime` 和 EventStore 提交；权限、workspace、tenant、interaction、取消和审计继续由本项目 contract 负责；Host 硬上限固定为 `512`，没有引入 DSH 的其他 runtime 边界。
+
+新增测试：scheduler rolling cap、exclusive barrier、动态重分类、模型顺序、abort drain/skip，以及 Runtime/API 集成和 capability projection。
+
+### CC-017
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`src/utils/toolResultStorage.ts`、`src/query.ts`、`src/services/compact/microCompact.ts`、`src/services/compact/timeBasedMCConfig.ts`
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；本项目没有复制 Claude Code 实现代码，仅重新实现工具结果 artifact、单消息 aggregate、count/token/time microcompact 和稳定 replacement state。
+
+本项目路径：`packages/context/src/tool-result-storage.ts`、`packages/context/src/tool-result-budget.ts`、`packages/runtime/src/index.ts`、`packages/tools/src/runtime.ts`、`packages/context/src/tool-result-*.test.ts`。
+
+范围：`50000` 字符/`100000` token 单结果阈值、`2000` UTF-8 bytes 预览、`200000` 字符单消息聚合预算、最大 fresh 结果优先 replacement、时间型 `60` 分钟 gap、最近 `5` 个保留和重启后的 model-view 重建。
+
+改写部分：artifact 使用 workspace-relative 路径和 WorkspaceResolver；完整结果继续保留在 EventStore；凭据脱敏、tenant/session 边界、permission 和事件 projection 使用本项目实现；provider-specific cached microcompact 仍 deferred。
+
+新增测试：`packages/context/src/tool-result-storage.test.ts`、`tool-result-budget.test.ts`、`packages/runtime/src/index.test.ts` 和 `apps/api/src/artifacts.test.ts` 的阈值、聚合、时间触发、replacement、恢复和安全场景。

@@ -4,6 +4,12 @@
 
 本文件记录 M01 的实际实现，作为 `docs/claude-code-context-management-research.zh-CN.md` 中 M01 规划的代码级落地补充。实现只参考 Claude Code 的结构和行为，没有复制 Claude Code 源码。
 
+## 当前基线修订（2026-08-28，阶段 6）
+
+阶段 2 已将未知模型能力的 fallback 更新为：`maxInputTokens=200000`、`maxOutputTokens=64000`、`defaultMaxOutputTokens=32000`；按默认 `reservedOutputTokens=20000` 计算，`effectiveWindowTokens=180000`。`packages/compaction/src/index.ts` 的 legacy `maxTokens` 同步为 `200000`，`maxSummaryChars` 同步为 `8192`。
+
+本节之后的 M01 原始实现记录保留当时的 16K/0 fallback 描述，用于追溯初始实现；当前运行时、API capability 和评测基线以本节、[Token/Context/Tool 实施基线](token-context-tool-limits-dsh-claude-code-implementation-plan.zh-CN.md)及 [阶段状态](phase-status.zh-CN.md) 为准。
+
 ## 1. Claude Code 对照入口
 
 | Claude Code 入口 | 关键职责 | 本项目对应实现 |

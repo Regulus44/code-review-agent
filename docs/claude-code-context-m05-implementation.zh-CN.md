@@ -5,6 +5,12 @@
 所属阶段：Phase 8，高级上下文能力
 参考快照：`D:/Develop/claude-code`
 
+## 当前基线修订（2026-08-28，阶段 6）
+
+阶段 3–5 已在 M05 基础上继续完成三项集成：单工具结果超过 `50000` 字符或 `100000` token 时写入 workspace artifact 并向模型提供最多 `2000` UTF-8 bytes 预览；单个 API user message 的工具结果聚合预算为 `200000` 字符，replacement receipt 可在重启后重建稳定 model view；并行工具调用由 DSH 风格 scheduler 限制为默认最多 `10` 个 in-flight，结果与 `tool/result` 事件按 assistant 声明顺序提交。时间型 microcompact 默认关闭，显式启用时使用 `60` 分钟 gap、保留最近 `5` 个结果。
+
+当前 M05 及阶段 3–5 的入口、参数和测试证据以 [Token/Context/Tool 实施基线](token-context-tool-limits-dsh-claude-code-implementation-plan.zh-CN.md)、[阶段 4 实施日志](development-log/phase-4-tool-result-aggregate-microcompact-2026-08-28.zh-CN.md)和 [阶段 5 实施日志](development-log/phase-5-parallel-tool-scheduler-2026-08-28.zh-CN.md) 为准；本文件后续章节保留 M05 的原始设计和边界说明。
+
 ## 1. Claude Code 入口与本项目映射
 
 | Claude Code 入口 | 关注点 | 本项目实现 |

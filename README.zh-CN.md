@@ -178,6 +178,24 @@ TypeScript API 读取的 `.env` 配置：
 | `PORT` | API 端口，默认 `3210`。 |
 | `CODE_REVIEW_AGENT_DB_PATH` | SQLite 数据库路径，默认使用 API 包的 `.data` 目录。 |
 
+当前运行时限制（阶段 1–5 基线）：
+
+| 项目 | 默认值 | 允许范围/硬上限 |
+|---|---:|---:|
+| Anthropic-compatible 单次输出 | `32000` tokens | 请求最多 `64000`，同时受模型自身上限校验 |
+| 未声明模型 context fallback | `200000` input / `64000` output / `32000` default | 默认 effective window `180000` |
+| Agent step | `32` | `1–512` |
+| Summary 正文 | `8192` 字符 | 由 summary compact 配置控制 |
+| 单工具结果 artifact | `50000` 字符或 `100000` tokens 触发 | model view 预览最多 `2000` UTF-8 bytes |
+| 单消息工具结果聚合 | `200000` 字符 | 超出部分使用稳定 artifact replacement |
+| 时间型 microcompact | 默认关闭 | 启用时 gap `60` 分钟、保留最近 `5` 个结果 |
+| 并行工具调用 | `10` 个 in-flight | Host 配置 `1–512`，`1` 可退化为串行 |
+
+运行时诊断通过 `GET /v1/capabilities` 查看 context、tool execution 和其他能力投影；每个
+`step/started` 事件包含实际 context budget、warning 和工具结果预算诊断。完整工具原文
+保存在 Session workspace 的 `.agent-artifacts/tool-results/<session>/<toolCallId>.(txt|json)`，
+模型只接收受限预览或 replacement reference。
+
 ## API 概览
 
 健康检查和发现：

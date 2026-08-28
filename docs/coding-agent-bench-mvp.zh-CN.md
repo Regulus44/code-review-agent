@@ -288,6 +288,12 @@ D:/Develop/coding-agent-test/datasets/swebench-lite/pilot-01/results/
 补上 Grader 执行并重新运行 pilot。确认
 单条任务能产生非空 `agent.diff` 且 Grader 可判分后，再开始串行运行 active 任务集。
 
+阶段 6 集成门禁还要求分别验证 `maxSteps=32` 和 `maxSteps=512` 的 Runner 配置；两者都必须
+通过 `1–512` 校验，不能再出现旧的 `100` 上限错误。运行过程中应同时保存完整事件日志、
+最终 diff、`context`/`toolExecution` capability 快照和工具结果 artifact 路径，便于定位
+context、工具聚合、并行调度和恢复问题。阶段 5 的并行工具默认最多 `10` 个 in-flight，
+不由评测脚本覆盖 AgentHost 的 Host cap。
+
 ### 第 3 步：串行跑完 pilot 任务集
 
 - 固定模型、参数、权限 preset 和任务顺序；
