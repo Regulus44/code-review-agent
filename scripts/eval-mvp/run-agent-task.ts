@@ -19,6 +19,7 @@ type Task = {
   readonly id: string;
   readonly problemStatement: string;
   readonly allowedPaths?: readonly string[];
+  readonly requiredChecks?: readonly string[];
   readonly timeoutMs?: number;
 };
 
@@ -150,7 +151,10 @@ async function main(): Promise<void> {
       ? "修改范围约束：只修改与本任务直接相关的文件，不要修改无关文件、测试基线或文档。"
       : `修改范围约束：只修改与本任务直接相关的文件。允许修改路径：${task.allowedPaths.join(", ")}。不要修改其他文件、测试基线或文档。`;
     const budgetInstruction = `执行预算：本次任务最多使用 ${maxSteps} 个 Agent step。请在有限预算内高效完成：先定位问题，再做最小修改并运行针对性测试；接近步数上限时停止探索，立即完成验证并总结。`;
-    const scopedPrompt = `${task.problemStatement}\n\n${budgetInstruction}\n${scopeInstruction}`;
+    const checksInstruction = task.requiredChecks === undefined || task.requiredChecks.length === 0
+      ? "验收要求：完成修改后执行与变更匹配的仓库原生测试、构建或诊断，并报告实际命令及退出状态。"
+      : `验收要求：${task.requiredChecks.join(", ")}。修改前先检查目标文件；修改后执行与任务匹配的仓库原生测试、构建或诊断，并报告实际命令及退出状态。`;
+    const scopedPrompt = `${task.problemStatement}\n\n${budgetInstruction}\n${scopeInstruction}\n${checksInstruction}`;
     const sent = await requestJson<{ turnId: string }>(baseUrl, `/v1/sessions/${encodeURIComponent(sessionId)}`, {
       method: "POST",
       body: { content: scopedPrompt },
