@@ -69,7 +69,7 @@ export function createToolResultStorage(writer: ToolResultStorageWriter, config:
       const exceedsChars = originalChars > threshold;
       if (!exceedsChars && !exceedsTokens) return { status: "not-needed", modelView: content };
 
-      const preview = truncateUtf8(content, previewLimit);
+      const preview = truncateUtf8(redactPreview(content), previewLimit);
       const extension = isJsonText(content) ? "json" : "txt";
       const relativePath = `${TOOL_RESULT_ARTIFACTS_ROOT}/${safeSegment(input.sessionId)}/${safeSegment(input.toolCallId)}.${extension}`;
       const artifact: ArtifactRef = {
@@ -161,6 +161,16 @@ export function containsNonTextContent(value: string): boolean {
   let parsed: unknown;
   try { parsed = JSON.parse(value); } catch { return false; }
   return containsMediaNode(parsed, 0);
+}
+
+/** Redacts common credential-shaped fields before a preview enters the model/event receipt. */
+function redactPreview(value: string): string {
+  const field = "(?:api[_-]?key|x-api-key|authorization|access[_-]?token|refresh[_-]?token|password|secret)";
+  let redacted = value
+    .replace(new RegExp(`([\"']?${field}[\"']?\\s*[:=]\\s*)(\")([^\"]*)(\")`, "giu"), "$1$2[REDACTED]$4")
+    .replace(new RegExp(`([\"']?${field}[\"']?\\s*[:=]\\s*)(')([^']*)(')`, "giu"), "$1$2[REDACTED]$4");
+  redacted = redacted.replace(new RegExp(`(${field}\\s*:\\s*)(?:bearer\\s+)?[^\\r\\n]+`, "giu"), "$1[REDACTED]");
+  return redacted.replace(new RegExp(`([\"']?${field}[\"']?\\s*[:=]\\s*)([^\\s\"',}\\]]+)`, "giu"), "$1[REDACTED]");
 }
 
 function containsMediaNode(value: unknown, depth: number): boolean {

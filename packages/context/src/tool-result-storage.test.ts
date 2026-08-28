@@ -60,6 +60,38 @@ describe("tool-result-storage", () => {
     expect(result.modelView).not.toContain(content.slice(0, 10_000));
   });
 
+  it("redacts credential-shaped values from the preview but preserves the artifact", async () => {
+    let written = "";
+    const storage = createToolResultStorage({
+      write: async (input) => {
+        written = input.content;
+        return "created";
+      },
+    });
+    const content = [
+      "api_key=secret-value",
+      "Authorization: Bearer bearer-secret-value",
+      JSON.stringify({ access_token: "json-secret-value", payload: "x".repeat(50_000) }),
+    ].join("\n");
+    const result = await storage.persist({
+      sessionId: "ses_1",
+      workspaceRoot: ".",
+      toolCallId: "redaction_call",
+      content,
+    });
+
+    expect(result.status).toBe("persisted");
+    expect(result.replacement?.preview).toContain("api_key=[REDACTED]");
+    expect(result.replacement?.preview).toContain("Authorization: [REDACTED]");
+    expect(result.replacement?.preview).toContain('access_token":"[REDACTED]"');
+    expect(result.replacement?.preview).not.toContain("secret-value");
+    expect(result.replacement?.preview).not.toContain("bearer-secret-value");
+    expect(result.replacement?.preview).not.toContain("json-secret-value");
+    expect(written).toContain("api_key=secret-value");
+    expect(written).toContain("bearer-secret-value");
+    expect(written).toContain("json-secret-value");
+  });
+
   it("treats repeated exclusive creation as idempotent", async () => {
     let writes = 0;
     const storage = createToolResultStorage({ write: async () => { writes += 1; return writes === 1 ? "created" : "exists"; } });
