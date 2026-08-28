@@ -764,6 +764,25 @@ export interface ContextProjectMemoryProjection {
 export type ContextDiagnosticLevel = "unknown" | "healthy" | "warning" | "error" | "auto_compact" | "blocking";
 export type ContextDiagnosticTokenSource = "provider" | "estimate" | "stale_usage";
 export type ContextDiagnosticTokenConfidence = "exact" | "high" | "medium" | "low";
+export type ContextToolResultBudgetTrigger = "none" | "per-result" | "message" | "count" | "tokens" | "time";
+export type ContextMicrocompactTrigger = "none" | "count" | "tokens" | "time";
+
+/** Bounded projection of the latest tool-result aggregate/microcompact decision. */
+export interface ContextToolResultBudgetProjection {
+  readonly enabled: boolean;
+  readonly changed: boolean;
+  readonly trigger: ContextToolResultBudgetTrigger;
+  readonly messageBudgetChars: number;
+  readonly messageBudgetMessagesOverBudget: number;
+  readonly messageBudgetReplacedToolCallIds: readonly string[];
+  readonly boundedCount: number;
+  readonly clearedCount: number;
+  readonly tokensSaved: number;
+  readonly microcompactTrigger: ContextMicrocompactTrigger;
+  readonly timeBasedMicrocompactEnabled: boolean;
+  readonly timeBasedGapMs: number;
+  readonly lastSequence: number;
+}
 
 export interface ContextDiagnosticRecovery {
   readonly status: "started" | "transition" | "succeeded" | "failed" | "circuit_open";
@@ -791,6 +810,7 @@ export interface ContextDiagnosticsProjection {
   readonly lastTurnId?: TurnId;
   readonly lastRequestId?: string;
   readonly breakdown?: Readonly<Record<string, number>>;
+  readonly lastToolResultBudget?: ContextToolResultBudgetProjection;
   readonly lastCompaction?: {
     readonly status: "completed" | "failed";
     readonly kind?: "legacy" | "session_memory" | "summary" | "micro";

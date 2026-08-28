@@ -669,6 +669,95 @@ describe("AgentHost", () => {
     expect(JSON.stringify(durable)).toContain("durable-0-");
   });
 
+  it("enforces the message-level aggregate budget for parallel fresh results", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-runtime-message-budget-"));
+    try {
+      const store = new InMemoryEventStore();
+      const registry = new ToolRegistry();
+      const content = "x".repeat(40_000);
+      registry.register({
+        name: "parallel_fixture",
+        description: "Return a large deterministic result for aggregate-budget testing.",
+        inputSchema: { type: "object", additionalProperties: false },
+        executionMode: "parallel",
+        riskLevel: "read",
+        approvalMode: "auto",
+        interruptBehavior: "cancel",
+        execute: async () => ({ ok: true, output: content, modelView: content }),
+      });
+      const requests: ModelRequest[] = [];
+      const model: ChatModel = {
+        async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+          requests.push(request);
+          if (requests.length === 1) {
+            for (let index = 0; index < 10; index += 1) {
+              yield { type: "tool_call_start", index, id: `parallel-call-${index}`, name: "parallel_fixture" };
+              yield { type: "tool_call_delta", index, arguments: "{}" };
+              yield { type: "tool_call_end", index };
+            }
+          } else {
+            yield { type: "text_delta", text: "parallel results compacted" };
+          }
+          yield { type: "done" };
+        },
+      };
+      const host = new AgentHost({
+        store,
+        model,
+        compactionEnabled: false,
+        toolRuntime: new ToolRuntime({ store, registry }),
+        toolResultBudget: {
+          maxToolResultsPerMessageChars: 200_000,
+          microcompactTriggerToolCount: 99,
+          microcompactTriggerTokens: 99_999,
+        },
+      });
+      const session = await host.createSession(root);
+      const turn = await host.sendMessage(session.id, "run ten parallel fixtures");
+      await host.waitForTurn(turn);
+
+      const secondToolMessages = requests[1]?.messages.filter((message) => message.role === "tool") ?? [];
+      const totalChars = secondToolMessages.reduce((sum, message) => sum + message.content.length, 0);
+      expect(secondToolMessages).toHaveLength(10);
+      expect(totalChars).toBeLessThanOrEqual(200_000);
+      expect(secondToolMessages.some((message) => message.content.startsWith("<persisted-tool-result"))).toBe(true);
+      const events = await host.events(session.id);
+      expect(events.filter((event) => event.type === "context/tool_result_persisted").length).toBeGreaterThanOrEqual(5);
+      const step = events.find((event) => event.type === "step/started" && (event.payload["toolResultBudget"] as { readonly trigger?: unknown } | undefined)?.trigger === "message");
+      expect(step?.payload["toolResultBudget"]).toMatchObject({
+        trigger: "message",
+        messageBudgetChars: 200_000,
+        messageBudgetMessagesOverBudget: 1,
+        messageBudgetReplacedToolCallIds: expect.any(Array),
+      });
+
+      const restartedRequests: ModelRequest[] = [];
+      const restarted = new AgentHost({
+        store,
+        model: {
+          async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+            restartedRequests.push(request);
+            yield { type: "text_delta", text: "replayed aggregate" };
+            yield { type: "done" };
+          },
+        },
+        compactionEnabled: false,
+        toolResultBudget: {
+          maxToolResultsPerMessageChars: 200_000,
+          microcompactTriggerToolCount: 99,
+          microcompactTriggerTokens: 99_999,
+        },
+      });
+      const replayTurn = await restarted.sendMessage(session.id, "replay aggregate results");
+      await restarted.waitForTurn(replayTurn);
+      const originalToolViews = secondToolMessages.map((message) => message.content);
+      const replayedToolViews = restartedRequests[0]?.messages.filter((message) => message.role === "tool").slice(-10).map((message) => message.content) ?? [];
+      expect(replayedToolViews).toEqual(originalToolViews);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("persists oversized single tool results and replays the same bounded model view", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "cra-runtime-tool-result-"));
     try {

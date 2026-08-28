@@ -25,6 +25,8 @@ export interface ToolResultStorageInput {
   readonly thresholdChars?: number;
   readonly maxTokens?: number;
   readonly previewBytes?: number;
+  /** Forces artifact creation for message-level aggregate budgets even below the per-result threshold. */
+  readonly forcePersist?: boolean;
 }
 
 export type ToolResultStorageStatus = "persisted" | "failed" | "not-needed" | "unsupported";
@@ -64,10 +66,11 @@ export function createToolResultStorage(writer: ToolResultStorageWriter, config:
       const threshold = positiveInteger(input.thresholdChars, thresholdChars);
       const tokenLimit = positiveInteger(input.maxTokens, maxTokens);
       const previewLimit = positiveInteger(input.previewBytes, previewBytes);
+      const forcePersist = input.forcePersist === true;
       if (containsNonTextContent(content)) return { status: "unsupported", modelView: content };
       const exceedsTokens = originalTokens > tokenLimit;
       const exceedsChars = originalChars > threshold;
-      if (!exceedsChars && !exceedsTokens) return { status: "not-needed", modelView: content };
+      if (!forcePersist && !exceedsChars && !exceedsTokens) return { status: "not-needed", modelView: content };
 
       const preview = truncateUtf8(redactPreview(content), previewLimit);
       const extension = isJsonText(content) ? "json" : "txt";

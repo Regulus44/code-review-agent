@@ -11,7 +11,15 @@ export {
 export { groupMessagesByApiRound } from "./api-round.js";
 export { normalizeMessagesForAPI } from "./api-normalize.js";
 export { ensureToolResultPairing } from "./tool-pairing.js";
-export { applyToolResultBudget, DEFAULT_COMPACTABLE_TOOLS, DEFAULT_MICROCOMPACT_MESSAGE } from "./tool-result-budget.js";
+export {
+  applyToolResultBudget,
+  applyToolResultBudgetAsync,
+  createToolResultBudgetState,
+  hydrateToolResultBudgetState,
+  DEFAULT_COMPACTABLE_TOOLS,
+  DEFAULT_MAX_TOOL_RESULTS_PER_MESSAGE_CHARS,
+  DEFAULT_MICROCOMPACT_MESSAGE,
+} from "./tool-result-budget.js";
 export {
   buildToolResultModelView,
   containsNonTextContent,
@@ -116,10 +124,12 @@ export type {
 } from "./tool-pairing.js";
 export type {
   ApplyToolResultBudgetOptions,
+  MicrocompactTrigger,
   ToolResultBudgetPolicy,
   ToolResultBudgetReport,
   ToolResultBudgetResult,
   ToolResultBudgetTrigger,
+  ToolResultBudgetState,
   ToolResultContextView,
 } from "./tool-result-budget.js";
 export type {

@@ -251,6 +251,7 @@ describe("InMemoryEventStore", () => {
       contextBudget: { effectiveWindowTokens: 10_000, warningThreshold: 7_000, errorThreshold: 8_000, autoCompactThreshold: 9_000, blockingThreshold: 9_800 },
       contextWarning: { percentLeft: 5, isAboveWarningThreshold: true, isAboveErrorThreshold: true, isAboveAutoCompactThreshold: true, isAtBlockingLimit: false },
       tokenCount: { value: 9_500, source: "provider", confidence: "exact", breakdown: { messages: 8_000, tools: 1_500 } },
+      toolResultBudget: { enabled: true, changed: true, trigger: "message", messageBudgetChars: 200_000, messageBudgetMessagesOverBudget: 1, messageBudgetReplacedToolCallIds: ["tool_1"], boundedCount: 1, clearedCount: 0, tokensSaved: 12_000, microcompactTrigger: "none", timeBasedMicrocompactEnabled: false, timeBasedGapMs: 3_600_000 },
     } });
     await store.append({ sessionId, type: "context/compact_boundary", payload: {
       boundary: { version: 1, id: "boundary_m13", kind: "summary", trigger: "auto", preCompactTokens: 9_500, sourceSequence: 2, createdAt: "2026-08-26T00:00:00.000Z" },
@@ -272,6 +273,7 @@ describe("InMemoryEventStore", () => {
       tokenConfidence: "exact",
       level: "auto_compact",
       lastRequestId: "request_m13",
+      lastToolResultBudget: { trigger: "message", messageBudgetChars: 200_000, messageBudgetMessagesOverBudget: 1, messageBudgetReplacedToolCallIds: ["tool_1"], timeBasedMicrocompactEnabled: false },
       lastCompaction: { status: "completed", kind: "summary", preCompactTokens: 9_500, postCompactTokens: 2_000, tokensSaved: 7_500 },
     });
     expect(projection?.contextDiagnostics?.recoveryChain).toHaveLength(16);

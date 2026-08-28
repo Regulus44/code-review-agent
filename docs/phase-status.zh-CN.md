@@ -4,6 +4,15 @@
 
 ## 当前状态
 
+### Phase 8.5-MR10：单消息工具结果聚合与时间型 MicroCompact（阶段 4，completed，2026-08-28）
+
+- 已完成 Claude Code 风格的单消息工具结果聚合预算：以最终 API user message 为边界，默认总预算为 `200000` 字符；超预算时按最大 fresh 结果优先持久化并替换为稳定 artifact model view，已发送未替换结果冻结，已替换结果复用同一 view；
+- Runtime 在每个 turn 内维护 `seenIds/replacements`，追加 `context/tool_result_persisted` receipt；完整 `tool/result` 仍保留在 EventStore，Storage/Web 只回放有界预算诊断；重启、resume 和后续 step 保持同一 model-visible tool view；
+- 时间型 microcompact 已独立为显式开关，默认关闭；启用后使用 `60` 分钟 gap 和 `keepRecentResults=5`，count/token/time trigger 在事件和 `step/started` 诊断中分开记录；
+- 阶段 4没有提前实现阶段 5 的并行 scheduler、provider-specific cached microcompact、Session Memory 或 Summary Compact；
+- 验证：`pnpm test`（全 workspace 547 项）、`pnpm typecheck`、`git diff --check`；详细记录见 [阶段 4 单消息工具结果聚合与时间型 MicroCompact 实施日志](development-log/phase-4-tool-result-aggregate-microcompact-2026-08-28.zh-CN.md)；实现 checkpoint 将在本次阶段提交后回填；
+- 下一阶段入口：实施基线中的阶段 5，按 DSH 默认最多 `10` 个并行工具调用实现统一 scheduler，并继续消费本阶段稳定的聚合预算与 replacement state。
+
 ### Phase 8.5-MR9：单工具结果落盘与 artifact 预览（阶段 3，completed，2026-08-28）
 
 - 已完成 Claude Code 风格单工具结果 artifact 化：超过 `50000` 字符或 `100000` token hard cap 时写入 `.agent-artifacts/tool-results/<session>/<toolCallId>.(txt|json)`，模型只看到 relative path 和最多 `2000` UTF-8 bytes preview；非文本 image/document block 不强制序列化；
@@ -11,7 +20,7 @@
 - `tool/result` 事件继续保存完整结果，`context/tool_result_persisted` 只保存 receipt metadata；Runtime 重启/回放按 receipt 重建相同 model-visible view，artifact 缺失或写入失败均 fail closed；WorkspaceResolver 和 API artifact lookup 继续执行 workspace/symlink/Session 边界；
 - shell/terminal/job 默认 model-visible 读取为 `30000` 字符，允许上限 `150000`，底层 host buffer 保持 `512 KiB`；
 - 验证：`pnpm test`、`pnpm typecheck`、`git diff --check`；阶段日志见 [阶段 3 单工具结果落盘实施日志](development-log/phase-3-tool-result-storage-2026-08-28.zh-CN.md)；阶段 checkpoint `79ab824`，preview 脱敏跟进 checkpoint `2bfb2b2`；
-- 下一阶段入口：实施基线中的阶段 4，单消息工具结果聚合预算与 Claude Code 时间型 microcompact。
+- 上一阶段入口：实施基线中的阶段 4，单消息工具结果聚合预算与 Claude Code 时间型 microcompact；该阶段已由上方 MR10 完成。
 
 ### Phase 8.5-MR7：Anthropic-compatible 输出能力（阶段 1，completed，2026-08-28）
 

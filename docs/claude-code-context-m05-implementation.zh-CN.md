@@ -1,6 +1,6 @@
 # M05 实施说明：Tool Result Budget 与 MicroCompact
 
-状态：`implemented`
+状态：`implemented`（阶段 4聚合预算与时间型 microcompact 已补齐）
 日期：2026-08-26
 所属阶段：Phase 8，高级上下文能力
 参考快照：`D:/Develop/claude-code`
@@ -11,7 +11,9 @@
 |---|---|---|
 | `src/query.ts:526-624` | 请求前释放工具结果、按 model view 计算预算 | `packages/runtime/src/index.ts:runSteps()`、`prepareModelContext()` |
 | `src/services/compact/microCompact.ts:137-205` | 文本、结构化 block、image/document 的工具结果估算 | `packages/context/src/tool-result-budget.ts:estimateToolResultTokens()` |
-| `src/services/compact/microCompact.ts:257-365` | 旧结果选择、最近结果保留、cleared marker | `packages/context/src/tool-result-budget.ts:microcompactTrigger()`、`applyToolResultBudget()` |
+| `src/services/compact/microCompact.ts:257-365` | 旧结果选择、最近结果保留、cleared marker | `packages/context/src/tool-result-budget.ts:microcompactTrigger()`、`applyToolResultBudgetAsync()` |
+| `src/utils/toolResultStorage.ts:367-910` | 单条 API user message 聚合预算、fresh replacement 和稳定替换状态 | `packages/context/src/tool-result-budget.ts:enforceAggregateBudget()`、`ToolResultBudgetState` |
+| `src/services/compact/timeBasedMCConfig.ts` | 时间型 microcompact 开关、60 分钟 gap、保留最近 5 个 | `ToolResultBudgetPolicy.timeBasedMicrocompactEnabled`、`timeBasedGapMs` |
 | `src/services/compact/microCompact.ts:426-520` | 时间衰减和重复清理状态 | `toolResultTimestamps`、`alreadyClearedToolCallIds` |
 | `src/services/compact/cachedMicrocompact.ts` | provider prompt-cache edit | 本阶段明确暂缓，不实现 provider-specific cache mutation |
 
@@ -26,8 +28,9 @@ EventStore transcript
   → ContextAssembly
   → M04 normalize
   → M04 tool pairing
-  → per-result bound
-  → count/token/time trigger
+  → per-result artifact view
+  → single API user message aggregate budget
+  → count/token/optional-time trigger
   → old compactable results → cleared marker
   → API round grouping
   → M02 token estimate/exact
@@ -56,12 +59,14 @@ interface ToolResultBudgetPolicy {
   microcompactTriggerToolCount?: number;
   microcompactTriggerTokens?: number;
   keepRecentResults?: number;
+  timeBasedMicrocompactEnabled?: boolean;
   timeBasedGapMs?: number;
+  maxToolResultsPerMessageChars?: number;
   compactableTools?: readonly string[];
 }
 ```
 
-默认值：`maxResultChars=8000`、`microcompactTriggerToolCount=10`、`microcompactTriggerTokens=20000`、`keepRecentResults=5`、`timeBasedGapMs=30min`。默认白名单覆盖 `read_file`、`bash`、`pwsh`、`grep`、`glob`、`web_search`、`web_fetch`、`edit_file`、`write_file`。
+默认值：`maxResultChars` 不自动启用（阶段 3单结果 artifact 阈值负责大结果），`maxToolResultsPerMessageChars=200000`、`microcompactTriggerToolCount=10`、`microcompactTriggerTokens=20000`、`keepRecentResults=5`、`timeBasedMicrocompactEnabled=false`、`timeBasedGapMs=60min`。默认白名单覆盖 `read_file`、`bash`、`pwsh`、`grep`、`glob`、`web_search`、`web_fetch`、`edit_file`、`write_file`。
 
 旧 `contextBudget.maxToolResultChars` 由 `AgentHost.toolResultBudgetWithLegacyFallback()` 映射到 `maxResultChars`，保证旧配置继续可用。
 
@@ -102,7 +107,7 @@ model view：前缀 + "[tool result bounded by context budget]"
 2. 从 EventStore 收集 `tool/result.createdAt`；
 3. 组装 M03 context；
 4. 执行 M04 normalize + pairing；
-5. 执行 M05 budget/microcompact；
+5. 执行单结果 artifact、单消息 aggregate budget 和 M05 count/token/optional-time microcompact；
 6. 使用同一份 `prepared.view` 做 token count 和 provider request；
 7. tool loop 产生新结果后，下一 step 重新执行上述路径；
 8. summary compact 后重新组装并重新执行 M04/M05。
@@ -119,6 +124,8 @@ Runtime 不会把“用于计数的工具结果”与“用于发送的工具结
 事件不保存完整工具输出、prompt、provider body 或 secret。同一 tool call 的 microcompact receipt 由 turn 内集合去重；Runtime 重启后从原始 transcript 重新计算。
 
 `step/started.payload.toolResultBudget` 包含 enabled/changed/trigger、bounded/cleared/newly-cleared 数量和 IDs、tokensSaved、protected IDs 以及生效 policy 摘要。
+
+阶段 4增加 `messageBudgetChars`、`messageBudgetMessagesOverBudget`、`messageBudgetReplacedToolCallIds`、`microcompactTrigger`、`timeBasedMicrocompactEnabled` 和 `timeBasedGapMs`，供 Storage projection 和 Web replay 使用。
 
 ## 8. 测试覆盖
 

@@ -230,6 +230,7 @@ describe("SessionStore", () => {
       contextWarning: { percentLeft: 4, isAboveWarningThreshold: true, isAboveErrorThreshold: true, isAboveAutoCompactThreshold: true, isAtBlockingLimit: false },
       tokenCount: { value: 9_600, source: "provider", confidence: "exact", breakdown: { messages: 9_000, tools: 600 } },
       modelRequestId: "request_live",
+      toolResultBudget: { enabled: true, changed: true, trigger: "message", messageBudgetChars: 200_000, messageBudgetMessagesOverBudget: 1, messageBudgetReplacedToolCallIds: ["tool_live"], boundedCount: 1, clearedCount: 0, tokensSaved: 4_000, microcompactTrigger: "none", timeBasedMicrocompactEnabled: false, timeBasedGapMs: 3_600_000 },
     }));
     store.apply(event(2, "context/recovery_started", { attempt: 1, errorClass: "prompt_too_long", transitionReason: "reactive_compact_retry", providerStatus: 413 }));
     store.apply(event(3, "context/summary_compacted", { kind: "summary", preCompactTokens: 9_600, postCompactTokens: 3_200, estimatedTokens: 3_200 }));
@@ -244,6 +245,7 @@ describe("SessionStore", () => {
       level: "auto_compact",
       lastStep: 2,
       lastRequestId: "request_live",
+      lastToolResultBudget: { trigger: "message", messageBudgetChars: 200_000, messageBudgetMessagesOverBudget: 1, messageBudgetReplacedToolCallIds: ["tool_live"], timeBasedMicrocompactEnabled: false },
       lastCompaction: { status: "completed", kind: "micro", tokensSaved: 321 },
     });
     expect(diagnostics?.recoveryChain).toHaveLength(2);

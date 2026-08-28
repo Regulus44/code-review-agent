@@ -1,6 +1,7 @@
 import type {
   AgentEvent,
   ContextDiagnosticRecovery,
+  ContextToolResultBudgetProjection,
   SessionId,
   SessionProjection,
   SessionStatus,
@@ -524,6 +525,7 @@ function foldContextDiagnostics(session: SessionProjection, event: AgentEvent): 
     const confidence = tokenCount["confidence"] === "exact" || tokenCount["confidence"] === "high" || tokenCount["confidence"] === "low" ? tokenCount["confidence"] : "medium";
     const breakdown = recordValue(tokenCount["breakdown"]);
     const normalizedBreakdown = breakdown === undefined ? previous?.breakdown : Object.fromEntries(Object.entries(breakdown).filter(([, item]) => typeof item === "number").slice(0, 16)) as Readonly<Record<string, number>>;
+    const toolResultBudget = parseToolResultBudgetProjection(event.payload["toolResultBudget"], event.sequence, previous?.lastToolResultBudget);
     return {
       ...session,
       contextDiagnostics: {
@@ -542,6 +544,7 @@ function foldContextDiagnostics(session: SessionProjection, event: AgentEvent): 
         ...(event.turnId === undefined ? {} : { lastTurnId: event.turnId }),
         ...(typeof event.payload["modelRequestId"] === "string" ? { lastRequestId: (event.payload["modelRequestId"] as string).slice(0, 128) } : {}),
         ...(normalizedBreakdown === undefined ? {} : { breakdown: normalizedBreakdown }),
+        ...(toolResultBudget === undefined ? previous?.lastToolResultBudget === undefined ? {} : { lastToolResultBudget: previous.lastToolResultBudget } : { lastToolResultBudget: toolResultBudget }),
         ...(previous?.lastCompaction === undefined ? {} : { lastCompaction: previous.lastCompaction }),
         recoveryChain: previous?.recoveryChain ?? [],
         updatedAt: event.createdAt,
@@ -593,6 +596,35 @@ function foldContextDiagnostics(session: SessionProjection, event: AgentEvent): 
     };
   }
   return undefined;
+}
+
+function parseToolResultBudgetProjection(value: unknown, sequence: number, previous?: ContextToolResultBudgetProjection): ContextToolResultBudgetProjection | undefined {
+  const record = recordValue(value);
+  if (record === undefined) return previous;
+  const trigger = record["trigger"] === "per-result" || record["trigger"] === "message" || record["trigger"] === "count" || record["trigger"] === "tokens" || record["trigger"] === "time" || record["trigger"] === "none"
+    ? record["trigger"]
+    : previous?.trigger ?? "none";
+  const microcompactTrigger = record["microcompactTrigger"] === "count" || record["microcompactTrigger"] === "tokens" || record["microcompactTrigger"] === "time" || record["microcompactTrigger"] === "none"
+    ? record["microcompactTrigger"]
+    : previous?.microcompactTrigger ?? "none";
+  const ids = Array.isArray(record["messageBudgetReplacedToolCallIds"])
+    ? record["messageBudgetReplacedToolCallIds"].filter((item): item is string => typeof item === "string").slice(0, 256)
+    : previous?.messageBudgetReplacedToolCallIds ?? [];
+  return {
+    enabled: typeof record["enabled"] === "boolean" ? record["enabled"] : previous?.enabled ?? true,
+    changed: typeof record["changed"] === "boolean" ? record["changed"] : previous?.changed ?? false,
+    trigger,
+    messageBudgetChars: numberValue(record["messageBudgetChars"], previous?.messageBudgetChars ?? 200_000),
+    messageBudgetMessagesOverBudget: numberValue(record["messageBudgetMessagesOverBudget"], previous?.messageBudgetMessagesOverBudget ?? 0),
+    messageBudgetReplacedToolCallIds: ids,
+    boundedCount: numberValue(record["boundedCount"], previous?.boundedCount ?? 0),
+    clearedCount: numberValue(record["clearedCount"], previous?.clearedCount ?? 0),
+    tokensSaved: numberValue(record["tokensSaved"], previous?.tokensSaved ?? 0),
+    microcompactTrigger,
+    timeBasedMicrocompactEnabled: typeof record["timeBasedMicrocompactEnabled"] === "boolean" ? record["timeBasedMicrocompactEnabled"] : previous?.timeBasedMicrocompactEnabled ?? false,
+    timeBasedGapMs: numberValue(record["timeBasedGapMs"], previous?.timeBasedGapMs ?? 60 * 60_000),
+    lastSequence: sequence,
+  };
 }
 
 function emptyContextDiagnostics(event: AgentEvent): NonNullable<SessionProjection["contextDiagnostics"]> {

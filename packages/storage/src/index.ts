@@ -57,6 +57,7 @@ import {
   type ContextSessionMemoryProjection,
   type ContextProjectMemoryProjection,
   type ContextDiagnosticsProjection,
+  type ContextToolResultBudgetProjection,
   type ContextDiagnosticRecovery,
   type ContextBoundaryMetadata,
   type ContextAttachmentProjection,
@@ -456,6 +457,7 @@ function contextDiagnosticsProjection(value: unknown, event: AgentEvent, previou
   const confidence = tokenCount["confidence"] === "exact" || tokenCount["confidence"] === "high" || tokenCount["confidence"] === "low" ? tokenCount["confidence"] : "medium";
   const breakdown = asRecord(tokenCount["breakdown"]);
   const normalizedBreakdown = breakdown === undefined ? previous?.breakdown : Object.fromEntries(Object.entries(breakdown).filter(([, item]) => typeof item === "number").slice(0, 16)) as Readonly<Record<string, number>>;
+  const toolResultBudget = contextToolResultBudgetProjection(payload["toolResultBudget"], event, previous?.lastToolResultBudget);
   const recoveryChain = previous?.recoveryChain ?? [];
   return {
     version: 1,
@@ -473,9 +475,39 @@ function contextDiagnosticsProjection(value: unknown, event: AgentEvent, previou
     ...(event.turnId === undefined ? previous?.lastTurnId === undefined ? {} : { lastTurnId: previous.lastTurnId } : { lastTurnId: event.turnId }),
     ...(typeof payload["modelRequestId"] === "string" ? { lastRequestId: payload["modelRequestId"].slice(0, 128) } : previous?.lastRequestId === undefined ? {} : { lastRequestId: previous.lastRequestId }),
     ...(normalizedBreakdown === undefined ? {} : { breakdown: normalizedBreakdown }),
+    ...(toolResultBudget === undefined ? previous?.lastToolResultBudget === undefined ? {} : { lastToolResultBudget: previous.lastToolResultBudget } : { lastToolResultBudget: toolResultBudget }),
     ...(previous?.lastCompaction === undefined ? {} : { lastCompaction: previous.lastCompaction }),
     recoveryChain,
     updatedAt: event.createdAt,
+    lastSequence: event.sequence,
+  };
+}
+
+function contextToolResultBudgetProjection(value: unknown, event: AgentEvent, previous?: ContextToolResultBudgetProjection): ContextToolResultBudgetProjection | undefined {
+  const record = asRecord(value);
+  if (record === undefined) return previous;
+  const trigger = record["trigger"] === "per-result" || record["trigger"] === "message" || record["trigger"] === "count" || record["trigger"] === "tokens" || record["trigger"] === "time" || record["trigger"] === "none"
+    ? record["trigger"]
+    : previous?.trigger ?? "none";
+  const microcompactTrigger = record["microcompactTrigger"] === "count" || record["microcompactTrigger"] === "tokens" || record["microcompactTrigger"] === "time" || record["microcompactTrigger"] === "none"
+    ? record["microcompactTrigger"]
+    : previous?.microcompactTrigger ?? "none";
+  const ids = Array.isArray(record["messageBudgetReplacedToolCallIds"])
+    ? record["messageBudgetReplacedToolCallIds"].filter((item): item is string => typeof item === "string").slice(0, 256)
+    : previous?.messageBudgetReplacedToolCallIds ?? [];
+  return {
+    enabled: typeof record["enabled"] === "boolean" ? record["enabled"] : previous?.enabled ?? true,
+    changed: typeof record["changed"] === "boolean" ? record["changed"] : previous?.changed ?? false,
+    trigger,
+    messageBudgetChars: numberValue(record["messageBudgetChars"], previous?.messageBudgetChars ?? 200_000),
+    messageBudgetMessagesOverBudget: numberValue(record["messageBudgetMessagesOverBudget"], previous?.messageBudgetMessagesOverBudget ?? 0),
+    messageBudgetReplacedToolCallIds: ids,
+    boundedCount: numberValue(record["boundedCount"], previous?.boundedCount ?? 0),
+    clearedCount: numberValue(record["clearedCount"], previous?.clearedCount ?? 0),
+    tokensSaved: numberValue(record["tokensSaved"], previous?.tokensSaved ?? 0),
+    microcompactTrigger,
+    timeBasedMicrocompactEnabled: typeof record["timeBasedMicrocompactEnabled"] === "boolean" ? record["timeBasedMicrocompactEnabled"] : previous?.timeBasedMicrocompactEnabled ?? false,
+    timeBasedGapMs: numberValue(record["timeBasedGapMs"], previous?.timeBasedGapMs ?? 60 * 60_000),
     lastSequence: event.sequence,
   };
 }

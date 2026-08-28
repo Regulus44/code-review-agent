@@ -44,7 +44,7 @@ import {
 } from "@code-review-agent/contracts";
 import { EchoChatModel, modelFailureMetadata, sanitizeFailureMessage } from "@code-review-agent/llm";
 import { compactMessages, DEFAULT_CONTEXT_BUDGET, type ContextBudget } from "@code-review-agent/compaction";
-import { applyToolResultBudget, assembleContext, buildPostCompactMessages, buildProjectMemoryPrompt, buildToolResultModelView, calculateContextWarningState, classifyProviderContextError, compactWithSessionMemory, compactWithSummaryModel, ContextRecoveryGuard, countContextTokens, createSessionMemoryFileWriteGuard, createTokenCounter, createToolResultStorage, ensureToolResultPairing, estimateContextTokens, extractContextAttachmentIds, fallbackModelContextCapability, fingerprintModelRequest, groupMessagesByApiRound, isReactiveContextError, normalizeMessagesForAPI, normalizeExtractionConfig, recallRelevantProjectMemory, resolveContextBudget, restoreModelViewFromTranscript, selectPostCompactAttachments, SessionMemoryExtractionScheduler, sessionMemoryStats, shouldCompactBeforeRequest, shouldExtractSessionMemory, shouldUseExactTokenCount, truncateProjectMemoryEntrypoint, validateProjectMemoryTopic, type ApiRound, type ContextAssembly, type ContextAttachment, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type PostCompactAttachmentConfig, type PostCompactAttachmentProvider, type ProjectMemoryScope, type ProjectMemoryStore, type ProjectMemoryTopic, type SessionMemoryCompactConfig, type SessionMemoryExtractionConfig, type SessionMemoryExtractionState, type SessionMemoryExtractor, type SessionMemoryStore, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport, type ToolResultStorage } from "@code-review-agent/context";
+import { applyToolResultBudgetAsync, assembleContext, buildPostCompactMessages, buildProjectMemoryPrompt, buildToolResultModelView, calculateContextWarningState, classifyProviderContextError, compactWithSessionMemory, compactWithSummaryModel, ContextRecoveryGuard, countContextTokens, createSessionMemoryFileWriteGuard, createTokenCounter, createToolResultBudgetState, createToolResultStorage, ensureToolResultPairing, estimateContextTokens, extractContextAttachmentIds, fallbackModelContextCapability, fingerprintModelRequest, groupMessagesByApiRound, hydrateToolResultBudgetState, isReactiveContextError, normalizeMessagesForAPI, normalizeExtractionConfig, recallRelevantProjectMemory, resolveContextBudget, restoreModelViewFromTranscript, selectPostCompactAttachments, SessionMemoryExtractionScheduler, sessionMemoryStats, shouldCompactBeforeRequest, shouldExtractSessionMemory, shouldUseExactTokenCount, truncateProjectMemoryEntrypoint, validateProjectMemoryTopic, type ApiRound, type ContextAssembly, type ContextAttachment, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type PostCompactAttachmentConfig, type PostCompactAttachmentProvider, type ProjectMemoryScope, type ProjectMemoryStore, type ProjectMemoryTopic, type SessionMemoryCompactConfig, type SessionMemoryExtractionConfig, type SessionMemoryExtractionState, type SessionMemoryExtractor, type SessionMemoryStore, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport, type ToolResultBudgetState, type ToolResultStorage } from "@code-review-agent/context";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -202,6 +202,7 @@ interface PreparedModelContext {
   readonly normalization: MessageNormalizationReport;
   readonly pairing: ToolPairingReport;
   readonly toolResultBudget: ToolResultBudgetReport;
+  readonly newlyPersistedToolResultReplacements: readonly ToolResultReplacementRecord[];
 }
 
 export type TenantModelRoute = Pick<ModelRouteRecord, "provider" | "model" | "baseUrl" | "credentialRef" | "contextCapability">;
@@ -2116,6 +2117,7 @@ export class AgentHost {
     protectedToolCallIds: ReadonlySet<string> = new Set<string>(),
     toolResultTimestamps: Readonly<Record<string, string>> = {},
     alreadyClearedToolCallIds: ReadonlySet<string> = new Set<string>(),
+    replacementState?: ToolResultBudgetState,
   ): Promise<PreparedModelContext> {
     const normalized = normalizeMessagesForAPI(assembly.modelView.messages, { mode: this.messageValidationMode });
     const paired = ensureToolResultPairing(normalized.messages, { mode: this.messageValidationMode });
@@ -2124,11 +2126,14 @@ export class AgentHost {
       throw new Error(`MODEL_MESSAGE_VALIDATION_FAILED: ${codes.join(",") || "unknown"}`);
     }
     const persisted = await this.persistToolResultMessages(sessionId, turnId, paired.messages);
-    const budgeted = applyToolResultBudget(persisted, {
+    if (replacementState !== undefined) hydrateToolResultBudgetState(replacementState, persisted);
+    const budgeted = await applyToolResultBudgetAsync(persisted, {
       policy: this.toolResultBudgetWithLegacyFallback(),
       protectedToolCallIds,
       toolResultTimestamps,
       alreadyClearedToolCallIds,
+      ...(replacementState === undefined ? {} : { replacementState }),
+      persistToolResult: async ({ toolCallId, toolName, content }) => this.persistToolResultForBudget(sessionId, toolCallId, toolName, content),
     });
     return {
       view: { messages: budgeted.messages, ...(assembly.modelView.tools === undefined ? {} : { tools: assembly.modelView.tools }) },
@@ -2136,7 +2141,21 @@ export class AgentHost {
       normalization: normalized.report,
       pairing: paired.report,
       toolResultBudget: budgeted.report,
+      newlyPersistedToolResultReplacements: budgeted.newlyPersistedReplacements ?? [],
     };
+  }
+
+  private async persistToolResultForBudget(sessionId: SessionId, toolCallId: string, toolName: string | undefined, content: string) {
+    const projection = await this.options.store.project(sessionId);
+    const workspaceRoot = projection === undefined ? "." : effectiveWorkspaceRoot(projection);
+    return this.toolResultStorage.persist({
+      sessionId: String(sessionId),
+      workspaceRoot,
+      toolCallId,
+      ...(toolName === undefined ? {} : { toolName }),
+      content,
+      forcePersist: true,
+    });
   }
 
   private async persistToolResultMessages(sessionId: SessionId, turnId: TurnId, messages: readonly ChatMessage[]): Promise<readonly ChatMessage[]> {
@@ -2306,6 +2325,7 @@ export class AgentHost {
     const alreadyClearedToolCallIds = new Set<string>();
     const reportedBudgetToolCallIds = new Set<string>();
     const reportedMicrocompactToolCallIds = new Set<string>();
+    const replacementState = createToolResultBudgetState(messages);
     const recoveryGuard = new ContextRecoveryGuard(
       this.contextRecovery?.maxReactiveAttempts ?? 1,
       this.contextRecovery?.maxConsecutiveCompactionFailures ?? 3,
@@ -2320,7 +2340,8 @@ export class AgentHost {
       let assembly = await this.assembleTurnContext(sessionId, messages, recovery, turnId);
       const protectedToolCallIds = pendingToolCallIds(projection);
       const toolResultTimestamps = await this.toolResultTimestamps(sessionId);
-      let prepared = await this.prepareModelContext(sessionId, turnId, assembly, protectedToolCallIds, toolResultTimestamps, alreadyClearedToolCallIds);
+      let prepared = await this.prepareModelContext(sessionId, turnId, assembly, protectedToolCallIds, toolResultTimestamps, alreadyClearedToolCallIds, replacementState);
+      await this.appendToolResultReplacementEvents(sessionId, turnId, prepared.newlyPersistedToolResultReplacements);
       await this.appendToolResultBudgetEvents(sessionId, turnId, prepared.toolResultBudget, this.toolResultBudgetWithLegacyFallback(), reportedBudgetToolCallIds, reportedMicrocompactToolCallIds, alreadyClearedToolCallIds);
       const beforeView: ModelContextView = prepared.view;
       const tokenCounter = createTokenCounter(primaryModel);
@@ -2373,7 +2394,8 @@ export class AgentHost {
           }
         }
         assembly = await this.assembleTurnContext(sessionId, messages, recovery, turnId);
-        prepared = await this.prepareModelContext(sessionId, turnId, assembly, protectedToolCallIds, toolResultTimestamps, alreadyClearedToolCallIds);
+        prepared = await this.prepareModelContext(sessionId, turnId, assembly, protectedToolCallIds, toolResultTimestamps, alreadyClearedToolCallIds, replacementState);
+        await this.appendToolResultReplacementEvents(sessionId, turnId, prepared.newlyPersistedToolResultReplacements);
         await this.appendToolResultBudgetEvents(sessionId, turnId, prepared.toolResultBudget, this.toolResultBudgetWithLegacyFallback(), reportedBudgetToolCallIds, reportedMicrocompactToolCallIds, alreadyClearedToolCallIds);
       }
       if (prepared.normalization.changed) {
@@ -2544,6 +2566,21 @@ export class AgentHost {
     return timestamps;
   }
 
+  private async appendToolResultReplacementEvents(
+    sessionId: SessionId,
+    turnId: TurnId,
+    replacements: readonly ToolResultReplacementRecord[],
+  ): Promise<void> {
+    for (const replacement of replacements) {
+      await this.options.store.append({
+        sessionId,
+        turnId,
+        type: "context/tool_result_persisted",
+        payload: replacement as unknown as Readonly<Record<string, unknown>>,
+      });
+    }
+  }
+
   private async appendToolResultBudgetEvents(
     sessionId: SessionId,
     turnId: TurnId,
@@ -2554,11 +2591,13 @@ export class AgentHost {
     alreadyClearedToolCallIds: Set<string>,
   ): Promise<void> {
     const newlyBoundedToolCallIds = report.boundedToolCallIds.filter((toolCallId) => !reportedToolCallIds.has(toolCallId));
+    const newlyMessageBudgetReplacedToolCallIds = report.messageBudgetReplacedToolCallIds.filter((toolCallId) => !reportedToolCallIds.has(toolCallId));
     const newlyClearedToolCallIds = report.newlyClearedToolCallIds.filter((toolCallId) => !reportedMicrocompactToolCallIds.has(toolCallId));
     for (const toolCallId of newlyBoundedToolCallIds) reportedToolCallIds.add(toolCallId);
+    for (const toolCallId of newlyMessageBudgetReplacedToolCallIds) reportedToolCallIds.add(toolCallId);
     for (const toolCallId of newlyClearedToolCallIds) reportedMicrocompactToolCallIds.add(toolCallId);
     for (const toolCallId of newlyClearedToolCallIds) alreadyClearedToolCallIds.add(toolCallId);
-    if (newlyBoundedToolCallIds.length === 0 && newlyClearedToolCallIds.length === 0) return;
+    if (newlyBoundedToolCallIds.length === 0 && newlyMessageBudgetReplacedToolCallIds.length === 0 && newlyClearedToolCallIds.length === 0) return;
     await this.options.store.append({
       sessionId,
       turnId,
@@ -2566,11 +2605,17 @@ export class AgentHost {
       payload: {
         boundedCount: report.boundedCount,
         boundedToolCallIds: newlyBoundedToolCallIds,
+        messageBudgetReplacedToolCallIds: newlyMessageBudgetReplacedToolCallIds,
         clearedCount: report.clearedCount,
         clearedToolCallIds: newlyClearedToolCallIds,
         tokensSaved: report.tokensSaved,
         trigger: report.trigger,
         protectedToolCallIds: report.protectedToolCallIds,
+        messageBudgetChars: report.messageBudgetChars,
+        messageBudgetMessagesOverBudget: report.messageBudgetMessagesOverBudget,
+        microcompactTrigger: report.microcompactTrigger,
+        timeBasedMicrocompactEnabled: report.timeBasedMicrocompactEnabled,
+        timeBasedGapMs: report.timeBasedGapMs,
       },
     });
     if (newlyClearedToolCallIds.length === 0) return;
@@ -2585,6 +2630,12 @@ export class AgentHost {
         keptRecent: policy.keepRecentResults ?? 5,
         tokensSaved: report.tokensSaved,
         protectedToolCallIds: report.protectedToolCallIds,
+        messageBudgetChars: report.messageBudgetChars,
+        messageBudgetMessagesOverBudget: report.messageBudgetMessagesOverBudget,
+        messageBudgetReplacedToolCallIds: report.messageBudgetReplacedToolCallIds,
+        microcompactTrigger: report.microcompactTrigger,
+        timeBasedMicrocompactEnabled: report.timeBasedMicrocompactEnabled,
+        timeBasedGapMs: report.timeBasedGapMs,
       },
     });
   }
@@ -3404,13 +3455,21 @@ function publicToolResultBudget(
     clearedToolCallIds: report.clearedToolCallIds,
     newlyClearedToolCallIds: report.newlyClearedToolCallIds,
     protectedToolCallIds: report.protectedToolCallIds,
+    messageBudgetChars: report.messageBudgetChars,
+    messageBudgetMessagesOverBudget: report.messageBudgetMessagesOverBudget,
+    messageBudgetReplacedToolCallIds: report.messageBudgetReplacedToolCallIds,
+    microcompactTrigger: report.microcompactTrigger,
+    timeBasedMicrocompactEnabled: report.timeBasedMicrocompactEnabled,
+    timeBasedGapMs: report.timeBasedGapMs,
     policy: {
       enabled: policy.enabled !== false,
       ...(policy.maxResultChars === undefined ? {} : { maxResultChars: policy.maxResultChars }),
       ...(policy.microcompactTriggerToolCount === undefined ? {} : { microcompactTriggerToolCount: policy.microcompactTriggerToolCount }),
       ...(policy.microcompactTriggerTokens === undefined ? {} : { microcompactTriggerTokens: policy.microcompactTriggerTokens }),
       ...(policy.keepRecentResults === undefined ? {} : { keepRecentResults: policy.keepRecentResults }),
+      ...(policy.timeBasedMicrocompactEnabled === undefined ? {} : { timeBasedMicrocompactEnabled: policy.timeBasedMicrocompactEnabled }),
       ...(policy.timeBasedGapMs === undefined ? {} : { timeBasedGapMs: policy.timeBasedGapMs }),
+      ...(policy.maxToolResultsPerMessageChars === undefined ? {} : { maxToolResultsPerMessageChars: policy.maxToolResultsPerMessageChars }),
     },
   };
 }

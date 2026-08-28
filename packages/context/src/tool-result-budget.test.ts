@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { ChatMessage } from "@code-review-agent/contracts";
 import {
   applyToolResultBudget,
+  applyToolResultBudgetAsync,
+  createToolResultBudgetState,
   DEFAULT_MICROCOMPACT_MESSAGE,
 } from "./tool-result-budget.js";
+import { createToolResultStorage } from "./tool-result-storage.js";
 
 function resultMessages(count: number, content = "result"): ChatMessage[] {
   const messages: ChatMessage[] = [];
@@ -17,6 +20,18 @@ function resultMessages(count: number, content = "result"): ChatMessage[] {
 
 function toolContents(messages: readonly ChatMessage[]): readonly string[] {
   return messages.filter((message) => message.role === "tool").map((message) => message.content);
+}
+
+function resultTool(messages: readonly ChatMessage[], toolCallId: string): string {
+  return messages.find((message) => message.role === "tool" && message.toolCallId === toolCallId)?.content ?? "";
+}
+
+function parallelResultMessages(count: number, size: number): ChatMessage[] {
+  const toolCalls = Array.from({ length: count }, (_, index) => ({ id: `parallel-${index}`, name: "read_file", arguments: "{}" }));
+  return [
+    { role: "assistant", content: "", toolCalls },
+    ...toolCalls.map((call) => ({ role: "tool" as const, toolCallId: call.id, content: "x".repeat(size) })),
+  ];
 }
 
 describe("applyToolResultBudget", () => {
@@ -73,7 +88,7 @@ describe("applyToolResultBudget", () => {
   it("uses time-based decay for old eligible results", () => {
     const now = Date.parse("2026-08-26T12:00:00.000Z");
     const result = applyToolResultBudget(resultMessages(3), {
-      policy: { microcompactTriggerToolCount: 99, microcompactTriggerTokens: 99_999, keepRecentResults: 1, timeBasedGapMs: 30 * 60_000 },
+      policy: { microcompactTriggerToolCount: 99, microcompactTriggerTokens: 99_999, keepRecentResults: 1, timeBasedMicrocompactEnabled: true },
       toolResultTimestamps: {
         "call-0": "2026-08-26T10:00:00.000Z",
         "call-1": "2026-08-26T11:50:00.000Z",
@@ -83,6 +98,83 @@ describe("applyToolResultBudget", () => {
     });
     expect(result.report.trigger).toBe("time");
     expect(result.report.newlyClearedToolCallIds).toEqual(["call-0", "call-1"]);
+  });
+
+  it("keeps time-based microcompact disabled unless explicitly enabled", () => {
+    const now = Date.parse("2026-08-26T12:00:00.000Z");
+    const result = applyToolResultBudget(resultMessages(6), {
+      policy: { microcompactTriggerToolCount: 99, microcompactTriggerTokens: 99_999, keepRecentResults: 5 },
+      toolResultTimestamps: { "call-0": "2026-08-26T10:00:00.000Z" },
+      nowMs: now,
+    });
+    expect(result.report.microcompactTrigger).toBe("none");
+    expect(result.report.timeBasedMicrocompactEnabled).toBe(false);
+  });
+
+  it("enforces the 200000-character aggregate budget by replacing largest fresh results", async () => {
+    const storage = createToolResultStorage({ write: async () => "created" });
+    const state = createToolResultBudgetState();
+    const result = await applyToolResultBudgetAsync(parallelResultMessages(10, 40_000), {
+      replacementState: state,
+      policy: { maxToolResultsPerMessageChars: 200_000, microcompactTriggerToolCount: 99, microcompactTriggerTokens: 99_999 },
+      persistToolResult: (input) => storage.persist({ sessionId: "ses_1", workspaceRoot: ".", ...input, forcePersist: true }),
+    });
+    const totalChars = toolContents(result.messages).reduce((sum, content) => sum + content.length, 0);
+    expect(result.report.trigger).toBe("message");
+    expect(result.report.messageBudgetMessagesOverBudget).toBe(1);
+    expect(result.report.messageBudgetReplacedToolCallIds.length).toBeGreaterThanOrEqual(5);
+    expect(totalChars).toBeLessThanOrEqual(200_000);
+    expect(state.replacements.size).toBe(result.report.messageBudgetReplacedToolCallIds.length);
+  });
+
+  it("groups tool results across user fragments until an assistant boundary", async () => {
+    const storage = createToolResultStorage({ write: async () => "created" });
+    const calls = [
+      { id: "group-a", name: "read_file", arguments: "{}" },
+      { id: "group-b", name: "read_file", arguments: "{}" },
+    ];
+    const result = await applyToolResultBudgetAsync([
+      { role: "assistant", content: "", toolCalls: calls },
+      { role: "tool", toolCallId: "group-a", content: "a".repeat(130_000) },
+      { role: "user", content: "interleaved user text" },
+      { role: "tool", toolCallId: "group-b", content: "b".repeat(130_000) },
+    ], {
+      replacementState: createToolResultBudgetState(),
+      policy: { maxToolResultsPerMessageChars: 200_000, microcompactTriggerToolCount: 99, microcompactTriggerTokens: 99_999 },
+      persistToolResult: (input) => storage.persist({ sessionId: "ses_1", workspaceRoot: ".", ...input, forcePersist: true }),
+    });
+    expect(result.report.messageBudgetMessagesOverBudget).toBe(1);
+    expect(result.report.messageBudgetReplacedToolCallIds).toEqual(["group-a"]);
+    expect(toolContents(result.messages)[1]).toHaveLength(130_000);
+  });
+
+  it("freezes a previously sent full result and replaces only fresh results", async () => {
+    const storage = createToolResultStorage({ write: async () => "created" });
+    const state = createToolResultBudgetState();
+    const first = await applyToolResultBudgetAsync([
+      { role: "assistant", content: "", toolCalls: [{ id: "frozen", name: "read_file", arguments: "{}" }] },
+      { role: "tool", toolCallId: "frozen", content: "f".repeat(150_000) },
+    ], {
+      replacementState: state,
+      policy: { maxToolResultsPerMessageChars: 200_000, microcompactTriggerToolCount: 99, microcompactTriggerTokens: 99_999 },
+      persistToolResult: (input) => storage.persist({ sessionId: "ses_1", workspaceRoot: ".", ...input, forcePersist: true }),
+    });
+    expect(toolContents(first.messages)[0]).toHaveLength(150_000);
+    const second = await applyToolResultBudgetAsync([
+      { role: "assistant", content: "", toolCalls: [
+        { id: "frozen", name: "read_file", arguments: "{}" },
+        { id: "fresh", name: "read_file", arguments: "{}" },
+      ] },
+      { role: "tool", toolCallId: "frozen", content: "f".repeat(150_000) },
+      { role: "tool", toolCallId: "fresh", content: "n".repeat(150_000) },
+    ], {
+      replacementState: state,
+      policy: { maxToolResultsPerMessageChars: 200_000, microcompactTriggerToolCount: 99, microcompactTriggerTokens: 99_999 },
+      persistToolResult: (input) => storage.persist({ sessionId: "ses_1", workspaceRoot: ".", ...input, forcePersist: true }),
+    });
+    expect(toolContents(second.messages)[0]).toHaveLength(150_000);
+    expect(resultTool(second.messages, "fresh")).toContain("<persisted-tool-result");
+    expect(second.report.messageBudgetReplacedToolCallIds).toEqual(["fresh"]);
   });
 
   it("uses the bounded view for token-triggered clearing", () => {
