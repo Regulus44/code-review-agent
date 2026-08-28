@@ -317,28 +317,32 @@ EventStore 的完整 `tool/result` 不被替换或删除。落盘、预览和 mi
 
 阶段 4 已按上述入口完成。默认聚合预算为 `200000` 字符，Runtime 在单结果落盘后按最终 API user message 选择最大 fresh 结果落盘；per-turn `seenIds/replacements` 保持同一替换在后续 step、重启和恢复中的稳定性。时间型 microcompact 默认关闭，显式开启后使用 `60` 分钟 gap 和 `keepRecentResults=5`。详细过程见 [阶段 4 单消息工具结果聚合与时间型 MicroCompact 实施日志](development-log/phase-4-tool-result-aggregate-microcompact-2026-08-28.zh-CN.md)。
 
-### 阶段 5：按 DSH 实现最多 10 个并行工具调用
+### 阶段 5：按 DSH 实现最多 10 个并行工具调用（已完成，2026-08-28）
 
 本阶段修改以下内容：
 
 | 本仓库文件/入口 | 直接修改内容 | 对照源码 |
 |---|---|---|
 | 新增 `packages/runtime/src/tool-call-scheduler.ts` | 实现 parallel rolling pool、exclusive barrier、最多 10 个 in-flight、停止补充、drain 已启动任务、模型顺序提交结果 | DSH `packages/core/agent-loop/src/tool-calls.ts` |
-| `packages/runtime/src/index.ts:AgentHostOptions` | 增加 `maxParallelToolCalls?: number`，默认 `10`，校验为正整数并设置明确硬上限；该值由 Host 拥有 | DSH `agent-loop/src/constants.ts`、`index.ts:resolveMaxParallelToolCalls()` |
+| `packages/runtime/src/index.ts:AgentHostOptions` | 增加 `maxParallelToolCalls?: number`，默认 `10`，Host 硬上限为 `512`；该值由 Host 拥有 | DSH `agent-loop/src/constants.ts`、`index.ts:resolveMaxParallelToolCalls()` |
 | `packages/runtime/src/index.ts:runSteps()` | 将当前 `Promise.all(response.toolCalls.map(...))` 替换为 scheduler；不直接同时启动所有 tool call | DSH `runGroup()`、`fillPool()` |
-| `packages/tools/src/index.ts`/ToolRegistry execution mode | 调度开始前重新读取每个未启动工具的 `executionMode`；`exclusive` 调用等待当前 parallel pool drain 后单独执行 | DSH tool reclassification/barrier |
+| `packages/tools/src/runtime.ts:ExecuteToolInput`、`commitDeferredResult()` | scheduler 路径延迟 `tool/result`/`diff/preview` 事件，由 Runtime 的 commit 回调按 assistant 声明顺序落盘；普通 `execute()` 调用继续即时提交 | DSH 结果按模型顺序提交的行为；本项目 EventStore contract |
+| `packages/runtime/src/index.ts` 与既有 `ToolRuntime.registry` | 调度开始前重新读取每个未启动工具的 `executionMode`；`exclusive` 调用等待当前 parallel pool drain 后单独执行；不改变 ToolRuntime 的权限、workspace、tenant 或取消管线 | DSH tool reclassification/barrier |
 | `apps/api/src/server.ts` | 允许 Host 配置并投影实际 `maxParallelToolCalls=10`，不由 Web 直接控制运行中 pool | DSH settings ownership；本项目 Host ownership |
-| `packages/runtime/src/tool-call-scheduler.test.ts`、`packages/runtime/src/index.test.ts`、`packages/tools/src/index.test.ts` | 覆盖最多 10 个、11+ rolling replenishment、exclusive barrier、模型顺序、某调用失败、abort、permission pause、interaction pause、取消后不启动剩余调用 | DSH scheduler tests 的行为 |
+| `packages/runtime/src/tool-call-scheduler.test.ts`、`packages/runtime/src/index.test.ts`、`apps/api/src/server.test.ts` | 覆盖最多 10 个、11+ rolling replenishment、exclusive barrier、模型顺序、abort、取消后不启动剩余调用、Host 配置和 API capability 投影；既有 ToolRuntime tests 保持 permission/interaction/tenant/workspace/cancel 回归 | DSH scheduler tests 的行为 |
 
 阶段 5 验收：
 
 - 一次 assistant step 返回 25 个 parallel tool call 时，同时运行数始终不超过 10；
 - 结果进入下一次 model request 的顺序与 assistant 声明顺序一致；
+- EventStore 中 `tool/result`（以及存在时的 `diff/preview`）顺序与 assistant 声明顺序一致；
 - exclusive 工具前后都形成 barrier；
 - abort 后不再补充新调用，已启动调用被 drain 并形成 completed/cancelled/failed 的结构化结果；
 - permission、workspace、tenant 和 tool cancellation 仍经过统一 ToolRuntime 管线。
 
 阶段 5 回滚：将 Host 配置设为 `1` 可退化为串行；代码级回滚恢复旧调度时不得删除已产生的工具事件。
+
+阶段 5 已按上述入口完成。Host 默认 `maxParallelToolCalls=10`，允许范围固定为 `1–512`；`runSteps()` 通过 scheduler 在 parallel pool、exclusive barrier 和 abort drain 之间切换。`ToolRuntime` 对 scheduler 调用延迟 `tool/result`/`diff/preview` 写入，并由 scheduler 按 assistant 声明顺序 commit；下一次 model request 的 tool results 与 EventStore 顺序一致，阶段 4 的 aggregate budget/replacement state 保持不变。详细过程见 [阶段 5 并行工具调用 Scheduler 实施日志](development-log/phase-5-parallel-tool-scheduler-2026-08-28.zh-CN.md)。
 
 ### 阶段 6：集成门禁、迁移说明和文档收敛
 

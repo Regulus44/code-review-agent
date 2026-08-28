@@ -4,6 +4,15 @@
 
 ## 当前状态
 
+### Phase 8.5-MR11：最多 10 个并行工具调用 Scheduler（阶段 5，completed，2026-08-28）
+
+- 已完成 DSH 风格 tool-call scheduler：parallel 工具使用最多 `10` 个 in-flight 的 rolling pool，Host 配置允许 `1–512`，`1` 可作为串行回滚；
+- 每个未启动调用都会从 `ToolRuntime.registry` 读取 live `executionMode`；exclusive 调用等待前置 parallel pool drain 后单独执行，后续 parallel 调用在 barrier 后继续；
+- scheduler 按 assistant 声明顺序提交结果给下一次 model request；`ToolRuntime` 延迟 `tool/result`/`diff/preview` 事件并由 scheduler 同序 commit；abort 后停止补充、drain 已启动调用，并为未启动后缀追加 `TOOL_ABORTED_BEFORE_DISPATCH` 的结构化 cancelled result；
+- ToolRuntime 继续负责 schema、workspace、tenant、permission、interaction、cancel、审计和事件；API `/v1/capabilities` 投影 Host 实际 `toolExecution.maxParallelToolCalls`，Web 不直接修改运行中的 pool；
+- 验证：scheduler 6 项、Runtime 69 项、API 40 项定向测试及 `pnpm typecheck` 通过；全 workspace `pnpm test`、`pnpm typecheck` 和 `git diff --check` 已通过；详细记录见 [阶段 5 并行工具调用 Scheduler 实施日志](development-log/phase-5-parallel-tool-scheduler-2026-08-28.zh-CN.md)；实现 checkpoint `483f3ef`；
+- 下一阶段入口：实施基线中的阶段 6，完成全链路恢复、安全、评测和文档门禁。
+
 ### Phase 8.5-MR10：单消息工具结果聚合与时间型 MicroCompact（阶段 4，completed，2026-08-28）
 
 - 已完成 Claude Code 风格的单消息工具结果聚合预算：以最终 API user message 为边界，默认总预算为 `200000` 字符；超预算时按最大 fresh 结果优先持久化并替换为稳定 artifact model view，已发送未替换结果冻结，已替换结果复用同一 view；
@@ -11,7 +20,7 @@
 - 时间型 microcompact 已独立为显式开关，默认关闭；启用后使用 `60` 分钟 gap 和 `keepRecentResults=5`，count/token/time trigger 在事件和 `step/started` 诊断中分开记录；
 - 阶段 4没有提前实现阶段 5 的并行 scheduler、provider-specific cached microcompact、Session Memory 或 Summary Compact；
 - 验证：`pnpm test`（全 workspace 547 项）、`pnpm typecheck`、`git diff --check`；详细记录见 [阶段 4 单消息工具结果聚合与时间型 MicroCompact 实施日志](development-log/phase-4-tool-result-aggregate-microcompact-2026-08-28.zh-CN.md)；实现 checkpoint `2f4fadf`；
-- 下一阶段入口：实施基线中的阶段 5，按 DSH 默认最多 `10` 个并行工具调用实现统一 scheduler，并继续消费本阶段稳定的聚合预算与 replacement state。
+- 上一阶段入口：实施基线中的阶段 5，按 DSH 默认最多 `10` 个并行工具调用实现统一 scheduler；该阶段已由上方 MR11 完成，并继续消费本阶段稳定的聚合预算与 replacement state。
 
 ### Phase 8.5-MR9：单工具结果落盘与 artifact 预览（阶段 3，completed，2026-08-28）
 
