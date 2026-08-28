@@ -204,6 +204,52 @@ describe("ToolRuntime", () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
+  it("returns structured context when an edit target is not found", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-edit-not-found-"));
+    try {
+      const before = "alpha\nbeta\ngamma";
+      await writeFile(path.join(root, "missing.txt"), before, "utf8");
+      const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools()); const runtime = new ToolRuntime({ store, registry }); const sessionId = brand<string, "SessionId">("ses_edit_not_found");
+      const pending = await runtime.execute({ sessionId, workspaceRoot: root, name: "edit_file", input: { path: "missing.txt", oldText: "delta", newText: "DELTA" } });
+      const result = await runtime.resolvePermission(pending.permission!.id, "approved");
+      const toolResult = result.result!;
+      expect(result.status).toBe("failed");
+      expect(toolResult.error).toMatchObject({ code: "TEXT_NOT_FOUND", remedy: expect.stringContaining("Reread the current file") });
+      expect(toolResult.presentation?.data).toMatchObject({ path: "missing.txt", matchCount: 0, matchLines: [], currentHash: createHash("sha256").update(before, "utf8").digest("hex"), totalLines: 3 });
+      expect(String(toolResult.presentation?.data && (toolResult.presentation.data as { context?: string }).context)).toContain("1: alpha");
+      expect(await readFile(path.join(root, "missing.txt"), "utf8")).toBe(before);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("reports all match line numbers without changing an ambiguous edit", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-edit-ambiguous-"));
+    try {
+      const before = "same\nmiddle\nsame";
+      await writeFile(path.join(root, "ambiguous.txt"), before, "utf8");
+      const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools()); const runtime = new ToolRuntime({ store, registry }); const sessionId = brand<string, "SessionId">("ses_edit_ambiguous");
+      const pending = await runtime.execute({ sessionId, workspaceRoot: root, name: "edit_file", input: { path: "ambiguous.txt", oldText: "same", newText: "changed" } });
+      const result = await runtime.resolvePermission(pending.permission!.id, "approved");
+      expect(result.status).toBe("failed");
+      expect(result.result?.error).toMatchObject({ code: "TEXT_NOT_UNIQUE", remedy: expect.stringContaining("Reread the current file") });
+      expect(result.result?.presentation?.data).toMatchObject({ path: "ambiguous.txt", matchCount: 2, matchLines: [1, 3], totalLines: 3 });
+      expect(await readFile(path.join(root, "ambiguous.txt"), "utf8")).toBe(before);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("matches LF edit text against CRLF files while preserving the file line endings", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-edit-crlf-"));
+    try {
+      const before = "before\r\nmiddle\r\n";
+      await writeFile(path.join(root, "crlf.txt"), before, "utf8");
+      const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools()); const runtime = new ToolRuntime({ store, registry }); const sessionId = brand<string, "SessionId">("ses_edit_crlf");
+      const pending = await runtime.execute({ sessionId, workspaceRoot: root, name: "edit_file", input: { path: "crlf.txt", oldText: "before\nmiddle", newText: "after\nmiddle" } });
+      const result = await runtime.resolvePermission(pending.permission!.id, "approved");
+      expect(result.status).toBe("completed");
+      expect(await readFile(path.join(root, "crlf.txt"), "utf8")).toBe("after\r\nmiddle\r\n");
+      expect(result.result?.output).toMatchObject({ changed: true, operations: [{ status: "applied", matchCount: 1 }] });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it("supports explicit append mode without weakening create protection", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "cra-write-modes-"));
     try {

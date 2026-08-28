@@ -312,7 +312,7 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
       execute: async (input, context) => grepFiles(context.workspaceRoot, input as { pattern: string; path?: string; maxResults?: number; literal?: boolean; ignoreCase?: boolean; contextLines?: number }, context.signal),
     },
     {
-      name: "edit_file", description: "Apply one or more unique exact replacements with stale detection and a unified diff.", inputSchema: object({ path: string, oldText: string, newText: string, expectedHash: string, edits: { type: "array" as const, maxItems: 50, items: object({ oldText: string, newText: string }, ["oldText", "newText"]) } }, ["path"]), executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "cancel",
+      name: "edit_file", description: "Apply one or more unique exact replacements with stale detection and a unified diff. Read the current file first; if a replacement is not found or is not unique, reread the file and use fresh unique context instead of repeating the same call.", inputSchema: object({ path: string, oldText: string, newText: string, expectedHash: string, edits: { type: "array" as const, maxItems: 50, items: object({ oldText: string, newText: string }, ["oldText", "newText"]) } }, ["path"]), executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "cancel",
       execute: async (input, context) => editFile(context.workspaceRoot, input as { path: string; oldText?: string; newText?: string; expectedHash?: string; edits?: readonly { oldText: string; newText: string }[] }),
     },
     {
@@ -630,26 +630,33 @@ async function editFile(root: string, args: { path: string; oldText?: string; ne
   if (args.expectedHash !== undefined && args.expectedHash !== loaded.hash) return editFailure("EDIT_STALE", args.path, loaded.before, `File hash changed before edit (expected ${args.expectedHash}, current ${loaded.hash})`, 0);
   const operations = args.edits ?? (args.oldText === undefined || args.newText === undefined ? [] : [{ oldText: args.oldText, newText: args.newText }]);
   if (operations.length === 0) return fail("EDIT_INPUT_INVALID", "Provide oldText/newText or at least one edits item", "Provide an exact replacement or a non-empty edits array.");
-  let after = loaded.before;
+  const lineEnding = detectLineEnding(loaded.before);
+  let after = normalizeLineEndings(loaded.before);
   const statuses: { readonly index: number; readonly status: "applied"; readonly matchCount: number }[] = [];
   for (const [index, operation] of operations.entries()) {
     if (operation.oldText.length === 0) return fail("EDIT_INPUT_INVALID", `Edit ${index + 1} oldText cannot be empty`);
-    const positions = findOccurrences(after, operation.oldText);
-    if (positions.length !== 1) return editFailure(positions.length === 0 ? "TEXT_NOT_FOUND" : "TEXT_NOT_UNIQUE", args.path, after, `Edit ${index + 1} expected one match but found ${positions.length}`, positions.length);
+    const oldText = normalizeLineEndings(operation.oldText);
+    const newText = normalizeLineEndings(operation.newText);
+    const positions = findOccurrences(after, oldText);
+    if (positions.length !== 1) {
+      const currentText = restoreLineEndings(after, lineEnding);
+      return editFailure(positions.length === 0 ? "TEXT_NOT_FOUND" : "TEXT_NOT_UNIQUE", args.path, currentText, `Edit ${index + 1} expected one match but found ${positions.length}`, positions.length, lineNumbersAt(after, positions));
+    }
     const position = positions[0]!;
-    after = after.slice(0, position) + operation.newText + after.slice(position + operation.oldText.length);
+    after = after.slice(0, position) + newText + after.slice(position + oldText.length);
     statuses.push({ index, status: "applied", matchCount: 1 });
   }
   const latest = await loadEditableFile(root, args.path);
   if ("ok" in latest) return latest;
   if (latest.hash !== loaded.hash) return editFailure("EDIT_CONFLICT", args.path, latest.before, `File changed during edit (expected ${loaded.hash}, current ${latest.hash})`, 0);
-  if (after === loaded.before) return fail("EDIT_NOOP", `Edit produced no change: ${args.path}`, "Reread the file and provide a replacement that changes the current content.");
-  await writeFile(loaded.target, after, "utf8");
-  const unifiedDiff = buildUnifiedDiff(args.path, loaded.before, after);
+  const afterText = restoreLineEndings(after, lineEnding);
+  if (afterText === loaded.before) return fail("EDIT_NOOP", `Edit produced no change: ${args.path}`, "Reread the file and provide a replacement that changes the current content.");
+  await writeFile(loaded.target, afterText, "utf8");
+  const unifiedDiff = buildUnifiedDiff(args.path, loaded.before, afterText);
   return {
     ok: true,
-    output: { path: args.path, beforeHash: loaded.hash, afterHash: hashText(after), operations: statuses, changed: true, unifiedDiff },
-    diff: { path: args.path, before: loaded.before, after },
+    output: { path: args.path, beforeHash: loaded.hash, afterHash: hashText(afterText), operations: statuses, changed: true, unifiedDiff },
+    diff: { path: args.path, before: loaded.before, after: afterText },
     presentation: { kind: "diff", title: `Updated ${args.path}`, text: unifiedDiff, data: { path: args.path, operations: statuses, unifiedDiff } },
   };
 }
@@ -857,10 +864,17 @@ function waitForTerminalOutput(terminal: ManagedTerminal, waitMs: number, signal
 function waitForChildClose(child: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<void> { if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(); return new Promise((resolve) => { let settled = false; const finish = () => { if (settled) return; settled = true; clearTimeout(timer); resolve(); }; const timer = setTimeout(finish, timeoutMs); child.once("close", finish); }); }
 function isMissingPathError(error: unknown): boolean { return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT"; }
 function hashText(value: string): string { return createHash("sha256").update(value, "utf8").digest("hex"); }
+function normalizeLineEndings(value: string): string { return value.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n"); }
+function restoreLineEndings(value: string, lineEnding: "\n" | "\r\n" | "\r"): string { return lineEnding === "\n" ? value : value.replace(/\n/gu, lineEnding); }
+function detectLineEnding(value: string): "\n" | "\r\n" | "\r" { const match = value.match(/\r\n|\r|\n/u); return (match?.[0] as "\n" | "\r\n" | "\r" | undefined) ?? "\n"; }
 function findOccurrences(value: string, needle: string): number[] { const positions: number[] = []; let offset = 0; while (offset <= value.length - needle.length) { const index = value.indexOf(needle, offset); if (index < 0) break; positions.push(index); offset = index + Math.max(needle.length, 1); } return positions; }
-function editFailure(code: string, filePath: string, text: string, message: string, matchCount: number): ToolResult {
+function lineNumbersAt(value: string, offsets: readonly number[]): number[] { return offsets.map((offset) => value.slice(0, offset).split("\n").length); }
+function editFailure(code: string, filePath: string, text: string, message: string, matchCount: number, matchLines: readonly number[] = []): ToolResult {
   const context = text.split(/\r?\n/u).slice(0, 8).map((line, index) => `${index + 1}: ${line}`).join("\n");
-  return { ok: false, error: { code, message: `${message}; path=${filePath}; matchCount=${matchCount}`, remedy: code === "EDIT_CONFLICT" || code === "EDIT_STALE" ? "Stop, reread the current file, and retry with a fresh expectedHash." : "Include more exact surrounding context so exactly one current match is selected." }, presentation: { kind: "diff", title: code, text: context, data: { path: filePath, matchCount, context } } };
+  const remedy = code === "EDIT_CONFLICT" || code === "EDIT_STALE"
+    ? "Stop, reread the current file, and retry with a fresh expectedHash."
+    : "Reread the current file and use a unique current context before editing; do not repeat the same replacement unchanged.";
+  return { ok: false, error: { code, message: `${message}; path=${filePath}; matchCount=${matchCount}`, remedy }, presentation: { kind: "diff", title: code, text: context, data: { path: filePath, matchCount, matchLines, currentHash: hashText(text), totalLines: text.length === 0 ? 0 : text.split(/\r?\n/u).length, context } } };
 }
 function patchResult(record: AppliedPatch, title: string): ToolResult {
   const text = record.files.map((file) => file.unifiedDiff).filter(Boolean).join("\n\n");
