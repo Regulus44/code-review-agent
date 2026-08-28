@@ -152,6 +152,44 @@ describe("AgentHost", () => {
     expect(system).toContain("Before editing, read the current file");
   });
 
+  it("publishes the platform-selected shell roster through model tools and prompt guidance", async () => {
+    const capture = async (platform: "win32" | "linux") => {
+      const requests: ModelRequest[] = [];
+      const model: ChatModel = {
+        async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+          requests.push(request);
+          yield { type: "text_delta", text: "roster-checked" };
+          yield { type: "done" };
+        },
+      };
+      const store = new InMemoryEventStore();
+      const registry = new ToolRegistry();
+      registry.registerMany(createBuiltinTools({ platform }));
+      const host = new AgentHost({ store, model, toolRegistry: registry });
+      const session = await host.createSession("D:/platform-roster-" + platform);
+      const turn = await host.sendMessage(session.id, "inspect the available shell");
+      await host.waitForTurn(turn);
+      const request = requests[0];
+      const system = request?.messages.find((message) => message.role === "system")?.content ?? "";
+      return {
+        toolNames: request?.tools?.map((tool) => tool.name) ?? [],
+        system,
+      };
+    };
+
+    const windows = await capture("win32");
+    expect(windows.toolNames).toContain("pwsh");
+    expect(windows.toolNames).not.toContain("bash");
+    expect(windows.system).toContain("## pwsh");
+    expect(windows.system).not.toContain("## bash");
+
+    const posix = await capture("linux");
+    expect(posix.toolNames).toContain("bash");
+    expect(posix.toolNames).not.toContain("pwsh");
+    expect(posix.system).toContain("## bash");
+    expect(posix.system).not.toContain("## pwsh");
+  });
+
   it("records the canonical M03 context assembly fingerprint and stable section metadata", async () => {
     const store = new InMemoryEventStore();
     const model: ChatModel = {

@@ -29,6 +29,11 @@ const DEFAULT_READ_LINES = 200;
 const MAX_READ_LINES = 1_000;
 const MAX_READ_LINE_CHARS = 2_000;
 const MAX_READ_RESULT_BYTES = 50 * 1024;
+const POWERSHELL_ENCODING_PREAMBLE = "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [System.Text.UTF8Encoding]::new($false); ";
+const SHELL_ENV_OVERRIDES: Readonly<Record<ShellKind, Readonly<Record<string, string>>>> = {
+  bash: { NO_COLOR: "1", TERM: "dumb", PAGER: "cat", GIT_PAGER: "cat" },
+  pwsh: { NO_COLOR: "1", PAGER: "cat", GIT_PAGER: "cat" },
+};
 
 const object = (properties: Record<string, any>, required: string[] = []) => ({ type: "object" as const, properties, required, additionalProperties: false });
 const string = { type: "string" as const };
@@ -548,21 +553,22 @@ async function executeShellCommand(kind: ShellKind, args: ShellToolInput, contex
   catch { return fail("WORKDIR_INVALID", `Shell workdir is invalid: ${args.workdir ?? context.workspaceRoot}`); }
   const launch = shellLaunch(kind, args.command, platform);
   const label = args.description?.trim() || args.command;
+  const env = SHELL_ENV_OVERRIDES[kind];
   if (args.run_in_background === true) {
-    return jobs.start({ sessionId: context.sessionId, workspaceRoot: context.workspaceRoot, cwd, executable: launch.executable, args: launch.args, command: args.command, ...(args.maxAttempts === undefined ? {} : { retry: { maxAttempts: args.maxAttempts, ...(args.retryBackoffMs === undefined ? {} : { backoffMs: args.retryBackoffMs }) } }), ...(args.deadlineMs === undefined ? {} : { deadlineMs: args.deadlineMs }), signal: context.signal, appendEvent: async (type, payload) => context.appendEvent(type, payload) });
+    return jobs.start({ sessionId: context.sessionId, workspaceRoot: context.workspaceRoot, cwd, executable: launch.executable, args: launch.args, command: args.command, env, ...(args.maxAttempts === undefined ? {} : { retry: { maxAttempts: args.maxAttempts, ...(args.retryBackoffMs === undefined ? {} : { backoffMs: args.retryBackoffMs }) } }), ...(args.deadlineMs === undefined ? {} : { deadlineMs: args.deadlineMs }), signal: context.signal, appendEvent: async (type, payload) => context.appendEvent(type, payload) });
   }
-  return runShellForeground(kind, args.command, label, cwd, launch.executable, launch.args, args.timeoutMs ?? 120_000, context.signal);
+  return runShellForeground(kind, args.command, label, cwd, launch.executable, launch.args, args.timeoutMs ?? 120_000, context.signal, env);
 }
 
 function shellLaunch(kind: ShellKind, command: string, platform: NodeJS.Platform): { readonly executable: string; readonly args: readonly string[] } {
   if (kind === "bash") return { executable: "bash", args: ["-lc", command] };
-  const constrained = "$ExecutionContext.SessionState.LanguageMode = 'ConstrainedLanguage'; " + command;
+  const constrained = POWERSHELL_ENCODING_PREAMBLE + "$ExecutionContext.SessionState.LanguageMode = 'ConstrainedLanguage'; " + command;
   return { executable: resolvePwshPath(undefined, process.env, platform), args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", constrained] };
 }
 
-function runShellForeground(kind: ShellKind, command: string, label: string, cwd: string, executable: string, args: readonly string[], timeoutMs: number, signal: AbortSignal): Promise<ToolResult> {
+function runShellForeground(kind: ShellKind, command: string, label: string, cwd: string, executable: string, args: readonly string[], timeoutMs: number, signal: AbortSignal, env: Readonly<Record<string, string>>): Promise<ToolResult> {
   return new Promise((resolve) => {
-    const child = spawn(executable, [...args], { cwd, detached: false, shell: false, windowsHide: true, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env } });
+    const child = spawn(executable, [...args], { cwd, detached: false, shell: false, windowsHide: true, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...env } });
     let stdout = "";
     let stderr = "";
     let output = "";

@@ -6,6 +6,7 @@ import { brand, type AgentEvent, type EventStore, type SessionProjection, type S
 import { createBuiltinTools } from "./builtin.js";
 import { ToolRegistry } from "./registry.js";
 import { ToolRuntime } from "./runtime.js";
+import { DefaultPermissionPolicy } from "./permissions.js";
 
 class QueryStore implements EventStore {
   readonly events: AgentEvent[] = [];
@@ -63,5 +64,26 @@ describe("Phase 3B.4 tools", () => {
     const result = await runtime.resolvePermission(pending.permission!.id, "approved");
     expect(["completed", "failed"]).toContain(result.status);
     if (result.status === "completed") expect(result.result?.output).toContain("pwsh-smoke"); else expect(result.result?.error?.code).toBe("COMMAND_NOT_FOUND");
+  });
+
+  it("keeps the selected shell's argv, environment, cwd, and audit semantics", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-shell-adapter-"));
+    try {
+      const isWindows = process.platform === "win32";
+      const kind = isWindows ? "pwsh" : "bash";
+      const command = isWindows ? "Write-Output $env:NO_COLOR; Write-Output 'stage3'" : "printf '%s:%s' \"$TERM\" 'stage3'";
+      const store = new QueryStore();
+      const registry = new ToolRegistry();
+      registry.registerMany(createBuiltinTools({ eventStore: store }));
+      const runtime = new ToolRuntime({ store, registry, policy: new DefaultPermissionPolicy({ preset: "danger-full-access" }) });
+      const result = await runtime.execute({ sessionId: brand<string, "SessionId">("ses_shell_adapter"), workspaceRoot: root, name: kind, input: { command } });
+      expect(result.status).toBe("completed");
+      expect(result.result?.output).toContain("stage3");
+      if (isWindows) expect(result.result?.output).toContain("1");
+      else expect(result.result?.output).toContain("dumb");
+      expect(result.result?.audit).toMatchObject({ shell: kind, cwd: root, exitCode: 0 });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
