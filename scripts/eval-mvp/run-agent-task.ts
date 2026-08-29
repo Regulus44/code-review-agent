@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { createConfiguredApiServer } from "../../apps/api/src/server.ts";
+import { auditScope, type ScopeAudit } from "./scope-audit.ts";
 // This must be the same module identity used by the API server. The eval
 // script runs from the repository root, where the workspace alias is not
 // resolvable, whereas the API resolves this exact built package through its
@@ -19,6 +20,8 @@ type Task = {
   readonly id: string;
   readonly problemStatement: string;
   readonly allowedPaths?: readonly string[];
+  readonly forbiddenPaths?: readonly string[];
+  readonly runtimeArtifactPaths?: readonly string[];
   readonly requiredChecks?: readonly string[];
   readonly timeoutMs?: number;
 };
@@ -72,6 +75,7 @@ const databasePath = path.join(runDirectory, "agent.sqlite");
 const eventsPath = path.join(runDirectory, "events.jsonl");
 const diffPath = path.join(runDirectory, "agent.diff");
 const statusPath = path.join(runDirectory, "git-status.json");
+const scopeAuditPath = path.join(runDirectory, "scope-audit.json");
 const resultPath = path.join(runDirectory, "result.json");
 const maxSteps = parseBoundedInteger(process.env["EVAL_MVP_MAX_STEPS"], 32, 1, 512);
 const autoApprovePermissions = process.env["EVAL_MVP_AUTO_APPROVE_PERMISSIONS"] !== "0";
@@ -116,6 +120,7 @@ async function main(): Promise<void> {
   let events: AgentEvent[] = [];
   let agentDiff = "";
   let gitStatus: string[] = [];
+  let scopeAudit: ScopeAudit | null = null;
   let failureClass: string | null = null;
   let modelInfo: HealthResponse["model"];
   const autoApprovedPermissionIds: string[] = [];
@@ -150,11 +155,14 @@ async function main(): Promise<void> {
     const scopeInstruction = task.allowedPaths === undefined || task.allowedPaths.length === 0
       ? "修改范围约束：只修改与本任务直接相关的文件，不要修改无关文件、测试基线或文档。"
       : `修改范围约束：只修改与本任务直接相关的文件。允许修改路径：${task.allowedPaths.join(", ")}。不要修改其他文件、测试基线或文档。`;
+    const forbiddenInstruction = task.forbiddenPaths === undefined || task.forbiddenPaths.length === 0
+      ? "禁止路径约束：不要修改评测私有目录、hidden grader、测试基线或其他未授权路径。"
+      : `禁止路径约束：不得修改 ${task.forbiddenPaths.join(", ")}，也不得修改评测私有目录、hidden grader 或测试基线。`;
     const budgetInstruction = `执行预算：本次任务最多使用 ${maxSteps} 个 Agent step。请在有限预算内高效完成：先定位问题，再做最小修改并运行针对性测试；接近步数上限时停止探索，立即完成验证并总结。`;
     const checksInstruction = task.requiredChecks === undefined || task.requiredChecks.length === 0
       ? "验收要求：完成修改后执行与变更匹配的仓库原生测试、构建或诊断，并报告实际命令及退出状态。"
       : `验收要求：${task.requiredChecks.join(", ")}。修改前先检查目标文件；修改后执行与任务匹配的仓库原生测试、构建或诊断，并报告实际命令及退出状态。`;
-    const scopedPrompt = `${task.problemStatement}\n\n${budgetInstruction}\n${scopeInstruction}\n${checksInstruction}`;
+    const scopedPrompt = `${task.problemStatement}\n\n${budgetInstruction}\n${scopeInstruction}\n${forbiddenInstruction}\n${checksInstruction}`;
     const sent = await requestJson<{ turnId: string }>(baseUrl, `/v1/sessions/${encodeURIComponent(sessionId)}`, {
       method: "POST",
       body: { content: scopedPrompt },
@@ -214,9 +222,17 @@ async function main(): Promise<void> {
     events = await requestJson<AgentEvent[]>(baseUrl, `/v1/sessions/${encodeURIComponent(sessionId)}/events?format=json`);
     await writeFile(eventsPath, events.map((event) => JSON.stringify(event)).join("\n") + (events.length === 0 ? "" : "\n"), "utf8");
     agentDiff = (await execFileAsync("git", ["-C", workspace, "-c", "core.longpaths=true", "-c", "core.fileMode=false", "diff", "--binary"], { cwd: repoRoot })).stdout;
-    gitStatus = (await execFileAsync("git", ["-C", workspace, "-c", "core.longpaths=true", "status", "--porcelain"], { cwd: repoRoot })).stdout.split(/\r?\n/u).filter(Boolean);
+    const statusPorcelain = (await execFileAsync("git", ["-C", workspace, "-c", "core.longpaths=true", "status", "--porcelain=v1", "--untracked-files=all", "-z"], { cwd: repoRoot })).stdout;
+    scopeAudit = auditScope({
+      statusPorcelain,
+      allowedPaths: task.allowedPaths,
+      forbiddenPaths: task.forbiddenPaths,
+      runtimeArtifactPaths: task.runtimeArtifactPaths,
+    });
+    gitStatus = [...scopeAudit.allChangedFiles];
     await writeFile(diffPath, agentDiff, "utf8");
-    await writeFile(statusPath, JSON.stringify({ workspace, entries: gitStatus }, null, 2) + "\n", "utf8");
+    await writeFile(statusPath, JSON.stringify({ workspace, entries: scopeAudit.entries, allChangedFiles: scopeAudit.allChangedFiles }, null, 2) + "\n", "utf8");
+    await writeFile(scopeAuditPath, JSON.stringify({ workspace, ...scopeAudit }, null, 2) + "\n", "utf8");
   } catch (error) {
     failureClass ??= "agent_failed";
     await writeFile(path.join(runDirectory, "error.txt"), error instanceof Error ? error.stack ?? error.message : String(error), "utf8");
@@ -250,7 +266,23 @@ async function main(): Promise<void> {
       steps,
       toolCalls,
       events: { path: eventsPath, count: events.length, lastSequence: events.at(-1)?.sequence ?? 0 },
-      diff: { path: diffPath, changedFiles: gitStatus.map((entry) => entry.slice(3)), bytes: Buffer.byteLength(agentDiff), scopeViolation: false },
+      workspace,
+      diff: {
+        path: diffPath,
+        changedFiles: gitStatus,
+        candidateChangedFiles: scopeAudit?.candidateChangedFiles ?? [],
+        runtimeArtifactFiles: scopeAudit?.runtimeArtifactFiles ?? [],
+        bytes: Buffer.byteLength(agentDiff),
+        scopeViolation: scopeAudit?.scopeViolation ?? true,
+        scopeAuditPath,
+      },
+      scopeAudit: scopeAudit === null ? null : {
+        path: scopeAuditPath,
+        scopeViolation: scopeAudit.scopeViolation,
+        candidateChangedFiles: scopeAudit.candidateChangedFiles,
+        runtimeArtifactFiles: scopeAudit.runtimeArtifactFiles,
+        violations: scopeAudit.violations,
+      },
       gitStatusPath: statusPath,
       failureClass,
     };

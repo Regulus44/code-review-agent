@@ -1,6 +1,6 @@
 # Django 16046 评测失败分析与 DSH / Claude Code 参考方案
 
-> 文档状态：阶段二、阶段三实施完成
+> 文档状态：阶段二、阶段三、阶段四实施完成
 > 更新时间：2026-08-29  
 > 适用范围：当前 Coding Agent 的 SWE-bench Lite 评测、日常代码修改流程，以及后续编辑工具和 Runner 的改进
 
@@ -270,8 +270,16 @@ DSH 的 `fs/observed`、`fs/edit-intent` 是其内部文件策略事件，不是
 | 项目 | 当前仓库：要修改的文件与入口 | 原因与修改边界 |
 | --- | --- | --- |
 | Agent 原始工作区范围检查 | `scripts/eval-mvp/run-agent-task.ts:249`，当前结果对象把 `scopeViolation` 固定为 `false`；同一脚本生成 `git-status.json` 和 `agent.diff` | `agent.diff` 无法表示 Git 未跟踪文件，`.agent-artifacts/` 因此会出现在 `changedFiles` 但不会被随后 `git apply` 到 Grader clean copy。应在生成 diff 前基于原始 workspace 的 `git status --porcelain` 检查所有修改、未跟踪和删除路径，再写入独立 scope 审计结果。 |
-| 最终 Grader 范围检查 | `scripts/eval-mvp/grade-agent-run.ps1:77` 的 `Get-ChangedFiles`、91 行的 `Get-PatchFiles`、289–293 行的 scope 判断 | 该脚本目前只对“已应用的 agent.diff”检查范围，因此看不到未纳入 diff 的未跟踪文件。应消费 Runner 生成的完整范围审计结果，或在 agent 原始 workspace 再做一次核验。 |
+| 最终 Grader 范围检查 | `scripts/eval-mvp/grade-agent-run.ps1:77` 的 `Get-ChangedFiles`、`Get-AuditFiles` / `Assert-SamePathSet` 以及约 300 行的 scope 对账 | 该脚本目前只对“已应用的 agent.diff”检查范围，因此看不到未纳入 diff 的未跟踪文件。应消费 Runner 生成的完整范围审计结果，或在 agent 原始 workspace 再做一次核验。 |
 | 运行产物策略 | `packages/runtime/src/index.test.ts:975–983`、`packages/tools/src/jobs.ts:103`、`packages/tools/src/patch.ts:293` 均会使用 `.agent-artifacts/` | 必须在评测配置中明确：`.agent-artifacts/` 是允许的运行时临时产物并从候选代码变更中排除，还是任何新增文件都算越界。两种策略均可，但 Runner、结果 JSON、Grader 必须一致。不能让 `changedFiles` 与 `scopeViolation` 给出互相矛盾的结论。 |
+
+阶段四采用“记录全部变更、候选变更单独判定”的策略：
+
+- `.agent-artifacts/**` 是允许的运行时临时产物。它们进入 `allChangedFiles` 和 `runtimeArtifactFiles`，但从 `candidateChangedFiles` 与候选 patch 中排除，不构成范围违规；
+- 其他未跟踪文件一律 fail closed，记录为 `untracked_candidate`。当前 `agent.diff` 基于 Git diff，无法可靠携带未跟踪文件，因此不允许把这类文件静默遗失在 Grader clean copy 中；
+- `allowedPaths` 和 `forbiddenPaths` 使用 workspace 相对路径和 glob 匹配。删除文件、重命名源路径和目标路径都纳入审计；
+- Runner 写出独立 `scope-audit.json`，结果 JSON 同时保存全部变更、候选变更、运行产物和违规原因；Grader 核对该审计、原始 Agent workspace 的 Git 状态以及 clean copy 应用后的候选 patch；
+- 范围判定依据任务的 `allowedPaths` / `forbiddenPaths`，不再使用 gold patch 文件列表冒充范围规则。Gold patch 仅用于 Django/SWE-bench 的基准测试输入。
 
 ### 阶段文件改动清单
 
@@ -288,8 +296,10 @@ DSH 的 `fs/observed`、`fs/edit-intent` 是其内部文件策略事件，不是
 | 当前仓库 | `packages/runtime/src/index.test.ts` | 覆盖 notice 不阻断工具、`tool/result → user/message` 顺序、重放和重启后 chain 清零 | DSH `repeat-tool-reminder/tests/repeat-tool-reminder.spec.ts` |
 | 当前仓库 | `docs/event-contract.md` | 说明既有 `user/message` 的 plugin notice source 与回放顺序；不新增事件类型 | DSH `repeat-tool-reminder/README.md` 的 Reminder delivery |
 | 当前仓库 | `packages/runtime/src/system-prompt.ts` | 补充通用编辑失败恢复和验证规则，不注入数据集私有信息 | DSH 工具说明的精确替换约束 |
-| 当前仓库 | `scripts/eval-mvp/run-agent-task.ts` | 把完整工作区状态转为可用的 scope 审计结果；维持现有预算/路径 prompt 注入 | 本次结果中 `.agent-artifacts/` 与 diff 不一致的事实 |
-| 当前仓库 | `scripts/eval-mvp/grade-agent-run.ps1` | 消费完整范围审计结果，并继续执行 Django 原生 Grader | 当前 `Get-ChangedFiles` / `Get-PatchFiles` 分支 |
+| 当前仓库 | `scripts/eval-mvp/scope-audit.ts`、`scope-audit-cli.ts` | 解析 Git porcelain 状态，分类全部变更、候选变更、运行产物、删除和未跟踪文件，并按 allowed/forbidden glob 计算违规 | 本次结果中 `.agent-artifacts/` 与 diff 不一致的事实 |
+| 当前仓库 | `scripts/eval-mvp/run-agent-task.ts` | 把完整工作区状态写入 `scope-audit.json`，结果 JSON 暴露同一审计摘要；维持预算/路径/禁止路径 prompt 注入 | Runner 的原始 workspace 证据 |
+| 当前仓库 | `scripts/eval-mvp/grade-agent-run.ps1` | 消费并校验完整范围审计，复核原始 workspace 与 clean copy 的文件集合，再执行 Django 原生 Grader | `Get-ChangedFiles`、scope audit 对账和候选 patch 一致性检查 |
+| 当前仓库 | `scripts/eval-mvp/scope-audit.test.ts`、`scope-audit-fixture.ps1` | 覆盖已跟踪修改、删除、未跟踪候选和 `.agent-artifacts/**` 的一致分类 | 阶段四脚本级 fixture |
 
 ## 7. 分阶段验收入口
 
@@ -301,7 +311,7 @@ DSH 的 `fs/observed`、`fs/edit-intent` 是其内部文件策略事件，不是
 | 文件观察与版本恢复（2A） | `packages/tools/src/file-observation.test.ts`、`packages/tools/src/index.test.ts` | 未读编辑稳定拒绝且文件不变；windowed read 后可编辑；外部改动 stale；重读后恢复；成功编辑刷新 hash；Session 隔离；并发 CAS 仅一个成功。 |
 | 重复调用提醒（2B） | `packages/runtime/src/repeat-tool-reminder.test.ts`、`packages/runtime/src/index.test.ts` | 精确调用在 3/5/8 次获得正确升级提醒；参数键深度排序、预览截断、拒绝调用计数、新用户消息重置、Session 隔离都符合 DSH；提醒不阻断调用。 |
 | 事件回放 | `packages/runtime/src/index.test.ts` 与 `docs/event-contract.md` 对应 fixture | 触发提醒时 sequence 为 `tool/call → tool/result → user/message(plugin notice)`；重启后旧 notice 可回放，但观察授权和 repeat counter 都不会被错误恢复。 |
-| 评测范围审计 | `scripts/eval-mvp/run-agent-task.ts`、`grade-agent-run.ps1` 的脚本级 fixture | 已跟踪修改、未跟踪文件、删除文件和 `.agent-artifacts/` 都得到一致判定。 |
+| 评测范围审计 | `scripts/eval-mvp/scope-audit.test.ts`、`scope-audit-fixture.ps1`、`scope-audit-grader-fixture.ps1`、Runner/Grader | 已跟踪修改、未跟踪文件、删除文件和 `.agent-artifacts/` 都得到一致判定；clean candidate 可通过，未跟踪候选会 fail closed。 |
 | Django 16046 | Django 原生 `tests/runtests.py`，由 `grade-agent-run.ps1` 调用 | `nformat("", ".") == ""`、`nformat(None, ".") == "None"`、pass-to-pass 通过；脚本化恢复场景中同一精确编辑第 3 次开始可见 DSH 式提醒，stale 编辑只能在重读后继续。 |
 
 ## 8. 不应直接照搬的部分

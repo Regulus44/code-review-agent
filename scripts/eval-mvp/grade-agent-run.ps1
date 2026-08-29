@@ -80,26 +80,49 @@ function Get-ChangedFiles {
     [string]$Directory
   )
 
-  $status = Invoke-Process -FilePath "git" -Arguments @("-c", "core.longpaths=true", "status", "--porcelain") -WorkingDirectory $Directory
+  $status = Invoke-Process -FilePath "git" -Arguments @("-c", "core.longpaths=true", "status", "--porcelain=v1", "--untracked-files=all") -WorkingDirectory $Directory
   if ($status.exitCode -ne 0) { throw "Could not inspect Git status in $Directory`n$($status.stderr)" }
   return @($status.stdout -split "\r?\n" | Where-Object { $_.Trim().Length -gt 0 } | ForEach-Object {
     $entry = $_
-    if ($entry.Length -ge 3) { $entry.Substring(3).Trim().Trim('"') } else { $entry.Trim() }
+    $path = if ($entry.Length -ge 3) { $entry.Substring(3).Trim().Trim('"') } else { $entry.Trim() }
+    if ($path -match '^(?<source>.+) -> (?<destination>.+)$') {
+      $Matches.source
+      $Matches.destination
+    } else {
+      $path
+    }
   } | Where-Object { $_.Length -gt 0 })
 }
 
-function Get-PatchFiles {
+function Get-AuditFiles {
   param(
     [Parameter(Mandatory = $true)]
-    [string]$PatchPath
+    [object]$Audit,
+    [Parameter(Mandatory = $true)]
+    [string]$Property
   )
 
-  $files = @()
-  foreach ($line in Get-Content -LiteralPath $PatchPath) {
-    if ($line -match '^\+\+\+ b/(.+)$') { $files += $Matches[1] }
-    elseif ($line -match '^--- a/(.+)$') { $files += $Matches[1] }
+  if ($null -eq $Audit.PSObject.Properties[$Property]) { return @() }
+  return @($Audit.$Property | ForEach-Object { [string]$_ } | Where-Object { $_.Trim().Length -gt 0 } | Sort-Object -Unique)
+}
+
+function Assert-SamePathSet {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$Left,
+    [Parameter(Mandatory = $true)]
+    [string[]]$Right,
+    [Parameter(Mandatory = $true)]
+    [string]$Description
+  )
+
+  $leftSet = @($Left | Sort-Object -Unique)
+  $rightSet = @($Right | Sort-Object -Unique)
+  $missing = @($leftSet | Where-Object { $_ -notin $rightSet })
+  $unexpected = @($rightSet | Where-Object { $_ -notin $leftSet })
+  if ($missing.Count -gt 0 -or $unexpected.Count -gt 0) {
+    throw "$Description mismatch. missing=$($missing -join ', ') unexpected=$($unexpected -join ', ')"
   }
-  return @($files | Sort-Object -Unique)
 }
 
 function Get-VenvPython {
@@ -231,18 +254,25 @@ if (-not (Test-Path -LiteralPath $agentResultFull)) { throw "Missing Agent resul
 $agentResult = Get-Content -LiteralPath $agentResultFull -Raw | ConvertFrom-Json
 $agentRunDirectory = Split-Path -Parent $agentResultFull
 $agentDiffPath = if ($agentResult.diff.path) { [System.IO.Path]::GetFullPath([string]$agentResult.diff.path) } else { Join-Path $agentRunDirectory "agent.diff" }
+$scopeAuditPath = if ($agentResult.diff.scopeAuditPath) { [System.IO.Path]::GetFullPath([string]$agentResult.diff.scopeAuditPath) } elseif ($agentResult.scopeAudit.path) { [System.IO.Path]::GetFullPath([string]$agentResult.scopeAudit.path) } else { Join-Path $agentRunDirectory "scope-audit.json" }
+$agentWorkspace = if ($agentResult.workspace) { [System.IO.Path]::GetFullPath([string]$agentResult.workspace) } else { $null }
 $taskPath = Join-Path $DatasetRoot "public\tasks\$TaskId\task.json"
 $baseWorkspace = Join-Path $DatasetRoot "runtime\workspaces\$TaskId"
 $goldPatchPath = Join-Path $DatasetRoot "private\gold-patches\$TaskId.patch"
 $testPatchPath = Join-Path $DatasetRoot "private\test-patches\$TaskId.patch"
 $privateRoot = Join-Path $DatasetRoot "private"
 
-foreach ($required in @($taskPath, $baseWorkspace, $goldPatchPath, $testPatchPath, $agentDiffPath)) {
+foreach ($required in @($taskPath, $baseWorkspace, $goldPatchPath, $testPatchPath, $agentDiffPath, $scopeAuditPath)) {
   if (-not (Test-Path -LiteralPath $required)) { throw "Missing required path: $required" }
 }
 Assert-PathOutside -Candidate $agentDiffPath -ForbiddenRoot $privateRoot
+Assert-PathOutside -Candidate $scopeAuditPath -ForbiddenRoot $privateRoot
+if ($null -eq $agentWorkspace -or -not (Test-Path -LiteralPath $agentWorkspace)) { throw "Missing Agent workspace in result: $agentWorkspace" }
+Assert-PathOutside -Candidate $agentWorkspace -ForbiddenRoot $privateRoot
 
 $task = Get-Content -LiteralPath $taskPath -Raw | ConvertFrom-Json
+$scopeAudit = Get-Content -LiteralPath $scopeAuditPath -Raw | ConvertFrom-Json
+if ($scopeAudit.schemaVersion -ne 1) { throw "Unsupported scope audit schema: $($scopeAudit.schemaVersion)" }
 $graderRunId = "grader-$(Get-Date -Format 'yyyyMMdd-HHmmssfff')"
 $graderDirectory = Join-Path $agentRunDirectory $graderRunId
 $cleanCopy = Join-Path $graderDirectory "clean-copy"
@@ -271,6 +301,29 @@ New-Item -ItemType Directory -Force -Path $graderDirectory | Out-Null
 Assert-PathOutside -Candidate $cleanCopy -ForbiddenRoot $privateRoot
 
 try {
+  $phase = "scope_check"
+  $scopeViolation = [bool]$scopeAudit.scopeViolation
+  $auditedAllFiles = Get-AuditFiles -Audit $scopeAudit -Property "allChangedFiles"
+  $auditedCandidateFiles = Get-AuditFiles -Audit $scopeAudit -Property "candidateChangedFiles"
+  $reportedChangedFiles = Get-AuditFiles -Audit $agentResult.diff -Property "changedFiles"
+  Assert-SamePathSet -Left $auditedAllFiles -Right $reportedChangedFiles -Description "Agent result changedFiles and scope audit allChangedFiles"
+  if ($scopeAudit.allowedPaths -ne $null -and $task.allowedPaths -ne $null) {
+    Assert-SamePathSet -Left (Get-AuditFiles -Audit $scopeAudit -Property "allowedPaths") -Right (Get-AuditFiles -Audit $task -Property "allowedPaths") -Description "Scope audit allowedPaths and task allowedPaths"
+  }
+  if ($scopeAudit.forbiddenPaths -ne $null -and $task.forbiddenPaths -ne $null) {
+    Assert-SamePathSet -Left (Get-AuditFiles -Audit $scopeAudit -Property "forbiddenPaths") -Right (Get-AuditFiles -Audit $task -Property "forbiddenPaths") -Description "Scope audit forbiddenPaths and task forbiddenPaths"
+  }
+  if ($agentResult.diff.scopeViolation -ne $null -and [bool]$agentResult.diff.scopeViolation -ne $scopeViolation) {
+    throw "Agent result scopeViolation does not match scope audit"
+  }
+  if ($scopeViolation) {
+    $violationSummary = @($scopeAudit.violations | ForEach-Object { "$($_.kind):$($_.path)" }) -join ", "
+    throw "Agent workspace scope audit failed: $violationSummary"
+  }
+  $workspaceFiles = Get-ChangedFiles -Directory $agentWorkspace
+  Assert-SamePathSet -Left $auditedAllFiles -Right $workspaceFiles -Description "Scope audit and Agent workspace Git status"
+  $phase = "provision"
+
   $clone = Invoke-Process -FilePath "git" -Arguments @("-c", "core.longpaths=true", "clone", "--no-local", "--quiet", $baseWorkspace, $cleanCopy) -WorkingDirectory $graderDirectory
   ($clone.stdout + $clone.stderr) | Add-Content -LiteralPath $graderLogPath
   if ($clone.exitCode -ne 0) { throw "Could not clone clean copy`n$($clone.stderr)" }
@@ -295,11 +348,10 @@ try {
     ($applyAgent.stdout + $applyAgent.stderr) | Add-Content -LiteralPath $graderLogPath
     if ($applyAgent.exitCode -ne 0) { throw "Agent diff could not be applied`n$($applyAgent.stderr)" }
   }
+  $phase = "scope_check"
   $cleanChangedFiles = Get-ChangedFiles -Directory $cleanCopy
   $agentChangedFiles = @($cleanChangedFiles)
-  $allowedFiles = Get-PatchFiles -PatchPath $goldPatchPath
-  $scopeViolation = @($cleanChangedFiles | Where-Object { $_ -notin $allowedFiles }).Count -gt 0
-  if ($scopeViolation) { throw "Agent changed files outside the gold patch scope: $($cleanChangedFiles -join ', ')" }
+  Assert-SamePathSet -Left $auditedCandidateFiles -Right $cleanChangedFiles -Description "Agent diff and scope audit candidate files"
 
   $phase = "security_check"
   $privateLeak = @(Get-ChildItem -LiteralPath $cleanCopy -Recurse -Force -ErrorAction SilentlyContinue | Where-Object {
@@ -360,7 +412,7 @@ try {
   }
 } catch {
   $errorMessage = $_.Exception.Message
-  $failureClass = if ($testTimedOut) { "timeout" } elseif ($scopeViolation) { "scope_violation" } elseif ($securityViolation) { "security_violation" } elseif ($phase -in @("run_fail_to_pass", "run_pass_to_pass")) { "test_failed" } elseif ($phase -in @("apply_agent_patch", "apply_hidden_patch")) { "grader_failed" } else { "infra_error" }
+  $failureClass = if ($testTimedOut) { "timeout" } elseif ($scopeViolation -or $phase -eq "scope_check") { "scope_violation" } elseif ($securityViolation) { "security_violation" } elseif ($phase -in @("run_fail_to_pass", "run_pass_to_pass")) { "test_failed" } elseif ($phase -in @("apply_agent_patch", "apply_hidden_patch")) { "grader_failed" } else { "infra_error" }
   $_ | Out-String | Add-Content -LiteralPath $graderLogPath
 }
 
@@ -378,11 +430,15 @@ $result = [ordered]@{
   endedAt = $endedAt.ToString("o")
   durationMs = [int]($endedAt - $startedAt).TotalMilliseconds
   agentResultPath = $agentResultFull
+  agentWorkspace = $agentWorkspace
   provider = $agentResult.provider
   model = $agentResult.model
   turnStatus = $agentResult.turnStatus
   agentStatus = $agentResult.status
   agentChangedFiles = @($agentChangedFiles)
+  auditedChangedFiles = @(Get-AuditFiles -Audit $scopeAudit -Property "allChangedFiles")
+  auditedCandidateFiles = @(Get-AuditFiles -Audit $scopeAudit -Property "candidateChangedFiles")
+  runtimeArtifactFiles = @(Get-AuditFiles -Audit $scopeAudit -Property "runtimeArtifactFiles")
   scopeViolation = $scopeViolation
   securityViolation = $securityViolation
   grader = [ordered]@{
