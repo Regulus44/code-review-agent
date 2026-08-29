@@ -2,6 +2,10 @@
 
 本文记录当前开发阶段的实际状态。它不是长期架构决策；阶段完成以对应 Git checkpoint、测试命令和验收证据为准。
 
+## 评测入口现状（2026-08-30）
+
+评测已切换为简化的真实 Agent 会话流程：`run-agent-task.ts` 与 `run-pilot.ps1` 只负责隔离 workspace、启动 Agent、记录事件/日志/差异和汇总结果。独立 Grader、hidden patch、scope audit 及 Grader 自检入口已移除；后续验证按 [`coding-agent-simple-evaluation-plan.zh-CN.md`](coding-agent-simple-evaluation-plan.zh-CN.md) 执行。下方早期阶段记录中的 Grader/step 结论仅作历史证据，不是当前运行要求。
+
 ## 当前状态
 
 ### Phase 8.5-MR12：集成门禁、迁移说明和文档收敛（阶段 6，completed，2026-08-28）
