@@ -9,7 +9,7 @@ const execFileAsync = promisify(execFile);
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const workspace = path.resolve(args.workspace);
-  const { stdout } = await execFileAsync("git", ["-C", workspace, "-c", "core.longpaths=true", "status", "--porcelain=v1", "--untracked-files=all", "-z"]);
+  const { stdout } = await execFileAsync("git", ["-C", workspace, "-c", "core.longpaths=true", "status", "--porcelain=v1", "--untracked-files=all", "-z"], { windowsHide: true });
   const audit = auditScope({
     statusPorcelain: stdout,
     allowedPaths: args.allowed,

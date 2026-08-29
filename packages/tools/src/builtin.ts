@@ -20,7 +20,7 @@ import { CapabilityRegistry, CapabilityError } from "./capabilities.js";
 import { applyPreview, loadPatchRecord, PatchConflictError, PatchParseError, persistPatchRecord, previewUnifiedPatch, removePatchRecord, type AppliedPatch } from "./patch.js";
 import { resolvePwshPath } from "./pwsh-path.js";
 
-const ALLOWED_EXECUTABLES = new Set(["git", "node", "npm", "pnpm", "vitest"]);
+const ALLOWED_EXECUTABLES = new Set(["git", "node", "npm", "pnpm", "python", "vitest"]);
 const MAX_PROCESS_OUTPUT_BYTES = 512 * 1024;
 export const DEFAULT_MODEL_OUTPUT_CHARS = 30_000;
 export const MAX_MODEL_OUTPUT_CHARS = 150_000;

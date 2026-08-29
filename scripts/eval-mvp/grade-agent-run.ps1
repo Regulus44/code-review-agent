@@ -28,6 +28,7 @@ function Invoke-Process {
   $startInfo.FileName = $FilePath
   $startInfo.WorkingDirectory = $WorkingDirectory
   $startInfo.UseShellExecute = $false
+  $startInfo.CreateNoWindow = $true
   $startInfo.RedirectStandardOutput = $true
   $startInfo.RedirectStandardError = $true
   foreach ($argument in $Arguments) { [void]$startInfo.ArgumentList.Add($argument) }
@@ -324,7 +325,10 @@ try {
   Assert-SamePathSet -Left $auditedAllFiles -Right $workspaceFiles -Description "Scope audit and Agent workspace Git status"
   $phase = "provision"
 
-  $clone = Invoke-Process -FilePath "git" -Arguments @("-c", "core.longpaths=true", "clone", "--no-local", "--quiet", $baseWorkspace, $cleanCopy) -WorkingDirectory $graderDirectory
+  # Force LF checkout during clone. The host may globally set core.autocrlf=true;
+  # that would make the clean copy differ byte-for-byte from the Agent diff and
+  # cause git apply to fail before tests even start.
+  $clone = Invoke-Process -FilePath "git" -Arguments @("-c", "core.longpaths=true", "-c", "core.autocrlf=false", "-c", "core.eol=lf", "clone", "--no-local", "--quiet", $baseWorkspace, $cleanCopy) -WorkingDirectory $graderDirectory
   ($clone.stdout + $clone.stderr) | Add-Content -LiteralPath $graderLogPath
   if ($clone.exitCode -ne 0) { throw "Could not clone clean copy`n$($clone.stderr)" }
   $autocrlf = Invoke-Process -FilePath "git" -Arguments @("config", "core.autocrlf", "false") -WorkingDirectory $cleanCopy
@@ -336,6 +340,11 @@ try {
   $normalizeCheckout = Invoke-Process -FilePath "git" -Arguments @("reset", "--hard", "--quiet", "HEAD") -WorkingDirectory $cleanCopy
   ($normalizeCheckout.stdout + $normalizeCheckout.stderr) | Add-Content -LiteralPath $graderLogPath
   if ($normalizeCheckout.exitCode -ne 0) { throw "Could not normalize clean copy checkout`n$($normalizeCheckout.stderr)" }
+  # Re-materialize tracked files after changing checkout settings. This handles
+  # clones created from a workspace whose files were already CRLF-normalized.
+  $forceCheckout = Invoke-Process -FilePath "git" -Arguments @("-c", "core.autocrlf=false", "-c", "core.eol=lf", "checkout-index", "--all", "--force") -WorkingDirectory $cleanCopy
+  ($forceCheckout.stdout + $forceCheckout.stderr) | Add-Content -LiteralPath $graderLogPath
+  if ($forceCheckout.exitCode -ne 0) { throw "Could not force LF checkout normalization`n$($forceCheckout.stderr)" }
   $enableLongPaths = Invoke-Process -FilePath "git" -Arguments @("config", "core.longpaths", "true") -WorkingDirectory $cleanCopy
   ($enableLongPaths.stdout + $enableLongPaths.stderr) | Add-Content -LiteralPath $graderLogPath
   if ($enableLongPaths.exitCode -ne 0) { throw "Could not enable long paths in clean copy`n$($enableLongPaths.stderr)" }

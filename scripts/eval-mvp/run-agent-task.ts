@@ -94,8 +94,8 @@ async function main(): Promise<void> {
   if (!(await pathExists(preparedWorkspace))) throw new Error(`Prepared workspace does not exist: ${preparedWorkspace}`);
 
   await mkdir(runDirectory, { recursive: true });
-  await execFileAsync("git", ["-c", "core.longpaths=true", "clone", "--no-local", "--quiet", preparedWorkspace, workspace], { cwd: repoRoot });
-  await execFileAsync("git", ["-C", workspace, "config", "core.longpaths", "true"], { cwd: repoRoot });
+  await execFileAsync("git", ["-c", "core.longpaths=true", "clone", "--no-local", "--quiet", preparedWorkspace, workspace], { cwd: repoRoot, windowsHide: true });
+  await execFileAsync("git", ["-C", workspace, "config", "core.longpaths", "true"], { cwd: repoRoot, windowsHide: true });
   await assertCleanGit(workspace);
 
   const store = new SqliteEventStore(databasePath);
@@ -221,8 +221,8 @@ async function main(): Promise<void> {
 
     events = await requestJson<AgentEvent[]>(baseUrl, `/v1/sessions/${encodeURIComponent(sessionId)}/events?format=json`);
     await writeFile(eventsPath, events.map((event) => JSON.stringify(event)).join("\n") + (events.length === 0 ? "" : "\n"), "utf8");
-    agentDiff = (await execFileAsync("git", ["-C", workspace, "-c", "core.longpaths=true", "-c", "core.fileMode=false", "diff", "--binary"], { cwd: repoRoot })).stdout;
-    const statusPorcelain = (await execFileAsync("git", ["-C", workspace, "-c", "core.longpaths=true", "status", "--porcelain=v1", "--untracked-files=all", "-z"], { cwd: repoRoot })).stdout;
+    agentDiff = (await execFileAsync("git", ["-C", workspace, "-c", "core.longpaths=true", "-c", "core.fileMode=false", "diff", "--binary"], { cwd: repoRoot, windowsHide: true })).stdout;
+    const statusPorcelain = (await execFileAsync("git", ["-C", workspace, "-c", "core.longpaths=true", "status", "--porcelain=v1", "--untracked-files=all", "-z"], { cwd: repoRoot, windowsHide: true })).stdout;
     scopeAudit = auditScope({
       statusPorcelain,
       allowedPaths: task.allowedPaths,
@@ -308,7 +308,7 @@ async function requestJson<T>(baseUrl: string, resource: string, options: { read
 }
 
 async function assertCleanGit(directory: string): Promise<void> {
-  const { stdout } = await execFileAsync("git", ["-C", directory, "-c", "core.longpaths=true", "status", "--porcelain"], { cwd: repoRoot });
+  const { stdout } = await execFileAsync("git", ["-C", directory, "-c", "core.longpaths=true", "status", "--porcelain"], { cwd: repoRoot, windowsHide: true });
   if (stdout.trim().length > 0) throw new Error(`Workspace is not clean: ${directory}`);
 }
 

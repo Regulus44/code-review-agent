@@ -27,6 +27,7 @@ function Invoke-Process {
   $startInfo.FileName = $FilePath
   $startInfo.WorkingDirectory = $WorkingDirectory
   $startInfo.UseShellExecute = $false
+  $startInfo.CreateNoWindow = $true
   $startInfo.RedirectStandardOutput = $true
   $startInfo.RedirectStandardError = $true
   foreach ($argument in $Arguments) { [void]$startInfo.ArgumentList.Add($argument) }

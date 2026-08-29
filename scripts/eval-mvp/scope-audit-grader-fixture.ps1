@@ -62,20 +62,23 @@ function Write-AgentResult {
 
 try {
   New-Item -ItemType Directory -Force -Path $fixtureRoot | Out-Null
-  Invoke-Checked -FilePath "git" -Arguments @("-c", "core.longpaths=true", "-c", "core.autocrlf=false", "clone", "--no-local", "--quiet", $baseWorkspace, $agentWorkspace) | Out-Null
+  Invoke-Checked -FilePath "git" -Arguments @("-c", "core.longpaths=true", "-c", "core.autocrlf=false", "-c", "core.eol=lf", "clone", "--no-local", "--quiet", $baseWorkspace, $agentWorkspace) | Out-Null
   Invoke-Checked -FilePath "git" -Arguments @("config", "core.autocrlf", "false") -WorkingDirectory $agentWorkspace | Out-Null
   Invoke-Checked -FilePath "git" -Arguments @("config", "core.longpaths", "true") -WorkingDirectory $agentWorkspace | Out-Null
   Invoke-Checked -FilePath "git" -Arguments @("reset", "--hard", "--quiet", "HEAD") -WorkingDirectory $agentWorkspace | Out-Null
+  Invoke-Checked -FilePath "git" -Arguments @("-c", "core.autocrlf=false", "-c", "core.eol=lf", "checkout-index", "--all", "--force") -WorkingDirectory $agentWorkspace | Out-Null
   Invoke-Checked -FilePath "git" -Arguments @("apply", "--whitespace=nowarn", $goldPatch) -WorkingDirectory $agentWorkspace | Out-Null
   $agentDiffText = Invoke-Checked -FilePath "git" -Arguments @("-c", "core.longpaths=true", "diff", "--binary") -WorkingDirectory $agentWorkspace
-  $agentDiffText | Set-Content -LiteralPath $agentDiff -Encoding utf8
+  # Preserve LF line endings in the synthetic diff. Set-Content would rewrite
+  # native Git output as CRLF on Windows and make the patch fail to apply.
+  [System.IO.File]::WriteAllText($agentDiff, (($agentDiffText -join "`n") + "`n"), [System.Text.UTF8Encoding]::new($false))
 
   $task = Get-Content -LiteralPath $taskPath -Raw | ConvertFrom-Json
   $allowed = (@($task.allowedPaths) -join ",")
   $cli = Join-Path $RepoRoot "scripts\eval-mvp\scope-audit-cli.ts"
   Invoke-Checked -FilePath "node" -Arguments @("--import", "tsx", $cli, "--workspace", $agentWorkspace, "--allowed", $allowed, "--output", $scopeAuditPath) | Out-Null
   Write-AgentResult -ExpectScopeViolation:$false
-  $goldOutput = Invoke-Checked -FilePath "pwsh" -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $RepoRoot "scripts\eval-mvp\grade-agent-run.ps1"), "-TaskId", $taskId, "-AgentResultPath", $agentResultPath, "-DatasetRoot", $DatasetRoot, "-Python", $Python) -WorkingDirectory $RepoRoot
+  $goldOutput = Invoke-Checked -FilePath "pwsh" -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $RepoRoot "scripts\eval-mvp\grade-agent-run.ps1"), "-TaskId", $taskId, "-AgentResultPath", $agentResultPath, "-DatasetRoot", $DatasetRoot, "-Python", $Python, "-InstallDependencies") -WorkingDirectory $RepoRoot
   $goldResultPath = @($goldOutput | Where-Object { $_ -match '^Result:' } | ForEach-Object { ($_ -replace '^Result:\s*', '').Trim() })[-1]
   $goldResult = Get-Content -LiteralPath $goldResultPath -Raw | ConvertFrom-Json
   if ($goldResult.status -ne "passed" -or $goldResult.scopeViolation) { throw "Expected clean gold fixture to pass" }
@@ -83,7 +86,7 @@ try {
   Set-Content -LiteralPath (Join-Path $agentWorkspace "unexpected.py") -Value "out of scope" -NoNewline
   Invoke-Checked -FilePath "node" -Arguments @("--import", "tsx", $cli, "--workspace", $agentWorkspace, "--allowed", $allowed, "--output", $scopeAuditPath) | Out-Null
   Write-AgentResult -ExpectScopeViolation:$true
-  $violationOutput = Invoke-Checked -FilePath "pwsh" -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $RepoRoot "scripts\eval-mvp\grade-agent-run.ps1"), "-TaskId", $taskId, "-AgentResultPath", $agentResultPath, "-DatasetRoot", $DatasetRoot, "-Python", $Python) -WorkingDirectory $RepoRoot
+  $violationOutput = Invoke-Checked -FilePath "pwsh" -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $RepoRoot "scripts\eval-mvp\grade-agent-run.ps1"), "-TaskId", $taskId, "-AgentResultPath", $agentResultPath, "-DatasetRoot", $DatasetRoot, "-Python", $Python, "-InstallDependencies") -WorkingDirectory $RepoRoot
   $violationResultPath = @($violationOutput | Where-Object { $_ -match '^Result:' } | ForEach-Object { ($_ -replace '^Result:\s*', '').Trim() })[-1]
   $violationResult = Get-Content -LiteralPath $violationResultPath -Raw | ConvertFrom-Json
   if ($violationResult.status -ne "failed" -or -not $violationResult.scopeViolation) { throw "Expected untracked candidate to fail scope audit" }

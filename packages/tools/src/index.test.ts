@@ -137,6 +137,24 @@ describe("ToolRuntime", () => {
     expect((await running).status).toBe("cancelled");
   });
 
+  it("allows the Django test runner command in a full-access session", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-django-tests-"));
+    try {
+      const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools());
+      const runtime = new ToolRuntime({ store, registry, policy: new DefaultPermissionPolicy({ preset: "danger-full-access" }) });
+      const sessionId = brand<string, "SessionId">("ses_django_allowlist");
+      const result = await runtime.execute({
+        sessionId,
+        workspaceRoot: root,
+        name: "run_tests",
+        input: { command: "python", args: ["-c", "print('django-test-command-allowed')"] },
+      });
+      expect(result.status).toBe("completed");
+      expect(result.result?.output).toBe("django-test-command-allowed\r\n");
+      expect(result.result?.audit).toMatchObject({ stdout: "django-test-command-allowed\r\n", exitCode: 0 });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it("restores pending approvals from durable events", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "cra-tools-"));
     try {

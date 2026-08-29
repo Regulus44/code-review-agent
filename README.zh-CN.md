@@ -247,6 +247,9 @@ pnpm test        # 全 package vitest 测试
 
 - `docs/coding-agent-migration-plan.zh-CN.md` — 改造总计划
 - `docs/phase-status.zh-CN.md` — 当前阶段状态和验收证据
+- `docs/agent-evaluation-guide.zh-CN.md` — Coding Agent 评测集建设和实施指南
+- `docs/coding-agent-bench-mvp.zh-CN.md` — 第一阶段轻量 Bench、核心指标和低成本实施方案
+- `docs/coding-agent-test-runner-reference.zh-CN.md` — SWE-bench、DSH、Claude Code Runner 调研与实施指导
 - `docs/event-contract.md`、`docs/tool-contract.md` — 事件和工具契约
 - `docs/protocol-boundaries.md` — MCP / ACP / A2A 边界定义
 - `docs/development-log/` — 各阶段开发日志
