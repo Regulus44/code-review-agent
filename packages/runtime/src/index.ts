@@ -62,6 +62,11 @@ export interface AgentHostOptions {
   readonly reasoningEffort?: string;
   readonly fallbackModels?: readonly ChatModel[];
   readonly systemPrompt?: string;
+  /**
+   * @deprecated Retained for caller compatibility. Turn execution is no longer
+   * terminated by a host-owned step budget; use cancellation or an external
+   * operational timeout when a caller needs to stop a turn.
+   */
   readonly maxSteps?: number;
   /** Maximum in-flight parallel-safe tool calls per assistant step. */
   readonly maxParallelToolCalls?: number;
@@ -246,7 +251,6 @@ export class AgentHost {
   private readonly recoveredPermissionIndex = new Map<PermissionId, TurnId>();
   private readonly recoveredInteractionIndex = new Map<InteractionId, TurnId>();
   private readonly turnTraces = new Map<TurnId, string>();
-  private readonly maxSteps: number;
   private readonly maxParallelToolCallsLimit: number;
   private readonly ready: Promise<void>;
   private readonly toolRuntime: ToolRuntime;
@@ -310,8 +314,6 @@ export class AgentHost {
     this.quota = options.quota;
     this.operations = options.operations ?? { backup: "deferred", migration: "deferred", upgrade: "deferred" };
     this.customSystemPrompt = options.systemPrompt;
-    this.maxSteps = options.maxSteps ?? 32;
-    if (!Number.isInteger(this.maxSteps) || this.maxSteps < 1 || this.maxSteps > 512) throw new Error("maxSteps must be an integer between 1 and 512");
     this.maxParallelToolCallsLimit = resolveMaxParallelToolCalls(options.maxParallelToolCalls);
     this.repeatToolReminder = new RepeatToolReminder(options.repeatToolReminder);
     const registry = options.toolRegistry ?? new ToolRegistry();
@@ -2364,7 +2366,8 @@ export class AgentHost {
       this.contextRecovery?.maxReactiveAttempts ?? 1,
       this.contextRecovery?.maxConsecutiveCompactionFailures ?? 3,
     );
-    for (let step = 1; step <= this.maxSteps; step += 1) {
+    let step = 1;
+    while (true) {
       if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Cancelled");
       this.appendSteers(messages, turnId);
       const projection = await this.options.store.project(sessionId);
@@ -2524,6 +2527,7 @@ export class AgentHost {
                 transitionReason: "reactive_compact_retry",
               });
               await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "recovered", recovery: "reactive_compact" } });
+              step += 1;
               continue;
             }
             const circuitOpen = recoveryGuard.recordCompactionFailure("reactive_compact");
@@ -2567,6 +2571,7 @@ export class AgentHost {
           messages.push({ role: "assistant", content: response.text, responseId: response.responseId, messageId: assistantEvent.eventId });
           for (const steer of steersAfterResponse) messages.push({ role: "user", content: steer });
           await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "steered" } });
+          step += 1;
           continue;
         }
         await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "completed" } });
@@ -2623,8 +2628,8 @@ export class AgentHost {
         throw controller.signal.reason ?? new Error("Cancelled");
       }
       await this.options.store.append({ sessionId, turnId, type: "step/ended", payload: { step, status: "completed", toolCalls: response.toolCalls.length } });
+      step += 1;
     }
-    throw new Error(`MAX_AGENT_STEPS_EXCEEDED: model did not produce a final response within ${this.maxSteps} steps`);
   }
 
   private async toolResultTimestamps(sessionId: SessionId): Promise<Readonly<Record<string, string>>> {

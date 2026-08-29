@@ -48,7 +48,7 @@ export interface ApiServerOptions {
   readonly host?: AgentHost;
   readonly model?: ChatModel;
   readonly fallbackModels?: readonly ChatModel[];
-  /** Maximum model/tool loop steps for a turn. */
+  /** @deprecated Retained for API compatibility; AgentHost no longer enforces a step limit. */
   readonly maxSteps?: number;
   /** Maximum in-flight parallel-safe tool calls per assistant step. */
   readonly maxParallelToolCalls?: number;

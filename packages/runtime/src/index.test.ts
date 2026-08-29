@@ -14,10 +14,34 @@ import { AgentHost } from "./index.js";
 const execFileAsync = promisify(execFile);
 
 describe("AgentHost", () => {
-  it("uses a 32-step default and accepts the 512-step hard boundary", () => {
+  it("keeps the legacy maxSteps option non-enforcing", () => {
     expect(() => new AgentHost({ store: new InMemoryEventStore() })).not.toThrow();
     expect(() => new AgentHost({ store: new InMemoryEventStore(), maxSteps: 512 })).not.toThrow();
-    expect(() => new AgentHost({ store: new InMemoryEventStore(), maxSteps: 513 })).toThrow("maxSteps must be an integer between 1 and 512");
+    expect(() => new AgentHost({ store: new InMemoryEventStore(), maxSteps: 513 })).not.toThrow();
+    expect(() => new AgentHost({ store: new InMemoryEventStore(), maxSteps: 0 })).not.toThrow();
+  });
+
+  it("continues a tool loop beyond a legacy maxSteps value", async () => {
+    const store = new InMemoryEventStore();
+    const registry = new ToolRegistry();
+    registry.register({ name: "legacy_step_fixture", description: "fixture", inputSchema: { type: "object" }, executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel", execute: async () => ({ ok: true, output: "fixture output" }) });
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        if (request.messages.some((message) => message.role === "tool")) yield { type: "text_delta", text: "completed after tool" };
+        else {
+          yield { type: "tool_call_start", index: 0, id: "call_legacy_step_fixture", name: "legacy_step_fixture" };
+          yield { type: "tool_call_delta", index: 0, arguments: "{}" };
+          yield { type: "tool_call_end", index: 0 };
+        }
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store, model, maxSteps: 1, toolRuntime: new ToolRuntime({ store, registry }) });
+    const session = await host.createSession("D:/legacy-max-steps-fixture");
+    const turn = await host.sendMessage(session.id, "run the fixture");
+    await host.waitForTurn(turn);
+    expect((await host.getSession(session.id))?.status).toBe("idle");
+    expect((await host.events(session.id)).filter((event) => event.type === "step/started")).toHaveLength(2);
   });
 
   it("uses a ten-call parallel default and validates the host-owned scheduler cap", () => {

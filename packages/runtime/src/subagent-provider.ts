@@ -8,6 +8,7 @@ export interface InProcessProviderOptions {
   readonly model?: ChatModel;
   readonly baseToolDefinitions?: readonly ToolDefinition[];
   readonly subagentRuntime?: AgentHostOptions["subagentRuntime"];
+  /** @deprecated Retained for provider compatibility; child AgentHost turns are not step-limited. */
   readonly maxSteps?: number;
 }
 
