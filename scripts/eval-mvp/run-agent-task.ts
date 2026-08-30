@@ -12,6 +12,7 @@ import { createConfiguredApiServer } from "../../apps/api/src/server.ts";
 // `store instanceof SqliteEventStore` false inside the API and disables local
 // provider profiles.
 import { SqliteEventStore } from "../../apps/api/node_modules/@code-review-agent/storage/dist/index.js";
+import { validateTrace, type TraceGateResult } from "./trace-gate.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -68,6 +69,7 @@ const runDirectory = path.join(datasetRoot, "results", resultGroup, taskId, runI
 const workspace = path.join(runDirectory, "workspace");
 const databasePath = path.join(runDirectory, "agent.sqlite");
 const eventsPath = path.join(runDirectory, "events.jsonl");
+const tracePath = path.join(runDirectory, "trace.json");
 const diffPath = path.join(runDirectory, "agent.diff");
 const statusPath = path.join(runDirectory, "git-status.json");
 const resultPath = path.join(runDirectory, "result.json");
@@ -175,8 +177,6 @@ async function main(): Promise<void> {
     if (turnStatus === "failed") failureClass = "agent_failed";
     if (turnStatus === "stopped" || turnStatus === "interrupted") failureClass = "interrupted";
 
-    events = await requestJson<AgentEvent[]>(baseUrl, `/v1/sessions/${encodeURIComponent(sessionId)}/events?format=json`);
-    await writeFile(eventsPath, events.map((event) => JSON.stringify(event)).join("\n") + (events.length === 0 ? "" : "\n"), "utf8");
     agentDiff = (await execFileAsync("git", ["-C", workspace, "-c", "core.longpaths=true", "-c", "core.fileMode=false", "diff", "--binary"], { cwd: repoRoot, windowsHide: true })).stdout;
     const statusPorcelain = (await execFileAsync("git", ["-C", workspace, "-c", "core.longpaths=true", "status", "--porcelain=v1", "--untracked-files=all", "-z"], { cwd: repoRoot, windowsHide: true })).stdout;
     gitStatus = parseChangedPaths(statusPorcelain);
@@ -188,8 +188,30 @@ async function main(): Promise<void> {
     throw error;
   } finally {
     const endedAt = new Date();
+    let traceExportError: string | undefined;
+    try {
+      events = sessionId === undefined ? [] : [...await store.list(sessionId as Parameters<typeof store.list>[0], 0)] as AgentEvent[];
+      await writeFile(eventsPath, events.map((event) => JSON.stringify(event)).join("\n") + (events.length === 0 ? "" : "\n"), "utf8");
+    } catch (error) {
+      traceExportError = safeErrorMessage(error);
+    }
+    let trace = await validateTrace({
+      events,
+      workspaceRoot: workspace,
+      ...(sessionId === undefined ? {} : { sessionId }),
+      ...(turnId === undefined ? {} : { turnId }),
+      turnStatus,
+      ...(traceExportError === undefined ? {} : { exportError: traceExportError }),
+    });
+    try {
+      await writeFile(tracePath, JSON.stringify(trace, null, 2) + "\n", "utf8");
+    } catch (error) {
+      trace = addTraceIssue(trace, "trace_report_write_failed", safeErrorMessage(error));
+    }
     const toolCalls = events.filter((event) => event.type === "tool/call").length;
     const steps = events.filter((event) => event.type === "step/started").length;
+    const agentStatus = turnStatus === "completed" ? "completed" : turnStatus;
+    const evaluationStatus = trace.status !== "complete" ? "invalid_trace" : trace.boundaryStatus === "contaminated" ? "contaminated" : agentStatus;
     const result = {
       schemaVersion: 1,
       runId,
@@ -202,7 +224,10 @@ async function main(): Promise<void> {
       modelConfigured: modelInfo?.configured ?? false,
       autoApprovePermissions,
       autoApprovedPermissions: autoApprovedPermissionIds.length,
-      status: turnStatus === "completed" ? "completed" : turnStatus,
+      status: agentStatus,
+      evaluationStatus,
+      traceStatus: trace.status,
+      boundaryStatus: trace.boundaryStatus,
       transportSmoke: (modelInfo?.provider ?? "unknown") === "echo",
       startedAt: startedAt.toISOString(),
       endedAt: endedAt.toISOString(),
@@ -212,7 +237,8 @@ async function main(): Promise<void> {
       turnStatus,
       steps,
       toolCalls,
-      events: { path: eventsPath, count: events.length, lastSequence: events.at(-1)?.sequence ?? 0 },
+      events: { path: eventsPath, count: events.length, lastSequence: events.at(-1)?.sequence ?? 0, status: trace.status },
+      trace: { path: tracePath, ...trace, ...(traceExportError === undefined ? {} : { exportError: traceExportError }) },
       workspace,
       diff: {
         path: diffPath,
@@ -289,6 +315,14 @@ function parseChangedPaths(statusPorcelain: string): string[] {
 function sanitizePathSegment(value: string): string {
   const sanitized = value.trim().replace(/[^a-zA-Z0-9._-]+/gu, "-");
   return sanitized.length === 0 ? "agent-smoke" : sanitized.slice(0, 80);
+}
+
+function safeErrorMessage(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).slice(0, 2_000);
+}
+
+function addTraceIssue(trace: TraceGateResult, issue: string, detail: string): TraceGateResult & { readonly reportError: string } {
+  return { ...trace, status: trace.status === "missing" ? "missing" : "partial", issues: [...trace.issues, issue], reportError: detail };
 }
 
 void main().catch((error: unknown) => {

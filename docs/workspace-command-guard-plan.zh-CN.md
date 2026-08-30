@@ -102,6 +102,35 @@ Guard 拒绝时返回统一错误：
 
 现有 `events.jsonl` 继续作为评测轨迹。Guard 不替代运行后的污染检查；如果旧入口或未知形式仍造成 workspace 外访问，该次结果继续标记为 `contaminated`。
 
+### 4.1 轨迹门禁（强制）
+
+为避免“有日志但无法判断日志是否完整”，评测入口在每次任务结束时运行
+`scripts/eval-mvp/trace-gate.ts`。它不执行测试、不改变 Agent 结果，只对已经持久化的事件做一致性检查：
+
+- `sequence` 从 1 开始且连续；
+- 每个 `tool/call` 都有且只有一个对应的 `tool/result`，不存在孤立结果；
+- `session/created`、工具事件中的 `workspaceRoot` 与本次 workspace 一致；
+- 所有事件的 `sessionId` 必须属于当前任务 Session；
+- 终态 turn 必须存在 `turn/ended`；
+- 命令、终端、文件工具中的外部路径必须被 `WorkspaceCommandGuard` 拦截，未拦截的外部引用标记为污染。
+
+每条任务必须保存以下产物：
+
+- `events.jsonl`：原始事件流；
+- `trace.json`：门禁判定、问题列表、越界引用和 Guard 拒绝明细；
+- `result.json`：包含 `traceStatus`、`boundaryStatus`、`evaluationStatus` 及上述文件路径。
+
+门禁状态含义：
+
+- `traceStatus=complete`：轨迹完整，可继续观察 Agent 结果；
+- `traceStatus=partial/missing`：轨迹不完整，该次运行记为 `invalid_trace`，不得计入能力结果；
+- `boundaryStatus=clean`：没有检测到外部引用；
+- `boundaryStatus=blocked`：发生过越界尝试，但在进程启动前被 Guard 拒绝；
+- `boundaryStatus=contaminated`：发现未被拦截的外部引用，不能作为纯 Agent 能力结果；
+- `boundaryStatus=unknown`：无法确认边界状态，需要人工复核。
+
+批量入口只汇总这些状态，不等待独立 Grader，也不把门禁重新变成隐藏测试或额外的 Agent 约束。门禁是评测证据完整性和 workspace 边界的最低审计要求。
+
 ## 5. 实施顺序
 
 ### 阶段一：纯函数与单元测试
@@ -128,6 +157,13 @@ Guard 拒绝时返回统一错误：
 - 人工要求 Agent 访问 workspace 外测试路径，确认被拒绝并留下事件；
 - 再运行正常修复，确认读取、编辑、依赖安装和原生测试不受影响。
 
+### 阶段五：轨迹门禁
+
+- 在 Agent 终态或异常退出后的 `finally` 路径导出 `events.jsonl`；
+- 运行 `trace-gate.ts` 并写入 `trace.json`；
+- 将不完整轨迹和未拦截外部引用从有效评测结果中剔除；
+- 在批次汇总中统计无效轨迹、污染运行和已拦截越界次数。
+
 ## 6. 测试清单
 
 至少覆盖：
@@ -149,6 +185,7 @@ Guard 拒绝时返回统一错误：
 - 之前 `seaborn-2848` 使用的外部数据集绝对路径在进程启动前被拒绝；
 - 同一规则覆盖所有命令和测试入口；
 - 每次拒绝均可从 `events.jsonl` 还原原因；
+- 每次运行都有 `events.jsonl`、`trace.json` 和 `result.json`，轨迹缺失时批次明确失败；
 - `pnpm typecheck`、Tools/Runtime/API 定向测试和一条真实 Easy smoke 通过。
 
 ## 8. 工作量与边界

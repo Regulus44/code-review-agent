@@ -40,7 +40,8 @@
   → 授予当前 workspace `workspace-full-access`
   → 发送任务描述
   → 观察 Agent 自主读取、修改、运行和安装依赖
-  → Agent 完成后保存对话和代码差异
+  → Agent 完成后保存对话、完整事件轨迹和代码差异
+  → 通过轻量轨迹门禁检查证据完整性和 workspace 边界
   → 在仓库自己的环境和测试入口上做一次结果验证
   → 记录成功、失败或环境阻塞
 ```
@@ -148,7 +149,7 @@ Agent 不需要感知评测超时时间，也不需要为了满足某个计数�
 
 ## 6. 最小结果记录
 
-每条任务保留一个简单结果文件即可，例如：
+每条任务保留一个简单结果文件，并同时保存事件轨迹文件，例如：
 
 ```json
 {
@@ -157,6 +158,12 @@ Agent 不需要感知评测超时时间，也不需要为了满足某个计数�
   "model": "当前实际使用的模型",
   "workspace": "任务 workspace 路径",
   "status": "solved",
+  "traceStatus": "complete",
+  "boundaryStatus": "clean",
+  "trace": {
+    "eventsPath": "events.jsonl",
+    "reportPath": "trace.json"
+  },
   "agentRanTests": true,
   "validation": {
     "command": "python tests/runtests.py ...",
@@ -175,6 +182,10 @@ Agent 不需要感知评测超时时间，也不需要为了满足某个计数�
 - `interrupted`：进程异常、人工停止或系统故障导致任务未完成。
 
 不要为了追求形式上的统一，把所有错误都转换成同一个 `test_failed`。
+
+`events.jsonl` 和 `trace.json` 是每条运行的强制证据产物。`traceStatus=partial/missing`
+时记为 `invalid_trace`，不得计入 Agent 能力结果；`boundaryStatus=contaminated` 时单独记为污染运行，
+也不得计入能力结果。`boundaryStatus=blocked` 只说明 Guard 成功拦截了越界尝试，不等同于 Agent 失败。
 
 ## 7. 十条任务的小批量执行方式
 
@@ -205,8 +216,9 @@ Agent 不需要感知评测超时时间，也不需要为了满足某个计数�
 - Agent 是否重复尝试；
 - Agent 最终修改了哪些文件；
 - Agent 是否给出了清晰的完成说明。
+- 轨迹是否完整、是否存在 Guard 拒绝以及是否出现未拦截的 workspace 外引用。
 
-这些是帮助改进 Agent 体验的观察数据，不需要先建立复杂的事件协议和统计系统。
+这些是帮助改进 Agent 体验的观察数据。轨迹门禁只做事件审计，不限制 Agent 的 step、命令、依赖安装或测试选择。
 
 ## 9. 与旧方案的关系
 
@@ -219,6 +231,7 @@ Agent 不需要感知评测超时时间，也不需要为了满足某个计数�
 - 使用 `workspace-full-access`，完整权限仅授予当前 workspace；
 - 不人为限制 Agent 的 step、命令和依赖安装；
 - 测试由 Agent 自主决定是否运行，评测人员在结束后做外部验证；
+- 每条运行先通过 `events.jsonl`/`trace.json` 轨迹门禁，再解释 Agent 结果；
 - 优先记录真实结果，不让评测框架的复杂性替代 Agent 能力结论。
 
 ## 10. 当前不做的事情
