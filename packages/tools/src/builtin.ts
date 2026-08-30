@@ -21,7 +21,7 @@ import { applyPreview, loadPatchRecord, PatchConflictError, PatchParseError, per
 import { resolvePwshPath } from "./pwsh-path.js";
 import { inspectCommand, workspaceCommandDeniedResult } from "./workspace-command-guard.js";
 
-const ALLOWED_EXECUTABLES = new Set(["git", "node", "npm", "pnpm", "python", "vitest"]);
+const ALLOWED_EXECUTABLES = new Set(["git", "node", "npm", "pnpm", "python", "vitest", "cmd", "cmd.exe"]);
 const MAX_PROCESS_OUTPUT_BYTES = 512 * 1024;
 export const DEFAULT_MODEL_OUTPUT_CHARS = 30_000;
 export const MAX_MODEL_OUTPUT_CHARS = 150_000;

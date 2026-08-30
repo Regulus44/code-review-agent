@@ -12,6 +12,7 @@ describe("WorkspaceCommandGuard", () => {
       await expect(inspectCommand({ workspaceRoot: root, executable: "python", args: ["tests/runtests.py", "utils_tests"] })).resolves.toEqual({ allowed: true });
       await expect(inspectCommand({ workspaceRoot: root, executable: "python", args: ["-m", "pip", "install", "-e", "."] })).resolves.toEqual({ allowed: true });
       await expect(inspectCommand({ workspaceRoot: root, executable: "pnpm", args: ["test"] })).resolves.toEqual({ allowed: true });
+      await expect(inspectCommand({ workspaceRoot: root, executable: "cmd.exe", args: ["/d", "/s", "/c", "dir"] })).resolves.toEqual({ allowed: true });
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
@@ -39,6 +40,8 @@ describe("WorkspaceCommandGuard", () => {
     ["dynamic process", { shellCommand: "Start-Process python -ArgumentList '-V'" }, "dynamic_execution"],
     ["inline Python", { executable: "python", args: ["-c", "print('x')"] }, "inline_code"],
     ["inline Node", { executable: "node", args: ["-e", "console.log('x')"] }, "inline_code"],
+    ["interactive cmd", { executable: "cmd.exe", args: ["/c", "dir"] }, "nested_shell"],
+    ["cmd external path", { executable: "cmd.exe", args: ["/d", "/s", "/c", "type C:\\Users\\example\\secret.txt"] }, "external_absolute_path"],
   ])("denies %s", async (_name, request, reason) => {
     const root = await mkdtemp(path.join(tmpdir(), "cra-command-guard-"));
     try {

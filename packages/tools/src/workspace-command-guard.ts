@@ -53,6 +53,9 @@ export async function inspectCommand(input: WorkspaceCommandInspection): Promise
   const executable = input.executable?.trim();
   const args = input.args ?? [];
   const executableName = executable === undefined ? "" : path.basename(executable).toLowerCase();
+  if (isCmdExecutable(executableName) && !isNonInteractiveCmd(args)) {
+    return denied(root, "nested_shell", executable ?? "cmd.exe", "CMD must be invoked non-interactively as cmd.exe /d /s /c <command>.");
+  }
   if ((isPythonExecutable(executableName) && args.some((arg) => arg.toLowerCase() === "-c"))
     || (isNodeExecutable(executableName) && args.some((arg) => ["-e", "--eval"].includes(arg.toLowerCase())))) {
     return denied(root, "inline_code", `${executable} ${args.find((arg) => ["-c", "-e", "--eval"].includes(arg.toLowerCase())) ?? ""}`.trim(), "Inline code execution is disabled for workspace-scoped commands.");
@@ -63,7 +66,7 @@ export async function inspectCommand(input: WorkspaceCommandInspection): Promise
     if (!decision.allowed) return decision;
   }
 
-  const shellCommand = input.shellCommand ?? "";
+  const shellCommand = input.shellCommand ?? (isCmdExecutable(executableName) ? cmdCommandBody(args) : "");
   if (shellCommand.length > 0) {
     if (INLINE_SHELL_CODE.test(shellCommand)) return denied(root, "inline_code", matchingExcerpt(shellCommand, INLINE_SHELL_CODE), "Inline Python or Node code is disabled for workspace-scoped commands.");
     if (NESTED_SHELL.test(shellCommand)) return denied(root, "nested_shell", matchingExcerpt(shellCommand, NESTED_SHELL), "Nested shells are disabled for workspace-scoped commands.");
@@ -224,6 +227,19 @@ function isPythonExecutable(value: string): boolean {
 
 function isNodeExecutable(value: string): boolean {
   return /^node(?:\.exe)?$/u.test(value);
+}
+
+function isCmdExecutable(value: string): boolean {
+  return value === "cmd" || value === "cmd.exe";
+}
+
+function isNonInteractiveCmd(args: readonly string[]): boolean {
+  const normalized = args.map((arg) => arg.toLowerCase());
+  return normalized[0] === "/d" && normalized[1] === "/s" && normalized[2] === "/c" && args.length >= 4;
+}
+
+function cmdCommandBody(args: readonly string[]): string {
+  return isNonInteractiveCmd(args) ? args.slice(3).join(" ") : "";
 }
 
 function denied(root: string, reason: WorkspaceCommandGuardReason, offendingValue: string, message: string): WorkspaceCommandDecision {
