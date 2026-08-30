@@ -1515,8 +1515,8 @@ function parsePageLimit(value: string | string[] | null | undefined): number | u
 }
 
 function parsePermissionPreset(value: unknown): PermissionPreset {
-  if (value === "read-only" || value === "workspace-write" || value === "ask-on-write" || value === "ask-on-execute" || value === "danger-full-access") return value;
-  throw new HttpError(400, "permissionPreset must be read-only, workspace-write, ask-on-write, ask-on-execute, or danger-full-access");
+  if (value === "read-only" || value === "workspace-write" || value === "ask-on-write" || value === "ask-on-execute" || value === "workspace-full-access" || value === "danger-full-access") return value;
+  throw new HttpError(400, "permissionPreset must be read-only, workspace-write, ask-on-write, ask-on-execute, workspace-full-access, or danger-full-access");
 }
 
 function requireReasoningEffort(value: unknown): string {

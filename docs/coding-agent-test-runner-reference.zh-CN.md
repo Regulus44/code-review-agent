@@ -4,7 +4,7 @@
 
 ## 实际入口
 
-`scripts/eval-mvp/run-agent-task.ts` 创建临时 API、Session 和独立 workspace，发送任务原文，自动批准当前 workspace 的 Full Access 权限，等待 Agent turn 结束，并保存：
+`scripts/eval-mvp/run-agent-task.ts` 创建临时 API、Session 和独立 workspace，发送任务原文及固定的 workspace 边界说明，使用 `workspace-full-access` 自动批准当前 workspace 内的操作，等待 Agent turn 结束，并保存：
 
 - `events.jsonl`：完整会话事件；
 - `agent.diff`：工作区代码差异；

@@ -83,7 +83,7 @@ const SCHEMA_VERSION = 7 as const;
 export const SQLITE_SCHEMA_VERSION = SCHEMA_VERSION;
 
 function isPermissionPreset(value: unknown): value is PermissionPreset {
-  return value === "read-only" || value === "workspace-write" || value === "ask-on-write" || value === "ask-on-execute" || value === "danger-full-access";
+  return value === "read-only" || value === "workspace-write" || value === "ask-on-write" || value === "ask-on-execute" || value === "workspace-full-access" || value === "danger-full-access";
 }
 
 function modelSelection(value: unknown): ModelSelection | undefined {

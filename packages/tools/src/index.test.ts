@@ -141,7 +141,7 @@ describe("ToolRuntime", () => {
     const root = await mkdtemp(path.join(tmpdir(), "cra-django-tests-"));
     try {
       const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools());
-      const runtime = new ToolRuntime({ store, registry, policy: new DefaultPermissionPolicy({ preset: "danger-full-access" }) });
+      const runtime = new ToolRuntime({ store, registry, policy: new DefaultPermissionPolicy({ preset: "workspace-full-access" }) });
       const sessionId = brand<string, "SessionId">("ses_django_allowlist");
       const result = await runtime.execute({
         sessionId,

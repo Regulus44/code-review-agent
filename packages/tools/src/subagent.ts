@@ -30,7 +30,7 @@ function failure(error: unknown): ToolResult {
   return { ok: false, error: { code, message } };
 }
 
-const permissionEnum = ["read-only", "workspace-write", "ask-on-write", "ask-on-execute", "danger-full-access"];
+const permissionEnum = ["read-only", "workspace-write", "ask-on-write", "ask-on-execute", "workspace-full-access", "danger-full-access"];
 
 export function createSubagentTools(options: SubagentToolOptions): readonly ToolDefinition[] {
   const runtime = options.runtime;

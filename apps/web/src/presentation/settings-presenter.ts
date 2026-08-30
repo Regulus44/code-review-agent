@@ -61,6 +61,7 @@ const permissionDescriptions: Record<PermissionPreset, { readonly label: string;
   "workspace-write": { label: "Workspace write", description: "Write inside the selected workspace without per-call approval." },
   "ask-on-write": { label: "Ask on write", description: "Read automatically; request approval before writes or execution." },
   "ask-on-execute": { label: "Ask on execute", description: "Allow file changes and request approval before commands run." },
+  "workspace-full-access": { label: "Workspace full access", description: "Run enabled tools without approval, with authority explicitly limited to the selected workspace." },
   "danger-full-access": { label: "Full access", description: "Run enabled tools without interactive approval." },
 };
 

@@ -376,11 +376,11 @@ describe("Phase 2 API", () => {
     const created = await fetch(`${baseUrl}/v1/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ workspaceRoot: "D:/workspace", permissionPreset: "workspace-write" }),
+      body: JSON.stringify({ workspaceRoot: "D:/workspace", permissionPreset: "workspace-full-access" }),
     });
     expect(created.status).toBe(201);
     const session = await created.json() as { id: string; permissionPreset: string; archived: boolean };
-    expect(session).toMatchObject({ permissionPreset: "workspace-write", archived: false });
+    expect(session).toMatchObject({ permissionPreset: "workspace-full-access", archived: false });
 
     const switched = await fetch(`${baseUrl}/v1/sessions/${session.id}/mode`, {
       method: "POST",

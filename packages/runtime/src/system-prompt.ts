@@ -102,13 +102,17 @@ function workspaceSection(workspaceRoot: string): string {
 Active workspace root: ${JSON.stringify(workspaceRoot)}
 All file, search, Git, and command operations for this turn must stay inside that workspace unless the user explicitly requests a supported external action and a visible tool permits it. Prefer workspace-relative paths in tool arguments. Do not use path traversal, silently switch repositories, or inspect a different directory merely because it is convenient.
 
+Do not inspect parent or sibling directories, benchmark metadata, other task workspaces, prior evaluation results, reference/gold patches, hidden tests, credential stores, or external installed/source versions to discover an implementation. An interpreter, package manager, compiler, or dependency may be executed as a toolchain, but its source must not be used as an answer key. Treat the workspace as the complete source of task evidence unless the user explicitly supplies another source.
+
 Before editing, read the current file and account for existing user changes. Treat any task-provided allowed-path list as a hard boundary in addition to the workspace boundary. Preserve unrelated modifications; never reset, discard, or overwrite them without explicit authorization.`;
 }
 
 function permissionSection(permissionPreset: PermissionPreset | undefined): string {
   const preset = permissionPreset === undefined
     ? "The active permission preset is not exposed to the model; rely on the tool result and approval events."
-    : `Active permission preset: ${permissionPreset}.`;
+    : permissionPreset === "workspace-full-access"
+      ? "Active permission preset: workspace-full-access. Reads, writes, commands, dependency installation, and enabled network tools may run without interactive approval, but this authority is strictly limited to the active workspace. It does not authorize reading, changing, enumerating, or using files outside the workspace."
+      : `Active permission preset: ${permissionPreset}.`;
   return `# Permissions and side effects
 ${preset}
 Read-only inspection may be automatic. Writes, deletes, process execution, network actions, and other side effects may require approval or may be denied. A permission request is authoritative: do not simulate approval, retry around it, or tell the user an action completed before the tool result confirms it.

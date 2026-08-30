@@ -10,7 +10,7 @@ export interface PermissionPolicy {
   isVisible?(definition: ToolDefinition): boolean;
 }
 
-export type PermissionPreset = "read-only" | "workspace-write" | "ask-on-write" | "ask-on-execute" | "danger-full-access";
+export type PermissionPreset = "read-only" | "workspace-write" | "ask-on-write" | "ask-on-execute" | "workspace-full-access" | "danger-full-access";
 
 export interface DefaultPermissionPolicyOptions {
   readonly preset?: PermissionPreset;
@@ -58,6 +58,6 @@ function presetModes(preset: PermissionPreset): { readonly networkMode: ToolAppr
   if (preset === "read-only") return { networkMode: "deny", writeMode: "deny", executeMode: "deny" };
   if (preset === "workspace-write") return { networkMode: "deny", writeMode: "auto", executeMode: "ask" };
   if (preset === "ask-on-execute") return { networkMode: "ask", writeMode: "auto", executeMode: "ask" };
-  if (preset === "danger-full-access") return { networkMode: "auto", writeMode: "auto", executeMode: "auto" };
+  if (preset === "workspace-full-access" || preset === "danger-full-access") return { networkMode: "auto", writeMode: "auto", executeMode: "auto" };
   return { networkMode: "deny", writeMode: "ask", executeMode: "ask" };
 }

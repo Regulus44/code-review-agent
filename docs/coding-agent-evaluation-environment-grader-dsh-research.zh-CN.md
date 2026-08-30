@@ -6,7 +6,7 @@
 
 | 功能 | 文件/入口 | 逻辑 |
 |---|---|---|
-| 单任务运行 | `scripts/eval-mvp/run-agent-task.ts` | 准备隔离 workspace，创建 API Session，授予 Full Access，发送任务，等待终态，保存事件、diff、Git 状态和结果 |
+| 单任务运行 | `scripts/eval-mvp/run-agent-task.ts` | 准备隔离 workspace，创建 API Session，授予 `workspace-full-access`，发送任务和固定边界说明，等待终态，保存事件、diff、Git 状态和结果 |
 | 批量运行 | `scripts/eval-mvp/run-pilot.ps1` | 串行启动单任务入口，保存日志并汇总完成率 |
 | 配置 | `apps/api/.data/provider-profiles.json`、`credentials.secrets.json`、`code-review-agent.sqlite` | 沿用日常 provider/model 配置 |
 | 数据集 | `D:/Develop/coding-agent-test` | 仓库外保存任务、workspace 和运行结果 |
@@ -23,4 +23,4 @@
 
 ## 后续实施约束
 
-任何新增评测代码都必须保持“真实 Agent + Full Access + 隔离 workspace + 原生验证”的最小流程。若需要更严格的自动判分，应另立设计和明确迁移，不得悄悄恢复旧 Grader 依赖。
+任何新增评测代码都必须保持“真实 Agent + `workspace-full-access` + 隔离 workspace + 原生验证”的最小流程。完整权限只针对当前 workspace，Prompt 必须禁止访问数据集元数据、其他任务、历史结果、参考实现和凭据。若需要更严格的自动判分，应另立设计和明确迁移，不得悄悄恢复旧 Grader 依赖。

@@ -159,7 +159,7 @@ export type TaskTerminalStatus = "completed" | "failed" | "cancelled" | "rejecte
 export type TaskStopReason = "completed" | "aborted" | "error" | "max-tokens" | "refusal";
 export type ReportDeliveryPolicy = "wakeup" | "quiet";
 export type GoalStatus = "active" | "paused" | "completed" | "blocked" | "cancelled";
-export type PermissionPreset = "read-only" | "workspace-write" | "ask-on-write" | "ask-on-execute" | "danger-full-access";
+export type PermissionPreset = "read-only" | "workspace-write" | "ask-on-write" | "ask-on-execute" | "workspace-full-access" | "danger-full-access";
 
 export interface ArtifactRef {
   readonly id: string;

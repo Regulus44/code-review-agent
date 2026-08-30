@@ -49,7 +49,7 @@ function modeField(value: unknown): SubagentMode {
 }
 
 function permissionField(value: unknown): PermissionPreset {
-  if (value !== "read-only" && value !== "workspace-write" && value !== "ask-on-write" && value !== "ask-on-execute" && value !== "danger-full-access") throw new DescriptorError("DESCRIPTOR_INVALID", "Subagent descriptor permissionPreset is invalid");
+  if (value !== "read-only" && value !== "workspace-write" && value !== "ask-on-write" && value !== "ask-on-execute" && value !== "workspace-full-access" && value !== "danger-full-access") throw new DescriptorError("DESCRIPTOR_INVALID", "Subagent descriptor permissionPreset is invalid");
   return value;
 }
 

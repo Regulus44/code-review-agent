@@ -103,7 +103,7 @@ async function main(): Promise<void> {
   const server = createConfiguredApiServer({
     store,
     credentialBackend: credentialMetadataStore,
-    permissionPreset: "danger-full-access",
+    permissionPreset: "workspace-full-access",
   });
   let sessionId: string | undefined;
   const startedAt = new Date();
@@ -128,7 +128,7 @@ async function main(): Promise<void> {
 
     const created = await requestJson<{ id: string }>(baseUrl, "/v1/sessions", {
       method: "POST",
-      body: { workspaceRoot: workspace, permissionPreset: "danger-full-access" },
+      body: { workspaceRoot: workspace, permissionPreset: "workspace-full-access" },
     });
     sessionId = created.id;
 
@@ -143,12 +143,10 @@ async function main(): Promise<void> {
       modelInfo = { ...selection.model, configured: true };
     }
 
+    const evaluationPrompt = `${task.problemStatement}\n\n评测边界：你在当前 workspace 内拥有完整权限，可以读取、修改、运行命令、安装依赖和执行测试。所有操作必须留在当前 workspace 内；不得读取、枚举或使用其父目录/同级目录、数据集元数据、其他任务、历史结果、参考或标准补丁、隐藏测试、凭据文件，以及外部安装版本或下载版本的源码来推导修复。请只依据任务描述、当前 workspace 内容和实际运行结果完成任务。`;
     const sent = await requestJson<{ turnId: string }>(baseUrl, `/v1/sessions/${encodeURIComponent(sessionId)}`, {
       method: "POST",
-      // Keep the experiment equivalent to normal Web use: the task text is
-      // the only task-specific prompt. Full workspace access is configured on
-      // the session, not simulated through extra benchmark instructions.
-      body: { content: task.problemStatement },
+      body: { content: evaluationPrompt },
     });
     turnId = sent.turnId;
 

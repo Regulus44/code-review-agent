@@ -25,4 +25,18 @@ describe("Coding Agent system prompt", () => {
     expect(prompt).toContain("exit status");
     expect(prompt).not.toContain("django__django-16046");
   });
+
+  it("defines workspace full access as approval-free authority inside the workspace only", () => {
+    const prompt = buildAgentSystemPromptSections({
+      workspaceRoot: "D:/workspace",
+      permissionPreset: "workspace-full-access",
+      tools: [],
+    }).map((section) => section.content).join("\n");
+
+    expect(prompt).toContain("Active permission preset: workspace-full-access");
+    expect(prompt).toContain("strictly limited to the active workspace");
+    expect(prompt).toContain("benchmark metadata");
+    expect(prompt).toContain("reference/gold patches");
+    expect(prompt).toContain("external installed/source versions");
+  });
 });

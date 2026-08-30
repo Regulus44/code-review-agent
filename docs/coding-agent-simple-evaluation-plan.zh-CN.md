@@ -33,7 +33,7 @@
 ```text
 准备干净 workspace
   → 使用和 Web 端相同的 Agent/provider/model
-  → 授予当前 workspace Full Access
+  → 授予当前 workspace `workspace-full-access`
   → 发送任务描述
   → 观察 Agent 自主读取、修改、运行和安装依赖
   → Agent 完成后保存对话和代码差异
@@ -60,7 +60,7 @@
 
 ### 3.2 给 Agent 的内容
 
-发送真实任务描述即可，例如：
+发送真实任务描述，并附加固定的 workspace 边界说明，例如：
 
 ```text
 请修复这个仓库中的问题：
@@ -68,6 +68,8 @@
 <任务描述>
 
 请直接在当前 workspace 中完成修改。你拥有当前 workspace 的完整访问权限，可以读取文件、运行命令、安装需要的依赖并执行测试。完成后说明修改内容和验证结果。
+
+所有操作必须留在当前 workspace 内；不得读取、枚举或使用父目录、同级目录、数据集元数据、其他任务、历史结果、参考补丁、隐藏测试、凭据文件或外部版本源码来推导修复。
 ```
 
 不再额外塞入以下内容：
@@ -79,7 +81,7 @@
 - 预先指定虚拟环境；
 - 过多的允许/禁止路径说明。
 
-workspace 本身就是边界。Agent 可以自由操作 workspace 内的文件和命令；评测数据、其他任务和秘密凭据不放入这个 workspace。
+workspace 本身就是边界。评测 Session 使用 `workspace-full-access`：Agent 可以自由操作 workspace 内的文件和命令，但权限名称和系统 Prompt 都明确不授权访问 workspace 外内容。评测数据、其他任务和秘密凭据不放入这个 workspace。
 
 ### 3.3 运行期间怎么观察
 
@@ -210,7 +212,7 @@ Agent 不需要感知评测超时时间，也不需要为了满足某个计数�
 
 - Web Agent 流程保持不变；
 - workspace 保持隔离；
-- Full Access 直接授予当前 workspace；
+- 使用 `workspace-full-access`，完整权限仅授予当前 workspace；
 - 不人为限制 Agent 的 step、命令和依赖安装；
 - 测试由 Agent 自主决定是否运行，评测人员在结束后做外部验证；
 - 优先记录真实结果，不让评测框架的复杂性替代 Agent 能力结论。
@@ -225,4 +227,3 @@ Agent 不需要感知评测超时时间，也不需要为了满足某个计数�
 - 不预先给 Agent 设置 step 或可感知的任务时间预算；
 - 不因为某次环境失败就修改历史仓库源码；
 - 不把环境问题、Grader 问题和 Agent 能力问题混为一个分数。
-
