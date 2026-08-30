@@ -20,8 +20,9 @@ import { CapabilityRegistry, CapabilityError } from "./capabilities.js";
 import { applyPreview, loadPatchRecord, PatchConflictError, PatchParseError, persistPatchRecord, previewUnifiedPatch, removePatchRecord, type AppliedPatch } from "./patch.js";
 import { resolvePwshPath } from "./pwsh-path.js";
 import { inspectCommand, workspaceCommandDeniedResult } from "./workspace-command-guard.js";
+import { hiddenProcessSpawnOptions } from "./process-spawn.js";
 
-const ALLOWED_EXECUTABLES = new Set(["git", "node", "npm", "pnpm", "python", "vitest", "cmd", "cmd.exe"]);
+const ALLOWED_EXECUTABLES = new Set(["git", "node", "npm", "pnpm", "python", "vitest"]);
 const MAX_PROCESS_OUTPUT_BYTES = 512 * 1024;
 export const DEFAULT_MODEL_OUTPUT_CHARS = 30_000;
 export const MAX_MODEL_OUTPUT_CHARS = 150_000;
@@ -60,6 +61,7 @@ export interface TerminalSummary {
 
 export interface TerminalManagerOptions {
   readonly modelOutputChars?: number;
+  readonly platform?: NodeJS.Platform;
 }
 
 interface ManagedTerminal extends Omit<TerminalSummary, "status" | "exitCode" | "signal" | "bufferedBytes"> {
@@ -79,12 +81,14 @@ interface ManagedTerminal extends Omit<TerminalSummary, "status" | "exitCode" | 
 export class TerminalManager {
   private readonly sessions = new Map<string, ManagedTerminal>();
   private readonly modelOutputChars: number;
+  private readonly platform: NodeJS.Platform;
 
   constructor(options: TerminalManagerOptions = {}) {
     const requested = options.modelOutputChars;
     this.modelOutputChars = requested !== undefined && Number.isFinite(requested) && requested > 0
       ? Math.min(MAX_MODEL_OUTPUT_CHARS, Math.floor(requested))
       : DEFAULT_MODEL_OUTPUT_CHARS;
+    this.platform = options.platform ?? process.platform;
   }
 
   /** Rebuild terminal metadata from durable events after a host restart. */
@@ -144,20 +148,19 @@ export class TerminalManager {
     const resolver = new WorkspaceResolver(input.workspaceRoot);
     const cwdPath = input.cwd === undefined ? resolver.rootPath : await resolver.resolveExisting(input.cwd);
     if (!(await stat(cwdPath)).isDirectory()) return fail("TERMINAL_CWD_INVALID", "Terminal cwd must be a directory");
-    const command = input.executable === undefined ? defaultShell() : input.executable;
-    const args = input.executable === undefined ? defaultShellArgs() : [...(input.args ?? [])];
-    if (input.executable !== undefined && !isAllowedExecutable(command)) return fail("COMMAND_NOT_ALLOWED", "Terminal executable is not on the allowlist");
+    const command = input.executable?.trim();
+    if (command === undefined || command.length === 0) return fail("TERMINAL_EXECUTABLE_REQUIRED", "Terminal executable must be provided explicitly; no default shell is started");
+    const args = [...(input.args ?? [])];
+    if (!isAllowedTerminalExecutable(command, this.platform)) return fail("COMMAND_NOT_ALLOWED", "Terminal executable is not on the allowlist");
     if (input.workspaceGuarded === true) {
-      const decision = await inspectCommand({ workspaceRoot: input.workspaceRoot, workdir: cwdPath, ...(input.executable === undefined ? {} : { executable: input.executable, args: input.args ?? [] }), ...(input.env === undefined ? {} : { env: input.env }) });
+      const decision = await inspectCommand({ workspaceRoot: input.workspaceRoot, workdir: cwdPath, executable: command, args, ...(input.env === undefined ? {} : { env: input.env }) });
       if (!decision.allowed) return workspaceCommandDeniedResult(decision);
     }
     const child = spawn(command, args, {
       cwd: cwdPath,
-      detached: true,
+      ...hiddenProcessSpawnOptions(this.platform),
       env: { ...process.env, ...(input.env ?? {}) },
-      shell: false,
       stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
     });
     const terminalId = `terminal_${randomUUID()}`;
     const terminal: ManagedTerminal = {
@@ -319,11 +322,11 @@ export class TerminalManager {
 
 export function createBuiltinTools(options: { readonly terminalManager?: TerminalManager; readonly jobManager?: JobManager; readonly eventStore?: Pick<EventStore, "list" | "project">; readonly visionEnabled?: boolean; readonly lspServers?: Readonly<Record<string, LspServerConfig>>; readonly lspManager?: LspManager; readonly codeMode?: CodeModeSandbox; readonly capabilities?: CapabilityRegistry; readonly platform?: NodeJS.Platform; readonly modelOutputChars?: number; readonly fileObservationPolicy?: FileObservationPolicy } = {}): readonly ToolDefinition[] {
   const modelOutputChars = normalizeModelOutputChars(options.modelOutputChars);
-  const terminals = options.terminalManager ?? new TerminalManager({ modelOutputChars });
+  const platform = options.platform ?? process.platform;
+  const terminals = options.terminalManager ?? new TerminalManager({ modelOutputChars, platform });
   const jobs = options.jobManager ?? new JobManager(options.eventStore === undefined ? { modelOutputChars } : { eventStore: options.eventStore, modelOutputChars });
   const lsp = options.lspManager ?? new LspManager(options.lspServers);
   const capabilities = options.capabilities ?? new CapabilityRegistry();
-  const platform = options.platform ?? process.platform;
   const fileObservationPolicy = options.fileObservationPolicy ?? new FileObservationPolicy();
   const patches = new Map<string, AppliedPatch>();
   const tools: ToolDefinition[] = [
@@ -433,7 +436,7 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
       execute: async (_input, context) => ({ ok: true, output: await jobs.listForSession(context.sessionId, context.workspaceRoot), presentation: { kind: "terminal", title: "Background jobs" } }),
     },
     {
-      name: "terminal_open", description: "Open a persistent terminal process scoped to this session and workspace.", inputSchema: object({ cwd: string, executable: string, args: { type: "array" as const, items: string, maxItems: 32 }, env: { type: "object" as const, additionalProperties: true } }), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
+      name: "terminal_open", description: "Open a persistent terminal process scoped to this session and workspace; executable and argv must be explicit.", inputSchema: object({ cwd: string, executable: string, args: { type: "array" as const, items: string, maxItems: 32 }, env: { type: "object" as const, additionalProperties: true } }, ["executable"]), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
       execute: async (input, context) => terminals.open({ sessionId: context.sessionId, workspaceRoot: context.workspaceRoot, workspaceGuarded: context.permissionPreset === "workspace-full-access", ...(typeof (input as { cwd?: unknown }).cwd === "string" ? { cwd: (input as { cwd: string }).cwd } : {}), ...(typeof (input as { executable?: unknown }).executable === "string" ? { executable: (input as { executable: string }).executable } : {}), ...((input as { args?: string[] }).args === undefined ? {} : { args: (input as { args: string[] }).args }), ...((input as { env?: Record<string, string> }).env === undefined ? {} : { env: (input as { env: Record<string, string> }).env }), appendEvent: async (payload) => context.appendEvent("terminal/session", payload) }),
     },
     {
@@ -859,7 +862,7 @@ async function runArgv(command: string, args: string[], cwd: string, signal: Abo
     if (!(await stat(cwd)).isDirectory()) return fail("WORKDIR_INVALID", `Working directory is not a directory: ${cwd}`);
   } catch { return fail("WORKDIR_INVALID", `Working directory does not exist: ${cwd}`); }
   return new Promise((resolve) => {
-    const child = spawn(command, args, { cwd, detached: true, shell: false, windowsHide: true });
+    const child = spawn(command, args, { cwd, ...hiddenProcessSpawnOptions() });
     let output = "";
     let stdout = "";
     let stderr = "";
@@ -896,9 +899,14 @@ async function runArgv(command: string, args: string[], cwd: string, signal: Abo
 }
 
 function terminateProcessTree(child: ChildProcessWithoutNullStreams | ReturnType<typeof spawn>): void { if (child.pid === undefined) { child.kill(); return; } if (process.platform === "win32") { const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, shell: false }); killer.unref(); try { child.kill(); } catch { /* taskkill remains the fallback for the process tree */ } } else { try { process.kill(-child.pid, "SIGTERM"); } catch { child.kill(); } } }
-function defaultShell(): string { return process.platform === "win32" ? (process.env["ComSpec"] ?? "cmd.exe") : (process.env["SHELL"] ?? "/bin/sh"); }
-function defaultShellArgs(): string[] { return process.platform === "win32" ? ["/d", "/q"] : ["-i"]; }
 function isAllowedExecutable(command: string): boolean { return /^[a-zA-Z0-9._-]+$/u.test(command) && ALLOWED_EXECUTABLES.has(command.toLowerCase()); }
+function isAllowedTerminalExecutable(command: string, platform: NodeJS.Platform): boolean {
+  if (!/^[a-zA-Z0-9._-]+$/u.test(command)) return false;
+  const normalized = command.toLowerCase();
+  if (ALLOWED_EXECUTABLES.has(normalized)) return true;
+  if (platform === "win32") return normalized === "pwsh" || normalized === "pwsh.exe" || normalized === "powershell" || normalized === "powershell.exe";
+  return normalized === "bash" || normalized === "sh";
+}
 function normalizeModelOutputChars(value: number | undefined): number { return value !== undefined && Number.isFinite(value) && value > 0 ? Math.min(MAX_MODEL_OUTPUT_CHARS, Math.floor(value)) : DEFAULT_MODEL_OUTPUT_CHARS; }
 function boundModelOutput(value: string, maxChars: number): string {
   if (value.length <= maxChars) return value;
@@ -956,6 +964,7 @@ function remedyForBuiltinError(code: string): string {
   if (code === "SEARCH_PATH_INVALID" || code === "SEARCH_PATTERN_INVALID") return "Correct the search path/pattern and retry with a bounded scope.";
   if (code === "COMMAND_NOT_ALLOWED") return "Choose an executable from the visible allowlist and pass explicit argv.";
   if (code === "COMMAND_NOT_FOUND") return "Check the executable name and installed toolchain before retrying.";
+  if (code === "TERMINAL_EXECUTABLE_REQUIRED") return "Provide an allowlisted terminal executable and explicit argv; no default shell is available.";
   if (code === "WORKDIR_INVALID") return "Use an existing directory inside the active workspace.";
   if (code === "NON_ZERO_EXIT") return "Inspect stdout/stderr and exit metadata before selecting the next command.";
   if (code === "OUTPUT_TRUNCATED") return "Narrow the command/search scope or use the bounded continuation/spill guidance.";

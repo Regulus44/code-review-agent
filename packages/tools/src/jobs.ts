@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { inspectCommand, workspaceCommandDeniedResult } from "./workspace-command-guard.js";
+import { hiddenProcessSpawnOptions } from "./process-spawn.js";
 
 export type JobStatus = "running" | "completed" | "failed" | "cancelled" | "orphaned";
 
@@ -118,7 +119,7 @@ export class JobManager {
       // when launched detached. Jobs are already owned by this host and are
       // marked orphaned from durable events after a restart, so keep the child
       // attached on Windows to preserve output capture and spill semantics.
-      child = spawn(input.executable, [...input.args], { cwd: input.cwd, detached: process.platform !== "win32", shell: false, windowsHide: true, env: { ...process.env, ...(input.env ?? {}) }, stdio: ["pipe", "pipe", "pipe"] });
+      child = spawn(input.executable, [...input.args], { cwd: input.cwd, ...hiddenProcessSpawnOptions(), env: { ...process.env, ...(input.env ?? {}) }, stdio: ["pipe", "pipe", "pipe"] });
     } catch (error) { return fail("COMMAND_FAILED", error instanceof Error ? error.message : String(error)); }
     const record: JobRecord = { jobId, sessionId: input.sessionId, workspaceRoot: input.workspaceRoot, cwd: input.cwd, command: input.command, executable: input.executable, args: [...input.args], ...(input.env === undefined ? {} : { env: { ...input.env } }), workspaceGuarded: input.workspaceGuarded === true, status: "running", startedAt, endedAt: undefined, exitCode: undefined, signal: undefined, child, output: "", readOffset: 0, readOffsetBytes: 0, totalBytes: 0, spillPath, spillWrite: Promise.resolve(), spillError: undefined, killed: false, endedNotified: false, error: undefined, attempt: 1, maxAttempts, deadlineAt, deadlineTimer: undefined, retryTimer: undefined, retryRequested: false, ...(input.appendEvent === undefined ? {} : { appendEvent: input.appendEvent }) };
     this.jobs.set(jobId, record);

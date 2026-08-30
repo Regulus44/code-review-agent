@@ -429,6 +429,7 @@ describe("ToolRuntime", () => {
     const runtime = new ToolRuntime({ store, registry }); const sessionId = brand<string, "SessionId">("ses_p1_state");
     const names = runtime.listTools().map((tool) => tool.name);
     expect(names).toEqual(expect.arrayContaining(["terminal_open", "terminal_send", "terminal_read", "terminal_signal", "terminal_close", "terminal_list", "delete_file", "git_log", "git_show", "ask_user", "plan", "todo_write"]));
+    expect(registry.get("terminal_open").inputSchema.required).toContain("executable");
     expect((await runtime.execute({ sessionId, workspaceRoot: process.cwd(), name: "plan", input: { content: "Inspect, edit, test", status: "active" } })).status).toBe("completed");
     expect((await runtime.execute({ sessionId, workspaceRoot: process.cwd(), name: "todo_write", input: { todos: [{ content: "Inspect", status: "completed" }, { content: "Test", status: "pending" }] } })).status).toBe("completed");
     expect(store.events.map((event) => event.type)).toContain("plan/updated"); expect(store.events.map((event) => event.type)).toContain("todo/updated");
@@ -457,6 +458,21 @@ describe("ToolRuntime", () => {
     } finally { /* terminal cleanup is asserted by terminal_close; the repository cwd must not be removed */ }
   });
 
+  it("rejects implicit terminal shells and the removed cmd executable path", async () => {
+    const root = process.cwd();
+    const manager = new TerminalManager({ platform: "win32" });
+    await expect(manager.open({ sessionId: "ses_terminal_policy", workspaceRoot: root })).resolves.toMatchObject({ ok: false, error: { code: "TERMINAL_EXECUTABLE_REQUIRED" } });
+    await expect(manager.open({ sessionId: "ses_terminal_policy", workspaceRoot: root, executable: "cmd.exe" })).resolves.toMatchObject({ ok: false, error: { code: "COMMAND_NOT_ALLOWED" } });
+
+    const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools());
+    const runtime = new ToolRuntime({ store: new MemoryStore(), registry });
+    await expect(runtime.execute({ sessionId: brand<string, "SessionId">("ses_terminal_schema"), workspaceRoot: root, name: "terminal_open", input: {} })).rejects.toMatchObject({ code: "INVALID_TOOL_INPUT" });
+    const pending = await runtime.execute({ sessionId: brand<string, "SessionId">("ses_cmd_removed"), workspaceRoot: root, name: "run_command", input: { executable: "cmd.exe", args: ["/d", "/s", "/c", "dir"] } });
+    expect(pending.status).toBe("awaiting_permission");
+    const result = await runtime.resolvePermission(pending.permission!.id, "approved");
+    expect(result).toMatchObject({ status: "failed", result: { error: { code: "COMMAND_NOT_ALLOWED" } } });
+  });
+
   it("guards commands sent through a workspace-full-access persistent terminal", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "cra-terminal-guard-"));
     const outside = await mkdtemp(path.join(tmpdir(), "cra-terminal-guard-outside-"));
@@ -464,7 +480,7 @@ describe("ToolRuntime", () => {
       const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools());
       const runtime = new ToolRuntime({ store, registry, policy: new DefaultPermissionPolicy({ preset: "workspace-full-access" }) });
       const sessionId = brand<string, "SessionId">("ses_terminal_guard");
-      const opened = await runtime.execute({ sessionId, workspaceRoot: root, name: "terminal_open", input: {} });
+      const opened = await runtime.execute({ sessionId, workspaceRoot: root, name: "terminal_open", input: { executable: "node" } });
       expect(opened.status).toBe("completed");
       const terminalId = (opened.result?.output as { terminalId?: string }).terminalId; expect(terminalId).toEqual(expect.any(String));
       const command = process.platform === "win32" ? `dir "${outside}"` : `cat "${path.join(outside, "secret.txt")}"`;

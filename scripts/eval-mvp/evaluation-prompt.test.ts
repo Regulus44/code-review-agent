@@ -9,8 +9,10 @@ describe("evaluation prompt contract", () => {
     expect(prompt).toContain("拥有完整权限");
     expect(prompt).toContain("所有操作必须留在当前 workspace 内");
     expect(prompt).toContain("不得读取、枚举或使用其父目录");
-    expect(prompt).toContain("cmd.exe /d /s /c");
     expect(prompt).toContain("不要打开交互式 CMD/PowerShell 窗口");
+    expect(prompt).toContain("显式提供受控 executable 和 argv");
+    expect(prompt).toContain("不要使用 CMD 作为命令入口");
+    expect(prompt).not.toContain("cmd.exe /d /s /c");
   });
 
   it("does not add benchmark-specific step, timeout, grader, or command constraints", () => {
