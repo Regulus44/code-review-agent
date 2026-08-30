@@ -12,6 +12,7 @@ import { createConfiguredApiServer } from "../../apps/api/src/server.ts";
 // `store instanceof SqliteEventStore` false inside the API and disables local
 // provider profiles.
 import { SqliteEventStore } from "../../apps/api/node_modules/@code-review-agent/storage/dist/index.js";
+import { buildEvaluationPrompt } from "./evaluation-prompt.ts";
 import { validateTrace, type TraceGateResult } from "./trace-gate.ts";
 
 const execFileAsync = promisify(execFile);
@@ -145,7 +146,7 @@ async function main(): Promise<void> {
       modelInfo = { ...selection.model, configured: true };
     }
 
-    const evaluationPrompt = `${task.problemStatement}\n\n评测边界：你在当前 workspace 内拥有完整权限，可以读取、修改、运行命令、安装依赖和执行测试。所有操作必须留在当前 workspace 内；不得读取、枚举或使用其父目录/同级目录、数据集元数据、其他任务、历史结果、参考或标准补丁、隐藏测试、凭据文件，以及外部安装版本或下载版本的源码来推导修复。请只依据任务描述、当前 workspace 内容和实际运行结果完成任务。`;
+    const evaluationPrompt = buildEvaluationPrompt({ problemStatement: task.problemStatement, workspaceRoot: workspace });
     const sent = await requestJson<{ turnId: string }>(baseUrl, `/v1/sessions/${encodeURIComponent(sessionId)}`, {
       method: "POST",
       body: { content: evaluationPrompt },

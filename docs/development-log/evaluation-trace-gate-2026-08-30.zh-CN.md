@@ -99,3 +99,5 @@ git diff --check
 ## 后续使用
 
 后续 Easy/Medium 批次沿用同一入口。查看批次结果时先检查 `traceStatus` 和 `boundaryStatus`，再根据 `agent.diff`、Agent 最终说明和仓库原生测试判断 `solved`/`unsolved`/`environment_blocked`/`interrupted`。
+
+评测 Prompt 统一由 `scripts/eval-mvp/evaluation-prompt.ts` 生成，正文不随任务变化；仅任务描述和 workspace 路径作为输入。Windows 子进程入口保持隐藏窗口启动，避免评测运行干扰桌面操作。

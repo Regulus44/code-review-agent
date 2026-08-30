@@ -6,7 +6,7 @@
 
 1. 从干净 base commit 准备独立 workspace。
 2. 使用日常配置的 provider/model，授予该 workspace `workspace-full-access`。
-3. 发送任务描述和固定的 workspace 边界说明，不附加 step、超时、命令白名单或 Grader 条件。
+3. 使用固定评测 Prompt 模板发送任务描述和 workspace 路径，不附加 step、超时、命令白名单或 Grader 条件。
 4. 让 Agent 自主读取、编辑、运行测试和安装依赖。
 5. Agent 结束后保存会话日志、`events.jsonl`、`trace.json`、`result.json` 和 `agent.diff`。
 6. 检查轨迹门禁：`traceStatus` 必须为 `complete`，且不得存在未拦截的 workspace 外引用。

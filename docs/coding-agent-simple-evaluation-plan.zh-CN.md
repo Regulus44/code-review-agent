@@ -8,6 +8,8 @@
 
 命令与测试工具的应用层 workspace 防外溢方案见 [`workspace-command-guard-plan.zh-CN.md`](workspace-command-guard-plan.zh-CN.md)。
 
+评测 Prompt 固定模板见 `scripts/eval-mvp/evaluation-prompt.ts`。模板正文保持不变，每条任务只替换任务描述和当前 workspace 路径；Windows 进程统一以隐藏窗口方式执行。
+
 ## 1. 我们到底要测什么
 
 只回答一个核心问题：

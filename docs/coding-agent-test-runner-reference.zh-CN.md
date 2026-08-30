@@ -14,6 +14,10 @@
 
 `scripts/eval-mvp/run-pilot.ps1` 串行调用上述单任务入口，保存每条任务日志并生成 `summary.json`/`summary.md`。它不调用 Grader，也不等待隐藏测试确认。
 
+评测 Prompt 的固定模板位于 `scripts/eval-mvp/evaluation-prompt.ts`。模板正文、权限语义和防污染规则固定不变；每条任务只替换任务描述和当前 workspace 绝对路径，避免不同批次因提示词漂移产生不可比结果。
+
+Windows 进程均以隐藏窗口方式启动：前台命令、PowerShell、Terminal、后台 Job 和 Code Mode 使用 `windowsHide: true`，批量 Runner 使用 `UseShellExecute=false` 与 `CreateNoWindow=true`。这只控制窗口显示，不改变 Agent 的命令权限或执行结果。
+
 ## 运行约定
 
 - workspace 外的数据集目录与任务之间严格隔离；
