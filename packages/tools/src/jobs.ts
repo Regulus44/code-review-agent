@@ -3,6 +3,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { inspectCommand, workspaceCommandDeniedResult } from "./workspace-command-guard.js";
 
 export type JobStatus = "running" | "completed" | "failed" | "cancelled" | "orphaned";
 
@@ -39,6 +40,7 @@ interface JobRecord {
   readonly executable: string;
   readonly args: readonly string[];
   readonly env?: Readonly<Record<string, string>>;
+  readonly workspaceGuarded: boolean;
   status: JobStatus;
   readonly startedAt: string;
   endedAt: string | undefined;
@@ -72,6 +74,7 @@ export interface StartJobInput {
   readonly args: readonly string[];
   readonly command: string;
   readonly env?: Readonly<Record<string, string>>;
+  readonly workspaceGuarded?: boolean;
   readonly retry?: { readonly maxAttempts?: number; readonly backoffMs?: number };
   readonly deadlineMs?: number;
   readonly signal?: AbortSignal;
@@ -95,6 +98,10 @@ export class JobManager {
   }
 
   async start(input: StartJobInput): Promise<ToolResult> {
+    if (input.workspaceGuarded === true) {
+      const decision = await inspectCommand({ workspaceRoot: input.workspaceRoot, workdir: input.cwd, shellCommand: input.command, ...(input.env === undefined ? {} : { env: input.env }) });
+      if (!decision.allowed) return workspaceCommandDeniedResult(decision);
+    }
     try { if (!(await stat(input.cwd)).isDirectory()) return fail("WORKDIR_INVALID", `Job cwd is not a directory: ${input.cwd}`); }
     catch { return fail("WORKDIR_INVALID", `Job cwd does not exist: ${input.cwd}`); }
     if (input.signal?.aborted) return fail("COMMAND_CANCELLED", "Background job was cancelled before start");
@@ -113,7 +120,7 @@ export class JobManager {
       // attached on Windows to preserve output capture and spill semantics.
       child = spawn(input.executable, [...input.args], { cwd: input.cwd, detached: process.platform !== "win32", shell: false, windowsHide: true, env: { ...process.env, ...(input.env ?? {}) }, stdio: ["pipe", "pipe", "pipe"] });
     } catch (error) { return fail("COMMAND_FAILED", error instanceof Error ? error.message : String(error)); }
-    const record: JobRecord = { jobId, sessionId: input.sessionId, workspaceRoot: input.workspaceRoot, cwd: input.cwd, command: input.command, executable: input.executable, args: [...input.args], ...(input.env === undefined ? {} : { env: { ...input.env } }), status: "running", startedAt, endedAt: undefined, exitCode: undefined, signal: undefined, child, output: "", readOffset: 0, readOffsetBytes: 0, totalBytes: 0, spillPath, spillWrite: Promise.resolve(), spillError: undefined, killed: false, endedNotified: false, error: undefined, attempt: 1, maxAttempts, deadlineAt, deadlineTimer: undefined, retryTimer: undefined, retryRequested: false, ...(input.appendEvent === undefined ? {} : { appendEvent: input.appendEvent }) };
+    const record: JobRecord = { jobId, sessionId: input.sessionId, workspaceRoot: input.workspaceRoot, cwd: input.cwd, command: input.command, executable: input.executable, args: [...input.args], ...(input.env === undefined ? {} : { env: { ...input.env } }), workspaceGuarded: input.workspaceGuarded === true, status: "running", startedAt, endedAt: undefined, exitCode: undefined, signal: undefined, child, output: "", readOffset: 0, readOffsetBytes: 0, totalBytes: 0, spillPath, spillWrite: Promise.resolve(), spillError: undefined, killed: false, endedNotified: false, error: undefined, attempt: 1, maxAttempts, deadlineAt, deadlineTimer: undefined, retryTimer: undefined, retryRequested: false, ...(input.appendEvent === undefined ? {} : { appendEvent: input.appendEvent }) };
     this.jobs.set(jobId, record);
     const append = (stream: "stdout" | "stderr", chunk: Buffer): void => {
       record.totalBytes += chunk.byteLength;
@@ -157,7 +164,7 @@ export class JobManager {
       }, delay);
     }
     input.signal?.addEventListener("abort", () => { void this.killWithReason(input.sessionId, jobId, "aborted"); }, { once: true });
-    await record.appendEvent?.("job/started", { ...this.summary(record), executable: record.executable, args: record.args, attempt: record.attempt, maxAttempts: record.maxAttempts, ...(record.deadlineAt === undefined ? {} : { deadlineAt: record.deadlineAt }) });
+    await record.appendEvent?.("job/started", { ...this.summary(record), executable: record.executable, args: record.args, workspaceGuarded: record.workspaceGuarded, attempt: record.attempt, maxAttempts: record.maxAttempts, ...(record.deadlineAt === undefined ? {} : { deadlineAt: record.deadlineAt }) });
     return { ok: true, output: { jobId, status: record.status, command: record.command, cwd: record.cwd }, presentation: { kind: "terminal", title: `Started job ${jobId}`, text: record.command, data: this.summary(record) } };
   }
 
@@ -200,6 +207,7 @@ export class JobManager {
       args: record.args,
       command: record.command,
       ...(record.env === undefined ? {} : { env: record.env }),
+      workspaceGuarded: record.workspaceGuarded,
       retry: { maxAttempts: record.maxAttempts - record.attempt },
       ...(record.deadlineAt === undefined ? {} : { deadlineMs: Math.max(1, new Date(record.deadlineAt).getTime() - Date.now()) }),
       ...(record.appendEvent === undefined ? {} : { appendEvent: record.appendEvent }),
@@ -305,6 +313,7 @@ export class JobManager {
         deadlineTimer: undefined,
         retryTimer: undefined,
         retryRequested: false,
+        workspaceGuarded: payload["workspaceGuarded"] === true,
       };
       this.jobs.set(jobId, record);
     }

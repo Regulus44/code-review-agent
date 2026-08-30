@@ -19,6 +19,7 @@ import type { CodeModeSandbox } from "./code-mode.js";
 import { CapabilityRegistry, CapabilityError } from "./capabilities.js";
 import { applyPreview, loadPatchRecord, PatchConflictError, PatchParseError, persistPatchRecord, previewUnifiedPatch, removePatchRecord, type AppliedPatch } from "./patch.js";
 import { resolvePwshPath } from "./pwsh-path.js";
+import { inspectCommand, workspaceCommandDeniedResult } from "./workspace-command-guard.js";
 
 const ALLOWED_EXECUTABLES = new Set(["git", "node", "npm", "pnpm", "python", "vitest"]);
 const MAX_PROCESS_OUTPUT_BYTES = 512 * 1024;
@@ -70,6 +71,8 @@ interface ManagedTerminal extends Omit<TerminalSummary, "status" | "exitCode" | 
   output: string;
   readOffset: number;
   totalBytes: number;
+  readonly workspaceGuarded: boolean;
+  pendingInput: string;
 }
 
 /** In-process terminal session manager. State is scoped by session/workspace and exposed through tool events. */
@@ -118,6 +121,8 @@ export class TerminalManager {
         output: "",
         readOffset: 0,
         totalBytes: typeof payload["bufferedBytes"] === "number" ? payload["bufferedBytes"] : 0,
+        workspaceGuarded: payload["workspaceGuarded"] === true,
+        pendingInput: "",
       };
       this.sessions.set(terminalId, terminal);
       if (status === "running") {
@@ -129,18 +134,23 @@ export class TerminalManager {
           command: terminal.command,
           status: "interrupted",
           bufferedBytes: terminal.totalBytes,
+          workspaceGuarded: terminal.workspaceGuarded,
         });
       }
     }
   }
 
-  async open(input: { sessionId: string; workspaceRoot: string; cwd?: string; executable?: string; args?: readonly string[]; env?: Readonly<Record<string, string>>; appendEvent?: (payload: Readonly<Record<string, unknown>>) => Promise<void> }): Promise<ToolResult> {
+  async open(input: { sessionId: string; workspaceRoot: string; cwd?: string; executable?: string; args?: readonly string[]; env?: Readonly<Record<string, string>>; workspaceGuarded?: boolean; appendEvent?: (payload: Readonly<Record<string, unknown>>) => Promise<void> }): Promise<ToolResult> {
     const resolver = new WorkspaceResolver(input.workspaceRoot);
     const cwdPath = input.cwd === undefined ? resolver.rootPath : await resolver.resolveExisting(input.cwd);
     if (!(await stat(cwdPath)).isDirectory()) return fail("TERMINAL_CWD_INVALID", "Terminal cwd must be a directory");
     const command = input.executable === undefined ? defaultShell() : input.executable;
     const args = input.executable === undefined ? defaultShellArgs() : [...(input.args ?? [])];
     if (input.executable !== undefined && !isAllowedExecutable(command)) return fail("COMMAND_NOT_ALLOWED", "Terminal executable is not on the allowlist");
+    if (input.workspaceGuarded === true) {
+      const decision = await inspectCommand({ workspaceRoot: input.workspaceRoot, workdir: cwdPath, ...(input.executable === undefined ? {} : { executable: input.executable, args: input.args ?? [] }), ...(input.env === undefined ? {} : { env: input.env }) });
+      if (!decision.allowed) return workspaceCommandDeniedResult(decision);
+    }
     const child = spawn(command, args, {
       cwd: cwdPath,
       detached: true,
@@ -164,6 +174,8 @@ export class TerminalManager {
       output: "",
       readOffset: 0,
       totalBytes: 0,
+      workspaceGuarded: input.workspaceGuarded === true,
+      pendingInput: "",
     };
     child.stdout.on("data", (chunk: Buffer) => this.append(terminal, chunk));
     child.stderr.on("data", (chunk: Buffer) => this.append(terminal, chunk));
@@ -179,11 +191,24 @@ export class TerminalManager {
     return ok({ terminalId, cwd: cwdPath, command: terminal.command, status: terminal.status });
   }
 
-  send(input: { sessionId: string; terminalId: string; text: string; appendNewline?: boolean }, signal: AbortSignal): ToolResult {
+  async send(input: { sessionId: string; terminalId: string; text: string; appendNewline?: boolean }, signal: AbortSignal): Promise<ToolResult> {
     const terminal = this.get(input.sessionId, input.terminalId);
     if (terminal.status !== "running" || terminal.child === undefined || terminal.child.stdin.destroyed) return fail(terminal.status === "interrupted" ? "TERMINAL_INTERRUPTED" : "TERMINAL_NOT_RUNNING", terminal.status === "interrupted" ? "Terminal process was interrupted by a host restart" : "Terminal is not running");
     if (signal.aborted) return fail("TERMINAL_CANCELLED", "Terminal input was cancelled");
     const text = input.appendNewline === false ? input.text : `${input.text}\n`;
+    if (terminal.workspaceGuarded) {
+      const buffered = `${terminal.pendingInput}${text}`;
+      const complete = input.appendNewline !== false || /[\r\n]/u.test(buffered);
+      if (!complete) {
+        terminal.pendingInput = buffered;
+        return ok({ terminalId: terminal.terminalId, bytesWritten: 0, bufferedBytes: Buffer.byteLength(buffered), status: terminal.status });
+      }
+      const decision = await inspectCommand({ workspaceRoot: terminal.workspaceRoot, workdir: terminal.cwd, shellCommand: buffered });
+      terminal.pendingInput = "";
+      if (!decision.allowed) return workspaceCommandDeniedResult(decision);
+      terminal.child.stdin.write(buffered);
+      return ok({ terminalId: terminal.terminalId, bytesWritten: Buffer.byteLength(buffered), status: terminal.status });
+    }
     terminal.child.stdin.write(text);
     return ok({ terminalId: terminal.terminalId, bytesWritten: Buffer.byteLength(text), status: terminal.status });
   }
@@ -287,6 +312,7 @@ export class TerminalManager {
       ...(terminal.exitCode === undefined ? {} : { exitCode: terminal.exitCode }),
       ...(terminal.signal === undefined ? {} : { signal: terminal.signal }),
       bufferedBytes: terminal.totalBytes,
+      workspaceGuarded: terminal.workspaceGuarded,
     };
   }
 }
@@ -383,11 +409,11 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
     },
     {
       name: "run_command", description: "Run an allowlisted executable with argv inside the workspace.", inputSchema: object({ executable: string, args: { type: "array" as const, items: string, maxItems: 32 } }, ["executable"]), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
-      execute: async (input, context) => { const args = input as { executable: string; args?: string[] }; if (!isAllowedExecutable(args.executable)) return fail("COMMAND_NOT_ALLOWED", "Executable is not on the allowlist"); return runArgv(args.executable, args.args ?? [], context.workspaceRoot, context.signal, modelOutputChars); },
+      execute: async (input, context) => { const args = input as { executable: string; args?: string[] }; if (!isAllowedExecutable(args.executable)) return fail("COMMAND_NOT_ALLOWED", "Executable is not on the allowlist"); const argv = args.args ?? []; const denied = await guardCommand(context, { executable: args.executable, args: argv }); if (denied !== undefined) return denied; return runArgv(args.executable, argv, context.workspaceRoot, context.signal, modelOutputChars); },
     },
     {
       name: "run_tests", description: "Run the repository test command using argv.", inputSchema: object({ command: string, args: { type: "array" as const, items: string, maxItems: 32 } }, ["command"]), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
-      execute: async (input, context) => { const args = input as { command: string; args?: string[] }; if (!isAllowedExecutable(args.command)) return fail("COMMAND_NOT_ALLOWED", "Test command is not on the allowlist"); return runArgv(args.command, args.args ?? [], context.workspaceRoot, context.signal, modelOutputChars); },
+      execute: async (input, context) => { const args = input as { command: string; args?: string[] }; if (!isAllowedExecutable(args.command)) return fail("COMMAND_NOT_ALLOWED", "Test command is not on the allowlist"); const argv = args.args ?? []; const denied = await guardCommand(context, { executable: args.command, args: argv }); if (denied !== undefined) return denied; return runArgv(args.command, argv, context.workspaceRoot, context.signal, modelOutputChars); },
     },
     ...(platform === "win32" ? [createShellTool("pwsh", jobs, platform, modelOutputChars)] : [createShellTool("bash", jobs, platform, modelOutputChars)]),
     {
@@ -408,7 +434,7 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
     },
     {
       name: "terminal_open", description: "Open a persistent terminal process scoped to this session and workspace.", inputSchema: object({ cwd: string, executable: string, args: { type: "array" as const, items: string, maxItems: 32 }, env: { type: "object" as const, additionalProperties: true } }), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
-      execute: async (input, context) => terminals.open({ sessionId: context.sessionId, workspaceRoot: context.workspaceRoot, ...(typeof (input as { cwd?: unknown }).cwd === "string" ? { cwd: (input as { cwd: string }).cwd } : {}), ...(typeof (input as { executable?: unknown }).executable === "string" ? { executable: (input as { executable: string }).executable } : {}), ...((input as { args?: string[] }).args === undefined ? {} : { args: (input as { args: string[] }).args }), ...((input as { env?: Record<string, string> }).env === undefined ? {} : { env: (input as { env: Record<string, string> }).env }), appendEvent: async (payload) => context.appendEvent("terminal/session", payload) }),
+      execute: async (input, context) => terminals.open({ sessionId: context.sessionId, workspaceRoot: context.workspaceRoot, workspaceGuarded: context.permissionPreset === "workspace-full-access", ...(typeof (input as { cwd?: unknown }).cwd === "string" ? { cwd: (input as { cwd: string }).cwd } : {}), ...(typeof (input as { executable?: unknown }).executable === "string" ? { executable: (input as { executable: string }).executable } : {}), ...((input as { args?: string[] }).args === undefined ? {} : { args: (input as { args: string[] }).args }), ...((input as { env?: Record<string, string> }).env === undefined ? {} : { env: (input as { env: Record<string, string> }).env }), appendEvent: async (payload) => context.appendEvent("terminal/session", payload) }),
     },
     {
       name: "terminal_send", description: "Send input to a persistent terminal process.", inputSchema: object({ terminalId: string, text: string, appendNewline: boolean }, ["terminalId", "text"]), executionMode: "exclusive", riskLevel: "execute", approvalMode: "ask", interruptBehavior: "cancel",
@@ -568,13 +594,21 @@ async function executeShellCommand(kind: ShellKind, args: ShellToolInput, contex
   let cwd: string;
   try { cwd = args.workdir === undefined ? resolver.rootPath : await resolver.resolveExisting(args.workdir); if (!(await stat(cwd)).isDirectory()) return fail("WORKDIR_INVALID", `Shell workdir is not a directory: ${args.workdir}`); }
   catch { return fail("WORKDIR_INVALID", `Shell workdir is invalid: ${args.workdir ?? context.workspaceRoot}`); }
+  const denied = await guardCommand(context, { workdir: cwd, shellCommand: args.command });
+  if (denied !== undefined) return denied;
   const launch = shellLaunch(kind, args.command, platform);
   const label = args.description?.trim() || args.command;
   const env = SHELL_ENV_OVERRIDES[kind];
   if (args.run_in_background === true) {
-    return jobs.start({ sessionId: context.sessionId, workspaceRoot: context.workspaceRoot, cwd, executable: launch.executable, args: launch.args, command: args.command, env, ...(args.maxAttempts === undefined ? {} : { retry: { maxAttempts: args.maxAttempts, ...(args.retryBackoffMs === undefined ? {} : { backoffMs: args.retryBackoffMs }) } }), ...(args.deadlineMs === undefined ? {} : { deadlineMs: args.deadlineMs }), signal: context.signal, appendEvent: async (type, payload) => context.appendEvent(type, payload) });
+    return jobs.start({ sessionId: context.sessionId, workspaceRoot: context.workspaceRoot, cwd, executable: launch.executable, args: launch.args, command: args.command, env, workspaceGuarded: context.permissionPreset === "workspace-full-access", ...(args.maxAttempts === undefined ? {} : { retry: { maxAttempts: args.maxAttempts, ...(args.retryBackoffMs === undefined ? {} : { backoffMs: args.retryBackoffMs }) } }), ...(args.deadlineMs === undefined ? {} : { deadlineMs: args.deadlineMs }), signal: context.signal, appendEvent: async (type, payload) => context.appendEvent(type, payload) });
   }
   return runShellForeground(kind, args.command, label, cwd, launch.executable, launch.args, args.timeoutMs ?? 120_000, context.signal, env, modelOutputChars);
+}
+
+async function guardCommand(context: ToolContext, input: { readonly workdir?: string; readonly executable?: string; readonly args?: readonly string[]; readonly shellCommand?: string; readonly env?: Readonly<Record<string, string>> }): Promise<ToolResult | undefined> {
+  if (context.permissionPreset !== "workspace-full-access") return undefined;
+  const decision = await inspectCommand({ workspaceRoot: context.workspaceRoot, ...input });
+  return decision.allowed ? undefined : workspaceCommandDeniedResult(decision);
 }
 
 function shellLaunch(kind: ShellKind, command: string, platform: NodeJS.Platform): { readonly executable: string; readonly args: readonly string[] } {

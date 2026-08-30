@@ -1083,6 +1083,8 @@ export interface ToolContext {
   readonly turnId?: TurnId;
   readonly toolCallId: ToolCallId;
   readonly workspaceRoot: string;
+  /** Active session permission preset, used by workspace-scoped execution guards. */
+  readonly permissionPreset: PermissionPreset;
   readonly caller: ToolCaller;
   readonly signal: AbortSignal;
   readonly reportProgress: (payload: Readonly<Record<string, unknown>>) => Promise<void>;

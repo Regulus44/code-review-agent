@@ -420,6 +420,7 @@ export class ToolRuntime {
           ...(request.turnId === undefined ? {} : { turnId: request.turnId }),
           toolCallId,
           workspaceRoot: request.workspaceRoot,
+          permissionPreset: this.permissionPresetFor(request.sessionId),
           caller: request.caller ?? "agent",
           signal: controller.signal,
           reportProgress: async (payload) => this.append(request, "tool/progress", { toolCallId, ...payload }),

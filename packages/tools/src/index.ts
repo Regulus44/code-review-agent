@@ -14,3 +14,4 @@ export * from "./subagent.js";
 export * from "./schema.js";
 export * from "./pwsh-path.js";
 export * from "./file-observation.js";
+export * from "./workspace-command-guard.js";

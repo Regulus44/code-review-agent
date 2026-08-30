@@ -19,6 +19,18 @@ async function removeTempTree(root: string): Promise<void> {
 }
 
 describe("JobManager", () => {
+  it("rejects a guarded background command before creating a job or spill artifact", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-job-guard-"));
+    const outside = await mkdtemp(path.join(tmpdir(), "cra-job-guard-outside-"));
+    try {
+      const jobs = new JobManager();
+      const result = await jobs.start({ sessionId: "ses_job_guard", workspaceRoot: root, cwd: root, executable: process.execPath, args: [], command: `Get-Content '${path.join(outside, "secret.txt")}'`, workspaceGuarded: true });
+      expect(result).toMatchObject({ ok: false, error: { code: "WORKSPACE_COMMAND_DENIED" }, output: { reason: "external_absolute_path" } });
+      expect(jobs.list("ses_job_guard", root)).toEqual([]);
+      await expect(readFile(path.join(root, ".agent-artifacts", "jobs"), "utf8")).rejects.toThrow();
+    } finally { await removeTempTree(root); await removeTempTree(outside); }
+  });
+
   it("starts a scoped job, records output events, and reads bounded output", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "cra-job-"));
     try {
@@ -144,7 +156,7 @@ describe("JobManager", () => {
       const marker = path.join(root, "retry.marker").replaceAll("\\", "/");
       const script = `const fs=require('node:fs'); if(!fs.existsSync('${marker}')){fs.writeFileSync('${marker}','1'); process.exit(2)}; process.stdout.write('retry-ok')`;
       const jobs = new JobManager();
-      const started = await jobs.start({ sessionId: "ses_job_retry", workspaceRoot: root, cwd: root, executable: process.execPath, args: ["-e", script], command: "node retry", retry: { maxAttempts: 2 } });
+      const started = await jobs.start({ sessionId: "ses_job_retry", workspaceRoot: root, cwd: root, executable: process.execPath, args: ["-e", script], command: "node retry", workspaceGuarded: true, retry: { maxAttempts: 2 } });
       const jobId = (started.output as { jobId: string }).jobId;
       for (let attempt = 0; attempt < 40 && jobs.list("ses_job_retry", root)[0]?.status === "running"; attempt += 1) await new Promise<void>((resolve) => setTimeout(resolve, 25));
       expect(jobs.list("ses_job_retry", root)[0]).toMatchObject({ status: "failed", retryable: true, attempt: 1, maxAttempts: 2 });

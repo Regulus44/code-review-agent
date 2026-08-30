@@ -140,6 +140,7 @@ describe("ToolRuntime", () => {
   it("allows the Django test runner command in a full-access session", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "cra-django-tests-"));
     try {
+      await writeFile(path.join(root, "django_test_command.py"), "print('django-test-command-allowed')\n", "utf8");
       const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools());
       const runtime = new ToolRuntime({ store, registry, policy: new DefaultPermissionPolicy({ preset: "workspace-full-access" }) });
       const sessionId = brand<string, "SessionId">("ses_django_allowlist");
@@ -147,11 +148,53 @@ describe("ToolRuntime", () => {
         sessionId,
         workspaceRoot: root,
         name: "run_tests",
-        input: { command: "python", args: ["-c", "print('django-test-command-allowed')"] },
+        input: { command: "python", args: ["django_test_command.py"] },
       });
       expect(result.status).toBe("completed");
       expect(result.result?.output).toBe("django-test-command-allowed\r\n");
       expect(result.result?.audit).toMatchObject({ stdout: "django-test-command-allowed\r\n", exitCode: 0 });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("blocks workspace-full-access commands before an external path can execute and records the denial", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-command-guard-runtime-"));
+    const outside = await mkdtemp(path.join(tmpdir(), "cra-command-guard-outside-"));
+    try {
+      const marker = path.join(root, "should-not-exist.txt");
+      const script = path.join(outside, "external.py");
+      await writeFile(script, `from pathlib import Path\nPath(${JSON.stringify(marker)}).write_text('executed')\n`, "utf8");
+      const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools());
+      const runtime = new ToolRuntime({ store, registry, policy: new DefaultPermissionPolicy({ preset: "workspace-full-access" }) });
+      const result = await runtime.execute({ sessionId: brand<string, "SessionId">("ses_workspace_guard"), workspaceRoot: root, name: "run_command", input: { executable: "python", args: [script] } });
+      expect(result).toMatchObject({ status: "failed", result: { ok: false, error: { code: "WORKSPACE_COMMAND_DENIED" }, output: { reason: "external_absolute_path", offendingValue: script } } });
+      await expect(readFile(marker, "utf8")).rejects.toThrow();
+      expect(store.events.map((event) => event.type)).toEqual(["tool/call", "tool/progress", "tool/result"]);
+      expect((store.events.at(-1)?.payload.result as { output?: { workspaceRoot?: string } }).output?.workspaceRoot).toBe(root);
+    } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
+  });
+
+  it("blocks PowerShell dataset enumeration under workspace-full-access before spawning", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-command-guard-shell-"));
+    try {
+      const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools({ platform: "win32" }));
+      const runtime = new ToolRuntime({ store, registry, policy: new DefaultPermissionPolicy({ preset: "workspace-full-access" }) });
+      const external = "D:\\Develop\\coding-agent-test\\datasets\\swebench-lite\\pilot-01";
+      const result = await runtime.execute({ sessionId: brand<string, "SessionId">("ses_workspace_shell_guard"), workspaceRoot: root, name: "pwsh", input: { command: `Get-ChildItem '${external}' -Recurse` } });
+      expect(result).toMatchObject({ status: "failed", result: { error: { code: "WORKSPACE_COMMAND_DENIED" }, output: { reason: "external_absolute_path" } } });
+      expect(store.events.some((event) => event.type === "tool/result" && (event.payload.result as { error?: { code?: string } }).error?.code === "WORKSPACE_COMMAND_DENIED")).toBe(true);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("allows a normal workspace-full-access PowerShell command without approval", async () => {
+    if (process.platform !== "win32") return;
+    const root = await mkdtemp(path.join(tmpdir(), "cra-command-guard-pwsh-"));
+    try {
+      const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools());
+      const runtime = new ToolRuntime({ store, registry, policy: new DefaultPermissionPolicy({ preset: "workspace-full-access" }) });
+      const result = await runtime.execute({ sessionId: brand<string, "SessionId">("ses_workspace_pwsh"), workspaceRoot: root, name: "pwsh", input: { command: "Write-Output 'workspace-command-ok'" } });
+      expect(result.status).toBe("completed");
+      expect(result.result?.output).toContain("workspace-command-ok");
+      expect(store.events.some((event) => event.type === "permission/requested")).toBe(false);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
@@ -412,6 +455,24 @@ describe("ToolRuntime", () => {
       const read = await runtime.execute({ sessionId, workspaceRoot: root, name: "terminal_read", input: { terminalId, waitMs: 500 } }); expect(read.status).toBe("completed"); expect((read.result?.output as { output?: string }).output).toContain("persistent-output");
       const close = await runtime.execute({ sessionId, workspaceRoot: root, name: "terminal_close", input: { terminalId } }); expect(close.status).toBe("awaiting_permission"); expect((await runtime.resolvePermission(close.permission!.id, "approved")).status).toBe("completed");
     } finally { /* terminal cleanup is asserted by terminal_close; the repository cwd must not be removed */ }
+  });
+
+  it("guards commands sent through a workspace-full-access persistent terminal", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-terminal-guard-"));
+    const outside = await mkdtemp(path.join(tmpdir(), "cra-terminal-guard-outside-"));
+    try {
+      const store = new MemoryStore(); const registry = new ToolRegistry(); registry.registerMany(createBuiltinTools());
+      const runtime = new ToolRuntime({ store, registry, policy: new DefaultPermissionPolicy({ preset: "workspace-full-access" }) });
+      const sessionId = brand<string, "SessionId">("ses_terminal_guard");
+      const opened = await runtime.execute({ sessionId, workspaceRoot: root, name: "terminal_open", input: {} });
+      expect(opened.status).toBe("completed");
+      const terminalId = (opened.result?.output as { terminalId?: string }).terminalId; expect(terminalId).toEqual(expect.any(String));
+      const command = process.platform === "win32" ? `dir "${outside}"` : `cat "${path.join(outside, "secret.txt")}"`;
+      const sent = await runtime.execute({ sessionId, workspaceRoot: root, name: "terminal_send", input: { terminalId, text: command } });
+      expect(sent).toMatchObject({ status: "failed", result: { error: { code: "WORKSPACE_COMMAND_DENIED" }, output: { reason: "external_absolute_path" } } });
+      const close = await runtime.execute({ sessionId, workspaceRoot: root, name: "terminal_close", input: { terminalId } });
+      expect(close.status).toBe("completed");
+    } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
   });
 
   it("replays a running terminal as interrupted without fabricating a child process", async () => {
