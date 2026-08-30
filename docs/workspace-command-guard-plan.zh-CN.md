@@ -1,8 +1,10 @@
 # WorkspaceCommandGuard 简要实施方案
 
-> 状态：待实施  
-> 适用范围：使用 `workspace-full-access` 的 Coding Agent 评测  
+> 状态：已实施
+> 适用范围：使用 `workspace-full-access` 的 Coding Agent 评测
 > 目标：阻止正常 Agent 通过命令或测试工具显式、误操作访问当前 workspace 外的文件。
+
+实现提交：`df7c6ce feat(tools): guard workspace-scoped commands`。详细验证记录见 [`development-log/workspace-command-guard-implementation-2026-08-30.zh-CN.md`](development-log/workspace-command-guard-implementation-2026-08-30.zh-CN.md)。
 
 ## 1. 方案定位
 
@@ -151,6 +153,6 @@ Guard 拒绝时返回统一错误：
 
 ## 8. 工作量与边界
 
-预计工作量为 1～2 个开发日，约 250～400 行实现和 15～25 项测试。
+实际实现集中在 Tools/Contracts 层，新增 Guard 核心、17 项专用单元测试，以及前台、PowerShell、Terminal 和 Job 集成测试；没有增加评测 Runner 或 Grader。
 
 本方案是当前评测阶段的低成本防外溢措施，不宣称操作系统级隔离。若未来威胁模型变为恶意代码执行，再单独评估 Windows AppContainer；当前不引入 Docker、Windows Sandbox、专用账户、环境复制或 Grader。
