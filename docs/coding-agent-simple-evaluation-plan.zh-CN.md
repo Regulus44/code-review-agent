@@ -6,6 +6,8 @@
 
 `workspace-full-access` 与防污染 Prompt 的实现记录见 [`development-log/workspace-full-access-evaluation-boundary-2026-08-30.zh-CN.md`](development-log/workspace-full-access-evaluation-boundary-2026-08-30.zh-CN.md)。
 
+命令与测试工具的应用层 workspace 防外溢方案见 [`workspace-command-guard-plan.zh-CN.md`](workspace-command-guard-plan.zh-CN.md)。
+
 ## 1. 我们到底要测什么
 
 只回答一个核心问题：
