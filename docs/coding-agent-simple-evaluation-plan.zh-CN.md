@@ -4,6 +4,8 @@
 > 目标：用最接近 Web 端真实使用的方式，观察 Coding Agent 是否能够解决代码任务。  
 > 原则：先评测 Agent 能力，暂不把 Runner、Grader、权限协议和环境编排本身做成新的复杂系统。
 
+`workspace-full-access` 与防污染 Prompt 的实现记录见 [`development-log/workspace-full-access-evaluation-boundary-2026-08-30.zh-CN.md`](development-log/workspace-full-access-evaluation-boundary-2026-08-30.zh-CN.md)。
+
 ## 1. 我们到底要测什么
 
 只回答一个核心问题：
