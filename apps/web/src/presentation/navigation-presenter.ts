@@ -129,9 +129,16 @@ export function buildNavigationModel(
 
   const groups = [...grouped.entries()]
     .map(([key, group]) => {
-      const sessions = group.sessions.filter((session) => matchesTree(session, query));
-      const latestUpdatedAt = latestTimestamp(sessions);
       const workspace = workspaceByKey.get(key);
+      // P0 search is intentionally local and metadata-only. Workspace label,
+      // basename and path are part of the same search surface as the Session
+      // title; this keeps Tree and Flat projections in lockstep without
+      // introducing a Host/content-search contract.
+      const workspaceSearchText = [workspace?.label, workspaceLabel(group.root), group.root]
+        .filter((value): value is string => typeof value === "string" && value.length > 0)
+        .join(" ");
+      const sessions = group.sessions.filter((session) => matchesTree(session, query, workspaceSearchText));
+      const latestUpdatedAt = latestTimestamp(sessions);
       return {
         key,
         root: group.root,
@@ -192,16 +199,19 @@ export function sessionRelativeTime(timestamp: string | undefined, now = Date.no
   return `${Math.floor(diff / 86_400_000)}d`;
 }
 
-function matchesTree(session: NavigationSession, query: string): NavigationSession | undefined {
-  if (query.length === 0 || matchesSession(session, query)) return session;
+function matchesTree(session: NavigationSession, query: string, workspaceSearchText: string): NavigationSession | undefined {
+  if (query.length === 0 || matchesSession(session, query, workspaceSearchText)) return session;
   const children = session.children
-    .map((child) => matchesTree(child, query))
+    .map((child) => matchesTree(child, query, workspaceSearchText))
     .filter((child): child is NavigationSession => child !== undefined);
   return children.length === 0 ? undefined : { ...session, children };
 }
 
-function matchesSession(session: SessionSummary, query: string): boolean {
-  return `${sessionLabel(session)} ${session.id} ${session.workspaceRoot}`.toLowerCase().includes(query);
+function matchesSession(session: SessionSummary, query: string, workspaceSearchText: string): boolean {
+  // Keep id as a low-priority compatibility token while making the primary
+  // visible fields title + Workspace label/path. There is no ranking in P0;
+  // all matching remains deterministic and synchronous.
+  return `${sessionLabel(session)} ${workspaceSearchText} ${session.id}`.toLowerCase().includes(query);
 }
 
 function containsSession(session: NavigationSession, id: SessionId): boolean {

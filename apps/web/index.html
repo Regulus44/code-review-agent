@@ -96,9 +96,15 @@
       .session-archive:hover { color: var(--blue); background: var(--blue-soft); }
       .workspace-browser { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; gap: 8px; }
       .workspace-browser-toolbar { display: flex; align-items: center; gap: 7px; margin: 1px 2px 4px; }
+      .workspace-browser-toolbar.search-expanded .workspace-browser-title,
+      .workspace-browser-toolbar.search-expanded .workspace-view-control { display: none; }
       .workspace-browser-title { flex: 1; color: var(--text-tertiary); font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
       .sidebar-list-scroll { min-height: 0; flex: 1 1 auto; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
-      .workspace-search { width: 105px; height: 27px; padding: 0 8px; border: 1px solid var(--border); border-radius: 7px; outline: 0; color: var(--text); background: var(--surface-subtle); font-size: 10px; }
+      .workspace-search-slot { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; }
+      .workspace-search-toggle, .workspace-search-clear { display: grid; place-items: center; width: 27px; height: 27px; padding: 0; border-radius: 7px; color: var(--text-tertiary); background: transparent; font-size: 14px; }
+      .workspace-search-toggle:hover, .workspace-search-toggle:focus-visible, .workspace-search-clear:hover, .workspace-search-clear:focus-visible { color: var(--text); background: var(--surface-hover); }
+      .workspace-search-toggle[aria-expanded="true"] { color: var(--blue); background: var(--blue-soft); }
+      .workspace-search { width: 160px; height: 27px; padding: 0 8px; border: 1px solid var(--border); border-radius: 7px; outline: 0; color: var(--text); background: var(--surface-subtle); font-size: 10px; }
       .workspace-search:focus { border-color: rgba(65,118,230,.45); box-shadow: 0 0 0 2px rgba(65,118,230,.1); }
       .workspace-search::placeholder { color: var(--text-tertiary); }
       .workspace-view-control { height: 27px; padding: 0 5px; border: 1px solid var(--border); border-radius: 7px; color: var(--text-secondary); background: var(--surface-subtle); font-size: 9px; }
@@ -727,7 +733,7 @@
             <div class="session-section-heading"><div class="section-label">Sessions</div><button id="archive-toggle" class="archive-toggle" type="button" aria-pressed="false">Archived</button></div>
           </div>
           <div class="workspace-browser">
-            <div class="workspace-browser-toolbar"><span class="workspace-browser-title">Workspaces</span><select id="workspace-view-mode" class="workspace-view-control" aria-label="Workspace view"><option value="tree">Tree</option><option value="flat">Flat</option></select><select id="workspace-sort" class="workspace-view-control" aria-label="Workspace sort"><option value="recent">Recent</option><option value="name">Name</option><option value="path">Path</option></select><input id="session-search" class="workspace-search" type="search" placeholder="Search" aria-label="Search sessions" /></div>
+            <div id="workspace-browser-toolbar" class="workspace-browser-toolbar"><span class="workspace-browser-title">Workspaces</span><select id="workspace-view-mode" class="workspace-view-control" aria-label="Workspace view"><option value="tree">Tree</option><option value="flat">Flat</option></select><select id="workspace-sort" class="workspace-view-control" aria-label="Workspace sort"><option value="recent">Recent</option><option value="name">Name</option><option value="path">Path</option></select><div id="session-search-slot" class="workspace-search-slot"><button id="session-search-toggle" class="workspace-search-toggle" type="button" aria-label="Search sessions" aria-expanded="false" aria-controls="session-search">⌕</button><input id="session-search" class="workspace-search" type="search" placeholder="Search sessions" aria-label="Search sessions" hidden tabindex="-1" /><button id="session-search-clear" class="workspace-search-clear" type="button" aria-label="Clear search" hidden>×</button></div></div>
             <div class="sidebar-list-scroll" role="region" aria-label="Workspace and session list" tabindex="0">
               <div id="session-list" class="session-list"></div>
             </div>
@@ -900,7 +906,10 @@
         const workspaceRecent = document.querySelector('#workspace-recent');
         const workspaceCreate = document.querySelector('#workspace-create');
          const permissionPreset = document.querySelector('#permission-preset');
+         const workspaceBrowserToolbar = document.querySelector('#workspace-browser-toolbar');
          const sessionSearch = document.querySelector('#session-search');
+         const sessionSearchToggle = document.querySelector('#session-search-toggle');
+         const sessionSearchClear = document.querySelector('#session-search-clear');
          const workspaceViewMode = document.querySelector('#workspace-view-mode');
          const workspaceSort = document.querySelector('#workspace-sort');
           const sessionMenu = document.querySelector('#session-menu');
@@ -938,6 +947,28 @@
          let sidebarNavigationState = typedRuntime?.createSidebarNavigationState?.() || fallbackSidebarNavigationState();
          const sidebarNavigationPersistence = typedRuntime?.createSidebarNavigationPersistence?.() || null;
          if (sidebarNavigationPersistence) sidebarNavigationState = sidebarNavigationPersistence.load();
+         let sidebarSearchExpanded = false;
+         const syncSidebarSearchUi = () => {
+           workspaceBrowserToolbar?.classList.toggle('search-expanded', sidebarSearchExpanded);
+           sessionSearchToggle?.setAttribute('aria-expanded', String(sidebarSearchExpanded));
+           if (sessionSearch) {
+             sessionSearch.hidden = !sidebarSearchExpanded;
+             sessionSearch.tabIndex = sidebarSearchExpanded ? 0 : -1;
+             sessionSearch.setAttribute('aria-hidden', String(!sidebarSearchExpanded));
+           }
+           if (sessionSearchClear) sessionSearchClear.hidden = !sidebarSearchExpanded || !String(sessionSearch?.value || '').length;
+         };
+         const setSidebarSearchExpanded = (expanded, focus = false) => {
+           sidebarSearchExpanded = expanded === true;
+           syncSidebarSearchUi();
+           if (sidebarSearchExpanded && focus) sessionSearch?.focus();
+         };
+         const clearSidebarSearch = (focusToggle = true) => {
+           dispatchSidebarNavigation({ type: 'clear-search' });
+           showSessionsTree({ sessions: state.sidebarSessions });
+           setSidebarSearchExpanded(false);
+           if (focusToggle) sessionSearchToggle?.focus();
+         };
          const syncSidebarNavigationAdapter = (next) => {
            sidebarNavigationState = next;
            state.showArchived = next.showArchived === true;
@@ -948,6 +979,7 @@
            state.workspaceSort = next.sort === 'name' || next.sort === 'path' ? next.sort : 'recent';
            if (archiveToggle) { archiveToggle.classList.toggle('active', state.showArchived); archiveToggle.setAttribute('aria-pressed', String(state.showArchived)); }
            if (sessionSearch && sessionSearch.value !== state.sessionSearch) sessionSearch.value = state.sessionSearch;
+           syncSidebarSearchUi();
            if (workspaceViewMode && workspaceViewMode.value !== state.workspaceViewMode) workspaceViewMode.value = state.workspaceViewMode;
            if (workspaceSort && workspaceSort.value !== state.workspaceSort) workspaceSort.value = state.workspaceSort;
          };
@@ -2928,9 +2960,12 @@
         renameCancel.onclick = () => closeRenameSession();
         renameModal.addEventListener('click', (event) => { if (event.target === renameModal) closeRenameSession(); });
         renameForm.addEventListener('submit', async (event) => { event.preventDefault(); const target = state.renameTarget; const nextTitle = renameInput.value.trim(); if (!target) return; if (!nextTitle) { renameError.textContent = target.kind === 'workspace' ? 'Enter a workspace label.' : 'Enter a session title.'; renameInput.focus(); return; } renameSave.disabled = true; renameError.textContent = ''; try { if (target.kind === 'workspace') { state.workspaces = await typedRuntime.api.renameWorkspace(target.key, nextTitle, commandKey()); closeRenameSession(); await refreshSessionList(); setStatus(`Workspace renamed · ${nextTitle}`, true); } else { const updated = typedRuntime?.api?.renameSession ? await typedRuntime.api.renameSession(target.id, nextTitle, commandKey()) : await api(`/v1/sessions/${encodeURIComponent(target.id)}/title`, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': commandKey() }, body: JSON.stringify({ title: nextTitle }) }); if (state.session?.id === target.id) { state.session = updated; title.textContent = updated.title || 'Coding session'; render(); } closeRenameSession(); await refreshSessionList(); } } catch (error) { renameError.textContent = error instanceof Error ? error.message : String(error); } finally { renameSave.disabled = false; } });
-        document.addEventListener('keydown', (event) => { if (event.key !== 'Escape') return; if (!settingsModal.hidden) closeSettings(); else if (!workspaceModal.hidden) closeWorkspacePicker(); else if (!renameModal.hidden) closeRenameSession(); else if (!sessionMenu.hidden) closeSessionMenu(); else if (!modelPopover.hidden) { if (modelEntryMode === 'command') closeModelCommandPopup(); else dispatchOverlay({ type: 'close', overlay: 'model-popover' }); } else if (!modePopover.hidden) dispatchOverlay({ type: 'close', overlay: 'mode-popover' }); else dispatchOverlay({ type: 'escape' }); });
+        document.addEventListener('keydown', (event) => { if (event.key !== 'Escape') return; if (!settingsModal.hidden) closeSettings(); else if (!workspaceModal.hidden) closeWorkspacePicker(); else if (!renameModal.hidden) closeRenameSession(); else if (!sessionMenu.hidden) closeSessionMenu(); else if (!modelPopover.hidden) { if (modelEntryMode === 'command') closeModelCommandPopup(); else dispatchOverlay({ type: 'close', overlay: 'model-popover' }); } else if (!modePopover.hidden) dispatchOverlay({ type: 'close', overlay: 'mode-popover' }); else if (sidebarSearchExpanded) clearSidebarSearch(); else dispatchOverlay({ type: 'escape' }); });
          archiveToggle.onclick = async () => { dispatchSidebarNavigation({ type: 'set-show-archived', showArchived: !sidebarNavigationState.showArchived }); try { await refreshSessionList(); } catch (error) { setStatus(error.message, false); } };
-         sessionSearch.addEventListener('input', () => { dispatchSidebarNavigation({ type: 'set-search-query', searchQuery: sessionSearch.value }); showSessionsTree({ sessions: state.sidebarSessions }); });
+         sessionSearchToggle.onclick = () => { setSidebarSearchExpanded(true, true); };
+         sessionSearchClear.onclick = (event) => { event.preventDefault(); event.stopPropagation(); clearSidebarSearch(); };
+         sessionSearch.addEventListener('input', () => { dispatchSidebarNavigation({ type: 'set-search-query', searchQuery: sessionSearch.value }); syncSidebarSearchUi(); showSessionsTree({ sessions: state.sidebarSessions }); });
+         sessionSearch.addEventListener('keydown', (event) => { if (event.key !== 'Escape') return; event.preventDefault(); event.stopPropagation(); clearSidebarSearch(); });
          workspaceViewMode.addEventListener('change', () => { dispatchSidebarNavigation({ type: 'set-view-mode', viewMode: workspaceViewMode.value === 'flat' ? 'flat' : 'tree' }); showSessionsTree({ sessions: state.sidebarSessions }); });
          workspaceSort.addEventListener('change', () => { dispatchSidebarNavigation({ type: 'set-sort', sort: workspaceSort.value === 'name' || workspaceSort.value === 'path' ? workspaceSort.value : 'recent' }); showSessionsTree({ sessions: state.sidebarSessions }); });
         document.querySelector('#session-path').onclick = () => openWorkspacePicker();

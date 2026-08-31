@@ -111,6 +111,25 @@ describe("buildNavigationModel", () => {
     expect(archivedModel.groups.map((group) => group.root)).toEqual(["D:/archived-workspace"]);
   });
 
+  it("matches local search against Workspace label and path in both tree and flat views", () => {
+    const labeled = session("ses_labeled", { title: "Review notes", workspaceRoot: "D:/repo" });
+    const sibling = session("ses_sibling", { title: "Unrelated", workspaceRoot: "D:/repo" });
+    const catalog: WorkspaceSummary[] = [{
+      key: workspaceKey("D:/repo"),
+      root: "D:/repo",
+      position: 0,
+      sessionCount: 2,
+      label: "Frontend review",
+    }];
+
+    for (const viewMode of ["tree", "flat"] as const) {
+      const byLabel = buildNavigationModel([labeled, sibling], { query: "frontend review", viewMode, workspaceCatalog: catalog });
+      expect(byLabel.groups[0]?.sessions.map((item) => item.id)).toEqual([labeled.id, sibling.id]);
+      const byPath = buildNavigationModel([labeled, sibling], { query: "d:/repo", viewMode, workspaceCatalog: catalog });
+      expect(byPath.groups[0]?.sessions.map((item) => item.id)).toEqual([labeled.id, sibling.id]);
+    }
+  });
+
   it("hides sessions whose workspace was soft-deleted while retaining their history", () => {
     const deletedWorkspaceSession = session("ses_deleted_workspace", { workspaceRoot: "D:/deleted-workspace" });
     const catalog: WorkspaceSummary[] = [{ key: workspaceKey("D:/repo"), root: "D:/repo", position: 0, sessionCount: 1 }];

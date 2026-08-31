@@ -635,6 +635,7 @@ WEB_SESSION_CONTENT_SEARCH   // 可选：Host 内容搜索，默认关闭
 | 2026-08-31 | 完成 M2 最小控制层切片：新增 `sidebar-presenter.ts` 统一导航输入归一化、active group 和空态输出；`browser.ts` 暴露 typed bridge；`index.html` typed 分支改用 `presentSidebarNavigation`，fallback DOM 暂保持兼容；新增 4 个 presenter 测试。 | 第 8 节 M2；第 12–13 节 | 由主 agent 复核后建立 M2 checkpoint；下一步再拆 WorkspaceBrowser DOM renderer 和 Tree/Flat/Search 共用行装配。 |
 | 2026-08-31 | 完成 M3 最小 row 信息减负切片：新增 `sidebar/workspace-row.ts`、`sidebar/session-row.ts`，由 `sidebar-presenter.ts` 派生稳定 Session 状态和 aria 文案；typed/fallback 两条 `showSessionsTree()` 路径通过同一 row adapter 接入。Workspace 默认只显示 label，root/count 进入 title/aria/menu；Session 默认只显示状态点、标题和相对时间，permission/childMode/provider 进入 title 与 assistive details；Workspace 上下移动能力移入菜单。 | 第 8 节 M3；第 11 节 F/H；第 12 节 P0/P2 | 主 agent 复核后建立 M3 checkpoint；后续 M4 再处理导航 state reducer/localStorage，M5 再处理搜索输入收敛。 |
 | 2026-08-31 | 完成 M4 导航状态与本地持久化切片：新增纯 reducer 和 fail-soft localStorage adapter，统一 Tree/Flat、排序、搜索生命周期、归档与展开 action；刷新恢复偏好，active Workspace 自动展开，Workspace 生命周期清理 stale key。 | 第 8 节 M4；第 11 节 D/E/I；第 12 节 P1；M4 实施记录 | 主 agent 复核后建立 M4 checkpoint；下一步进入 M5 折叠搜索和键盘生命周期。 |
+| 2026-08-31 | 完成 M5 P0 本地搜索交互收敛：搜索输入默认折叠为图标，展开后自动聚焦；Escape 与 clear 均清空查询并收起；Tree/Flat 共用标题、Workspace label/basename/path 的同步本地匹配，保留 Session ID 兼容匹配；未引入 Host 内容搜索、debounce、AbortController 或 API contract。 | 第 8 节 M5 P0；第 11 节 E/G；第 12 节本地搜索；M5 实施记录 | 主 agent 复核并建立 M5 checkpoint；后续单独评估 M5 P1 Host 内容搜索与 API/权限边界。 |
 
 #### M3 实施记录（2026-08-31）
 
@@ -695,6 +696,31 @@ git diff --check                                 通过
 - localStorage 只提供单浏览器/单 origin 偏好，不承担跨设备同步、用户账户迁移或 EventStore 回放。
 
 **M4 回滚边界**：关闭 typed bridge 的 `sidebarNavigationPersistence` 或让其返回默认 state，即可忽略本地偏好并继续使用兼容字段；回滚 `index.html` 的 dispatch 接入并移除 `browser.ts` 的 M4 bridge 字段即可恢复 M3 renderer。删除 `sidebar-navigation-state.ts` 及测试不会影响 Session/Workspace API、EventStore、归档事实或服务器数据；不得以 M4 回滚为由清理服务器 Session 或 Workspace。
+
+#### M5 P0 实施记录（2026-08-31）
+
+本轮只实现本地元数据搜索和搜索槽位交互，沿用 DSH `WorkspaceBrowser.tsx:984-1037` 的“按需展开、自动聚焦、Escape/clear 收起”行为，并参考 `tree.ts` 的本地 title/Workspace label 派生边界。没有复制 DSH 代码，没有新增 Host 内容搜索请求，也没有修改 `packages/contracts`、EventStore、Session/Workspace API 或权限边界。
+
+- `apps/web/src/presentation/navigation-presenter.ts`：`buildNavigationModel()` 为每个 Workspace 生成统一搜索文本（自定义 label、basename、规范化前的路径），`matchesTree()` 在 Tree 与 Flat 两种投影中复用同一匹配函数；可见字段以 Session 标题与 Workspace label/path 为主，Session ID 作为兼容性低优先级 token 保留。
+- `apps/web/src/presentation/navigation-presenter.test.ts`：新增 label/path 查询在 Tree/Flat 模式下命中同一 Workspace 全部 Session 的测试，确保本地同步投影一致。
+- `apps/web/index.html`：Workspace toolbar 新增 `session-search-toggle`、`session-search-slot` 与 `session-search-clear`；输入框默认 `hidden`、`tabindex=-1`，展开时只保留搜索槽位并自动聚焦，clear/Escape 通过 M4 reducer 的 `clear-search` action 清空并收起，typed/fallback 渲染器继续共享同一个 `showSessionsTree()` 查询状态。
+- `apps/web/src/shell/sidebar-shell.test.ts`：增加搜索默认折叠、ARIA 展开状态、clear 控件和 Escape 生命周期的静态契约测试。
+
+**M5 P0 验收结果**
+
+```text
+pnpm --filter @code-review-agent/web test -- --run src/presentation/navigation-presenter.test.ts src/shell/sidebar-shell.test.ts   18 个测试通过
+pnpm typecheck                                                                                                     通过
+git diff --check                                                                                                   通过
+```
+
+**M5 P0 未覆盖项**
+
+- Host 内容搜索、输入防抖、AbortController/stale response 丢弃、结果去重/分页、snippet 脱敏及 API/权限 contract 均未实现；这些属于 M5 P1，必须先完成 ADR 和 bounded query/result 设计。
+- 当前 renderer 仍由 `index.html` 的 `showSessionsTree()` 整体重建列表；稳定 key/节点复用和完整 WorkspaceBrowser renderer 拆分留待 M7/P2。
+- 搜索查询默认不写入 localStorage，刷新后从空查询开始；这是 M4 的 Web-only 持久化策略，不改变 Session/Workspace 事实。
+
+**M5 P0 回滚边界**：恢复 `index.html` 原有常驻 input toolbar，并移除 `setSidebarSearchExpanded`、clear/Escape 监听及对应静态测试即可回退交互；恢复 `matchesTree()`/`matchesSession()` 的旧调用签名即可回退字段策略。回滚只影响 Web projection 与 DOM，不删除或修改 EventStore、Session/Workspace API、归档数据或公共 contract。
 
 ## 15. 防漂移检查清单（每个后续 PR 必填）
 

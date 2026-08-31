@@ -63,4 +63,16 @@ describe("sidebar shell contract", () => {
     expect(indexHtml).toContain("sidebarNavigationPersistence?.save(next)");
     expect(indexHtml).toContain("navigation.activeWorkspaceKey");
   });
+
+  it("keeps local search collapsed until requested and exposes keyboard lifecycle", () => {
+    expect(sidebarHtml).toContain('id="session-search-toggle"');
+    expect(sidebarHtml).toContain('aria-expanded="false"');
+    expect(sidebarHtml).toContain('id="session-search-clear"');
+    expect(sidebarHtml).toContain('id="session-search" class="workspace-search" type="search"');
+    expect(sidebarHtml).toContain('hidden tabindex="-1"');
+    expect(indexHtml).toContain("const setSidebarSearchExpanded = (expanded, focus = false) =>");
+    expect(indexHtml).toContain("sessionSearch.addEventListener('keydown'");
+    expect(indexHtml).toContain("else if (sidebarSearchExpanded) clearSidebarSearch()");
+    expect(indexHtml).toContain("type: 'clear-search'");
+  });
 });
