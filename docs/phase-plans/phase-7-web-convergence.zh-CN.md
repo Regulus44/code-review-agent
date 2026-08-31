@@ -2,6 +2,10 @@
 
 状态：`completed`（7.1–7.10 Web shell、连接与回放、Workspace/Session navigation、Conversation/Tool/Permission/Interaction、Trajectory、Task/Subagent/MCP、Settings/Deliverables、响应式与可访问性、五场景 browser/replay gate、Workspace reorder 与 Workspace rename/archive/delete lifecycle 均已完成；阶段 checkpoint：`82326d6`）
 
+## Phase 7 后续验证对接：Sidebar M7（2026-08-31）
+
+Phase 8.0 M7 复用 Phase 7 已建立的 HTTP/SSE/SQLite fixture 和 Web replay 边界，对 Sidebar attention、Workspace/Session keyboard navigation 以及 600/900/1024 视觉矩阵补充回归证据。该后续验证不改变 Phase 7 的 Event/Tool/Task/Permission/Workspace contract，也不改变本阶段已完成状态；入口为 `pnpm test:phase8:sidebar` 和 [`docs/development-log/phase8-m7-sidebar-2026-08-31.zh-CN.md`](../development-log/phase8-m7-sidebar-2026-08-31.zh-CN.md)。
+
 ## 当前执行 checkpoint：Workspace lifecycle controls（2026-08-23）
 
 本 checkpoint 完成 Workspace 元数据的 host-backed 生命周期，并保持 Session 与 EventStore 历史可恢复：

@@ -5,6 +5,7 @@ import { join } from "node:path";
 const root = process.cwd();
 const baselineRoot = join(root, "docs", "phase8-visual-baselines");
 const manifest = JSON.parse(await readFile(join(baselineRoot, "manifest.json"), "utf8"));
+const shellMarkup = await readFile(join(root, "apps", "web", "index.html"), "utf8");
 const assert = (condition, message) => { if (!condition) throw new Error(`Phase 8 visual gate: ${message}`); };
 
 assert(manifest.schemaVersion === 1, "manifest schemaVersion must be 1");
@@ -12,6 +13,20 @@ assert(manifest.source === "phase8-web-fixture", "manifest source must identify 
 assert(manifest.settingsCapabilityState?.plugins === "deferred", "Settings manifest must record Plugins as deferred");
 assert(typeof manifest.settingsCapabilityState?.pluginsReason === "string" && manifest.settingsCapabilityState.pluginsReason.length > 0, "Settings manifest must explain the deferred Plugins state");
 assert(Array.isArray(manifest.baselines) && manifest.baselines.length === 6, "manifest must contain six responsive baselines");
+const sidebarMatrix = manifest.sidebarMatrix;
+assert(sidebarMatrix?.schemaVersion === 1, "sidebar matrix schemaVersion must be 1");
+assert(JSON.stringify(sidebarMatrix.viewportWidths) === JSON.stringify([600, 900, 1024]), "sidebar matrix must cover 600/900/1024 widths");
+assert(JSON.stringify(sidebarMatrix.states) === JSON.stringify(["empty", "long-list", "search", "workspace-menu", "attention"]), "sidebar matrix states are incomplete or reordered");
+assert(sidebarMatrix.evidence === "stable-shell-assertions", "sidebar matrix must identify stable shell assertions as evidence");
+for (const assertion of ["listScrollport", "searchCollapsed", "attentionHiddenWhenEmpty", "attentionRoutesToDetails", "workspaceMenuOnFocus"]) {
+  assert(sidebarMatrix.assertions?.[assertion] === true, `sidebar matrix assertion ${assertion} is missing`);
+}
+assert(sidebarMatrix.assertions?.defaultSessionWindow === 5, "sidebar matrix default session window must be five rows");
+assert(shellMarkup.includes('class="sidebar-list-scroll" role="region" aria-label="Workspace and session list" tabindex="0"'), "sidebar visual gate is missing the dedicated list scrollport");
+assert(shellMarkup.includes('id="session-search-toggle"') && shellMarkup.includes('aria-expanded="false"'), "sidebar visual gate is missing collapsed search state");
+assert(shellMarkup.includes('id="sidebar-attention"') && shellMarkup.includes('id="sidebar-attention-button"'), "sidebar visual gate is missing attention indicator");
+assert(shellMarkup.includes("sessions.slice(0, limit)") && shellMarkup.includes("className = 'workspace-show-more'"), "sidebar visual gate is missing long-list overflow state");
+assert(shellMarkup.includes("Workspace actions · ${label}") && shellMarkup.includes("Session actions · ${label}"), "sidebar visual gate is missing focus/hover menu affordances");
 
 const expected = new Map([
   ["shell:600x800", "web-shell-600x800.jpg"],
@@ -61,4 +76,4 @@ for (const entry of settings) {
   assert(entry.file !== shell.find((candidate) => candidate.width === entry.width)?.file, `Settings and shell baselines must be separate files at ${entry.width}px`);
 }
 
-console.log(JSON.stringify({ phase: "8.0", gate: "responsive-visual-baselines", passed: true, baselines: results, plugins: manifest.settingsCapabilityState.plugins }));
+console.log(JSON.stringify({ phase: "8.0", gate: "responsive-visual-baselines", passed: true, baselines: results, sidebarMatrix: { widths: sidebarMatrix.viewportWidths, states: sidebarMatrix.states, evidence: sidebarMatrix.evidence }, plugins: manifest.settingsCapabilityState.plugins }));

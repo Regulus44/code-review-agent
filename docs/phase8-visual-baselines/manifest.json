@@ -6,6 +6,20 @@
     "plugins": "deferred",
     "pluginsReason": "Plugin runtime is deferred until a Phase 8.5 productization requirement is accepted."
   },
+  "sidebarMatrix": {
+    "schemaVersion": 1,
+    "viewportWidths": [600, 900, 1024],
+    "states": ["empty", "long-list", "search", "workspace-menu", "attention"],
+    "evidence": "stable-shell-assertions",
+    "assertions": {
+      "listScrollport": true,
+      "defaultSessionWindow": 5,
+      "searchCollapsed": true,
+      "attentionHiddenWhenEmpty": true,
+      "attentionRoutesToDetails": true,
+      "workspaceMenuOnFocus": true
+    }
+  },
   "baselines": [
     { "file": "web-shell-600x800.jpg", "surface": "shell", "width": 600, "height": 800 },
     { "file": "web-settings-600x800.jpg", "surface": "settings", "width": 600, "height": 800 },

@@ -94,4 +94,32 @@ describe("sidebar shell contract", () => {
     expect(indexHtml).toContain("sidebarAttentionButton?.addEventListener('click'");
     expect(indexHtml).toContain("details-group-${groupId}");
   });
+
+  it("covers the M7 keyboard, ARIA, focus, and navigation matrix", () => {
+    const controls = [
+      ['sidebar collapse', 'id="sidebar-toggle"', 'aria-label="Collapse sidebar"'],
+      ['new session', 'id="new-session"', 'type="button"'],
+      ['archive toggle', 'id="archive-toggle"', 'aria-pressed="false"'],
+      ['search toggle', 'id="session-search-toggle"', 'aria-expanded="false"'],
+      ['search input', 'id="session-search"', 'type="search"'],
+      ['attention button', 'id="sidebar-attention-button"', 'aria-controls="details-panel"'],
+    ];
+    for (const [label, id, marker] of controls) {
+      expect(sidebarHtml, `${label} is missing`).toContain(id);
+      expect(sidebarHtml, `${label} is missing ${marker}`).toContain(marker);
+    }
+
+    // DSH's sidebar/workspace tests treat the list as a keyboard-reachable
+    // region, while row actions appear only on hover/focus and keep their
+    // semantics in the DOM. Keep that matrix explicit for the static shell.
+    expect(sidebarHtml).toContain('role="region" aria-label="Workspace and session list" tabindex="0"');
+    expect(indexHtml).toContain("header.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') {");
+    expect(indexHtml).toContain("sessionSearch.addEventListener('keydown'");
+    expect(indexHtml).toContain("sidebarAttentionButton?.addEventListener('click'");
+    expect(indexHtml).toContain("group.querySelector('summary')?.focus()");
+    expect(indexHtml).toContain("menu.setAttribute('aria-label', `Workspace actions · ${label}`)");
+    expect(indexHtml).toContain("menu.setAttribute('aria-label', `Session actions · ${label}`)");
+    expect(indexHtml).toContain("className = 'workspace-show-more'");
+    expect(indexHtml).toContain("sessions.slice(0, limit)");
+  });
 });

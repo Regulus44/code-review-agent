@@ -21,6 +21,7 @@
     "test:phase8:browser:evidence": "pnpm typecheck && pnpm build:web && node scripts/phase8-browser-evidence-gate.mjs",
     "test:phase8:parity": "pnpm typecheck && pnpm build:web && node scripts/phase8-parity-gate.mjs",
     "test:phase8:visual": "node scripts/phase8-visual-gate.mjs",
+    "test:phase8:sidebar": "pnpm typecheck && pnpm build:web && pnpm --filter @code-review-agent/web test -- --run src/shell/sidebar-shell.test.ts && node scripts/phase8-sidebar-gate.mjs",
     "test:phase8:lsp": "pnpm typecheck && pnpm build:web && node scripts/phase8-lsp-codemode-gate.mjs",
     "test:phase8:lsp:exit": "pnpm typecheck && pnpm build:web && node scripts/phase8-lsp-codemode-exit-gate.mjs",
     "test:phase8:deployment": "pnpm typecheck && pnpm build && node scripts/phase8-deployment-audit.mjs",

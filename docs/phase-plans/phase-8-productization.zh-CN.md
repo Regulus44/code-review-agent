@@ -213,6 +213,17 @@ git diff --check
 
 8.0.7 状态：`completed`（2026-08-25）。真实 Codex In-app Browser evidence 已覆盖计划列出的 9 组行为场景；`docs/phase8-browser-evidence.json` 和 `scripts/phase8-browser-evidence-gate.mjs` 对场景、fixture 参数、视口、ARIA/focus、Settings recovery 和六个视觉基线做可重复审计。8.0 关闭后，Phase 8 继续保留 8.3/8.5 的目标部署环境 smoke 作为 partial 边界。
 
+### 8.0.8 Sidebar M7 测试、视觉基线和回放（completed，2026-08-31）
+
+在 8.0.7 的 Web parity 基础上补齐 M6 Sidebar attention 的真实边界证据：
+
+- `apps/web/tests/sidebar-attention-replay.e2e.mjs` 通过 SQLite/API/SSE fixture 验证 pending interaction/permission、resolved 清理、API restart replay 和 failed MCP 生命周期；
+- `scripts/phase8-sidebar-gate.mjs` 接入 delegation fixture，验证 running child catalog/scoped replay，并审计 typed browser bundle 与 Sidebar shell markers；
+- `apps/web/src/shell/sidebar-shell.test.ts` 覆盖 collapse、Search、Workspace Enter/Space、Details focus、ARIA 名称和五状态导航矩阵；
+- `docs/phase8-visual-baselines/manifest.json` 与 `scripts/phase8-visual-gate.mjs` 增加 600/900/1024 Sidebar 状态矩阵，保留六张真实 JPEG 基线。
+
+门禁：`pnpm test:phase8:sidebar`、`pnpm test:phase8:visual`。本切片只增加测试/视觉证据，不改变 Event/Tool/Task/Permission/Workspace contract；Playwright 像素级 diff 仍作为后续可选能力。
+
 ## 5. Phase 8.1：Context Compaction
 
 交付物：

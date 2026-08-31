@@ -94,6 +94,14 @@
 - 验证：`pnpm --filter @code-review-agent/web test -- --run src/sidebar/sidebar-attention.test.ts src/shell/sidebar-shell.test.ts`、`pnpm typecheck`、`pnpm --filter @code-review-agent/web build:browser`、`git diff --check` 均通过；详细记录见 [`phase8-m6-sidebar-details-2026-08-31.zh-CN.md`](development-log/phase8-m6-sidebar-details-2026-08-31.zh-CN.md)。
 - 后续入口：M7 补充真实 API/SSE/replay browser、键盘和视觉矩阵；旧 detached compatibility sink 随完整 WorkspaceBrowser 拆分删除。
 
+## Phase 8.0 M7：Sidebar 测试、视觉基线和回放（completed，2026-08-31）
+
+- 新增 `apps/web/tests/sidebar-attention-replay.e2e.mjs`，使用真实 SQLite/API/SSE fixture 验证 pending interaction/permission、resolved 清理、API 重启回放、failed MCP 生命周期；并由 `scripts/phase8-sidebar-gate.mjs` 接入已有 delegation fixture，确认 running child catalog、scoped replay 和 typed browser bundle。
+- `apps/web/src/shell/sidebar-shell.test.ts` 增加键盘/ARIA/focus 与导航矩阵：列表 region、Workspace Enter/Space、Search 展开、attention → Details、summary focus、行菜单 accessible name 和五条长列表窗口。
+- `docs/phase8-visual-baselines/manifest.json` 增加 600/900/1024 的 sidebar 状态矩阵（empty、long-list、search、workspace-menu、attention）；`scripts/phase8-visual-gate.mjs` 对稳定 shell markers/CSS 断言做可重复审计，既有六张 JPEG 基线保持不变。
+- 新增门禁命令 `pnpm test:phase8:sidebar`；本轮验证 `pnpm typecheck`、`pnpm build:web`、Web sidebar shell tests、`pnpm test:phase8:visual`、M7 sidebar gate 和 `git diff --check` 均通过。
+- M7 不改变 Event/Tool/Task/Permission/Workspace contract；尚未引入 Playwright 像素级截图 diff，图形浏览器接入时复用同一 fixture 和断言。
+
 ## Phase 8.0 Web parity（completed，2026-08-25）
 
 - 8.0.0–8.0.6 的 typed Web projection、Shell/Workspace/Conversation/Details/Settings、六个 600/900/1024 × 800 JPEG 基线、ARIA/focus/recovery 证据均已通过；Plugins 继续明确显示为 `deferred`。

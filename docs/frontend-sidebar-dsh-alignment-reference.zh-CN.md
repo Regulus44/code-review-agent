@@ -1,6 +1,6 @@
 # Coding Agent 前端左栏与 DSH 对齐改造参考
 
-> 状态：调研与方案编制中（首版已落盘，2026-08-31）
+> 状态：M0–M7 已落盘；M7 完成测试、视觉基线和回放门禁（2026-08-31）
 > 适用范围：Phase 8「高级能力与产品化」中的 Web 信息架构、左栏视觉减负和导航交互收敛。
 > 目标：为后续前端改造提供可追踪的总参考，明确每一项改造对应的本仓库文件、代码入口、DSH 参考入口、契约边界、验收场景和回滚方式，防止在“像 DSH”的过程中发生目标漂移。
 
@@ -748,6 +748,35 @@ git diff --check                                                                
 - `mcp-list`/`subagent-list` 的 detached compatibility sink 仍保留在渲染代码中，后续完成完整 renderer 拆分时可以删除；它们不再挂载到可见 sidebar DOM。
 
 **M6 回滚边界**：恢复左栏两个 `sidebar-secondary` 区块并移除 `sidebar-attention` DOM/renderer/bridge/test，即可恢复 M5 的左栏可见结构；不需要回滚 Details renderer、SessionStore、MCP/Task 事实或任何 Event/Tool/Task/Permission/Workspace contract。
+
+#### M7 实施记录（2026-08-31）
+
+本轮完成 M6 attention badge 的真实 API/SSE/SQLite 回放门禁、键盘/ARIA/focus 导航矩阵和左栏视觉状态矩阵。测试结构模仿 DSH `ui-sidebar`、`ui-workspace`、`ui-layout` 的行为分层，但没有复制 DSH 类型、品牌或 fixture。
+
+- `apps/web/tests/sidebar-attention-replay.e2e.mjs`：使用现有 `withFixture()` 启动真实 SQLite/API；通过 SSE 追加并接收 pending interaction/permission，重启后确认 pending projection 恢复，再通过 SSE 追加 resolved 事件并重启确认状态稳定；通过真实 `/v1/mcp/servers` 生命周期制造 failed MCP 并验证 API 重启后仍可观察。
+- `scripts/phase8-sidebar-gate.mjs`：检查 Web shell/typed bridge，运行 attention replay 场景，并启动现有 `phase7-delegation-fixture-server.mjs` 验证真实 running child catalog、scoped replay 和 browser bundle；输出 M7 的 viewports、状态矩阵、键盘、ARIA、focus 证据。
+- `apps/web/src/shell/sidebar-shell.test.ts`：补充 sidebar collapse、New session、Archived、折叠 Search、attention 路由、列表 region、Workspace Enter/Space、Details summary focus、Workspace/Session menu accessible name 和长列表 overflow 的静态契约矩阵。
+- `docs/phase8-visual-baselines/manifest.json` 与 `scripts/phase8-visual-gate.mjs`：保留既有六张真实 600/900/1024 JPEG，同时增加 `sidebarMatrix`，对 empty、long-list、search、workspace-menu、attention 五种状态和稳定 DOM/CSS 断言进行可重复审计。
+- `package.json`：新增 `pnpm test:phase8:sidebar`，串联 typecheck、Web build、sidebar shell contract 和 M7 API/SSE/delegation gate。
+
+**M7 验收结果**
+
+```text
+pnpm typecheck                                      通过
+pnpm build:web                                      通过
+pnpm --filter @code-review-agent/web test -- --run src/shell/sidebar-shell.test.ts   9 个测试通过
+pnpm test:phase8:visual                             通过（6 张 JPEG + 5 状态 sidebar 矩阵）
+node scripts/phase8-sidebar-gate.mjs               通过（API/SSE/replay + running child）
+git diff --check                                    通过
+```
+
+**M7 未覆盖项**
+
+- 当前门禁仍是无 Playwright 依赖的真实 HTTP/SSE/SQLite 边界测试与静态 shell contract；尚未新增图形浏览器截图采集或像素级 diff。
+- `running child` 使用已有 delegation fixture 的真实 SubagentRuntime catalog 验证，attention badge 的点击/Details 聚焦由 shell contract 覆盖；下一步若接入图形浏览器，应复用同一 fixture 和断言。
+- WorkspaceBrowser 仍由 `index.html` 的兼容 renderer 编排，稳定 key/局部 DOM 复用和完整文件拆分继续留在 P2，不在 M7 扩大范围。
+
+**M7 回滚边界**：移除 `sidebar-attention-replay.e2e.mjs`、`phase8-sidebar-gate.mjs`、`test:phase8:sidebar`、`sidebarMatrix` manifest 字段及新增 shell 断言即可回退测试与视觉门禁；不回滚 M6 运行时代码、EventStore、Session/Workspace/Task/Permission/MCP contract 或现有 JPEG 基线。
 
 ## 15. 防漂移检查清单（每个后续 PR 必填）
 
