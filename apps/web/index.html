@@ -841,7 +841,11 @@
         const modelPopup = typedRuntime?.createModelPopup && modelDirectory ? typedRuntime.createModelPopup(modelDirectory) : null;
         let modelDirectoryUnsubscribe = null;
         let modelEntryMode = 'seat';
-        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, credentials: [], pendingCredentialId: '', settingsProviderEditorId: null, settingsProviderDraft: null, settingsProviderBusy: false, settingsProviderError: '', settingsProviderDiscovery: new Map(), modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, stoppingTurnId: null, composer: typedRuntime?.createComposerState?.() || { phase: 'idle', attemptId: 0 }, composerEpoch: 0, requestActions: typedRuntime?.createRequestActionGate?.() || null, workspaces: null, lastWorkspaceOrderSequence: 0, conversationScrollTop: 0, trajectoryScrollTop: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 280, details: 'closed', detailsWidthPx: 0, narrow: false, narrowExpanded: false, mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), expandedSessionGroups: new Set(), sessionSearch: '', sessionView: 'conversation', trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
+         // Navigation preferences live in the Web-only reducer below. These
+         // fields remain as a compatibility adapter for older render helpers;
+         // they are synchronised from sidebarNavigationState and never written
+         // to the EventStore/API as UI facts.
+         const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, credentials: [], pendingCredentialId: '', settingsProviderEditorId: null, settingsProviderDraft: null, settingsProviderBusy: false, settingsProviderError: '', settingsProviderDiscovery: new Map(), modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, stoppingTurnId: null, composer: typedRuntime?.createComposerState?.() || { phase: 'idle', attemptId: 0 }, composerEpoch: 0, requestActions: typedRuntime?.createRequestActionGate?.() || null, workspaces: null, lastWorkspaceOrderSequence: 0, conversationScrollTop: 0, trajectoryScrollTop: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 280, details: 'closed', detailsWidthPx: 0, narrow: false, narrowExpanded: false, mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), expandedSessionGroups: new Set(), sessionSearch: '', sessionView: 'conversation', trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
         let usageDrawerOpen = false;
         let renderedSessionView = state.sessionView;
         let modelMenuPane = 'root';
@@ -899,8 +903,8 @@
          const sessionSearch = document.querySelector('#session-search');
          const workspaceViewMode = document.querySelector('#workspace-view-mode');
          const workspaceSort = document.querySelector('#workspace-sort');
-         const sessionMenu = document.querySelector('#session-menu');
-         const connectionBanner = document.querySelector('#connection-banner');
+          const sessionMenu = document.querySelector('#session-menu');
+          const connectionBanner = document.querySelector('#connection-banner');
          const connectionBannerMessage = document.querySelector('#connection-banner-message');
          const connectionRetry = document.querySelector('#connection-retry');
          const queueDock = document.querySelector('#queue-dock');
@@ -910,7 +914,51 @@
          const renameError = document.querySelector('#rename-error');
          const renameSave = document.querySelector('#rename-save');
          const renameClose = document.querySelector('#rename-close');
-         const renameCancel = document.querySelector('#rename-cancel');
+          const renameCancel = document.querySelector('#rename-cancel');
+         const fallbackSidebarNavigationState = () => ({ viewMode: 'tree', sort: 'recent', searchQuery: '', showArchived: false, expandedWorkspaces: {}, expandedSessionGroups: {} });
+         const fallbackNavigationReducer = (current, action) => {
+           const next = { ...current, expandedWorkspaces: { ...current.expandedWorkspaces }, expandedSessionGroups: { ...current.expandedSessionGroups } };
+           const key = typeof action.key === 'string' ? action.key.trim() : '';
+           const setExpanded = (field, expanded) => { if (!key) return; if (expanded) next[field][key] = true; else delete next[field][key]; };
+           if (action.type === 'set-view-mode') next.viewMode = action.viewMode === 'flat' ? 'flat' : 'tree';
+           else if (action.type === 'set-sort') next.sort = action.sort === 'name' || action.sort === 'path' ? action.sort : 'recent';
+           else if (action.type === 'set-search-query') next.searchQuery = String(action.searchQuery ?? '');
+           else if (action.type === 'clear-search') next.searchQuery = '';
+           else if (action.type === 'set-show-archived') next.showArchived = action.showArchived === true;
+           else if (action.type === 'toggle-workspace') setExpanded('expandedWorkspaces', !next.expandedWorkspaces[key]);
+           else if (action.type === 'set-workspace-expanded') setExpanded('expandedWorkspaces', action.expanded === true);
+           else if (action.type === 'ensure-workspace-expanded') setExpanded('expandedWorkspaces', true);
+           else if (action.type === 'toggle-session-group') setExpanded('expandedSessionGroups', !next.expandedSessionGroups[key]);
+           else if (action.type === 'set-session-group-expanded') setExpanded('expandedSessionGroups', action.expanded === true);
+           else if (action.type === 'remove-workspace-key') { delete next.expandedWorkspaces[key]; delete next.expandedSessionGroups[key]; }
+           else if (action.type === 'retain-workspace-keys') { const retained = new Set((action.keys || []).map((value) => String(value).trim())); for (const field of ['expandedWorkspaces', 'expandedSessionGroups']) for (const storedKey of Object.keys(next[field])) if (!retained.has(storedKey)) delete next[field][storedKey]; }
+           else if (action.type === 'reset') return fallbackSidebarNavigationState();
+           return next;
+         };
+         let sidebarNavigationState = typedRuntime?.createSidebarNavigationState?.() || fallbackSidebarNavigationState();
+         const sidebarNavigationPersistence = typedRuntime?.createSidebarNavigationPersistence?.() || null;
+         if (sidebarNavigationPersistence) sidebarNavigationState = sidebarNavigationPersistence.load();
+         const syncSidebarNavigationAdapter = (next) => {
+           sidebarNavigationState = next;
+           state.showArchived = next.showArchived === true;
+           state.expandedWorkspaces = new Set(Object.entries(next.expandedWorkspaces || {}).filter(([, expanded]) => expanded === true).map(([key]) => key));
+           state.expandedSessionGroups = new Set(Object.entries(next.expandedSessionGroups || {}).filter(([, expanded]) => expanded === true).map(([key]) => key));
+           state.sessionSearch = typeof next.searchQuery === 'string' ? next.searchQuery : '';
+           state.workspaceViewMode = next.viewMode === 'flat' ? 'flat' : 'tree';
+           state.workspaceSort = next.sort === 'name' || next.sort === 'path' ? next.sort : 'recent';
+           if (archiveToggle) { archiveToggle.classList.toggle('active', state.showArchived); archiveToggle.setAttribute('aria-pressed', String(state.showArchived)); }
+           if (sessionSearch && sessionSearch.value !== state.sessionSearch) sessionSearch.value = state.sessionSearch;
+           if (workspaceViewMode && workspaceViewMode.value !== state.workspaceViewMode) workspaceViewMode.value = state.workspaceViewMode;
+           if (workspaceSort && workspaceSort.value !== state.workspaceSort) workspaceSort.value = state.workspaceSort;
+         };
+         const dispatchSidebarNavigation = (action, options = {}) => {
+           const reducer = typedRuntime?.reduceSidebarNavigation || fallbackNavigationReducer;
+           const next = reducer(sidebarNavigationState, action);
+           syncSidebarNavigationAdapter(next);
+           if (options.persist !== false) sidebarNavigationPersistence?.save(next);
+           return next;
+         };
+         syncSidebarNavigationAdapter(sidebarNavigationState);
          const workspaceDialog = workspaceModal.querySelector('.workspace-modal');
          const settingsDialog = settingsModal.querySelector('.workspace-modal');
          const renameDialog = renameModal.querySelector('.workspace-modal');
@@ -1179,8 +1227,17 @@
         };
         const modeLabels = { 'read-only': 'Read only', 'workspace-write': 'Workspace write', 'ask-on-write': 'Ask on write', 'ask-on-execute': 'Ask on execute', 'workspace-full-access': 'Workspace full access', 'danger-full-access': 'Full access' };
         const currentMode = () => state.session?.permissionPreset || 'ask-on-write';
-        const refreshWorkspaces = async () => { try { state.workspaces = typedRuntime?.api?.listWorkspaces ? await typedRuntime.api.listWorkspaces(state.showArchived) : await api(`/v1/workspaces${state.showArchived ? '?include_archived=true' : ''}`); } catch { state.workspaces = null; } };
-        const refreshSessionList = async () => { const payload = await api(`/v1/sessions?include_archived=${state.showArchived}`); await refreshWorkspaces(); showSessionsTree(payload); archiveToggle.classList.toggle('active', state.showArchived); archiveToggle.setAttribute('aria-pressed', String(state.showArchived)); };
+         const refreshWorkspaces = async () => {
+           try {
+             state.workspaces = typedRuntime?.api?.listWorkspaces ? await typedRuntime.api.listWorkspaces(state.showArchived) : await api(`/v1/workspaces${state.showArchived ? '?include_archived=true' : ''}`);
+             // Catalog keys are host-backed lifecycle facts. Retaining only
+             // keys currently present prevents deleted/archived workspaces
+             // from leaving stale expansion preferences behind.
+             const keys = (state.workspaces?.workspaces || []).filter((workspace) => workspace.deleted !== true).map((workspace) => workspace.key || workspace.root);
+             dispatchSidebarNavigation({ type: 'retain-workspace-keys', keys });
+           } catch { state.workspaces = null; }
+         };
+         const refreshSessionList = async () => { const payload = await api(`/v1/sessions?include_archived=${state.showArchived}`); await refreshWorkspaces(); showSessionsTree(payload); archiveToggle.classList.toggle('active', state.showArchived); archiveToggle.setAttribute('aria-pressed', String(state.showArchived)); };
         const refreshSubagents = async () => { if (!state.session) { state.subagents = []; renderSubagents(); if (typedConnection) renderTaskPanel(typedConnection.store.getSnapshot()); return; } try { state.subagents = (await api(`/v1/sessions/${encodeURIComponent(state.session.id)}/subagents?scope=children`)).agents || []; } catch { state.subagents = []; } renderSubagents(); if (typedConnection) renderTaskPanel(typedConnection.store.getSnapshot()); };
         const refreshWorktrees = async () => { if (!state.session || !typedRuntime?.api?.listWorktrees) { state.worktrees = []; return; } try { state.worktrees = (await typedRuntime.api.listWorktrees(state.session.id)).worktrees || []; } catch { state.worktrees = []; } };
          const setStatus = (text, connected = true) => { status.textContent = text; status.classList.toggle('disconnected', !connected); };
@@ -2481,9 +2538,10 @@
         const workspaceForRoot = (root) => (state.workspaces?.workspaces || []).find((workspace) => (typedRuntime?.workspaceKey ? typedRuntime.workspaceKey(workspace.key || workspace.root) : workspaceKey(workspace.key || workspace.root)) === (typedRuntime?.workspaceKey ? typedRuntime.workspaceKey(root) : workspaceKey(root)));
         const performWorkspaceArchive = async (workspace) => {
           if (!typedRuntime?.api?.archiveWorkspace) return;
-          const nextArchived = workspace.archived !== true;
-          state.workspaces = await typedRuntime.api.archiveWorkspace(workspace.key, nextArchived, commandKey());
-          closeSessionMenu();
+           const nextArchived = workspace.archived !== true;
+           state.workspaces = await typedRuntime.api.archiveWorkspace(workspace.key, nextArchived, commandKey());
+          dispatchSidebarNavigation({ type: 'remove-workspace-key', key: typedRuntime?.workspaceKey ? typedRuntime.workspaceKey(workspace.key || workspace.root) : workspace.key || workspace.root });
+           closeSessionMenu();
           await refreshSessionList();
           setStatus(nextArchived ? `Workspace archived · ${workspace.label || typedRuntime.workspaceLabel(workspace.root)}` : `Workspace restored · ${workspace.label || typedRuntime.workspaceLabel(workspace.root)}`, true);
         };
@@ -2491,8 +2549,9 @@
           if (!typedRuntime?.api?.deleteWorkspace) return;
           const label = workspace.label || typedRuntime.workspaceLabel(workspace.root);
           if (!window.confirm(`Delete workspace “${label}”? Sessions and event history remain available for audit, but the workspace will disappear from navigation.`)) return;
-          state.workspaces = await typedRuntime.api.deleteWorkspace(workspace.key, commandKey());
-          closeSessionMenu();
+           state.workspaces = await typedRuntime.api.deleteWorkspace(workspace.key, commandKey());
+          dispatchSidebarNavigation({ type: 'remove-workspace-key', key: typedRuntime?.workspaceKey ? typedRuntime.workspaceKey(workspace.key || workspace.root) : workspace.key || workspace.root });
+           closeSessionMenu();
           await refreshSessionList();
           setStatus(`Workspace deleted · ${label}`, true);
         };
@@ -2576,7 +2635,7 @@
         };
         const showSessionsTree = (payload) => {
           const sessions = Array.isArray(payload) ? payload : payload.sessions || [];
-          const navigation = typedRuntime?.presentSidebarNavigation?.(sessions, { showArchived: state.showArchived, query: state.sessionSearch, selectedSessionId: state.session?.id, viewMode: state.workspaceViewMode, sort: state.workspaceSort, workspaceOrder: state.workspaces?.workspaces?.map((workspace) => workspace.key || workspace.root), workspaceCatalog: state.workspaces?.workspaces });
+          const navigation = typedRuntime?.presentSidebarNavigation?.(sessions, { showArchived: sidebarNavigationState.showArchived, query: sidebarNavigationState.searchQuery, selectedSessionId: state.session?.id, viewMode: sidebarNavigationState.viewMode, sort: sidebarNavigationState.sort, workspaceOrder: state.workspaces?.workspaces?.map((workspace) => workspace.key || workspace.root), workspaceCatalog: state.workspaces?.workspaces });
           if (navigation) {
             state.sidebarSessions = navigation.allSessions;
             state.recentWorkspaces = [...navigation.recentWorkspaces];
@@ -2587,43 +2646,52 @@
               list.append(empty); return;
             }
             const containsActive = (node) => node.id === state.session?.id || node.children.some(containsActive);
-            if (navigation.activeWorkspaceKey) state.expandedWorkspaces.add(navigation.activeWorkspaceKey);
+            if (navigation.activeWorkspaceKey) {
+              if (sidebarNavigationState.expandedWorkspaces[navigation.activeWorkspaceKey] === undefined) dispatchSidebarNavigation({ type: 'ensure-workspace-expanded', key: navigation.activeWorkspaceKey });
+              if (sidebarNavigationState.expandedSessionGroups[navigation.activeWorkspaceKey] === undefined) dispatchSidebarNavigation({ type: 'set-session-group-expanded', key: navigation.activeWorkspaceKey, expanded: true });
+            }
             const appendNavigationNode = (parent, node) => {
               const row = createSidebarSessionRow(node);
               parent.append(row);
               if (node.children.length) { const nested = document.createElement('div'); nested.className = 'workspace-children'; for (const child of node.children) appendNavigationNode(nested, child); parent.append(nested); }
             };
             for (const group of navigation.groups) {
-              if (group.sessions.some(containsActive)) { state.expandedWorkspaces.add(group.key); state.expandedSessionGroups.add(group.key); }
-              const expanded = state.expandedWorkspaces.has(group.key);
+              if (group.sessions.some(containsActive)) {
+                if (sidebarNavigationState.expandedWorkspaces[group.key] === undefined) dispatchSidebarNavigation({ type: 'ensure-workspace-expanded', key: group.key });
+                if (sidebarNavigationState.expandedSessionGroups[group.key] === undefined) dispatchSidebarNavigation({ type: 'set-session-group-expanded', key: group.key, expanded: true });
+              }
+              const expanded = sidebarNavigationState.expandedWorkspaces[group.key] === true;
               const section = document.createElement('section'); section.className = `workspace-group ${expanded ? '' : 'collapsed'}`;
-              const toggleGroup = () => { if (state.expandedWorkspaces.has(group.key)) state.expandedWorkspaces.delete(group.key); else state.expandedWorkspaces.add(group.key); showSessionsTree({ sessions: state.sidebarSessions }); };
+              const toggleGroup = () => { dispatchSidebarNavigation({ type: 'toggle-workspace', key: group.key }); showSessionsTree({ sessions: state.sidebarSessions }); };
               const header = createSidebarWorkspaceRow(group, expanded, navigation.activeWorkspaceKey === group.key, toggleGroup);
               section.append(header); const children = document.createElement('div'); children.className = 'workspace-sessions';
-              const expandedSessions = state.expandedSessionGroups.has(group.key);
+              const expandedSessions = sidebarNavigationState.expandedSessionGroups[group.key] === true;
               const sessionWindow = windowSidebarSessions(group.sessions, expandedSessions);
               for (const node of sessionWindow.visible) appendNavigationNode(children, node);
               if (sessionWindow.hiddenCount > 0 || (expandedSessions && group.sessions.length > 5)) {
                 const overflow = document.createElement('button'); overflow.type = 'button'; overflow.className = 'workspace-show-more'; overflow.dataset.navigationKey = `workspace:${group.key}:overflow`;
                 overflow.textContent = sessionWindow.hiddenCount > 0 ? `Show ${sessionWindow.hiddenCount} more sessions` : 'Show fewer sessions';
-                overflow.onclick = () => { if (expandedSessions) state.expandedSessionGroups.delete(group.key); else state.expandedSessionGroups.add(group.key); showSessionsTree({ sessions: state.sidebarSessions }); };
+                overflow.onclick = () => { dispatchSidebarNavigation({ type: 'toggle-session-group', key: group.key }); showSessionsTree({ sessions: state.sidebarSessions }); };
                 children.append(overflow);
               }
               section.append(children); list.append(section);
             }
             return;
           }
-          const visible = sessions.filter((session) => session.deleted !== true && session.parentSessionId === undefined && Boolean(session.archived) === state.showArchived);
+          const visible = sessions.filter((session) => session.deleted !== true && session.parentSessionId === undefined && Boolean(session.archived) === sidebarNavigationState.showArchived);
           state.sidebarSessions = visible;
           state.recentWorkspaces = sessions.map((session) => session.workspaceRoot).filter(Boolean);
-          const query = state.sessionSearch.trim().toLowerCase();
+          const query = sidebarNavigationState.searchQuery.trim().toLowerCase();
           const grouped = new Map();
           for (const session of visible) {
             const root = session.workspaceRoot || '.';
             const key = workspaceKey(root);
             const group = grouped.get(key) || { key, root, sessions: [] };
             group.sessions.push(session); grouped.set(key, group);
-            if (state.session?.id === session.id) { state.expandedWorkspaces.add(key); state.expandedSessionGroups.add(key); }
+            if (state.session?.id === session.id) {
+              if (sidebarNavigationState.expandedWorkspaces[key] === undefined) dispatchSidebarNavigation({ type: 'ensure-workspace-expanded', key });
+              if (sidebarNavigationState.expandedSessionGroups[key] === undefined) dispatchSidebarNavigation({ type: 'set-session-group-expanded', key, expanded: true });
+            }
           }
           list.innerHTML = '';
           const groups = [...grouped.values()].map((group) => {
@@ -2637,22 +2705,22 @@
             const bTime = Math.max(...b.sessions.map((session) => Date.parse(session.updatedAt || session.createdAt || '') || 0));
             return bTime - aTime;
           });
-          if (!groups.length) { const empty = document.createElement('div'); empty.className = 'tree-empty'; empty.textContent = query ? 'No sessions match this search.' : state.showArchived ? 'No archived sessions.' : 'No active sessions. Create a session to start coding.'; list.append(empty); return; }
+          if (!groups.length) { const empty = document.createElement('div'); empty.className = 'tree-empty'; empty.textContent = query ? 'No sessions match this search.' : sidebarNavigationState.showArchived ? 'No archived sessions.' : 'No active sessions. Create a session to start coding.'; list.append(empty); return; }
           for (const group of groups) {
-            const expanded = state.expandedWorkspaces.has(group.key);
+            const expanded = sidebarNavigationState.expandedWorkspaces[group.key] === true;
             const section = document.createElement('section'); section.className = `workspace-group ${expanded ? '' : 'collapsed'}`;
-            const toggleGroup = () => { if (state.expandedWorkspaces.has(group.key)) state.expandedWorkspaces.delete(group.key); else state.expandedWorkspaces.add(group.key); showSessionsTree({ sessions: state.sidebarSessions }); };
+            const toggleGroup = () => { dispatchSidebarNavigation({ type: 'toggle-workspace', key: group.key }); showSessionsTree({ sessions: state.sidebarSessions }); };
             const header = createSidebarWorkspaceRow(group, expanded, state.session?.workspaceRoot && workspaceKey(state.session.workspaceRoot) === group.key, toggleGroup);
             section.append(header);
             const children = document.createElement('div'); children.className = 'workspace-sessions';
-            const expandedSessions = state.expandedSessionGroups.has(group.key);
+            const expandedSessions = sidebarNavigationState.expandedSessionGroups[group.key] === true;
             const orderedSessions = [...group.sessions].sort((a, b) => (Date.parse(b.updatedAt || '') || 0) - (Date.parse(a.updatedAt || '') || 0));
             const sessionWindow = windowSidebarSessions(orderedSessions, expandedSessions);
             for (const session of sessionWindow.visible) children.append(createSidebarSessionRow(session));
             if (sessionWindow.hiddenCount > 0 || (expandedSessions && orderedSessions.length > 5)) {
               const overflow = document.createElement('button'); overflow.type = 'button'; overflow.className = 'workspace-show-more'; overflow.dataset.navigationKey = `workspace:${group.key}:overflow`;
               overflow.textContent = sessionWindow.hiddenCount > 0 ? `Show ${sessionWindow.hiddenCount} more sessions` : 'Show fewer sessions';
-              overflow.onclick = () => { if (expandedSessions) state.expandedSessionGroups.delete(group.key); else state.expandedSessionGroups.add(group.key); showSessionsTree({ sessions: state.sidebarSessions }); };
+              overflow.onclick = () => { dispatchSidebarNavigation({ type: 'toggle-session-group', key: group.key }); showSessionsTree({ sessions: state.sidebarSessions }); };
               children.append(overflow);
             }
             section.append(children); list.append(section);
@@ -2861,10 +2929,10 @@
         renameModal.addEventListener('click', (event) => { if (event.target === renameModal) closeRenameSession(); });
         renameForm.addEventListener('submit', async (event) => { event.preventDefault(); const target = state.renameTarget; const nextTitle = renameInput.value.trim(); if (!target) return; if (!nextTitle) { renameError.textContent = target.kind === 'workspace' ? 'Enter a workspace label.' : 'Enter a session title.'; renameInput.focus(); return; } renameSave.disabled = true; renameError.textContent = ''; try { if (target.kind === 'workspace') { state.workspaces = await typedRuntime.api.renameWorkspace(target.key, nextTitle, commandKey()); closeRenameSession(); await refreshSessionList(); setStatus(`Workspace renamed · ${nextTitle}`, true); } else { const updated = typedRuntime?.api?.renameSession ? await typedRuntime.api.renameSession(target.id, nextTitle, commandKey()) : await api(`/v1/sessions/${encodeURIComponent(target.id)}/title`, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': commandKey() }, body: JSON.stringify({ title: nextTitle }) }); if (state.session?.id === target.id) { state.session = updated; title.textContent = updated.title || 'Coding session'; render(); } closeRenameSession(); await refreshSessionList(); } } catch (error) { renameError.textContent = error instanceof Error ? error.message : String(error); } finally { renameSave.disabled = false; } });
         document.addEventListener('keydown', (event) => { if (event.key !== 'Escape') return; if (!settingsModal.hidden) closeSettings(); else if (!workspaceModal.hidden) closeWorkspacePicker(); else if (!renameModal.hidden) closeRenameSession(); else if (!sessionMenu.hidden) closeSessionMenu(); else if (!modelPopover.hidden) { if (modelEntryMode === 'command') closeModelCommandPopup(); else dispatchOverlay({ type: 'close', overlay: 'model-popover' }); } else if (!modePopover.hidden) dispatchOverlay({ type: 'close', overlay: 'mode-popover' }); else dispatchOverlay({ type: 'escape' }); });
-        archiveToggle.onclick = async () => { state.showArchived = !state.showArchived; try { await refreshSessionList(); } catch (error) { setStatus(error.message, false); } };
-        sessionSearch.addEventListener('input', () => { state.sessionSearch = sessionSearch.value; showSessionsTree({ sessions: state.sidebarSessions }); });
-        workspaceViewMode.addEventListener('change', () => { state.workspaceViewMode = workspaceViewMode.value === 'flat' ? 'flat' : 'tree'; showSessionsTree({ sessions: state.sidebarSessions }); });
-        workspaceSort.addEventListener('change', () => { state.workspaceSort = workspaceSort.value === 'name' || workspaceSort.value === 'path' ? workspaceSort.value : 'recent'; showSessionsTree({ sessions: state.sidebarSessions }); });
+         archiveToggle.onclick = async () => { dispatchSidebarNavigation({ type: 'set-show-archived', showArchived: !sidebarNavigationState.showArchived }); try { await refreshSessionList(); } catch (error) { setStatus(error.message, false); } };
+         sessionSearch.addEventListener('input', () => { dispatchSidebarNavigation({ type: 'set-search-query', searchQuery: sessionSearch.value }); showSessionsTree({ sessions: state.sidebarSessions }); });
+         workspaceViewMode.addEventListener('change', () => { dispatchSidebarNavigation({ type: 'set-view-mode', viewMode: workspaceViewMode.value === 'flat' ? 'flat' : 'tree' }); showSessionsTree({ sessions: state.sidebarSessions }); });
+         workspaceSort.addEventListener('change', () => { dispatchSidebarNavigation({ type: 'set-sort', sort: workspaceSort.value === 'name' || workspaceSort.value === 'path' ? workspaceSort.value : 'recent' }); showSessionsTree({ sessions: state.sidebarSessions }); });
         document.querySelector('#session-path').onclick = () => openWorkspacePicker();
         document.querySelector('#workspace-close').onclick = () => closeWorkspacePicker();
         document.querySelector('#workspace-cancel').onclick = () => closeWorkspacePicker();

@@ -634,6 +634,7 @@ WEB_SESSION_CONTENT_SEARCH   // 可选：Host 内容搜索，默认关闭
 | 2026-08-31 | 完成 M1 Sidebar shell 最小切片：`index.html` 新增 `sidebar-primary` 与 `sidebar-list-scroll` 分区，固定 header/New session/toolbar/footer，独立 Workspace/Session scrollport；新增 `sidebar-shell.test.ts` 并通过 typecheck、Web 全量测试和 diff 检查。 | 第 8 节 M1；第 11–12 节 | 由主 agent 复核后建立 Phase 8 M1 checkpoint；后续进入 M2 浏览器控制层。 |
 | 2026-08-31 | 完成 M2 最小控制层切片：新增 `sidebar-presenter.ts` 统一导航输入归一化、active group 和空态输出；`browser.ts` 暴露 typed bridge；`index.html` typed 分支改用 `presentSidebarNavigation`，fallback DOM 暂保持兼容；新增 4 个 presenter 测试。 | 第 8 节 M2；第 12–13 节 | 由主 agent 复核后建立 M2 checkpoint；下一步再拆 WorkspaceBrowser DOM renderer 和 Tree/Flat/Search 共用行装配。 |
 | 2026-08-31 | 完成 M3 最小 row 信息减负切片：新增 `sidebar/workspace-row.ts`、`sidebar/session-row.ts`，由 `sidebar-presenter.ts` 派生稳定 Session 状态和 aria 文案；typed/fallback 两条 `showSessionsTree()` 路径通过同一 row adapter 接入。Workspace 默认只显示 label，root/count 进入 title/aria/menu；Session 默认只显示状态点、标题和相对时间，permission/childMode/provider 进入 title 与 assistive details；Workspace 上下移动能力移入菜单。 | 第 8 节 M3；第 11 节 F/H；第 12 节 P0/P2 | 主 agent 复核后建立 M3 checkpoint；后续 M4 再处理导航 state reducer/localStorage，M5 再处理搜索输入收敛。 |
+| 2026-08-31 | 完成 M4 导航状态与本地持久化切片：新增纯 reducer 和 fail-soft localStorage adapter，统一 Tree/Flat、排序、搜索生命周期、归档与展开 action；刷新恢复偏好，active Workspace 自动展开，Workspace 生命周期清理 stale key。 | 第 8 节 M4；第 11 节 D/E/I；第 12 节 P1；M4 实施记录 | 主 agent 复核后建立 M4 checkpoint；下一步进入 M5 折叠搜索和键盘生命周期。 |
 
 #### M3 实施记录（2026-08-31）
 
@@ -666,6 +667,34 @@ pnpm --filter @code-review-agent/web build:browser 通过
 - title/aria 是按需详情的第一步，hover card、拖拽插入标记和完整 keyboard treeitem 语义仍需后续可访问性/e2e 门禁验证。
 
 **M3 回滚边界**：恢复 `index.html` 原有 Workspace/Session row DOM 装配、移除 `browser.ts` 的四个 row bridge 字段，以及删除 `sidebar/workspace-row.ts`、`sidebar/session-row.ts` 和对应测试即可回滚。若只需暂时关闭信息减负，可让 `createSidebar*Row()` adapter 回退到旧 renderer；不得以 M3 回滚为由删除 Workspace reorder API、修改 Session/Workspace contract、EventStore 或归档事实。
+
+#### M4 实施记录（2026-08-31）
+
+本轮完成“导航状态与本地持久化”最小可审查切片。实现模仿 DSH `ui-workspace/src/client/stores.ts` 的浏览状态隔离，以及 `WorkspaceBrowser.tsx` 中当前 Session 所属 group 自动展开的行为；没有复制 DSH 类型、代码、品牌或引入第三方依赖。
+
+- `apps/web/src/sidebar/sidebar-navigation-state.ts`：新增纯 `SidebarNavigationState` reducer，覆盖 `tree/flat`、`recent/name/path`、搜索输入、归档过滤、Workspace 展开和五条 Session 窗口展开；展开状态保留用户显式的 `false`，当前 Session 所属 group 只在没有显式选择时自动展开；`retain-workspace-keys`/`remove-workspace-key` 清理生命周期失效 key。reducer 不读写 DOM、API、EventStore。
+- 同一文件提供 Web-only `createSidebarNavigationPersistence()` localStorage adapter。默认持久化视图、排序、归档和展开状态，`searchQuery` 仅保留当前页面生命周期；可选 `persistSearchQuery` 只为后续产品决策预留。读取、JSON 解析、写入、清除和 localStorage 能力/配额异常均 fail-soft，损坏值按白名单归一化。
+- `apps/web/src/browser.ts`：typed bridge 暴露 reducer、state factory、持久化 adapter 和序列化 helper；公共 bridge 只包含本仓库 Web presentation 类型，不暴露 DSH 内部类型。
+- `apps/web/index.html:832, 900-969, 1182-1199, 2636-2725, 2932-2935`：大 `state` 保留兼容字段但唯一来源改为 `sidebarNavigationState`；初始化从 localStorage 恢复控件；Workspace/Session 展开、归档、Tree/Flat、排序和搜索事件统一 dispatch action；刷新时按 Workspace catalog 清理失效 key，当前 Session group 自动展开。
+- 测试覆盖 reducer 不变性、视图/排序/归档/搜索、Workspace/Session 展开与 stale key 清理、localStorage 恢复、搜索不持久化、未知值归一化、损坏 JSON 和存储异常 fail-soft；`sidebar-shell.test.ts` 增加 index 接入静态契约。
+
+**M4 验收结果**
+
+```text
+pnpm --filter @code-review-agent/web build       通过
+pnpm --filter @code-review-agent/web build:browser 通过
+pnpm --filter @code-review-agent/web test        41 个测试文件 / 171 个测试通过
+git diff --check                                 通过
+```
+
+**M4 未覆盖项**
+
+- `WorkspaceBrowser` 完整 DOM 文件拆分、稳定 key/节点复用和 Tree/Flat/Search 共用 renderer 仍留待 M7/P2；本轮只把导航状态边界接入现有 `showSessionsTree()`。
+- 搜索仍是本地元数据匹配；Host 内容搜索、防抖/取消、结果分页和 API contract 需要独立 ADR 与后续 M5 切片。
+- 当前 Session 所属 Workspace 在列表投影可见时自动展开；若当前 Session 属于已归档/删除 Workspace，遵循 catalog 投影隐藏，不由浏览器缓存重新创建导航项。
+- localStorage 只提供单浏览器/单 origin 偏好，不承担跨设备同步、用户账户迁移或 EventStore 回放。
+
+**M4 回滚边界**：关闭 typed bridge 的 `sidebarNavigationPersistence` 或让其返回默认 state，即可忽略本地偏好并继续使用兼容字段；回滚 `index.html` 的 dispatch 接入并移除 `browser.ts` 的 M4 bridge 字段即可恢复 M3 renderer。删除 `sidebar-navigation-state.ts` 及测试不会影响 Session/Workspace API、EventStore、归档事实或服务器数据；不得以 M4 回滚为由清理服务器 Session 或 Workspace。
 
 ## 15. 防漂移检查清单（每个后续 PR 必填）
 

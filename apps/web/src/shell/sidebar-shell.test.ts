@@ -49,4 +49,18 @@ describe("sidebar shell contract", () => {
     expect(indexHtml).toContain("Move workspace up");
     expect(indexHtml).toContain("Move workspace down");
   });
+
+  it("keeps navigation preferences in the Web-only reducer and persistence adapter", () => {
+    expect(indexHtml).toContain("createSidebarNavigationPersistence");
+    expect(indexHtml).toContain("let sidebarNavigationState");
+    expect(indexHtml).toContain("const dispatchSidebarNavigation = (action, options = {}) =>");
+    expect(indexHtml).toContain("type: 'set-show-archived'");
+    expect(indexHtml).toContain("type: 'set-search-query'");
+    expect(indexHtml).toContain("type: 'set-view-mode'");
+    expect(indexHtml).toContain("type: 'set-sort'");
+    expect(indexHtml).toContain("type: 'retain-workspace-keys'");
+    expect(indexHtml).toContain("type: 'remove-workspace-key'");
+    expect(indexHtml).toContain("sidebarNavigationPersistence?.save(next)");
+    expect(indexHtml).toContain("navigation.activeWorkspaceKey");
+  });
 });

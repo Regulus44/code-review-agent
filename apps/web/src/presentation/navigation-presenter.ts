@@ -1,4 +1,5 @@
 import type { SessionId, SessionSummary, WorkspaceSummary } from "@code-review-agent/contracts";
+import type { SidebarNavigationState as SidebarNavigationStateContract } from "../sidebar/sidebar-navigation-state.js";
 
 export interface NavigationSession extends SessionSummary {
   readonly children: readonly NavigationSession[];
@@ -36,21 +37,12 @@ export type NavigationSort = NavigationRenderIntent["sort"];
 /**
  * Web-only sidebar browsing preferences.
  *
- * This is deliberately kept next to the presenter contract instead of in
- * packages/contracts: it is a view preference, not an EventStore fact or an
- * API/Workspace contract. `selectedSessionId` is intentionally absent here;
- * selection is sourced from SessionStore/browser state and is not persisted as
- * a sidebar preference. `activeWorkspaceKey` is likewise a derived presenter
- * value, never an independently stored fact. M4 may move this type to a
- * dedicated sidebar state module without changing these ownership rules.
+ * M4 moved the full contract to sidebar-navigation-state.ts. The alias stays
+ * here for source compatibility with M0 callers. `selectedSessionId` remains
+ * sourced from SessionStore/browser state and is not persisted as a sidebar
+ * preference; `activeWorkspaceKey` remains a derived presenter value.
  */
-export interface SidebarNavigationState {
-  readonly viewMode: NavigationViewMode;
-  readonly sort: NavigationSort;
-  readonly searchQuery: string;
-  readonly showArchived: boolean;
-  readonly expandedWorkspaces: Readonly<Record<string, boolean>>;
-}
+export type SidebarNavigationState = SidebarNavigationStateContract;
 
 export interface NavigationOptions {
   readonly showArchived?: boolean;

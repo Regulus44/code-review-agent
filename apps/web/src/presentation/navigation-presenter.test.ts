@@ -68,6 +68,7 @@ describe("buildNavigationModel", () => {
       searchQuery: "",
       showArchived: false,
       expandedWorkspaces: { "d:/repo": true },
+      expandedSessionGroups: { "d:/repo": false },
     } satisfies SidebarNavigationState;
     expect(state.expandedWorkspaces["d:/repo"]).toBe(true);
   });

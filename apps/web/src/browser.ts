@@ -37,6 +37,14 @@ import { applyShellFrame, mountShellFrame } from "./shell/app-frame.js";
 import { COLLAPSED_SESSION_LIMIT, presentSidebarNavigation, windowSessionGroup } from "./sidebar/sidebar-presenter.js";
 import { createSessionRow, presentSessionRow } from "./sidebar/session-row.js";
 import { createWorkspaceRow, presentWorkspaceRow } from "./sidebar/workspace-row.js";
+import {
+  createSidebarNavigationPersistence,
+  createSidebarNavigationState,
+  reduceSidebarNavigation,
+  serializeSidebarNavigationState,
+  sidebarNavigationActions,
+  SIDEBAR_NAVIGATION_STORAGE_KEY,
+} from "./sidebar/sidebar-navigation-state.js";
 
 export interface BrowserWebRuntime {
   readonly api: WebApiClient;
@@ -112,6 +120,13 @@ export interface BrowserWebRuntime {
   readonly presentSessionRow: typeof presentSessionRow;
   readonly createWorkspaceRow: typeof createWorkspaceRow;
   readonly presentWorkspaceRow: typeof presentWorkspaceRow;
+  /** Browser-local navigation preferences; never an EventStore fact source. */
+  readonly createSidebarNavigationState: typeof createSidebarNavigationState;
+  readonly reduceSidebarNavigation: typeof reduceSidebarNavigation;
+  readonly createSidebarNavigationPersistence: typeof createSidebarNavigationPersistence;
+  readonly serializeSidebarNavigationState: typeof serializeSidebarNavigationState;
+  readonly sidebarNavigationActions: typeof sidebarNavigationActions;
+  readonly sidebarNavigationStorageKey: typeof SIDEBAR_NAVIGATION_STORAGE_KEY;
 }
 
 const api = new WebApiClient();
@@ -186,6 +201,12 @@ const runtime: BrowserWebRuntime = {
   presentSessionRow,
   createWorkspaceRow,
   presentWorkspaceRow,
+  createSidebarNavigationState,
+  reduceSidebarNavigation,
+  createSidebarNavigationPersistence,
+  serializeSidebarNavigationState,
+  sidebarNavigationActions,
+  sidebarNavigationStorageKey: SIDEBAR_NAVIGATION_STORAGE_KEY,
 };
 
 Object.assign(window, { CodeReviewAgentWeb: runtime });
