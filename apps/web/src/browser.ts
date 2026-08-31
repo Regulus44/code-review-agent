@@ -37,6 +37,7 @@ import { applyShellFrame, mountShellFrame } from "./shell/app-frame.js";
 import { COLLAPSED_SESSION_LIMIT, presentSidebarNavigation, windowSessionGroup } from "./sidebar/sidebar-presenter.js";
 import { createSessionRow, presentSessionRow } from "./sidebar/session-row.js";
 import { createWorkspaceRow, presentWorkspaceRow } from "./sidebar/workspace-row.js";
+import { presentSidebarAttention } from "./sidebar/sidebar-attention.js";
 import {
   createSidebarNavigationPersistence,
   createSidebarNavigationState,
@@ -120,6 +121,7 @@ export interface BrowserWebRuntime {
   readonly presentSessionRow: typeof presentSessionRow;
   readonly createWorkspaceRow: typeof createWorkspaceRow;
   readonly presentWorkspaceRow: typeof presentWorkspaceRow;
+  readonly presentSidebarAttention: typeof presentSidebarAttention;
   /** Browser-local navigation preferences; never an EventStore fact source. */
   readonly createSidebarNavigationState: typeof createSidebarNavigationState;
   readonly reduceSidebarNavigation: typeof reduceSidebarNavigation;
@@ -201,6 +203,7 @@ const runtime: BrowserWebRuntime = {
   presentSessionRow,
   createWorkspaceRow,
   presentWorkspaceRow,
+  presentSidebarAttention,
   createSidebarNavigationState,
   reduceSidebarNavigation,
   createSidebarNavigationPersistence,

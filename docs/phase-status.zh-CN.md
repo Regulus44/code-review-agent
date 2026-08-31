@@ -87,6 +87,13 @@
 - [ADR：Phase 8 Web 与 DSH 前端行为对齐](adr/phase-8-web-dsh-alignment.zh-CN.md) 已接受，记录行为参考、REST/SSE 边界、typed Web 拆分、契约变更和回滚规则；
 - Phase 8 曾于 2026-08-24 暂存归档在 checkpoint `c1aae6c`，随后持续恢复推进。8.0 的 aggregate Web parity contract、六个 600/900/1024 Shell/Settings 视觉基线、真实 in-app browser visual/accessibility evidence 和 9 个 DSH 对齐行为场景已在 `2026-08-25` 独立 checkpoint 中闭合；8.4 已补齐长任务与并发 Web recovery matrix，并新增真实 graphical browser recovery 第一批证据，8.5 已建立产品化边界、tenant-scoped Workspace/MCP/provider routing、credential reference lifecycle、JWT/principal catalog、external secret adapter 和 SQLite backup/restore/migration rollback 第一切片。当前剩余的是 8.3/8.5 的目标部署环境 OS/IdP/secret-manager/upgrade smoke，不再包含 8.0 browser parity 缺口。
 
+## Phase 8.0 M6：Integrations/Tasks/Details 收敛（completed，2026-08-31）
+
+- 左栏移除常驻 Integrations/Tasks，仅在存在 pending request、running child 或 MCP failure 时显示一个可访问 attention badge；完整状态、操作和错误继续由 Details 的 Requests/Planning/Integrations 分组承载。
+- 新增 `apps/web/src/sidebar/sidebar-attention.ts` 及 typed bridge，补充空态、优先级、ARIA、badge 路由和 sidebar 静态契约测试；不改变 Event/Tool/Task/Permission/Workspace contract。
+- 验证：`pnpm --filter @code-review-agent/web test -- --run src/sidebar/sidebar-attention.test.ts src/shell/sidebar-shell.test.ts`、`pnpm typecheck`、`pnpm --filter @code-review-agent/web build:browser`、`git diff --check` 均通过；详细记录见 [`phase8-m6-sidebar-details-2026-08-31.zh-CN.md`](development-log/phase8-m6-sidebar-details-2026-08-31.zh-CN.md)。
+- 后续入口：M7 补充真实 API/SSE/replay browser、键盘和视觉矩阵；旧 detached compatibility sink 随完整 WorkspaceBrowser 拆分删除。
+
 ## Phase 8.0 Web parity（completed，2026-08-25）
 
 - 8.0.0–8.0.6 的 typed Web projection、Shell/Workspace/Conversation/Details/Settings、六个 600/900/1024 × 800 JPEG 基线、ARIA/focus/recovery 证据均已通过；Plugins 继续明确显示为 `deferred`。

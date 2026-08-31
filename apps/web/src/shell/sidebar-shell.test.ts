@@ -75,4 +75,23 @@ describe("sidebar shell contract", () => {
     expect(indexHtml).toContain("else if (sidebarSearchExpanded) clearSidebarSearch()");
     expect(indexHtml).toContain("type: 'clear-search'");
   });
+
+  it("keeps low-frequency integrations and tasks out of the sidebar", () => {
+    expect(sidebarHtml).not.toContain("class=\"sidebar-secondary\"");
+    expect(sidebarHtml).not.toContain('id="mcp-list"');
+    expect(sidebarHtml).not.toContain('id="subagent-list"');
+    expect(sidebarHtml).toContain('id="sidebar-attention"');
+    expect(sidebarHtml).toContain('id="sidebar-attention-button"');
+    expect(sidebarHtml).toContain('aria-controls="details-panel"');
+  });
+
+  it("projects attention into one accessible badge and routes it to Details", () => {
+    expect(indexHtml).toContain("presentSidebarAttention");
+    expect(indexHtml).toContain("const renderSidebarAttention = (snapshot) =>");
+    expect(indexHtml).toContain("sidebarAttentionButton.dataset.group = intent.targetGroup || ''");
+    expect(indexHtml).toContain("const openDetailsGroup = (groupId) =>");
+    expect(indexHtml).toContain("if (state.layout.details !== 'open') dispatchShellLayout({ type: 'toggle-details' })");
+    expect(indexHtml).toContain("sidebarAttentionButton?.addEventListener('click'");
+    expect(indexHtml).toContain("details-group-${groupId}");
+  });
 });

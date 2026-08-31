@@ -722,6 +722,33 @@ git diff --check                                                                
 
 **M5 P0 回滚边界**：恢复 `index.html` 原有常驻 input toolbar，并移除 `setSidebarSearchExpanded`、clear/Escape 监听及对应静态测试即可回退交互；恢复 `matchesTree()`/`matchesSession()` 的旧调用签名即可回退字段策略。回滚只影响 Web projection 与 DOM，不删除或修改 EventStore、Session/Workspace API、归档数据或公共 contract。
 
+#### M6 实施记录（2026-08-31）
+
+本轮完成 Integrations/Tasks/Details 收敛的最小可回滚切片，模仿 DSH `SidebarRoot.tsx` 的 footer/slot 分层与 `WorkspaceBrowser` 不承载低频状态的职责边界。没有复制 DSH 代码、类型、品牌或文案，也没有修改 EventStore、公共 contract、MCP/Task API 或权限语义。
+
+- `apps/web/index.html`：移除左栏常驻 Integrations/Tasks `<details>` 和可见 `mcp-list`/`subagent-list`；在固定 footer 前增加单一 `sidebar-attention` indicator。无待处理请求、运行中 child 或 MCP failure 时保持 `hidden`；有事项时只显示带 `aria-label` 的按钮和计数 badge。
+- `apps/web/index.html`：新增 `renderSidebarAttention(snapshot)`，从 SessionStore conversation projection、fallback 事件日志、Subagent catalog 和 MCP server 状态派生 attention；请求优先，其次 running child，再其次 MCP failure。点击按钮通过 `openDetailsGroup()` 打开 Details 面板并聚焦对应 `details-group-requests/planning/integrations` 分组。
+- `apps/web/src/sidebar/sidebar-attention.ts`：新增纯 Web presentation 投影，统一计数归一化、优先级、可访问标签和 Details target group；`apps/web/src/browser.ts` 暴露 typed bridge，不把 DSH 内部类型泄露到页面。
+- `apps/web/src/sidebar/sidebar-attention.test.ts`：覆盖空态、pending interaction/permission、running child、MCP failure、优先级和异常计数；`apps/web/src/shell/sidebar-shell.test.ts` 增加常驻区移除、badge/ARIA/click/Details 分组静态契约。
+- `renderTaskPanel()`/`renderMcpDetailsPanel()` 继续在 Details 中承载完整状态、操作和错误；历史 `renderSubagents()`/`renderMcp()` 刷新入口保留为 detached compatibility sink，避免低频数据重新进入左栏。
+
+**M6 验收结果**
+
+```text
+pnpm --filter @code-review-agent/web test -- --run src/sidebar/sidebar-attention.test.ts src/shell/sidebar-shell.test.ts   14 个测试通过
+pnpm typecheck                                                                                                      通过
+pnpm --filter @code-review-agent/web build:browser                                                                  通过
+git diff --check                                                                                                    通过
+```
+
+**M6 未覆盖项**
+
+- 尚未新增真实 API/SSE browser fixture 来逐状态截图验证 badge；M7 负责真实浏览器、键盘和视觉矩阵。
+- 单一 indicator 在同一时刻选择 Requests > Planning > Integrations 的最高优先级目标；多个低频事项的完整数量和切换仍在 Details 分组查看。
+- `mcp-list`/`subagent-list` 的 detached compatibility sink 仍保留在渲染代码中，后续完成完整 renderer 拆分时可以删除；它们不再挂载到可见 sidebar DOM。
+
+**M6 回滚边界**：恢复左栏两个 `sidebar-secondary` 区块并移除 `sidebar-attention` DOM/renderer/bridge/test，即可恢复 M5 的左栏可见结构；不需要回滚 Details renderer、SessionStore、MCP/Task 事实或任何 Event/Tool/Task/Permission/Workspace contract。
+
 ## 15. 防漂移检查清单（每个后续 PR 必填）
 
 - [ ] 改动属于 M0–M7 中已登记的模块，或先更新本文件；
