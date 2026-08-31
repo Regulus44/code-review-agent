@@ -139,6 +139,8 @@
       .session-status-dot.running { background: var(--green); box-shadow: 0 0 0 3px rgba(35,155,87,.12); }
       .session-status-dot.failed { background: var(--red); }
       .session-status-dot.queued { background: var(--amber); }
+      .session-status-dot.completed { background: var(--text-tertiary); }
+      .session-status-dot.stopped { background: var(--amber); }
       .tree-empty { padding: 12px 9px; border: 1px dashed var(--border-strong); border-radius: 9px; color: var(--text-tertiary); font-size: 11px; line-height: 1.5; }
       .session-menu { position: fixed; z-index: 30; width: 164px; padding: 5px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); }
       .session-menu[hidden] { display: none; }
@@ -2497,9 +2499,20 @@
         const openWorkspaceMenu = (workspace, anchor) => {
           sessionMenu.innerHTML = '';
           const addAction = (label, icon, handler, danger = false) => { const button = document.createElement('button'); button.type = 'button'; button.className = danger ? 'danger' : ''; button.innerHTML = `<span>${icon}</span><span>${label}</span>`; button.onclick = async () => { button.disabled = true; try { await handler(); } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); button.disabled = false; } }; sessionMenu.append(button); };
-          const label = workspace.label || typedRuntime.workspaceLabel(workspace.root);
+          const label = workspace.label || (typedRuntime?.workspaceLabel ? typedRuntime.workspaceLabel(workspace.root) : workspaceLabel(workspace.root));
           addAction('New session', '＋', () => { closeSessionMenu(); openWorkspacePicker(); workspaceInput.value = workspace.root; });
           addAction('Rename workspace', '✎', () => { closeSessionMenu(); openRenameWorkspace(workspace); });
+          const order = (state.workspaces?.workspaces || []).map((entry) => entry.key || entry.root);
+          const workspaceKeyValue = typedRuntime?.workspaceKey ? typedRuntime.workspaceKey(workspace.key || workspace.root) : workspaceKey(workspace.key || workspace.root);
+          const position = order.findIndex((entry) => (typedRuntime?.workspaceKey ? typedRuntime.workspaceKey(entry) : workspaceKey(entry)) === workspaceKeyValue);
+          const reorder = async (delta, direction) => {
+            if (!typedRuntime?.api?.reorderWorkspaces || position < 0 || position + delta < 0 || position + delta >= order.length) return;
+            const next = [...order]; [next[position], next[position + delta]] = [next[position + delta], next[position]];
+            state.workspaces = await typedRuntime.api.reorderWorkspaces(next, commandKey());
+            closeSessionMenu(); showSessionsTree({ sessions: state.sidebarSessions }); setStatus(`Workspace order · moved ${direction}`, true);
+          };
+          if (typedRuntime?.api?.reorderWorkspaces && position > 0) addAction('Move workspace up', '↑', () => reorder(-1, 'up'));
+          if (typedRuntime?.api?.reorderWorkspaces && position >= 0 && position < order.length - 1) addAction('Move workspace down', '↓', () => reorder(1, 'down'));
           addAction(workspace.archived ? 'Restore workspace' : 'Archive workspace', workspace.archived ? '↩' : '▱', () => performWorkspaceArchive(workspace));
           addAction('Delete workspace', '⌫', () => deleteWorkspace(workspace), true);
           const rect = anchor.getBoundingClientRect(); sessionMenu.style.left = `${Math.max(8, Math.min(window.innerWidth - 176, rect.right - 164))}px`; sessionMenu.style.top = `${Math.min(window.innerHeight - 150, rect.bottom + 4)}px`; dispatchOverlay({ type: 'open', overlay: 'session-menu' });
@@ -2519,6 +2532,48 @@
           if (expanded || sessions.length <= limit) return { visible: sessions, hiddenCount: 0 };
           return { visible: sessions.slice(0, limit), hiddenCount: sessions.length - limit };
         };
+        // M3 row adapter: both typed and legacy navigation paths use the same
+        // compact label/status/details semantics. The local branch is kept
+        // deliberately small so an unavailable typed bridge cannot restore the
+        // old metadata-heavy rows.
+        const sidebarSessionContext = (node) => {
+          const selected = state.session?.id === node.id;
+          const projection = selected ? state.session : null;
+          return {
+            selected,
+            pendingInteraction: Boolean(projection?.interactions?.some((item) => item.status === 'pending')),
+            pendingPermission: Boolean(projection?.permissions?.some((item) => item.status === 'pending')),
+            runningChild: Boolean(selected && state.subagents.some((entry) => entry.live || entry.status === 'running' || entry.task?.status === 'running')),
+          };
+        };
+        const createSidebarSessionRow = (node) => {
+          const context = sidebarSessionContext(node);
+          const onSelect = () => openSession(node.id);
+          const onMenu = (_session, anchor) => openSessionMenu(node, anchor);
+          if (typedRuntime?.createSessionRow) return typedRuntime.createSessionRow({ session: node, ...context }, { onSelect, onMenu });
+          const row = document.createElement('div'); row.className = 'tree-session'; row.dataset.sessionId = String(node.id);
+          const button = document.createElement('button'); button.type = 'button'; button.className = `session${context.selected ? ' active' : ''}`;
+          const label = sessionLabel(node); const relative = sessionTime(node.updatedAt) || 'new';
+          const status = context.pendingInteraction || context.pendingPermission || node.status === 'queued' ? 'queued' : node.status === 'running' || context.runningChild ? 'running' : node.status === 'failed' ? 'failed' : node.status === 'stopped' || node.status === 'interrupted' ? 'stopped' : 'completed';
+          const statusLabel = status === 'queued' ? 'Needs attention' : status[0].toUpperCase() + status.slice(1);
+          const details = [node.workspaceRoot || '.', node.permissionPreset, node.childMode, node.childProvider].filter(Boolean).join(' · ');
+          button.title = `${label} · ${details}`; button.setAttribute('aria-label', `Session status: ${statusLabel} · ${label} · Updated ${relative}`); if (context.selected) button.setAttribute('aria-current', 'true');
+          const dot = document.createElement('span'); dot.className = `session-status-dot ${status}`; dot.setAttribute('aria-hidden', 'true');
+          const copy = document.createElement('span'); copy.className = 'session-copy'; const name = document.createElement('span'); name.className = 'session-name'; name.textContent = label; const meta = document.createElement('span'); meta.className = 'session-path'; meta.textContent = relative; const detail = document.createElement('span'); detail.className = 'session-row-detail sr-only'; detail.textContent = details; copy.append(name, meta, detail); button.append(dot, copy); button.onclick = onSelect; row.append(button);
+          const actions = document.createElement('span'); actions.className = 'tree-session-actions'; const menu = document.createElement('button'); menu.type = 'button'; menu.className = 'tree-action'; menu.textContent = '⋯'; menu.title = 'Session actions'; menu.setAttribute('aria-label', `Session actions · ${label}`); menu.onclick = (event) => { event.stopPropagation(); onMenu(node, menu); }; actions.append(menu); row.append(actions); return row;
+        };
+        const createSidebarWorkspaceRow = (group, expanded, active, onToggle) => {
+          const sessionCount = group.sessions.reduce((total, node) => total + 1 + (node.children?.length || 0), 0);
+          const workspace = workspaceForRoot(group.root) || { key: group.key, root: group.root, label: group.label };
+          const onMenu = (anchor) => {
+            if (typedRuntime?.createWorkspaceRow || typedRuntime?.api?.archiveWorkspace) return openWorkspaceMenu(workspace, anchor);
+            openWorkspacePicker(); workspaceInput.value = group.root;
+          };
+          if (typedRuntime?.createWorkspaceRow) return typedRuntime.createWorkspaceRow({ group: { key: group.key, root: group.root, label: group.label }, expanded, active, sessionCount }, { onToggle, onMenu });
+          const header = document.createElement('div'); header.className = `workspace-group-header${active ? ' active' : ''}`; header.setAttribute('role', 'button'); header.tabIndex = 0; header.setAttribute('aria-expanded', String(expanded)); const label = group.label || workspaceLabel(group.root); header.setAttribute('aria-label', `Workspace ${label} · ${group.root} · ${sessionCount} session${sessionCount === 1 ? '' : 's'}`); header.title = `${group.root} · ${sessionCount} session${sessionCount === 1 ? '' : 's'}`;
+          const caret = document.createElement('span'); caret.className = 'workspace-caret'; caret.textContent = '⌄'; caret.setAttribute('aria-hidden', 'true'); const folder = document.createElement('span'); folder.className = 'workspace-folder'; folder.textContent = '⌂'; folder.setAttribute('aria-hidden', 'true'); const copy = document.createElement('span'); copy.className = 'workspace-group-copy'; const name = document.createElement('span'); name.className = 'workspace-group-name'; name.textContent = label; copy.append(name); header.append(caret, folder, copy);
+          const menu = document.createElement('button'); menu.type = 'button'; menu.className = 'workspace-menu-trigger'; menu.textContent = '⋯'; menu.title = `Workspace actions · ${label}`; menu.setAttribute('aria-label', `Workspace actions · ${label}`); menu.onclick = (event) => { event.stopPropagation(); onMenu(menu); }; header.append(menu); header.onclick = onToggle; header.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onToggle(event); } }; return header;
+        };
         const showSessionsTree = (payload) => {
           const sessions = Array.isArray(payload) ? payload : payload.sessions || [];
           const navigation = typedRuntime?.presentSidebarNavigation?.(sessions, { showArchived: state.showArchived, query: state.sessionSearch, selectedSessionId: state.session?.id, viewMode: state.workspaceViewMode, sort: state.workspaceSort, workspaceOrder: state.workspaces?.workspaces?.map((workspace) => workspace.key || workspace.root), workspaceCatalog: state.workspaces?.workspaces });
@@ -2534,33 +2589,16 @@
             const containsActive = (node) => node.id === state.session?.id || node.children.some(containsActive);
             if (navigation.activeWorkspaceKey) state.expandedWorkspaces.add(navigation.activeWorkspaceKey);
             const appendNavigationNode = (parent, node) => {
-              const row = document.createElement('div'); row.className = 'tree-session';
-              const button = document.createElement('button'); button.type = 'button'; button.className = `session ${state.session?.id === node.id ? 'active' : ''}`; button.title = node.workspaceRoot || '.';
-              const statusDot = document.createElement('span'); statusDot.className = `session-status-dot ${node.status || ''}`;
-              const copy = document.createElement('span'); copy.className = 'session-copy';
-              const name = document.createElement('span'); name.className = 'session-name'; name.textContent = typedRuntime.sessionLabel(node);
-              const meta = document.createElement('span'); meta.className = 'session-path'; meta.textContent = `${typedRuntime.sessionRelativeTime(node.updatedAt) || 'new'} · ${node.permissionPreset || 'ask-on-write'}${node.childMode ? ` · ${node.childMode}` : ''}`;
-              copy.append(name, meta); button.append(statusDot, copy); button.onclick = () => openSession(node.id);
-              const actions = document.createElement('span'); actions.className = 'tree-session-actions';
-              const menuButton = document.createElement('button'); menuButton.type = 'button'; menuButton.className = 'tree-action'; menuButton.textContent = '⋯'; menuButton.title = 'Session actions'; menuButton.onclick = (event) => { event.stopPropagation(); openSessionMenu(node, menuButton); };
-              actions.append(menuButton); row.append(button, actions); parent.append(row);
+              const row = createSidebarSessionRow(node);
+              parent.append(row);
               if (node.children.length) { const nested = document.createElement('div'); nested.className = 'workspace-children'; for (const child of node.children) appendNavigationNode(nested, child); parent.append(nested); }
             };
             for (const group of navigation.groups) {
               if (group.sessions.some(containsActive)) { state.expandedWorkspaces.add(group.key); state.expandedSessionGroups.add(group.key); }
-              const section = document.createElement('section'); section.className = `workspace-group ${state.expandedWorkspaces.has(group.key) ? '' : 'collapsed'}`;
-              const header = document.createElement('div'); header.className = 'workspace-group-header'; header.setAttribute('role', 'button'); header.tabIndex = 0;
-              const caret = document.createElement('span'); caret.className = 'workspace-caret'; caret.textContent = '⌄';
-              const folder = document.createElement('span'); folder.className = 'workspace-folder'; folder.textContent = '⌂';
-              const copy = document.createElement('span'); copy.className = 'workspace-group-copy';
-              const groupName = document.createElement('span'); groupName.className = 'workspace-group-name'; groupName.textContent = group.label || typedRuntime.workspaceLabel(group.root);
-              const groupPath = document.createElement('span'); groupPath.className = 'workspace-group-path'; groupPath.textContent = group.root;
-              copy.append(groupName, groupPath);
-              const count = document.createElement('span'); count.className = 'workspace-count'; count.textContent = String(group.sessions.reduce((total, node) => total + 1 + node.children.length, 0));
-              const workspaceMenu = document.createElement('button'); workspaceMenu.type = 'button'; workspaceMenu.className = 'workspace-menu-trigger'; workspaceMenu.textContent = '⋯'; workspaceMenu.title = 'Workspace actions'; workspaceMenu.setAttribute('aria-label', `Workspace actions · ${group.label || typedRuntime.workspaceLabel(group.root)}`); workspaceMenu.onclick = (event) => { event.stopPropagation(); const workspace = workspaceForRoot(group.root) || { key: group.key, root: group.root }; openWorkspaceMenu(workspace, workspaceMenu); };
-              header.append(caret, folder, copy, count, workspaceMenu); appendWorkspaceOrderControls(header, group.root);
+              const expanded = state.expandedWorkspaces.has(group.key);
+              const section = document.createElement('section'); section.className = `workspace-group ${expanded ? '' : 'collapsed'}`;
               const toggleGroup = () => { if (state.expandedWorkspaces.has(group.key)) state.expandedWorkspaces.delete(group.key); else state.expandedWorkspaces.add(group.key); showSessionsTree({ sessions: state.sidebarSessions }); };
-              header.onclick = toggleGroup; header.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleGroup(); } };
+              const header = createSidebarWorkspaceRow(group, expanded, navigation.activeWorkspaceKey === group.key, toggleGroup);
               section.append(header); const children = document.createElement('div'); children.className = 'workspace-sessions';
               const expandedSessions = state.expandedSessionGroups.has(group.key);
               const sessionWindow = windowSidebarSessions(group.sessions, expandedSessions);
@@ -2601,29 +2639,16 @@
           });
           if (!groups.length) { const empty = document.createElement('div'); empty.className = 'tree-empty'; empty.textContent = query ? 'No sessions match this search.' : state.showArchived ? 'No archived sessions.' : 'No active sessions. Create a session to start coding.'; list.append(empty); return; }
           for (const group of groups) {
-            const section = document.createElement('section'); section.className = `workspace-group ${state.expandedWorkspaces.has(group.key) ? '' : 'collapsed'}`;
-            const header = document.createElement('div'); header.className = 'workspace-group-header'; header.setAttribute('role', 'button'); header.tabIndex = 0;
-            const caret = document.createElement('span'); caret.className = 'workspace-caret'; caret.textContent = '⌄';
-            const folder = document.createElement('span'); folder.className = 'workspace-folder'; folder.textContent = '⌂';
-            const copy = document.createElement('span'); copy.className = 'workspace-group-copy'; copy.innerHTML = `<span class="workspace-group-name">${esc(workspaceLabel(group.root))}</span><span class="workspace-group-path">${esc(group.root)}</span>`;
-            const count = document.createElement('span'); count.className = 'workspace-count'; count.textContent = String(group.sessions.length);
-            const workspaceMenu = document.createElement('button'); workspaceMenu.type = 'button'; workspaceMenu.className = 'workspace-menu-trigger'; workspaceMenu.textContent = '⋯'; workspaceMenu.title = 'New session in this workspace'; workspaceMenu.onclick = (event) => { event.stopPropagation(); openWorkspacePicker(); workspaceInput.value = group.root; };
-            header.append(caret, folder, copy, count, workspaceMenu); const toggleGroup = () => { if (state.expandedWorkspaces.has(group.key)) state.expandedWorkspaces.delete(group.key); else state.expandedWorkspaces.add(group.key); showSessionsTree({ sessions: state.sidebarSessions }); }; header.onclick = toggleGroup; header.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleGroup(); } };
+            const expanded = state.expandedWorkspaces.has(group.key);
+            const section = document.createElement('section'); section.className = `workspace-group ${expanded ? '' : 'collapsed'}`;
+            const toggleGroup = () => { if (state.expandedWorkspaces.has(group.key)) state.expandedWorkspaces.delete(group.key); else state.expandedWorkspaces.add(group.key); showSessionsTree({ sessions: state.sidebarSessions }); };
+            const header = createSidebarWorkspaceRow(group, expanded, state.session?.workspaceRoot && workspaceKey(state.session.workspaceRoot) === group.key, toggleGroup);
             section.append(header);
             const children = document.createElement('div'); children.className = 'workspace-sessions';
             const expandedSessions = state.expandedSessionGroups.has(group.key);
             const orderedSessions = [...group.sessions].sort((a, b) => (Date.parse(b.updatedAt || '') || 0) - (Date.parse(a.updatedAt || '') || 0));
             const sessionWindow = windowSidebarSessions(orderedSessions, expandedSessions);
-            for (const session of sessionWindow.visible) {
-              const row = document.createElement('div'); row.className = 'tree-session';
-              const button = document.createElement('button'); button.type = 'button'; button.className = `session ${state.session?.id === session.id ? 'active' : ''}`; button.title = session.workspaceRoot || '.';
-              const statusDot = document.createElement('span'); statusDot.className = `session-status-dot ${session.status || ''}`;
-              const text = document.createElement('span'); text.className = 'session-copy'; text.innerHTML = `<span class="session-name">${esc(sessionLabel(session))}</span><span class="session-path">${esc(sessionTime(session.updatedAt) || 'new')} · ${esc(session.permissionPreset || 'ask-on-write')}</span>`;
-              button.append(statusDot, text); button.onclick = () => openSession(session.id);
-              const actions = document.createElement('span'); actions.className = 'tree-session-actions';
-              const menuButton = document.createElement('button'); menuButton.type = 'button'; menuButton.className = 'tree-action'; menuButton.textContent = '⋯'; menuButton.title = 'Session actions'; menuButton.onclick = (event) => { event.stopPropagation(); openSessionMenu(session, menuButton); };
-              actions.append(menuButton); row.append(button, actions); children.append(row);
-            }
+            for (const session of sessionWindow.visible) children.append(createSidebarSessionRow(session));
             if (sessionWindow.hiddenCount > 0 || (expandedSessions && orderedSessions.length > 5)) {
               const overflow = document.createElement('button'); overflow.type = 'button'; overflow.className = 'workspace-show-more'; overflow.dataset.navigationKey = `workspace:${group.key}:overflow`;
               overflow.textContent = sessionWindow.hiddenCount > 0 ? `Show ${sessionWindow.hiddenCount} more sessions` : 'Show fewer sessions';

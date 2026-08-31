@@ -633,6 +633,39 @@ WEB_SESSION_CONTENT_SEARCH   // 可选：Host 内容搜索，默认关闭
 | 2026-08-31 | 完成 M0 事实与契约冻结：在 `navigation-presenter.ts` 明确 Web-only `SidebarNavigationState`、`selectedSessionId` 输入/回显和 `activeWorkspaceKey` 派生边界；补充 API、SessionStore、typed bridge 注释与 3 组 presenter contract 测试。 | 第 8 节 M0；第 15 节 | 进入 M1/M2 前端结构实施；M4 只能在本冻结之上接 reducer/持久化。 |
 | 2026-08-31 | 完成 M1 Sidebar shell 最小切片：`index.html` 新增 `sidebar-primary` 与 `sidebar-list-scroll` 分区，固定 header/New session/toolbar/footer，独立 Workspace/Session scrollport；新增 `sidebar-shell.test.ts` 并通过 typecheck、Web 全量测试和 diff 检查。 | 第 8 节 M1；第 11–12 节 | 由主 agent 复核后建立 Phase 8 M1 checkpoint；后续进入 M2 浏览器控制层。 |
 | 2026-08-31 | 完成 M2 最小控制层切片：新增 `sidebar-presenter.ts` 统一导航输入归一化、active group 和空态输出；`browser.ts` 暴露 typed bridge；`index.html` typed 分支改用 `presentSidebarNavigation`，fallback DOM 暂保持兼容；新增 4 个 presenter 测试。 | 第 8 节 M2；第 12–13 节 | 由主 agent 复核后建立 M2 checkpoint；下一步再拆 WorkspaceBrowser DOM renderer 和 Tree/Flat/Search 共用行装配。 |
+| 2026-08-31 | 完成 M3 最小 row 信息减负切片：新增 `sidebar/workspace-row.ts`、`sidebar/session-row.ts`，由 `sidebar-presenter.ts` 派生稳定 Session 状态和 aria 文案；typed/fallback 两条 `showSessionsTree()` 路径通过同一 row adapter 接入。Workspace 默认只显示 label，root/count 进入 title/aria/menu；Session 默认只显示状态点、标题和相对时间，permission/childMode/provider 进入 title 与 assistive details；Workspace 上下移动能力移入菜单。 | 第 8 节 M3；第 11 节 F/H；第 12 节 P0/P2 | 主 agent 复核后建立 M3 checkpoint；后续 M4 再处理导航 state reducer/localStorage，M5 再处理搜索输入收敛。 |
+
+#### M3 实施记录（2026-08-31）
+
+本轮交付聚焦“行组件信息减负”，没有引入 React、第三方 UI 依赖，也没有修改 `packages/contracts`、EventStore、API route 或 Session/Workspace 事实模型。实现边界如下：
+
+- `apps/web/src/sidebar/workspace-row.ts`：提供纯 `presentWorkspaceRow()` 和 DOM `createWorkspaceRow()`；Workspace 行只把 label 放在可见 copy 中，完整 root 与聚合 session count 通过 `title`、`aria-label` 和 Workspace menu 继续可发现；active/expanded 由 presenter/浏览器 state 传入，row 不扫描 DOM 推断。
+- `apps/web/src/sidebar/session-row.ts`：提供纯 `presentSessionRow()` 和 DOM `createSessionRow()`；可见信息收敛为状态点、标题、相对时间，root、permission preset、child mode/provider 保留在 title 和屏幕阅读器可访问的 details 节点；menu/selection 仍由调用方回调驱动。
+- `apps/web/src/sidebar/sidebar-presenter.ts`：新增 `presentSessionStatus()`，将 raw `SessionSummary.status` 及可选 Web-only pending interaction/permission/running child 信号映射为 `pending/running/completed/failed/stopped`，并输出稳定英文 aria 文案。`idle` 仅作为已完成展示态，不改变原始 status。
+- `apps/web/src/browser.ts`：typed bridge 暴露 row presenter/DOM factory，供静态 `index.html` 调用；公共 bridge 只暴露本仓库 Web presentation 类型，不暴露 DSH 内部类型。
+- `apps/web/index.html`：typed/fallback 共用 `createSidebarSessionRow()` 与 `createSidebarWorkspaceRow()` 适配器；移除 Workspace 行常态路径、count 和上下箭头，菜单中保留 rename/archive/delete 与 move up/down；Session 复杂 metadata 不再进入常态 meta 行；fallback 在 typed bridge 不可用时继续使用相同的低噪声结构和新建 Workspace 行行为。
+
+**M3 验收结果**
+
+```text
+pnpm --filter @code-review-agent/web build       通过
+pnpm --filter @code-review-agent/web test        40 个测试文件 / 165 个测试通过
+pnpm --filter @code-review-agent/web build:browser 通过
+```
+
+新增/覆盖测试：
+
+- `sidebar-presenter.test.ts`：pending 优先级、running child、idle→completed、failed/interrupted→稳定展示态；
+- `workspace-row.test.ts`：label 与 root/count details 分离、无 label root 回退；
+- `session-row.test.ts`：title/time 轻量摘要、丰富 metadata details、pending permission aria 文案。
+
+**M3 未覆盖项**
+
+- 当前 row factory 仍由单页 `index.html` 编排 section、children 和 overflow；完整 `WorkspaceBrowser` 文件拆分、稳定 key/节点复用及 Tree/Flat/Search 共用 renderer 留待后续 M7/P2 切片。
+- pending interaction/permission/running child 只在选中 Session 且现有 Web projection 可取得时传入；列表中其他 Session 仍依据 `SessionSummary.status` 派生展示态。引入完整 Host-backed pending 索引前不得修改公共 contract。
+- title/aria 是按需详情的第一步，hover card、拖拽插入标记和完整 keyboard treeitem 语义仍需后续可访问性/e2e 门禁验证。
+
+**M3 回滚边界**：恢复 `index.html` 原有 Workspace/Session row DOM 装配、移除 `browser.ts` 的四个 row bridge 字段，以及删除 `sidebar/workspace-row.ts`、`sidebar/session-row.ts` 和对应测试即可回滚。若只需暂时关闭信息减负，可让 `createSidebar*Row()` adapter 回退到旧 renderer；不得以 M3 回滚为由删除 Workspace reorder API、修改 Session/Workspace contract、EventStore 或归档事实。
 
 ## 15. 防漂移检查清单（每个后续 PR 必填）
 

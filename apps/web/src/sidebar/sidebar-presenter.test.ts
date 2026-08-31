@@ -4,6 +4,7 @@ import {
   COLLAPSED_SESSION_LIMIT,
   navigationEmptyMessage,
   presentSidebarNavigation,
+  presentSessionStatus,
   windowSessionGroup,
 } from "./sidebar-presenter.js";
 
@@ -65,5 +66,23 @@ describe("navigationEmptyMessage", () => {
     expect(navigationEmptyMessage({ emptyState: "search", query: "x", showArchived: false })).toBe("No sessions match this search.");
     expect(navigationEmptyMessage({ emptyState: "archived", query: "", showArchived: true })).toBe("No archived sessions.");
     expect(navigationEmptyMessage({ emptyState: "none", query: "", showArchived: false })).toBe("No active sessions. Create a session to start coding.");
+  });
+});
+
+describe("presentSessionStatus", () => {
+  it("prioritizes pending interaction over a running host state", () => {
+    expect(presentSessionStatus({ status: "running" }, { pendingInteraction: true })).toMatchObject({
+      status: "pending",
+      cssClass: "queued",
+      label: "Needs attention",
+      ariaLabel: "Session status: Needs attention",
+    });
+  });
+
+  it("maps terminal host states to stable row states without changing the contract", () => {
+    expect(presentSessionStatus({ status: "idle" })).toMatchObject({ status: "completed", cssClass: "completed", label: "Completed" });
+    expect(presentSessionStatus({ status: "failed" }).status).toBe("failed");
+    expect(presentSessionStatus({ status: "interrupted" }).status).toBe("stopped");
+    expect(presentSessionStatus({ status: "running" }, { runningChild: true }).status).toBe("running");
   });
 });

@@ -1,4 +1,4 @@
-import type { SessionId, SessionSummary, WorkspaceSummary } from "@code-review-agent/contracts";
+import type { SessionId, SessionStatus, SessionSummary, WorkspaceSummary } from "@code-review-agent/contracts";
 import {
   buildNavigationModel,
   type NavigationRenderIntent,
@@ -109,4 +109,62 @@ export function windowSessionGroup<T>(
     return { visible: sessions, hiddenCount: 0, expanded };
   }
   return { visible: sessions.slice(0, safeLimit), hiddenCount: sessions.length - safeLimit, expanded: false };
+}
+
+/**
+ * Optional Web-only signals that can make a row actionable without changing
+ * the host-backed SessionSummary contract. The current sidebar only supplies
+ * these for the selected Session when the richer SessionStore projection is
+ * available; all other rows derive their state from SessionSummary.status.
+ */
+export interface SessionStatusPresentationOptions {
+  readonly pendingInteraction?: boolean;
+  readonly pendingPermission?: boolean;
+  readonly runningChild?: boolean;
+}
+
+export type SessionDisplayStatus = "pending" | "running" | "completed" | "failed" | "stopped";
+
+export interface SessionStatusPresentation {
+  readonly status: SessionDisplayStatus;
+  readonly cssClass: "queued" | "running" | "completed" | "failed" | "stopped";
+  readonly label: string;
+  readonly ariaLabel: string;
+}
+
+/**
+ * Derive the small, stable status vocabulary shown by Session rows. Raw host
+ * status remains available on SessionSummary for details; this projection
+ * intentionally gives pending interaction/permission an attention-first
+ * visual priority and maps the idle host state to a completed row state.
+ */
+export function presentSessionStatus(
+  session: Pick<SessionSummary, "status">,
+  options: SessionStatusPresentationOptions = {},
+): SessionStatusPresentation {
+  const rawStatus = session.status as SessionStatus;
+  const status: SessionDisplayStatus = options.pendingInteraction === true || options.pendingPermission === true || rawStatus === "queued"
+    ? "pending"
+    : rawStatus === "failed"
+      ? "failed"
+      : rawStatus === "stopped" || rawStatus === "interrupted"
+        ? "stopped"
+        : rawStatus === "running" || options.runningChild === true
+          ? "running"
+          : "completed";
+  const label = status === "pending"
+    ? "Needs attention"
+    : status === "running"
+      ? "Running"
+      : status === "completed"
+        ? "Completed"
+        : status === "failed"
+          ? "Failed"
+          : "Stopped";
+  return {
+    status,
+    cssClass: status === "pending" ? "queued" : status,
+    label,
+    ariaLabel: `Session status: ${label}`,
+  };
 }

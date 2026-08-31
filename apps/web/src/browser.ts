@@ -35,6 +35,8 @@ import { createShellBootState, normalizeBootError, presentShellBoot, reduceShell
 import { createShellOverlayState, presentShellOverlay, reduceShellOverlay } from "./shell/overlay.js";
 import { applyShellFrame, mountShellFrame } from "./shell/app-frame.js";
 import { COLLAPSED_SESSION_LIMIT, presentSidebarNavigation, windowSessionGroup } from "./sidebar/sidebar-presenter.js";
+import { createSessionRow, presentSessionRow } from "./sidebar/session-row.js";
+import { createWorkspaceRow, presentWorkspaceRow } from "./sidebar/workspace-row.js";
 
 export interface BrowserWebRuntime {
   readonly api: WebApiClient;
@@ -106,6 +108,10 @@ export interface BrowserWebRuntime {
   readonly presentSidebarNavigation: typeof presentSidebarNavigation;
   readonly windowSessionGroup: typeof windowSessionGroup;
   readonly collapsedSessionLimit: typeof COLLAPSED_SESSION_LIMIT;
+  readonly createSessionRow: typeof createSessionRow;
+  readonly presentSessionRow: typeof presentSessionRow;
+  readonly createWorkspaceRow: typeof createWorkspaceRow;
+  readonly presentWorkspaceRow: typeof presentWorkspaceRow;
 }
 
 const api = new WebApiClient();
@@ -176,6 +182,10 @@ const runtime: BrowserWebRuntime = {
   presentSidebarNavigation,
   windowSessionGroup,
   collapsedSessionLimit: COLLAPSED_SESSION_LIMIT,
+  createSessionRow,
+  presentSessionRow,
+  createWorkspaceRow,
+  presentWorkspaceRow,
 };
 
 Object.assign(window, { CodeReviewAgentWeb: runtime });

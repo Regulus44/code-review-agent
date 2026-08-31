@@ -39,4 +39,14 @@ describe("sidebar shell contract", () => {
     expect(indexHtml).toContain("className = 'workspace-show-more'");
     expect(indexHtml).toContain("expandedSessionGroups");
   });
+
+  it("routes typed and fallback rows through the compact M3 adapters", () => {
+    expect(indexHtml).toContain("const createSidebarSessionRow = (node) =>");
+    expect(indexHtml).toContain("typedRuntime?.createSessionRow");
+    expect(indexHtml).toContain("const createSidebarWorkspaceRow = (group, expanded, active, onToggle) =>");
+    expect(indexHtml).toContain("typedRuntime?.createWorkspaceRow");
+    expect(indexHtml).toContain("session-row-detail sr-only");
+    expect(indexHtml).toContain("Move workspace up");
+    expect(indexHtml).toContain("Move workspace down");
+  });
 });
