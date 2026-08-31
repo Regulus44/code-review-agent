@@ -27,6 +27,11 @@ import {
 export type WebConnectionState = "idle" | "connecting" | "connected" | "reconnecting" | "failed";
 
 export interface SessionStoreSnapshot {
+  /**
+   * Current Web selection. The sidebar may use this value to mark a selected
+   * row; it is not an independent navigation fact or persisted sidebar
+   * preference.
+   */
   readonly sessionId?: SessionId;
   readonly session?: SessionProjection;
   readonly events: readonly AgentEvent[];

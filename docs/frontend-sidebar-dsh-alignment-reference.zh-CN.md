@@ -222,6 +222,40 @@ DSH 的 `AppFrame` 使用 pointer capture、rAF 和实际渲染宽度基准完�
 
 **验收/回滚**：类型检查和现有导航测试通过；M0 无生产运行时变更，可直接撤销新增类型。
 
+#### M0 已冻结的来源边界（2026-08-31）
+
+本轮以最小契约注释和 presenter contract 测试完成冻结，没有引入 M4 的 reducer、localStorage 持久化或新的 API。字段的唯一来源和禁止越权如下：
+
+| 字段 | 所有者/来源 | presenter 责任 | 明确禁止 |
+|---|---|---|---|
+| `selectedSessionId` | Web `SessionStoreSnapshot.sessionId`；迁移期间 `index.html` 的 `state.session?.id` 通过 bridge 传入，新的调用应使用 `NavigationOptions.selectedSessionId` | 在 `NavigationRenderIntent.selectedSessionId` 原样回显，并据此派生 `activeWorkspaceKey` | 不从 `WorkspaceSummary`、DOM 当前 class 或 EventStore 另造一份 selection；不作为 Sidebar 偏好持久化 |
+| `activeWorkspaceKey` | 由 `buildNavigationModel()` 根据 selected Session、可见 Session/Workspace projection 派生 | 只输出可见分组中 selected Session 所属的规范化 Workspace key；selected Session 不可见时保持 `undefined` | 不在 API、EventStore、`WorkspaceSummary` 或本地存储中独立写入/恢复 |
+| `expandedWorkspaces` | Web-only 浏览器/渲染状态；当前仍由 `index.html` 的 `state.expandedWorkspaces` 临时持有 | M0 仅在 `SidebarNavigationState` 类型中冻结其 UI 语义；M4 再接 reducer/持久化 | 不进入 `packages/contracts`、Session/Workspace 事件、EventStore 或 API mutation |
+| `showArchived` | Web-only 列表过滤器；同时作为 `WebApiClient.listSessions/listWorkspaces(includeArchived)` 的 query 参数和 presenter option | 只决定返回 active/archived projection 的可见性，原始 `SessionSummary.archived`/`WorkspaceSummary.archived` 保持 host 事实 | 不因切换筛选器而修改归档事实；不把筛选状态追加为事件 |
+
+本轮 contract 约束落在 `apps/web/src/presentation/navigation-presenter.ts`：新增 Web-only `SidebarNavigationState` 类型、`NavigationOptions.selectedSessionId`（保留 `activeSessionId` 兼容别名）和 `NavigationRenderIntent.selectedSessionId`。`apps/web/src/client/store.ts` 与 `apps/web/src/client/api.ts` 只补充来源边界注释，`apps/web/src/browser.ts` 明确 typed bridge 只暴露纯 projection。这样后续 M4 可以移动类型和接入 reducer，而无需改变事实来源或公共 contract。
+
+**M0 改动文件**
+
+- `apps/web/src/presentation/navigation-presenter.ts`：冻结 Web-only state 类型、selection 命名和 active Workspace 派生注释；不改变过滤/分组结果；
+- `apps/web/src/presentation/navigation-presenter.test.ts`：覆盖 preferred `selectedSessionId`、兼容 `activeSessionId`、不可见 selected Session 和 Web-only state 类型契约；
+- `apps/web/src/client/store.ts`：标注 `SessionStoreSnapshot.sessionId` 是当前 Web selection 来源；
+- `apps/web/src/client/api.ts`：标注 `includeArchived` 仅为只读 query filter；
+- `apps/web/src/browser.ts`：标注 bridge 暴露纯 navigation projection，不成为第二事实源；
+- 本文档：记录 M0 的来源矩阵、实施边界、验证和回滚。
+
+**验收命令与结果**
+
+```powershell
+pnpm typecheck
+pnpm --filter @code-review-agent/web test
+git diff --check
+```
+
+2026-08-31 验收结果：`pnpm typecheck` 通过；Web 36 个测试文件、151 个测试通过；`git diff --check` 通过。M0 未改动 `packages/contracts`、EventStore、API route 或生产 DOM/CSS 行为。
+
+**M0 回滚边界**：删除上述 presenter 类型/字段回显、注释和新增测试即可回滚；保留现有 `activeSessionId` 调用路径不会影响旧 bridge。不得以 M0 回滚为由修改或回滚 EventStore、Session/Workspace 公共 contract、归档事实或 API 路由。
+
 ### M1：Sidebar shell 与滚动边界
 
 **本仓库需要修改**
@@ -545,6 +579,7 @@ WEB_SESSION_CONTENT_SEARCH   // 可选：Host 内容搜索，默认关闭
 | 2026-08-31 | 核对两张用户截图，确认当前左栏的路径、count、常驻排序、树线、低频面板和滚动边界问题；核对 `apps/web/index.html`、`navigation-presenter.ts`、`columns.ts`、`layout.ts`、`app-frame.ts`、contracts。 | 第 1–4 节 | 补齐 DSH 处理方式与本仓库入口映射。 |
 | 2026-08-31 | 核对 DSH `SidebarRoot`、`WorkspaceBrowser`、`Rows`、`tree.ts`、`stores.ts`、`AppFrame`、`columns.ts` 及对应测试入口。 | 第 5–9 节 | 进入 P0/P1/P2 实施拆分和验收门禁。 |
 | 2026-08-31 | 将改造分为 M0–M7 模块、P0–P2 阶段，写入 feature flag、回滚和许可证边界。 | 第 10–13 节 | 后续若发现新入口或 contract 需求，先更新本节与 ADR，再编码。 |
+| 2026-08-31 | 完成 M0 事实与契约冻结：在 `navigation-presenter.ts` 明确 Web-only `SidebarNavigationState`、`selectedSessionId` 输入/回显和 `activeWorkspaceKey` 派生边界；补充 API、SessionStore、typed bridge 注释与 3 组 presenter contract 测试。 | 第 8 节 M0；第 15 节 | 进入 M1/M2 前端结构实施；M4 只能在本冻结之上接 reducer/持久化。 |
 
 ## 15. 防漂移检查清单（每个后续 PR 必填）
 

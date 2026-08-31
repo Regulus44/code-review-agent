@@ -318,10 +318,15 @@ export class WebApiClient {
     return this.request<HealthResponse>("/health");
   }
 
+  /**
+   * `includeArchived` is a Web navigation filter. It selects the host-backed
+   * projection returned by this query; it does not mutate SessionSummary.archived.
+   */
   listSessions(includeArchived = false): Promise<{ readonly sessions: readonly SessionSummary[] }> {
     return this.request(`/v1/sessions?include_archived=${String(includeArchived)}`);
   }
 
+  /** `includeArchived` has the same read-only filter semantics as listSessions. */
   listWorkspaces(includeArchived = false): Promise<WorkspaceCatalog> {
     return this.request<WorkspaceCatalog>(`/v1/workspaces${includeArchived ? "?include_archived=true" : ""}`);
   }

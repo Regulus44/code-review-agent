@@ -18,6 +18,12 @@ export interface NavigationRenderIntent {
   readonly groups: readonly WorkspaceNavigationGroup[];
   readonly allSessions: readonly SessionSummary[];
   readonly recentWorkspaces: readonly string[];
+  /**
+   * The selected Session comes from the Web SessionStore/browser selection.
+   * It is echoed in the render intent so row renderers do not read DOM state.
+   */
+  readonly selectedSessionId?: SessionId;
+  /** Derived from selectedSessionId and the current Workspace/Session projection. */
   readonly activeWorkspaceKey?: string;
   readonly emptyState: "none" | "search" | "archived";
   readonly viewMode: "tree" | "flat";
@@ -27,9 +33,34 @@ export interface NavigationRenderIntent {
 export type NavigationViewMode = NavigationRenderIntent["viewMode"];
 export type NavigationSort = NavigationRenderIntent["sort"];
 
+/**
+ * Web-only sidebar browsing preferences.
+ *
+ * This is deliberately kept next to the presenter contract instead of in
+ * packages/contracts: it is a view preference, not an EventStore fact or an
+ * API/Workspace contract. `selectedSessionId` is intentionally absent here;
+ * selection is sourced from SessionStore/browser state and is not persisted as
+ * a sidebar preference. `activeWorkspaceKey` is likewise a derived presenter
+ * value, never an independently stored fact. M4 may move this type to a
+ * dedicated sidebar state module without changing these ownership rules.
+ */
+export interface SidebarNavigationState {
+  readonly viewMode: NavigationViewMode;
+  readonly sort: NavigationSort;
+  readonly searchQuery: string;
+  readonly showArchived: boolean;
+  readonly expandedWorkspaces: Readonly<Record<string, boolean>>;
+}
+
 export interface NavigationOptions {
   readonly showArchived?: boolean;
   readonly query?: string;
+  /** Current Web selection; this is the preferred name for new callers. */
+  readonly selectedSessionId?: SessionId;
+  /**
+   * @deprecated Compatibility alias for the existing index.html bridge. It
+   * has the same source and semantics as selectedSessionId.
+   */
   readonly activeSessionId?: SessionId;
   readonly maxDepth?: number;
   readonly workspaceOrder?: readonly string[];
@@ -43,6 +74,15 @@ export interface NavigationOptions {
  * The DOM shell owns expansion and click state; this function owns filtering,
  * grouping, parent/child lineage and deterministic ordering so refresh and
  * replay cannot produce a second navigation fact model.
+ *
+ * Source boundary (M0):
+ * - `selectedSessionId` is read from the Web SessionStore/browser selection;
+ * - `activeWorkspaceKey` is derived from that selection and the host-backed
+ *   Session/Workspace projection;
+ * - `showArchived` is a Web filter mirrored into list query parameters and
+ *   never changes SessionSummary/WorkspaceSummary.archived;
+ * - `expandedWorkspaces` remains renderer-owned Web UI state and is not an
+ *   input to or output of this pure projection until M4 wires a reducer.
  */
 export function buildNavigationModel(
   input: readonly SessionSummary[],
@@ -50,6 +90,7 @@ export function buildNavigationModel(
 ): NavigationRenderIntent {
   const showArchived = options.showArchived === true;
   const query = normalizeQuery(options.query);
+  const selectedSessionId = options.selectedSessionId ?? options.activeSessionId;
   const maxDepth = boundedDepth(options.maxDepth);
   const viewMode: NavigationViewMode = options.viewMode === "flat" ? "flat" : "tree";
   const sort: NavigationSort = options.sort === "name" || options.sort === "path" ? options.sort : "recent";
@@ -115,9 +156,9 @@ export function buildNavigationModel(
       if (leftPosition >= 0 || rightPosition >= 0) return (leftPosition < 0 ? Number.MAX_SAFE_INTEGER : leftPosition) - (rightPosition < 0 ? Number.MAX_SAFE_INTEGER : rightPosition);
       return compareNavigationGroup(left, right, sort);
     });
-  const activeWorkspaceKey = options.activeSessionId === undefined
+  const activeWorkspaceKey = selectedSessionId === undefined
     ? undefined
-    : groups.find((group) => group.sessions.some((session) => containsSession(session, options.activeSessionId as SessionId)))?.key;
+    : groups.find((group) => group.sessions.some((session) => containsSession(session, selectedSessionId)))?.key;
 
   return {
     query,
@@ -125,6 +166,7 @@ export function buildNavigationModel(
     groups,
     allSessions,
     recentWorkspaces: uniqueWorkspaces(allSessions),
+    ...(selectedSessionId === undefined ? {} : { selectedSessionId }),
     ...(activeWorkspaceKey === undefined ? {} : { activeWorkspaceKey }),
     emptyState: groups.length > 0 ? "none" : query.length > 0 ? "search" : showArchived ? "archived" : "none",
     viewMode,

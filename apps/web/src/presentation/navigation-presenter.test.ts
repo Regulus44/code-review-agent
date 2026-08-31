@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { brand, type SessionSummary, type WorkspaceSummary } from "@code-review-agent/contracts";
-import { buildNavigationModel, sessionRelativeTime, workspaceKey } from "./navigation-presenter.js";
+import { buildNavigationModel, sessionRelativeTime, workspaceKey, type SidebarNavigationState } from "./navigation-presenter.js";
 
 function session(id: string, overrides: Partial<SessionSummary> = {}): SessionSummary {
   return {
@@ -39,6 +39,37 @@ describe("buildNavigationModel", () => {
     expect(model.allSessions.map((item) => item.id)).toEqual(["ses_parent", "ses_child", "ses_archived"]);
     expect(buildNavigationModel([parent, child], { activeSessionId: child.id }).activeWorkspaceKey).toBe(workspaceKey(parent.workspaceRoot));
     expect(buildNavigationModel([parent, archived], { showArchived: true }).groups[0]?.sessions[0]?.id).toBe("ses_archived");
+  });
+
+  it("freezes Web selection ownership and derives the active workspace", () => {
+    const selected = session("ses_selected", { workspaceRoot: "D:/selected" });
+    const other = session("ses_other", { workspaceRoot: "D:/other" });
+    const intent = buildNavigationModel([selected, other], { selectedSessionId: selected.id });
+    expect(intent.selectedSessionId).toBe(selected.id);
+    expect(intent.activeWorkspaceKey).toBe(workspaceKey(selected.workspaceRoot));
+
+    // The legacy bridge name remains source-compatible during the migration,
+    // but it has the exact same selection semantics.
+    expect(buildNavigationModel([selected], { activeSessionId: selected.id }).selectedSessionId).toBe(selected.id);
+  });
+
+  it("keeps a selected Session source distinct from visibility filters", () => {
+    const archived = session("ses_archived_selected", { archived: true });
+    const intent = buildNavigationModel([archived], { selectedSessionId: archived.id });
+    expect(intent.selectedSessionId).toBe(archived.id);
+    expect(intent.activeWorkspaceKey).toBeUndefined();
+    expect(intent.showArchived).toBe(false);
+  });
+
+  it("expresses sidebar browsing state as Web-only data", () => {
+    const state = {
+      viewMode: "tree",
+      sort: "recent",
+      searchQuery: "",
+      showArchived: false,
+      expandedWorkspaces: { "d:/repo": true },
+    } satisfies SidebarNavigationState;
+    expect(state.expandedWorkspaces["d:/repo"]).toBe(true);
   });
 
   it("keeps ancestors when a child matches search", () => {

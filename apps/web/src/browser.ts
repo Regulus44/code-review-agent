@@ -60,6 +60,11 @@ export interface BrowserWebRuntime {
   readonly focusableSelector: typeof FOCUSABLE_SELECTOR;
   readonly nextFocusableIndex: typeof nextFocusableIndex;
   readonly presentConnection: typeof presentConnection;
+  /**
+   * Pure Web navigation projection. Session selection is supplied by the
+   * browser/SessionStore adapter; workspace expansion stays in sidebar UI
+   * state. This bridge must not become a second EventStore fact source.
+   */
   readonly buildNavigationModel: typeof buildNavigationModel;
   readonly sessionLabel: typeof sessionLabel;
   readonly sessionRelativeTime: typeof sessionRelativeTime;
