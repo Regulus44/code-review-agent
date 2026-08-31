@@ -123,6 +123,8 @@
       .workspace-order-button:disabled { opacity: .3; cursor: not-allowed; }
       .workspace-sessions { display: grid; gap: 2px; padding-left: 19px; }
       .workspace-group.collapsed .workspace-sessions { display: none; }
+      .workspace-show-more { justify-self: start; margin: 2px 0 2px 8px; padding: 4px 7px; border-radius: 6px; color: var(--text-tertiary); background: transparent; font-size: 10px; text-align: left; }
+      .workspace-show-more:hover, .workspace-show-more:focus-visible { color: var(--blue); background: var(--blue-soft); outline: 0; }
       .workspace-children { display: grid; gap: 2px; padding-left: 14px; border-left: 1px solid var(--border); }
       .tree-session { position: relative; display: flex; align-items: center; gap: 4px; min-width: 0; }
       .tree-session::before { content: ""; position: absolute; left: -11px; top: -4px; bottom: -4px; width: 1px; background: var(--border); }
@@ -837,7 +839,7 @@
         const modelPopup = typedRuntime?.createModelPopup && modelDirectory ? typedRuntime.createModelPopup(modelDirectory) : null;
         let modelDirectoryUnsubscribe = null;
         let modelEntryMode = 'seat';
-        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, credentials: [], pendingCredentialId: '', settingsProviderEditorId: null, settingsProviderDraft: null, settingsProviderBusy: false, settingsProviderError: '', settingsProviderDiscovery: new Map(), modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, stoppingTurnId: null, composer: typedRuntime?.createComposerState?.() || { phase: 'idle', attemptId: 0 }, composerEpoch: 0, requestActions: typedRuntime?.createRequestActionGate?.() || null, workspaces: null, lastWorkspaceOrderSequence: 0, conversationScrollTop: 0, trajectoryScrollTop: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 280, details: 'closed', detailsWidthPx: 0, narrow: false, narrowExpanded: false, mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), sessionSearch: '', sessionView: 'conversation', trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
+        const state = { session: null, events: new Map(), source: null, scopedSource: null, storeUnsubscribe: null, tools: new Map(), mcp: [], subagents: [], worktrees: [], models: null, credentials: [], pendingCredentialId: '', settingsProviderEditorId: null, settingsProviderDraft: null, settingsProviderBusy: false, settingsProviderError: '', settingsProviderDiscovery: new Map(), modelStatus: 'loading', modelError: '', modelReceipt: '', capabilities: null, stoppingTurnId: null, composer: typedRuntime?.createComposerState?.() || { phase: 'idle', attemptId: 0 }, composerEpoch: 0, requestActions: typedRuntime?.createRequestActionGate?.() || null, workspaces: null, lastWorkspaceOrderSequence: 0, conversationScrollTop: 0, trajectoryScrollTop: 0, layout: typedRuntime?.createShellLayoutState?.() || { sidebar: 'expanded', sidebarWidthPx: 280, details: 'closed', detailsWidthPx: 0, narrow: false, narrowExpanded: false, mobileSidebarOpen: false }, boot: typedRuntime?.createShellBootState?.() || { status: 'booting' }, overlay: typedRuntime?.createShellOverlayState?.() || { open: null }, renameTarget: null, recentWorkspaces: [], showArchived: false, expandedWorkspaces: new Set(), expandedSessionGroups: new Set(), sessionSearch: '', sessionView: 'conversation', trajectoryQuery: '', trajectoryRunningOnly: false, trajectorySelectedKey: null, trajectoryFollow: true, trajectoryCollapsedLanes: new Set(), trajectoryCollapsedRecords: new Set(), taskSelectedId: null, mcpSelectedName: null };
         let usageDrawerOpen = false;
         let renderedSessionView = state.sessionView;
         let modelMenuPane = 'root';
@@ -2511,16 +2513,22 @@
           const move = (delta, label) => { const button = document.createElement('button'); button.type = 'button'; button.className = 'workspace-order-button'; button.textContent = delta < 0 ? '↑' : '↓'; button.title = label; button.setAttribute('aria-label', label); button.disabled = position + delta < 0 || position + delta >= order.length; button.onclick = async (event) => { event.stopPropagation(); if (button.disabled) return; const next = [...order]; [next[position], next[position + delta]] = [next[position + delta], next[position]]; button.disabled = true; try { state.workspaces = await typedRuntime.api.reorderWorkspaces(next, commandKey()); showSessionsTree({ sessions: state.sidebarSessions }); setStatus(`Workspace order · ${label}`, true); } catch (error) { setStatus(error instanceof Error ? error.message : String(error), false); button.disabled = false; } }; controls.append(button); };
           move(-1, 'Move workspace up'); move(1, 'Move workspace down'); header.append(controls);
         };
+        const windowSidebarSessions = (sessions, expanded) => {
+          const limit = typedRuntime?.collapsedSessionLimit || 5;
+          if (typedRuntime?.windowSessionGroup) return typedRuntime.windowSessionGroup(sessions, expanded);
+          if (expanded || sessions.length <= limit) return { visible: sessions, hiddenCount: 0 };
+          return { visible: sessions.slice(0, limit), hiddenCount: sessions.length - limit };
+        };
         const showSessionsTree = (payload) => {
           const sessions = Array.isArray(payload) ? payload : payload.sessions || [];
-          const navigation = typedRuntime?.buildNavigationModel?.(sessions, { showArchived: state.showArchived, query: state.sessionSearch, activeSessionId: state.session?.id, viewMode: state.workspaceViewMode, sort: state.workspaceSort, workspaceOrder: state.workspaces?.workspaces?.map((workspace) => workspace.key || workspace.root), workspaceCatalog: state.workspaces?.workspaces });
+          const navigation = typedRuntime?.presentSidebarNavigation?.(sessions, { showArchived: state.showArchived, query: state.sessionSearch, selectedSessionId: state.session?.id, viewMode: state.workspaceViewMode, sort: state.workspaceSort, workspaceOrder: state.workspaces?.workspaces?.map((workspace) => workspace.key || workspace.root), workspaceCatalog: state.workspaces?.workspaces });
           if (navigation) {
             state.sidebarSessions = navigation.allSessions;
             state.recentWorkspaces = [...navigation.recentWorkspaces];
             list.innerHTML = '';
             if (!navigation.groups.length) {
               const empty = document.createElement('div'); empty.className = 'tree-empty';
-              empty.textContent = navigation.emptyState === 'search' ? 'No sessions match this search.' : navigation.emptyState === 'archived' ? 'No archived sessions.' : 'No active sessions. Create a session to start coding.';
+              empty.textContent = navigation.emptyMessage || (navigation.emptyState === 'search' ? 'No sessions match this search.' : navigation.emptyState === 'archived' ? 'No archived sessions.' : 'No active sessions. Create a session to start coding.');
               list.append(empty); return;
             }
             const containsActive = (node) => node.id === state.session?.id || node.children.some(containsActive);
@@ -2539,7 +2547,7 @@
               if (node.children.length) { const nested = document.createElement('div'); nested.className = 'workspace-children'; for (const child of node.children) appendNavigationNode(nested, child); parent.append(nested); }
             };
             for (const group of navigation.groups) {
-              if (group.sessions.some(containsActive)) state.expandedWorkspaces.add(group.key);
+              if (group.sessions.some(containsActive)) { state.expandedWorkspaces.add(group.key); state.expandedSessionGroups.add(group.key); }
               const section = document.createElement('section'); section.className = `workspace-group ${state.expandedWorkspaces.has(group.key) ? '' : 'collapsed'}`;
               const header = document.createElement('div'); header.className = 'workspace-group-header'; header.setAttribute('role', 'button'); header.tabIndex = 0;
               const caret = document.createElement('span'); caret.className = 'workspace-caret'; caret.textContent = '⌄';
@@ -2553,7 +2561,17 @@
               header.append(caret, folder, copy, count, workspaceMenu); appendWorkspaceOrderControls(header, group.root);
               const toggleGroup = () => { if (state.expandedWorkspaces.has(group.key)) state.expandedWorkspaces.delete(group.key); else state.expandedWorkspaces.add(group.key); showSessionsTree({ sessions: state.sidebarSessions }); };
               header.onclick = toggleGroup; header.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleGroup(); } };
-              section.append(header); const children = document.createElement('div'); children.className = 'workspace-sessions'; for (const node of group.sessions) appendNavigationNode(children, node); section.append(children); list.append(section);
+              section.append(header); const children = document.createElement('div'); children.className = 'workspace-sessions';
+              const expandedSessions = state.expandedSessionGroups.has(group.key);
+              const sessionWindow = windowSidebarSessions(group.sessions, expandedSessions);
+              for (const node of sessionWindow.visible) appendNavigationNode(children, node);
+              if (sessionWindow.hiddenCount > 0 || (expandedSessions && group.sessions.length > 5)) {
+                const overflow = document.createElement('button'); overflow.type = 'button'; overflow.className = 'workspace-show-more'; overflow.dataset.navigationKey = `workspace:${group.key}:overflow`;
+                overflow.textContent = sessionWindow.hiddenCount > 0 ? `Show ${sessionWindow.hiddenCount} more sessions` : 'Show fewer sessions';
+                overflow.onclick = () => { if (expandedSessions) state.expandedSessionGroups.delete(group.key); else state.expandedSessionGroups.add(group.key); showSessionsTree({ sessions: state.sidebarSessions }); };
+                children.append(overflow);
+              }
+              section.append(children); list.append(section);
             }
             return;
           }
@@ -2567,7 +2585,7 @@
             const key = workspaceKey(root);
             const group = grouped.get(key) || { key, root, sessions: [] };
             group.sessions.push(session); grouped.set(key, group);
-            if (state.session?.id === session.id) state.expandedWorkspaces.add(key);
+            if (state.session?.id === session.id) { state.expandedWorkspaces.add(key); state.expandedSessionGroups.add(key); }
           }
           list.innerHTML = '';
           const groups = [...grouped.values()].map((group) => {
@@ -2593,7 +2611,10 @@
             header.append(caret, folder, copy, count, workspaceMenu); const toggleGroup = () => { if (state.expandedWorkspaces.has(group.key)) state.expandedWorkspaces.delete(group.key); else state.expandedWorkspaces.add(group.key); showSessionsTree({ sessions: state.sidebarSessions }); }; header.onclick = toggleGroup; header.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleGroup(); } };
             section.append(header);
             const children = document.createElement('div'); children.className = 'workspace-sessions';
-            for (const session of group.sessions.sort((a, b) => (Date.parse(b.updatedAt || '') || 0) - (Date.parse(a.updatedAt || '') || 0))) {
+            const expandedSessions = state.expandedSessionGroups.has(group.key);
+            const orderedSessions = [...group.sessions].sort((a, b) => (Date.parse(b.updatedAt || '') || 0) - (Date.parse(a.updatedAt || '') || 0));
+            const sessionWindow = windowSidebarSessions(orderedSessions, expandedSessions);
+            for (const session of sessionWindow.visible) {
               const row = document.createElement('div'); row.className = 'tree-session';
               const button = document.createElement('button'); button.type = 'button'; button.className = `session ${state.session?.id === session.id ? 'active' : ''}`; button.title = session.workspaceRoot || '.';
               const statusDot = document.createElement('span'); statusDot.className = `session-status-dot ${session.status || ''}`;
@@ -2602,6 +2623,12 @@
               const actions = document.createElement('span'); actions.className = 'tree-session-actions';
               const menuButton = document.createElement('button'); menuButton.type = 'button'; menuButton.className = 'tree-action'; menuButton.textContent = '⋯'; menuButton.title = 'Session actions'; menuButton.onclick = (event) => { event.stopPropagation(); openSessionMenu(session, menuButton); };
               actions.append(menuButton); row.append(button, actions); children.append(row);
+            }
+            if (sessionWindow.hiddenCount > 0 || (expandedSessions && orderedSessions.length > 5)) {
+              const overflow = document.createElement('button'); overflow.type = 'button'; overflow.className = 'workspace-show-more'; overflow.dataset.navigationKey = `workspace:${group.key}:overflow`;
+              overflow.textContent = sessionWindow.hiddenCount > 0 ? `Show ${sessionWindow.hiddenCount} more sessions` : 'Show fewer sessions';
+              overflow.onclick = () => { if (expandedSessions) state.expandedSessionGroups.delete(group.key); else state.expandedSessionGroups.add(group.key); showSessionsTree({ sessions: state.sidebarSessions }); };
+              children.append(overflow);
             }
             section.append(children); list.append(section);
           }

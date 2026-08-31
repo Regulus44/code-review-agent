@@ -333,6 +333,35 @@ apps/web/src/sidebar/sidebar-presenter.ts
 - 空态区分 search、archived、no active sessions；
 - renderer 使用稳定 row key/DOM identity，第一阶段可采用局部 group 更新，第二阶段再完全移除整棵树重建。
 
+#### M2 最小实施记录（2026-08-31）
+
+本轮先交付 M2 的控制层边界切片，暂不搬移整棵 DOM renderer，也不引入 M4 的 reducer/localStorage。这样可以先固定 WorkspaceBrowser 的输入、投影和空态语义，再在后续切片安全替换 `showSessionsTree()` 的 DOM 装配。
+
+**已实施**
+
+- 新增 `apps/web/src/sidebar/sidebar-presenter.ts`，封装 `buildNavigationModel()` 的 Web adapter：
+  - 归一化 `query`、`viewMode`、`sort`、`workspaceOrder`、`workspaceCatalog` 输入；
+  - 同时接受首选的 `selectedSessionId` 和迁移期兼容的 `activeSessionId`；
+  - 输出 `activeGroupKey`（由 `activeWorkspaceKey` 派生）和稳定 `emptyMessage`，使 DOM renderer 不需要自行推断 active/empty 语义；
+  - 提供 DSH 对齐的 `COLLAPSED_SESSION_LIMIT = 5` 与 `windowSessionGroup()`；当前 `showSessionsTree()` 的 typed/fallback 两条兼容路径通过同一 `windowSidebarSessions()` adapter 应用五条默认窗口和 overflow；
+  - 保持 Session/Workspace/EventStore contract 不变，浏览状态仍是 Web-only。
+- `apps/web/src/browser.ts` 新增 `presentSidebarNavigation` typed bridge 入口；原有 `buildNavigationModel` 继续保留，便于已有调用和渐进迁移。
+- `apps/web/index.html:2516` 的 typed 分支改为调用 `typedRuntime.presentSidebarNavigation()`，并改用 `selectedSessionId` 命名；typed/fallback 均经过 `windowSidebarSessions()`，在无 typed bridge 时以相同的 limit/overflow 规则降级。
+- `apps/web/index.html` 的导航临时 state 增加 `expandedSessionGroups`（仅当前页面内存态），当前 Workspace/Session DOM 仍由原闭包装配；不包含 M4 reducer/localStorage。
+- 新增 `apps/web/src/sidebar/sidebar-presenter.test.ts`，覆盖输入归一化、active group、搜索/归档空态、选择与可见性边界及五条折叠窗口。
+
+**M2 最小切片验收**
+
+```powershell
+pnpm --filter @code-review-agent/web build
+pnpm --filter @code-review-agent/web test
+git diff --check
+```
+
+2026-08-31：Web build 通过；Web 38 个测试文件、158 个测试通过；`git diff --check` 通过。此次没有修改 `packages/contracts`、EventStore、API route、M1 shell/CSS 或 M4 持久化状态。
+
+**M2 最小切片回滚边界**：删除 `apps/web/src/sidebar/sidebar-presenter.ts` 及其测试，恢复 `index.html` 对 `typedRuntime.buildNavigationModel` 的调用，并移除 `browser.ts` 的新 bridge 字段即可。不得以该切片回滚为由改变 Session/Workspace 事实、归档 API 或事件恢复逻辑。
+
 ### M3：Workspace/Session row（信息减负）
 
 **建议新增文件**
@@ -603,6 +632,7 @@ WEB_SESSION_CONTENT_SEARCH   // 可选：Host 内容搜索，默认关闭
 | 2026-08-31 | 将改造分为 M0–M7 模块、P0–P2 阶段，写入 feature flag、回滚和许可证边界。 | 第 10–13 节 | 后续若发现新入口或 contract 需求，先更新本节与 ADR，再编码。 |
 | 2026-08-31 | 完成 M0 事实与契约冻结：在 `navigation-presenter.ts` 明确 Web-only `SidebarNavigationState`、`selectedSessionId` 输入/回显和 `activeWorkspaceKey` 派生边界；补充 API、SessionStore、typed bridge 注释与 3 组 presenter contract 测试。 | 第 8 节 M0；第 15 节 | 进入 M1/M2 前端结构实施；M4 只能在本冻结之上接 reducer/持久化。 |
 | 2026-08-31 | 完成 M1 Sidebar shell 最小切片：`index.html` 新增 `sidebar-primary` 与 `sidebar-list-scroll` 分区，固定 header/New session/toolbar/footer，独立 Workspace/Session scrollport；新增 `sidebar-shell.test.ts` 并通过 typecheck、Web 全量测试和 diff 检查。 | 第 8 节 M1；第 11–12 节 | 由主 agent 复核后建立 Phase 8 M1 checkpoint；后续进入 M2 浏览器控制层。 |
+| 2026-08-31 | 完成 M2 最小控制层切片：新增 `sidebar-presenter.ts` 统一导航输入归一化、active group 和空态输出；`browser.ts` 暴露 typed bridge；`index.html` typed 分支改用 `presentSidebarNavigation`，fallback DOM 暂保持兼容；新增 4 个 presenter 测试。 | 第 8 节 M2；第 12–13 节 | 由主 agent 复核后建立 M2 checkpoint；下一步再拆 WorkspaceBrowser DOM renderer 和 Tree/Flat/Search 共用行装配。 |
 
 ## 15. 防漂移检查清单（每个后续 PR 必填）
 

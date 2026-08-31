@@ -30,4 +30,13 @@ describe("sidebar shell contract", () => {
     expect(indexHtml).toMatch(/\.sidebar-list-scroll \{[^}]*min-height: 0;[^}]*overflow: auto;/s);
     expect(indexHtml).toMatch(/\.workspace-browser \{[^}]*min-height: 0;[^}]*flex: 1 1 auto;/s);
   });
+
+  it("keeps typed and fallback navigation on one five-row overflow adapter", () => {
+    expect(indexHtml).toContain("typedRuntime?.presentSidebarNavigation");
+    expect(indexHtml).toContain("const windowSidebarSessions = (sessions, expanded) =>");
+    expect(indexHtml).toContain("typedRuntime?.windowSessionGroup");
+    expect(indexHtml).toContain("sessions.slice(0, limit)");
+    expect(indexHtml).toContain("className = 'workspace-show-more'");
+    expect(indexHtml).toContain("expandedSessionGroups");
+  });
 });
