@@ -21,15 +21,15 @@ function fixture(overrides: Partial<SessionSummary> = {}): SessionSummary {
 describe("presentSessionRow", () => {
   it("exposes only title/time as the visual summary and keeps rich metadata in details", () => {
     const view = presentSessionRow({ session: fixture({ childMode: "one-shot", childProvider: "fixture-provider" }), now: Date.parse("2026-08-31T09:59:30.000Z") });
-    expect(view).toMatchObject({ label: "Review API", relativeTime: "now", status: { status: "running" } });
+    expect(view).toMatchObject({ label: "Review API", relativeTime: "刚刚", status: { status: "running" } });
     expect(view.details).toContain("ask-on-write");
     expect(view.details).toContain("one-shot");
     expect(view.details).toContain("fixture-provider");
-    expect(view.ariaLabel).toContain("Session status: Running");
+    expect(view.ariaLabel).toContain("会话状态：运行中");
   });
 
   it("uses a stable status label when permission is pending", () => {
     const view = presentSessionRow({ session: fixture(), pendingPermission: true });
-    expect(view.status).toMatchObject({ status: "pending", cssClass: "queued", label: "Needs attention" });
+    expect(view.status).toMatchObject({ status: "pending", cssClass: "queued", label: "需要处理" });
   });
 });

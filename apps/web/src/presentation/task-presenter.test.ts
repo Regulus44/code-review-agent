@@ -30,7 +30,7 @@ describe("task presenter", () => {
     const view = presentTask(task(), { maxDetailChars: 512 });
     expect(view.title).toBe("Inspect repository");
     expect(view.mode).toBe("one-shot");
-    expect(view.lineage).toContain("child ses_child_presenter");
+    expect(view.lineage).toContain("子会话 ses_child_presenter");
     expect(view.artifacts).toEqual(["report.md"]);
     expect(view.details.untrusted).toBe(true);
     expect(view.summary).toBe("Found the entry points");

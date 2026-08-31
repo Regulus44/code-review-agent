@@ -12,8 +12,8 @@ describe("shell boot state", () => {
   it("normalizes unknown failures and presents a retryable boundary", () => {
     const failed = reduceShellBoot(createShellBootState(), { type: "failed", error: new Error("host unavailable") });
     expect(failed).toEqual({ status: "failed", error: "host unavailable", retryable: true });
-    expect(presentShellBoot(failed)).toMatchObject({ title: "Unable to connect", message: "host unavailable", retryable: true });
-    expect(normalizeBootError({})).toBe("The Coding Agent host did not respond.");
+    expect(presentShellBoot(failed)).toMatchObject({ title: "无法连接", message: "host unavailable", retryable: true });
+    expect(normalizeBootError({})).toBe("Coding Agent 主机没有响应。");
   });
 
   it("bounds failure text without losing the typed status", () => {

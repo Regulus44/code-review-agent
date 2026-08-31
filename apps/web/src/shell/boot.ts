@@ -41,8 +41,8 @@ export function presentShellBoot(state: ShellBootState, maxMessageChars = 240): 
     return {
       status: state.status,
       appBusy: true,
-      title: "Loading workspace",
-      message: "Connecting to the Coding Agent host…",
+      title: "正在加载工作区",
+      message: "正在连接 Coding Agent 主机…",
       mark: "…",
       retryable: false,
     };
@@ -60,7 +60,7 @@ export function presentShellBoot(state: ShellBootState, maxMessageChars = 240): 
   return {
     status: state.status,
     appBusy: false,
-    title: "Unable to connect",
+    title: "无法连接",
     message: bounded(state.error, maxMessageChars),
     mark: "!",
     retryable: state.retryable,
@@ -70,7 +70,7 @@ export function presentShellBoot(state: ShellBootState, maxMessageChars = 240): 
 export function normalizeBootError(error: unknown): string {
   if (error instanceof Error && error.message.trim()) return error.message.trim();
   if (typeof error === "string" && error.trim()) return error.trim();
-  return "The Coding Agent host did not respond.";
+  return "Coding Agent 主机没有响应。";
 }
 
 function bounded(value: string, maxChars: number): string {

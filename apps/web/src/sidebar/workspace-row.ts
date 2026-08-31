@@ -29,7 +29,7 @@ export function presentWorkspaceRow(input: WorkspaceRowPresentationInput): Works
   const expanded = input.expanded === true;
   const active = input.active === true;
   const sessionCount = Number.isFinite(input.sessionCount) && (input.sessionCount ?? 0) >= 0 ? Math.floor(input.sessionCount ?? 0) : undefined;
-  const details = [root, sessionCount === undefined ? undefined : `${sessionCount} session${sessionCount === 1 ? "" : "s"}`].filter(Boolean).join(" · ");
+  const details = [root, sessionCount === undefined ? undefined : `${sessionCount} 个会话`].filter(Boolean).join(" · ");
   return {
     key: input.group.key,
     label,
@@ -37,7 +37,7 @@ export function presentWorkspaceRow(input: WorkspaceRowPresentationInput): Works
     expanded,
     active,
     title: details || root,
-    ariaLabel: `Workspace ${label}${details ? ` · ${details}` : ""}`,
+    ariaLabel: `工作区 ${label}${details ? ` · ${details}` : ""}`,
   };
 }
 
@@ -84,8 +84,8 @@ export function createWorkspaceRow(
     menu.type = "button";
     menu.className = "workspace-menu-trigger";
     menu.textContent = "⋯";
-    menu.title = `Workspace actions · ${view.label}`;
-    menu.setAttribute("aria-label", `Workspace actions · ${view.label}`);
+    menu.title = `工作区操作 · ${view.label}`;
+    menu.setAttribute("aria-label", `工作区操作 · ${view.label}`);
     menu.addEventListener("click", (event) => {
       event.stopPropagation();
       handlers.onMenu?.(menu);
@@ -106,5 +106,5 @@ export function createWorkspaceRow(
 function workspaceLabel(root: string): string {
   const value = root.replace(/[\\/]+$/u, "");
   const segments = value.split(/[\\/]/u).filter(Boolean);
-  return segments.at(-1) || value || "Workspace";
+  return segments.at(-1) || value || "工作区";
 }

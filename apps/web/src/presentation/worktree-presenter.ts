@@ -36,7 +36,7 @@ export function presentWorktrees(worktrees: readonly WorktreeProjection[] | unde
       path: worktree.path,
       branch: worktree.branch ?? "detached",
       status: worktree.status,
-      statusLabel: worktree.status === "clean" ? "Clean" : worktree.status === "dirty" ? "Dirty" : worktree.status === "conflicted" ? "Conflict" : worktree.status === "attached" ? "Attached" : worktree.status === "removed" ? "Removed" : "Failed",
+      statusLabel: worktree.status === "clean" ? "干净" : worktree.status === "dirty" ? "有修改" : worktree.status === "conflicted" ? "冲突" : worktree.status === "attached" ? "已附加" : worktree.status === "removed" ? "已移除" : "失败",
       attached: worktree.status === "attached" || worktree.sessionId !== undefined,
       canSwitch: !removed && !conflicted && worktree.id !== activeWorktreeId,
       dirty,
@@ -49,5 +49,5 @@ export function presentWorktrees(worktrees: readonly WorktreeProjection[] | unde
   const clean = items.filter((item) => item.status === "clean" || item.status === "attached").length;
   const dirty = items.filter((item) => item.dirty).length;
   const conflicted = items.filter((item) => item.conflicted).length;
-  return { visible: items.length > 0, items, clean, dirty, conflicted, summary: items.length === 0 ? "No worktrees" : `${clean} clean · ${dirty} dirty · ${conflicted} conflicted` };
+  return { visible: items.length > 0, items, clean, dirty, conflicted, summary: items.length === 0 ? "没有工作树" : `${clean} 干净 · ${dirty} 有修改 · ${conflicted} 冲突` };
 }

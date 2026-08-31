@@ -179,12 +179,12 @@ export function inspectTrajectory(record: TrajectoryRecord, maxDetailChars = 8_0
   const raw = asRecord(record.detail);
   const value = (keys: readonly string[]): unknown => readPath(raw, keys);
   const boundedEntry = (label: string, candidate: unknown): TrajectoryInspectorEntry => {
-    if (candidate === undefined) return entry(label, "unknown");
+    if (candidate === undefined) return entry(label, "未知");
     const display = presentBoundedValue(candidate, Math.min(maxDetailChars, 2_000));
     return { label, value: display.text, untrusted: display.untrusted, truncated: display.truncated };
   };
   const detailEntry: TrajectoryInspectorEntry = {
-    label: "Untrusted event data",
+    label: "不受信任的事件数据",
     value: detail.text,
     untrusted: detail.untrusted,
     truncated: detail.truncated,
@@ -198,43 +198,43 @@ export function inspectTrajectory(record: TrajectoryRecord, maxDetailChars = 8_0
     sections: [
       {
         id: "overview",
-        title: "Overview",
+        title: "概览",
         entries: compactEntries([
-          entry("Kind", record.kind),
-          entry("Status", record.status),
-          entry("Running", record.running ? "yes" : "no"),
-          entry("Record key", record.key),
+          entry("类型", record.kind),
+          entry("状态", localizeStatus(record.status)),
+          entry("运行中", record.running ? "是" : "否"),
+          entry("记录键", record.key),
         ]),
       },
       {
         id: "options",
-        title: "Options",
+        title: "选项",
         entries: [
-          boundedEntry("Options", value(["options"])),
-          boundedEntry("Model", value(["model"])),
-          boundedEntry("Reasoning", value(["reasoning", "reasoningEffort"])),
-          boundedEntry("Temperature", value(["temperature"])),
-          boundedEntry("Max tokens", value(["maxTokens", "max_tokens"])),
+          boundedEntry("选项", value(["options"])),
+          boundedEntry("模型", value(["model"])),
+          boundedEntry("推理", value(["reasoning", "reasoningEffort"])),
+          boundedEntry("温度", value(["temperature"])),
+          boundedEntry("最大 token", value(["maxTokens", "max_tokens"])),
         ],
       },
       {
         id: "usage",
-        title: "Usage",
+        title: "用量",
         entries: [
-          boundedEntry("Usage", value(["usage"])),
-          boundedEntry("Input tokens", value(["inputTokens", "input_tokens", "usage", "input"])),
-          boundedEntry("Output tokens", value(["outputTokens", "output_tokens", "usage", "output"])),
+          boundedEntry("用量", value(["usage"])),
+          boundedEntry("输入 token", value(["inputTokens", "input_tokens", "usage", "input"])),
+          boundedEntry("输出 token", value(["outputTokens", "output_tokens", "usage", "output"])),
           boundedEntry("TTFT", value(["ttftMs", "ttft_ms"])),
-          boundedEntry("Provider", value(["provider"])),
+          boundedEntry("提供方", value(["provider"])),
         ],
       },
       {
         id: "timing",
-        title: "Timing",
+        title: "时间",
         entries: compactEntries([
-          entry("Started", record.startedAt ?? "unknown"),
-          entry("Ended", record.endedAt ?? (record.running ? "running" : "unknown")),
-          entry("Duration", formatDuration(record.durationMs, record.running)),
+          entry("开始", record.startedAt ?? "未知"),
+          entry("结束", record.endedAt ?? (record.running ? "运行中" : "未知")),
+          entry("耗时", formatDuration(record.durationMs, record.running)),
         ]),
       },
       {
@@ -243,63 +243,63 @@ export function inspectTrajectory(record: TrajectoryRecord, maxDetailChars = 8_0
         entries: [
           boundedEntry("Diff", value(["diff"])),
           boundedEntry("Patch", value(["patch"])),
-          boundedEntry("Before", value(["before"])),
-          boundedEntry("After", value(["after"])),
+          boundedEntry("修改前", value(["before"])),
+          boundedEntry("修改后", value(["after"])),
         ],
       },
       {
         id: "request",
-        title: "Request",
+        title: "请求",
         entries: [
-          boundedEntry("Request", value(["request"])),
-          boundedEntry("Permission", value(["permissionId", "permission"])),
-          boundedEntry("Interaction", value(["interactionId", "interaction"])),
-          boundedEntry("Question", value(["question"])),
+          boundedEntry("请求", value(["request"])),
+          boundedEntry("权限", value(["permissionId", "permission"])),
+          boundedEntry("交互", value(["interactionId", "interaction"])),
+          boundedEntry("问题", value(["question"])),
         ],
       },
       {
         id: "catalog",
-        title: "Tool catalog",
+        title: "工具目录",
         entries: [
-          boundedEntry("Tool", value(["toolName", "name"])),
-          boundedEntry("Risk", value(["riskLevel", "risk"])),
-          boundedEntry("Source", value(["source"])),
+          boundedEntry("工具", value(["toolName", "name"])),
+          boundedEntry("风险", value(["riskLevel", "risk"])),
+          boundedEntry("来源", value(["source"])),
           boundedEntry("Schema", value(["inputSchema", "schema"])),
         ],
       },
       {
         id: "rendered",
-        title: "Rendered",
+        title: "渲染结果",
         entries: [detailEntry],
       },
       {
         id: "raw",
-        title: "Raw",
+        title: "原始数据",
         entries: [detailEntry],
       },
       {
         id: "source",
-        title: "Source",
+        title: "来源",
         entries: compactEntries([
-          entry("Source sequence", String(record.sourceSeq)),
-          entry("Last sequence", String(record.lastSeq)),
-          entry("Session", String(record.sessionId)),
-          entry("Turn", record.turnId === undefined ? "unknown" : String(record.turnId)),
-          entry("Task", record.taskId === undefined ? "unknown" : String(record.taskId)),
-          entry("Call", record.callId === undefined ? "unknown" : String(record.callId)),
-          entry("Root call", record.rootCallId ?? "unknown"),
-          entry("Parent call", record.parentCallId ?? "unknown"),
+          entry("来源序列", String(record.sourceSeq)),
+          entry("最后序列", String(record.lastSeq)),
+          entry("会话", String(record.sessionId)),
+          entry("回合", record.turnId === undefined ? "未知" : String(record.turnId)),
+          entry("任务", record.taskId === undefined ? "未知" : String(record.taskId)),
+          entry("调用", record.callId === undefined ? "未知" : String(record.callId)),
+          entry("根调用", record.rootCallId ?? "未知"),
+          entry("父调用", record.parentCallId ?? "未知"),
         ]),
       },
       {
         id: "input",
-        title: "Input",
-        entries: [boundedEntry("Input", value(["input", "arguments"]))],
+        title: "输入",
+        entries: [boundedEntry("输入", value(["input", "arguments"]))],
       },
       {
         id: "output",
-        title: "Output",
-        entries: [boundedEntry("Output", value(["output", "result"]))],
+        title: "输出",
+        entries: [boundedEntry("输出", value(["output", "result"]))],
       },
       {
         id: "schema",
@@ -308,7 +308,7 @@ export function inspectTrajectory(record: TrajectoryRecord, maxDetailChars = 8_0
       },
       {
         id: "detail",
-        title: "Rendered detail",
+        title: "渲染详情",
         entries: [detailEntry],
       },
     ],
@@ -344,8 +344,12 @@ function readPath(record: Readonly<Record<string, unknown>> | undefined, keys: r
 }
 
 function formatDuration(durationMs: number | undefined, running: boolean): string {
-  if (running) return "running";
-  if (durationMs === undefined) return "unknown";
+  if (running) return "运行中";
+  if (durationMs === undefined) return "未知";
   if (durationMs < 1_000) return `${durationMs}ms`;
   return `${(durationMs / 1_000).toFixed(durationMs < 10_000 ? 2 : 1)}s`;
+}
+
+function localizeStatus(value: string): string {
+  return ({ queued: "排队中", running: "运行中", completed: "已完成", failed: "失败", cancelled: "已取消", canceled: "已取消", stopped: "已停止", interrupted: "已中断", pending: "待处理", expired: "已过期" } as Record<string, string>)[value] ?? value;
 }

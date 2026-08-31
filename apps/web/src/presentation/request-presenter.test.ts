@@ -57,14 +57,14 @@ describe("request presenters", () => {
     const question = presentInteraction(interaction(), context);
     expect(approval).toMatchObject({ status: "pending", recovery: "restored", interactive: true });
     expect(question).toMatchObject({ status: "pending", recovery: "restored", interactive: true });
-    expect(approval.recoveryLabel).toContain("Recovered");
-    expect(question.recoveryLabel).toContain("Recovered");
+    expect(approval.recoveryLabel).toContain("请求已恢复");
+    expect(question.recoveryLabel).toContain("请求已恢复");
   });
 
   it("preserves terminal interaction status and removes answer actions", () => {
     const view = presentInteraction(interaction({ status: "expired" }), { now: Date.parse("2026-08-23T00:00:30.000Z") });
     expect(view).toMatchObject({ status: "expired", interactive: false, recovery: "expired", actions: [] });
-    expect(view.summary).toBe("Question expired");
+    expect(view.summary).toBe("问题已过期");
   });
 
   it("selects one active request with question priority", () => {

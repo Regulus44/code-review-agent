@@ -40,10 +40,10 @@ export function presentMcpServer(server: McpServerView, options: McpPresenterOpt
   const retryAt = stringValue(retry?.["nextAttemptAt"]);
   const lastError = stringValue(server.lastError);
   const auth = status === "needs_auth"
-    ? "needs authorization"
+    ? "需要授权"
     : credentialRef !== undefined
-      ? "credential reference configured"
-      : "no credential reference";
+      ? "已配置凭据引用"
+      : "未配置凭据引用";
   return {
     name: stringValue(config?.["name"]) ?? stringValue(server.name) ?? "MCP server",
     status,

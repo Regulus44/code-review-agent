@@ -187,23 +187,23 @@ function requestTiming(status: string, expiresAt: string | undefined, options: R
 }
 
 function recoveryState(status: string, options: RequestPresenterOptions): { readonly state: RequestRecoveryState; readonly label?: string } {
-  if (status === "expired") return { state: "expired", label: "Expired · response disabled" };
+  if (status === "expired") return { state: "expired", label: "已过期 · 已禁用响应" };
   if (status === "pending" && (options.sessionStatus === "interrupted" || options.connection === "reconnecting" || options.connection === "connecting")) {
-    return { state: "restored", label: "Recovered request · response will continue the turn" };
+    return { state: "restored", label: "请求已恢复 · 响应后将继续当前回合" };
   }
   return { state: "none" };
 }
 
 function permissionSummary(status: PermissionDisplayStatus, toolName: string): string {
-  if (status === "pending") return `Approval required · ${toolName}`;
-  if (status === "expired") return `Approval expired · ${toolName}`;
-  return `Permission ${status} · ${toolName}`;
+  if (status === "pending") return `需要批准 · ${toolName}`;
+  if (status === "expired") return `批准已过期 · ${toolName}`;
+  return `权限${status} · ${toolName}`;
 }
 
 function interactionSummary(status: InteractionDisplayStatus): string {
-  if (status === "pending") return "Agent needs your input";
-  if (status === "expired") return "Question expired";
-  return `Interaction ${status}`;
+  if (status === "pending") return "智能体需要你的输入";
+  if (status === "expired") return "问题已过期";
+  return `交互${status}`;
 }
 
 function commandOf(input: unknown): string | undefined {

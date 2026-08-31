@@ -26,7 +26,7 @@ export interface TaskPresenterOptions {
  * supplied by the host catalog when available.
  */
 export function presentTask(task: TaskProjection, options: TaskPresenterOptions = {}): TaskRenderIntent {
-  const title = task.title ?? task.report?.summary ?? `Task ${String(task.id)}`;
+  const title = task.title ?? task.report?.summary ?? `任务 ${String(task.id)}`;
   const reportSummary = task.report?.summary;
   const summary = reportSummary ?? (typeof task.result === "string" ? task.result : task.status);
   const details = presentBoundedValue({
@@ -50,7 +50,7 @@ export function presentTask(task: TaskProjection, options: TaskPresenterOptions 
 }
 
 function lineageLabel(task: TaskProjection): string {
-  const parent = task.parentTaskId === undefined ? "root" : `parent ${String(task.parentTaskId)}`;
-  const child = task.childSessionId === undefined ? "no child session" : `child ${String(task.childSessionId)}`;
-  return `${parent} · ${child} · depth ${task.delegationDepth ?? 0}`;
+  const parent = task.parentTaskId === undefined ? "根任务" : `父任务 ${String(task.parentTaskId)}`;
+  const child = task.childSessionId === undefined ? "无子会话" : `子会话 ${String(task.childSessionId)}`;
+  return `${parent} · ${child} · 深度 ${task.delegationDepth ?? 0}`;
 }

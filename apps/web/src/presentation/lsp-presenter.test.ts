@@ -13,7 +13,7 @@ describe("presentLspTool", () => {
   it("projects diagnostics with source locations and bounded status", () => {
     const view = presentLspTool(base);
     expect(view).toMatchObject({ visible: true, method: "diagnostics", serverId: "ts", path: "src/a.ts", status: "completed" });
-    expect(view.diagnostics[0]).toMatchObject({ severity: "error", message: "Type error", location: { line: 1, character: 2, preview: expect.stringContaining(":2:3") } });
+    expect(view.diagnostics[0]).toMatchObject({ severity: "错误", message: "Type error", location: { line: 1, character: 2, preview: expect.stringContaining(":2:3") } });
   });
 
   it("projects definition/reference locations and restart/failure states", () => {

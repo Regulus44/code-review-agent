@@ -257,7 +257,7 @@ function finalizeJob(job: MutableJob, interruptedAt: number): JobView {
     totalBytes: job.totalBytes,
     truncated: job.truncated,
     ...(job.spillPath === undefined ? {} : { spillPath: job.spillPath }),
-    ...(orphaned ? { diagnostics: "Host restarted before the job emitted a terminal event." } : job.diagnostics === undefined ? {} : { diagnostics: job.diagnostics }),
+    ...(orphaned ? { diagnostics: "主机在作业发出终止事件前重启。" } : job.diagnostics === undefined ? {} : { diagnostics: job.diagnostics }),
     sourceSequence: job.sourceSequence,
     lastSequence: job.lastSequence,
     recovery,

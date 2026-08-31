@@ -57,12 +57,12 @@ export interface SettingsPresenterOptions {
 }
 
 const permissionDescriptions: Record<PermissionPreset, { readonly label: string; readonly description: string }> = {
-  "read-only": { label: "Read only", description: "Inspect files and history without changing the workspace." },
-  "workspace-write": { label: "Workspace write", description: "Write inside the selected workspace without per-call approval." },
-  "ask-on-write": { label: "Ask on write", description: "Read automatically; request approval before writes or execution." },
-  "ask-on-execute": { label: "Ask on execute", description: "Allow file changes and request approval before commands run." },
-  "workspace-full-access": { label: "Workspace full access", description: "Run enabled tools without approval, with authority explicitly limited to the selected workspace." },
-  "danger-full-access": { label: "Full access", description: "Run enabled tools without interactive approval." },
+  "read-only": { label: "只读", description: "仅查看文件和历史，不修改工作区。" },
+  "workspace-write": { label: "工作区写入", description: "允许在选定工作区内写入，无需逐次批准。" },
+  "ask-on-write": { label: "写入前询问", description: "读取自动执行；写入或执行操作前请求批准。" },
+  "ask-on-execute": { label: "执行前询问", description: "允许文件修改；运行命令前请求批准。" },
+  "workspace-full-access": { label: "工作区完全访问", description: "启用的工具无需批准即可运行，但权限严格限制在选定工作区内。" },
+  "danger-full-access": { label: "完全访问", description: "启用的工具无需交互式批准即可运行。" },
 };
 
 /**
@@ -102,17 +102,17 @@ export function presentSettings(
       ? "OS-level network isolation is required by policy."
       : "Network enforcement metadata is unavailable.";
   const capabilities: SettingsCapability[] = [
-    { key: "coding-tools", label: "Coding tools", status: tools.length > 0 ? "available" : "unavailable", detail: `${tools.length} host-approved tool${tools.length === 1 ? "" : "s"} in the current catalog.` },
-    { key: "mcp", label: "MCP", status: mcpServers.length > 0 ? "configured" : "available", detail: mcpServers.length > 0 ? `${connected}/${mcpServers.length} configured server${mcpServers.length === 1 ? "" : "s"} connected.` : "No MCP server is configured." },
-    { key: "subagent", label: "Internal subagents", status: options.hasSubagentRuntime === false ? "unavailable" : "available", detail: options.hasSubagentRuntime === false ? "The host did not expose the internal Subagent service." : "Parent/child Task and Session controls are available." },
-    { key: "attachments", label: "Attachments", status: attachment === undefined ? "unavailable" : attachment.enabled ? "available" : "unavailable", detail: attachment === undefined ? "The host did not expose attachment capability metadata." : attachment.enabled ? `Files up to ${Math.floor(attachment.maxBytes / 1024)} KiB; images ${attachment.imagesEnabled ? "enabled" : "disabled"}.` : attachment.reason ?? "Attachments are disabled by the host policy." },
-    { key: "context-compaction", label: "Context compaction", status: context === undefined ? "unavailable" : context.enabled ? (context.configured ? "configured" : "available") : "unavailable", detail: context === undefined ? "The host did not expose context budget metadata." : !context.enabled ? "Context compaction is disabled by the host." : context.budget?.maxTokens === undefined ? "Compaction is enabled; provider context budget is unknown." : `Compaction budget: ${context.budget.maxTokens} tokens.` },
-    { key: "context-collapse", label: "Context Collapse", status: context?.collapse?.status ?? "unavailable", detail: context?.collapse?.reason ?? "The host did not expose Context Collapse capability metadata." },
-    { key: "code-mode", label: "Code Mode", status: codeMode === undefined ? "unavailable" : codeMode.enabled ? "configured" : codeMode.configured ? "unavailable" : "unavailable", detail: codeMode === undefined ? "The host did not expose Code Mode policy metadata." : codeMode.enabled ? `Sandbox enabled; output/runtime limits are host-controlled. ${codeModeNetworkDetail}` : codeMode.configured ? "Code Mode is configured but disabled by policy." : "Code Mode is not configured." },
-    { key: "lsp", label: "Language server", status: lsp === undefined ? "unavailable" : lsp.configured ? "configured" : "available", detail: lsp === undefined ? "The host did not expose LSP server metadata." : lsp.configured ? `${lsp.servers.length} configured server${lsp.servers.length === 1 ? "" : "s"}: ${lsp.servers.join(", ")}.` : "No language server is configured." },
-    { key: "plugins", label: "Plugins", status: plugins?.status ?? "unavailable", detail: plugins === undefined ? "The host did not expose plugin runtime metadata." : plugins.reason },
-    { key: "productization", label: "Productization", status: productization?.status ?? "unavailable", detail: productization === undefined ? "The host did not expose productization readiness metadata." : productization.reason },
-    { key: "a2a", label: "A2A interoperability", status: a2aStatus, detail: a2aStatus === "deferred" ? "Deferred until an external Agent interoperability scenario is accepted." : a2aStatus === "available" ? "External Agent adapter is enabled." : "External Agent adapter is unavailable." },
+    { key: "coding-tools", label: "编码工具", status: tools.length > 0 ? "available" : "unavailable", detail: `当前目录中有 ${tools.length} 个经主机批准的工具。` },
+    { key: "mcp", label: "MCP", status: mcpServers.length > 0 ? "configured" : "available", detail: mcpServers.length > 0 ? `${connected}/${mcpServers.length} 个已配置服务已连接。` : "尚未配置 MCP 服务。" },
+    { key: "subagent", label: "内部子智能体", status: options.hasSubagentRuntime === false ? "unavailable" : "available", detail: options.hasSubagentRuntime === false ? "主机未提供内部子智能体服务。" : "父/子任务和会话控制可用。" },
+    { key: "attachments", label: "附件", status: attachment === undefined ? "unavailable" : attachment.enabled ? "available" : "unavailable", detail: attachment === undefined ? "主机未提供附件能力元数据。" : attachment.enabled ? `文件上限 ${Math.floor(attachment.maxBytes / 1024)} KiB；图片${attachment.imagesEnabled ? "已启用" : "已禁用"}。` : attachment.reason ?? "附件已被主机策略禁用。" },
+    { key: "context-compaction", label: "上下文压缩", status: context === undefined ? "unavailable" : context.enabled ? (context.configured ? "configured" : "available") : "unavailable", detail: context === undefined ? "主机未提供上下文预算元数据。" : !context.enabled ? "上下文压缩已被主机禁用。" : context.budget?.maxTokens === undefined ? "上下文压缩已启用，但提供方上下文预算未知。" : `压缩预算：${context.budget.maxTokens} tokens。` },
+    { key: "context-collapse", label: "上下文折叠", status: context?.collapse?.status ?? "unavailable", detail: context?.collapse?.reason ?? "主机未提供上下文折叠能力元数据。" },
+    { key: "code-mode", label: "代码模式", status: codeMode === undefined ? "unavailable" : codeMode.enabled ? "configured" : codeMode.configured ? "unavailable" : "unavailable", detail: codeMode === undefined ? "主机未提供代码模式策略元数据。" : codeMode.enabled ? `沙箱已启用；输出和运行时限制由主机控制。${codeModeNetworkDetail}` : codeMode.configured ? "代码模式已配置，但被策略禁用。" : "代码模式未配置。" },
+    { key: "lsp", label: "语言服务器", status: lsp === undefined ? "unavailable" : lsp.configured ? "configured" : "available", detail: lsp === undefined ? "主机未提供语言服务器元数据。" : lsp.configured ? `${lsp.servers.length} 个已配置服务器：${lsp.servers.join("、")}。` : "尚未配置语言服务器。" },
+    { key: "plugins", label: "插件", status: plugins?.status ?? "unavailable", detail: plugins === undefined ? "主机未提供插件运行时元数据。" : plugins.reason },
+    { key: "productization", label: "产品化", status: productization?.status ?? "unavailable", detail: productization === undefined ? "主机未提供产品化就绪元数据。" : productization.reason },
+    { key: "a2a", label: "A2A 互操作", status: a2aStatus, detail: a2aStatus === "deferred" ? "等待接受外部智能体互操作场景后再启用。" : a2aStatus === "available" ? "外部智能体适配器已启用。" : "外部智能体适配器不可用。" },
   ];
   return {
     workspaceRoot: session?.workspaceRoot ?? ".",

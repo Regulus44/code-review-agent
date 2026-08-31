@@ -181,11 +181,11 @@ export function workspaceKey(root: string | undefined): string {
 export function workspaceLabel(root: string | undefined): string {
   const value = String(root ?? ".").replace(/[\\/]+$/u, "");
   const segments = value.split(/[\\/]/u).filter(Boolean);
-  return (segments.at(-1) ?? value) || "Workspace";
+  return (segments.at(-1) ?? value) || "工作区";
 }
 
 export function sessionLabel(session: Pick<SessionSummary, "id" | "title">): string {
-  return session.title ?? `Session · ${String(session.id).slice(-6)}`;
+  return session.title ?? `会话 · ${String(session.id).slice(-6)}`;
 }
 
 export function sessionRelativeTime(timestamp: string | undefined, now = Date.now()): string {
@@ -193,10 +193,10 @@ export function sessionRelativeTime(timestamp: string | undefined, now = Date.no
   const parsed = Date.parse(timestamp);
   if (!Number.isFinite(parsed)) return "";
   const diff = Math.max(0, now - parsed);
-  if (diff < 60_000) return "now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
-  return `${Math.floor(diff / 86_400_000)}d`;
+  if (diff < 60_000) return "刚刚";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
+  return `${Math.floor(diff / 86_400_000)} 天前`;
 }
 
 function matchesTree(session: NavigationSession, query: string, workspaceSearchText: string): NavigationSession | undefined {

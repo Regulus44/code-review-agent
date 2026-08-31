@@ -8,7 +8,7 @@ describe("presentPlan", () => {
   it("exposes review state without claiming that a command surface exists", () => {
     const view = presentPlan(plan);
     expect(view).toMatchObject({ visible: true, status: "active", reviewable: true, editable: false });
-    expect(view.unavailableReason).toContain("command surface");
+    expect(view.unavailableReason).toContain("幂等计划操作接口");
   });
 
   it("bounds long plan content", () => {

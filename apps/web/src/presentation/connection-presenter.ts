@@ -16,11 +16,11 @@ export function presentConnection(connection: WebConnectionState, error?: string
     case "connected":
       return { visible: false, tone: "neutral", message: "", retryable: false };
     case "connecting":
-      return { visible: true, tone: "neutral", message: "Loading session…", retryable: false };
+      return { visible: true, tone: "neutral", message: "正在加载会话…", retryable: false };
     case "reconnecting":
-      return { visible: true, tone: "warning", message: bounded(`Connection interrupted; retrying${error === undefined ? "…" : `: ${error}`}`, maxMessageChars), retryable: false };
+      return { visible: true, tone: "warning", message: bounded(`连接中断，正在重试${error === undefined ? "…" : `：${error}`}`, maxMessageChars), retryable: false };
     case "failed":
-      return { visible: true, tone: "error", message: bounded(`Connection failed${error === undefined ? "" : `: ${error}`}`, maxMessageChars), retryable: true };
+      return { visible: true, tone: "error", message: bounded(`连接失败${error === undefined ? "" : `：${error}`}`, maxMessageChars), retryable: true };
   }
 }
 

@@ -20,7 +20,7 @@ function server(overrides: Record<string, unknown> = {}): McpServerView {
 describe("MCP presenter", () => {
   it("summarizes scope, generation, auth and catalog policy", () => {
     const view = presentMcpServer(server());
-    expect(view).toMatchObject({ name: "fixture", scope: "project", transport: "stdio", revision: 3, generation: 7, auth: "credential reference configured", activeCount: 1, disabledCount: 1 });
+    expect(view).toMatchObject({ name: "fixture", scope: "project", transport: "stdio", revision: 3, generation: 7, auth: "已配置凭据引用", activeCount: 1, disabledCount: 1 });
     expect(view.catalog[1]).toMatchObject({ name: "write", enabled: false, disabledReason: "tool-policy-disabled" });
   });
 
@@ -34,6 +34,6 @@ describe("MCP presenter", () => {
 
   it("does not claim authorization when no credential reference exists", () => {
     const view = presentMcpServer(server({ config: { name: "fixture", scope: "session", transport: "sse" } }));
-    expect(view.auth).toBe("no credential reference");
+    expect(view.auth).toBe("未配置凭据引用");
   });
 });

@@ -9,8 +9,8 @@ describe("presentComposerSubmit", () => {
   });
 
   it("renders stop for queued and running turns", () => {
-    expect(presentComposerSubmit({ bootReady: true, inputHasContent: true, turn: turn("queued") })).toMatchObject({ mode: "stop", ariaLabel: "Stop queued turn" });
-    expect(presentComposerSubmit({ bootReady: true, inputHasContent: true, turn: turn("running") })).toMatchObject({ mode: "stop", ariaLabel: "Stop running turn" });
+    expect(presentComposerSubmit({ bootReady: true, inputHasContent: true, turn: turn("queued") })).toMatchObject({ mode: "stop", ariaLabel: "停止排队中的回合" });
+    expect(presentComposerSubmit({ bootReady: true, inputHasContent: true, turn: turn("running") })).toMatchObject({ mode: "stop", ariaLabel: "停止正在运行的回合" });
   });
 
   it("keeps stopping state until the durable turn terminal event removes it", () => {
@@ -22,6 +22,6 @@ describe("presentComposerSubmit", () => {
   });
 
   it("renders an explicit submitting phase while host admission is pending", () => {
-    expect(presentComposerSubmit({ bootReady: true, inputHasContent: true, pendingSubmit: true })).toMatchObject({ mode: "submitting", disabled: true, ariaLabel: "Sending message" });
+    expect(presentComposerSubmit({ bootReady: true, inputHasContent: true, pendingSubmit: true })).toMatchObject({ mode: "submitting", disabled: true, ariaLabel: "正在发送消息" });
   });
 });

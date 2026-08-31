@@ -24,12 +24,12 @@ export function presentPlan(plan: PlanProjection | undefined, options: PlanPrese
   return {
     visible: content.length > 0 || status !== "cleared",
     status,
-    statusLabel: status === "draft" ? "Draft" : status === "active" ? "Active" : status === "approved" ? "Approved" : status === "rejected" ? "Rejected" : "Cleared",
+    statusLabel: status === "draft" ? "草稿" : status === "active" ? "进行中" : status === "approved" ? "已批准" : status === "rejected" ? "已拒绝" : "已清除",
     content,
     reviewable: status === "draft" || status === "active",
     editable: commandSurfaceAvailable && !["approved", "cleared"].includes(status),
     detail: presentBoundedValue({ content, updatedAt: plan?.updatedAt ?? "unknown", sequence: plan?.lastSequence ?? 0 }, options.maxChars ?? 6_000),
-    ...(commandSurfaceAvailable ? {} : { unavailableReason: "Plan editing and review commands are deferred until the host exposes an idempotent command surface." }),
+    ...(commandSurfaceAvailable ? {} : { unavailableReason: "主机尚未提供幂等计划操作接口，编辑和审查暂不可用。" }),
   };
 }
 

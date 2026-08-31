@@ -66,13 +66,13 @@ describe("trajectory presenter", () => {
     const inspected = inspectTrajectory(runningRecord("tool:running", 1));
     const timing = inspected.sections.find((section) => section.id === "timing");
     const detail = inspected.sections.find((section) => section.id === "detail");
-    expect(timing?.entries.find((entry) => entry.label === "Duration")?.value).toBe("running");
+    expect(timing?.entries.find((entry) => entry.label === "耗时")?.value).toBe("运行中");
     expect(detail?.entries[0]?.value).toContain("[redacted]");
     expect(detail?.entries[0]?.untrusted).toBe(true);
     expect(inspected.sections.map((section) => section.id)).toEqual([
       "overview", "options", "usage", "timing", "diff", "request", "catalog", "rendered", "raw", "source", "input", "output", "schema", "detail",
     ]);
-    expect(inspected.sections.find((section) => section.id === "usage")?.entries.find((item) => item.label === "TTFT")?.value).toBe("unknown");
+    expect(inspected.sections.find((section) => section.id === "usage")?.entries.find((item) => item.label === "TTFT")?.value).toBe("未知");
   });
 
   it("builds a bounded timeline with stable order, nested depth, and explicit timing state", () => {

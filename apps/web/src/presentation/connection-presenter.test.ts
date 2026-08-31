@@ -15,6 +15,6 @@ describe("presentConnection", () => {
   });
 
   it("distinguishes the initial loading state", () => {
-    expect(presentConnection("connecting")).toEqual({ visible: true, tone: "neutral", message: "Loading session…", retryable: false });
+    expect(presentConnection("connecting")).toEqual({ visible: true, tone: "neutral", message: "正在加载会话…", retryable: false });
   });
 });

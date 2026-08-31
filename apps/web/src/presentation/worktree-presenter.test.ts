@@ -13,6 +13,6 @@ describe("presentWorktrees", () => {
   });
 
   it("keeps an explicit empty state", () => {
-    expect(presentWorktrees([])).toEqual({ visible: false, items: [], clean: 0, dirty: 0, conflicted: 0, summary: "No worktrees" });
+    expect(presentWorktrees([])).toEqual({ visible: false, items: [], clean: 0, dirty: 0, conflicted: 0, summary: "没有工作树" });
   });
 });

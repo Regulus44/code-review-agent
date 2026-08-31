@@ -58,9 +58,9 @@ export function presentSidebarNavigation(
 }
 
 export function navigationEmptyMessage(intent: Pick<NavigationRenderIntent, "emptyState" | "query" | "showArchived">): string {
-  if (intent.emptyState === "search" || intent.query.length > 0) return "No sessions match this search.";
-  if (intent.emptyState === "archived" || intent.showArchived) return "No archived sessions.";
-  return "No active sessions. Create a session to start coding.";
+  if (intent.emptyState === "search" || intent.query.length > 0) return "没有匹配搜索条件的会话。";
+  if (intent.emptyState === "archived" || intent.showArchived) return "没有已归档会话。";
+  return "没有活动会话。创建会话开始编码。";
 }
 
 export function countNavigationSessions(
@@ -153,18 +153,18 @@ export function presentSessionStatus(
           ? "running"
           : "completed";
   const label = status === "pending"
-    ? "Needs attention"
+    ? "需要处理"
     : status === "running"
-      ? "Running"
+      ? "运行中"
       : status === "completed"
-        ? "Completed"
+        ? "已完成"
         : status === "failed"
-          ? "Failed"
-          : "Stopped";
+          ? "失败"
+          : "已停止";
   return {
     status,
     cssClass: status === "pending" ? "queued" : status,
     label,
-    ariaLabel: `Session status: ${label}`,
+    ariaLabel: `会话状态：${label}`,
   };
 }

@@ -37,7 +37,7 @@ export function presentQuestionBatch(
       id: String(item.id),
       question: bounded(item.question, 500),
       status,
-      statusLabel: status === "pending" ? "Needs answer" : status === "answered" ? "Answered" : status === "cancelled" ? "Cancelled" : "Expired",
+      statusLabel: status === "pending" ? "待回答" : status === "answered" ? "已回答" : status === "cancelled" ? "已取消" : "已过期",
       options: item.options.slice(0, 16).map((option) => ({ label: bounded(option.label, 120), value: bounded(option.value, 240) })),
       allowFreeform: item.allowFreeform,
       canAnswer: status === "pending",
@@ -57,8 +57,8 @@ export function presentQuestionBatch(
     pendingCount,
     resolvedCount,
     expiredCount,
-    title: pendingCount > 0 ? "Agent questions" : "Question history",
-    summary: `${pendingCount} pending · ${resolvedCount} resolved · ${expiredCount} expired`,
+    title: pendingCount > 0 ? "智能体问题" : "问题历史",
+    summary: `${pendingCount} 待处理 · ${resolvedCount} 已解决 · ${expiredCount} 已过期`,
   };
 }
 

@@ -40,17 +40,17 @@ export function presentGoalBar(
   if (goal === undefined) {
     return {
       visible: false,
-      title: "No active goal",
+      title: "没有活动目标",
       status: "unknown",
-      statusLabel: "No goal",
+      statusLabel: "无目标",
       criteria: [],
-      completion: { satisfied: 0, total: 0, label: "No success criteria" },
+      completion: { satisfied: 0, total: 0, label: "无成功标准" },
       detail: presentBoundedValue({}, options.maxDetailChars ?? 4_000),
       canEdit: false,
       canPause: false,
       canResume: false,
       canClear: false,
-      unavailableReason: "The session has not recorded a durable goal.",
+      unavailableReason: "该会话尚未记录持久化目标。",
     };
   }
   const criteria = goal.successCriteria.map((text) => ({
@@ -62,26 +62,26 @@ export function presentGoalBar(
   return {
     visible: true,
     id: String(goal.id),
-    title: bounded(goal.title || "Untitled goal", 180),
+    title: bounded(goal.title || "未命名目标", 180),
     status: goal.status,
     statusLabel: statusLabel(goal.status),
     criteria,
     completion: {
       satisfied,
       total: criteria.length,
-      label: criteria.length === 0 ? "No success criteria" : `${satisfied}/${criteria.length} criteria satisfied`,
+      label: criteria.length === 0 ? "无成功标准" : `${satisfied}/${criteria.length} 项标准已满足`,
     },
     detail: presentBoundedValue({ budget: goal.budget, result: goal.result, reason: goal.reason }, options.maxDetailChars ?? 4_000),
     canEdit: commandSurfaceAvailable && goal.status === "active",
     canPause: commandSurfaceAvailable && goal.status === "active",
     canResume: commandSurfaceAvailable && (goal.status === "paused" || goal.status === "blocked"),
     canClear: commandSurfaceAvailable && !["completed", "cancelled"].includes(goal.status),
-    ...(commandSurfaceAvailable ? {} : { unavailableReason: "Goal controls are deferred until the host exposes an idempotent command surface." }),
+    ...(commandSurfaceAvailable ? {} : { unavailableReason: "主机尚未提供幂等目标操作接口，目标控制暂不可用。" }),
   };
 }
 
 function statusLabel(status: GoalStatus): string {
-  return status === "active" ? "Active" : status === "paused" ? "Paused" : status === "completed" ? "Completed" : status === "blocked" ? "Blocked" : "Cancelled";
+  return status === "active" ? "进行中" : status === "paused" ? "已暂停" : status === "completed" ? "已完成" : status === "blocked" ? "已阻塞" : "已取消";
 }
 
 function bounded(value: string, maxChars: number): string {

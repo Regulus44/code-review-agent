@@ -29,7 +29,7 @@ export interface SessionRowHandlers {
 export function presentSessionRow(input: SessionRowPresentationInput): SessionRowPresentation {
   const session = input.session;
   const label = sessionLabel(session);
-  const relativeTime = sessionRelativeTime(session.updatedAt, input.now) || "new";
+  const relativeTime = sessionRelativeTime(session.updatedAt, input.now) || "新建";
   const status = presentSessionStatus(session, input);
   const details = [
     session.workspaceRoot || ".",
@@ -44,7 +44,7 @@ export function presentSessionRow(input: SessionRowPresentationInput): SessionRo
     status,
     details,
     title: `${label} · ${details}`,
-    ariaLabel: `${status.ariaLabel} · ${label} · Updated ${relativeTime}`,
+    ariaLabel: `${status.ariaLabel} · ${label} · 更新于 ${relativeTime}`,
   };
 }
 
@@ -99,8 +99,8 @@ export function createSessionRow(
     menu.type = "button";
     menu.className = "tree-action";
     menu.textContent = "⋯";
-    menu.title = "Session actions";
-    menu.setAttribute("aria-label", `Session actions · ${view.label}`);
+    menu.title = "会话操作";
+    menu.setAttribute("aria-label", `会话操作 · ${view.label}`);
     menu.addEventListener("click", (event) => {
       event.stopPropagation();
       handlers.onMenu?.(input.session, menu);

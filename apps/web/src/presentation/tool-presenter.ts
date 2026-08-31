@@ -92,12 +92,12 @@ function classifyTool(name: string): ToolPresentationKind {
 function sourceLabelFor(name: string, kind: ToolPresentationKind): string {
   if (kind === "mcp") {
     const parts = name.split("__");
-    return parts.length >= 3 ? `MCP · ${parts[1]} · ${parts.slice(2).join("__")}` : "MCP";
+    return parts.length >= 3 ? `MCP · ${parts[1]} · ${parts.slice(2).join("__")}` : "MCP 工具";
   }
-  if (kind === "subagent") return "Subagent";
-  if (kind === "diff") return "Diff/Patch";
-  if (kind === "terminal") return "Terminal/Job";
-  return kind === "builtin" ? "Tool" : "Event";
+  if (kind === "subagent") return "子智能体";
+  if (kind === "diff") return "Diff / Patch";
+  if (kind === "terminal") return "Terminal / Job";
+  return kind === "builtin" ? "工具" : "事件";
 }
 
 function presentationTitle(tool: ToolCallView): string | undefined {
@@ -115,12 +115,12 @@ function resultModelView(value: unknown): unknown {
 function statusLabel(status: ToolCallView["status"]): string {
   switch (status) {
     case "pending":
-    case "running": return "Running";
-    case "awaiting_permission": return "Needs approval";
-    case "completed": return "Completed";
+    case "running": return "运行中";
+    case "awaiting_permission": return "等待批准";
+    case "completed": return "已完成";
     case "failed":
-    case "denied": return "Failed";
-    case "cancelled": return "Stopped";
+    case "denied": return "失败";
+    case "cancelled": return "已停止";
     default: return status.replace(/_/g, " ");
   }
 }
@@ -145,13 +145,13 @@ function classifyRowVariant(name: string): ToolRowVariant {
 
 function variantTitle(variant: ToolRowVariant): string {
   switch (variant) {
-    case "search": return "Search";
-    case "read": return "Read";
+    case "search": return "搜索";
+    case "read": return "读取";
     case "bash": return "Bash";
-    case "write": return "Write";
-    case "edit": return "Edit";
-    case "code": return "Code";
-    default: return "Tool call";
+    case "write": return "写入";
+    case "edit": return "编辑";
+    case "code": return "代码";
+    default: return "工具调用";
   }
 }
 

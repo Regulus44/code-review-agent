@@ -35,18 +35,24 @@ describe("Tool presenter", () => {
 
   it("derives a compact target summary and separate IN/OUT sections", () => {
     const view = presentToolCall(call("read_file", { output: "contents" }, { path: "src/index.ts" }));
-    expect(view.title).toBe("Read");
+    expect(view.title).toBe("读取");
     expect(view.summary).toBe("src/index.ts");
     expect(view.filePath).toBe("src/index.ts");
     expect(view.input).toContain("path");
     expect(view.output).toContain("output");
     expect(view.state).toBe("ok");
-    expect(view.statusLabel).toBe("Completed");
+    expect(view.statusLabel).toBe("已完成");
   });
 
   it("maps pending, failed and cancelled calls to DSH row states", () => {
     expect(presentToolCall(call("bash", undefined, { command: "pnpm test" }, "pending")).state).toBe("running");
     expect(presentToolCall(call("bash", { message: "boom" }, { command: "pnpm test" }, "failed")).state).toBe("error");
     expect(presentToolCall(call("bash", { message: "stopped" }, { command: "pnpm test" }, "cancelled")).state).toBe("stopped");
+  });
+
+  it("keeps established developer tool terms in English", () => {
+    expect(presentToolCall(call("bash", undefined, { command: "pnpm test" })).title).toBe("Bash");
+    expect(presentToolCall(call("diff_preview", {})).sourceLabel).toBe("Diff / Patch");
+    expect(presentToolCall(call("terminal_session", {})).sourceLabel).toBe("Terminal / Job");
   });
 });

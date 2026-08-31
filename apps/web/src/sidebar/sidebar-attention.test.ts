@@ -7,7 +7,7 @@ describe("sidebar attention projection", () => {
       visible: false,
       count: 0,
       label: "",
-      ariaLabel: "No pending attention",
+      ariaLabel: "没有待处理事项",
     });
   });
 
@@ -16,21 +16,21 @@ describe("sidebar attention projection", () => {
     expect(intent.visible).toBe(true);
     expect(intent.targetGroup).toBe("requests");
     expect(intent.count).toBe(3);
-    expect(intent.ariaLabel).toContain("3 pending requests");
+    expect(intent.ariaLabel).toContain("3 个待处理请求");
   });
 
   it("targets Planning for a running child task", () => {
     const intent = presentSidebarAttention({ runningChildren: 1 });
     expect(intent.targetGroup).toBe("planning");
     expect(intent.count).toBe(1);
-    expect(intent.ariaLabel).toContain("1 child task running");
+    expect(intent.ariaLabel).toContain("1 个子任务正在运行");
   });
 
   it("targets Integrations for MCP failures", () => {
     const intent = presentSidebarAttention({ mcpFailures: 2 });
     expect(intent.targetGroup).toBe("integrations");
     expect(intent.count).toBe(2);
-    expect(intent.ariaLabel).toContain("2 MCP integrations need attention");
+    expect(intent.ariaLabel).toContain("2 个 MCP 集成需要处理");
   });
 
   it("uses request priority when multiple groups need attention", () => {

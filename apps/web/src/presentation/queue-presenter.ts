@@ -45,7 +45,7 @@ export function presentQueue(session?: SessionProjection, maxMessageChars = 180)
     status: turn.status,
     position: index + 1,
     ...(queuePosition === undefined ? {} : { queuePosition }),
-    message: bounded(turn.userMessage ?? "Queued turn", maxMessageChars),
+    message: bounded(turn.userMessage ?? "排队中的回合", maxMessageChars),
     createdAt: turn.createdAt,
     cancellable: true,
     canMoveUp: turn.status === "queued" && (queuePosition ?? 1) > 1,

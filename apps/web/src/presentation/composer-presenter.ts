@@ -23,7 +23,7 @@ export interface ComposerSubmitView {
 
 export function presentComposerSubmit(input: ComposerSubmitInput): ComposerSubmitView {
   if (input.pendingSubmit) {
-    return { mode: "submitting", icon: "…", disabled: true, ariaLabel: "Sending message", title: "Sending message" };
+    return { mode: "submitting", icon: "…", disabled: true, ariaLabel: "正在发送消息", title: "正在发送消息" };
   }
   const turn = input.turn?.status === "queued" || input.turn?.status === "running" ? input.turn : undefined;
   const stopping = turn !== undefined && input.stoppingTurnId === turn.id;
@@ -34,7 +34,7 @@ export function presentComposerSubmit(input: ComposerSubmitInput): ComposerSubmi
     mode,
     icon: mode === "send" ? "↑" : mode === "stop" ? "■" : "…",
     disabled,
-    ariaLabel: mode === "send" ? "Send message" : mode === "stop" ? queued ? "Stop queued turn" : "Stop running turn" : "Stopping turn",
-    title: mode === "send" ? "Send message" : mode === "stop" ? "Stop current turn" : "Stopping current turn",
+    ariaLabel: mode === "send" ? "发送消息" : mode === "stop" ? queued ? "停止排队中的回合" : "停止正在运行的回合" : "正在停止回合",
+    title: mode === "send" ? "发送消息" : mode === "stop" ? "停止当前回合" : "正在停止当前回合",
   };
 }

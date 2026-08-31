@@ -106,12 +106,24 @@ function restartOf(tool: ToolCallView): LspRenderIntent["restartState"] {
 }
 
 function summary(method: LspRenderIntent["method"], status: LspRenderIntent["status"], diagnostics: number, locations: number, restart: LspRenderIntent["restartState"]): string {
-  const subject = method === "diagnostics" ? `${diagnostics} diagnostic${diagnostics === 1 ? "" : "s"}` : `${locations} location${locations === 1 ? "" : "s"}`;
-  return `LSP ${method} · ${status} · ${subject}${restart === "none" ? "" : ` · ${restart}`}`;
+  const subject = method === "diagnostics" ? `${diagnostics} 条诊断` : `${locations} 个位置`;
+  return `LSP · ${localizeMethod(method)} · ${localizeStatus(status)} · ${subject}${restart === "none" ? "" : ` · ${localizeRestart(restart)}`}`;
+}
+
+function localizeMethod(value: LspRenderIntent["method"]): string {
+  return ({ diagnostics: "诊断", definition: "定义", references: "引用", unknown: "未知方法" } as Record<LspRenderIntent["method"], string>)[value];
+}
+
+function localizeStatus(value: LspRenderIntent["status"]): string {
+  return ({ completed: "已完成", failed: "失败", running: "运行中", unknown: "未知" } as Record<LspRenderIntent["status"], string>)[value];
+}
+
+function localizeRestart(value: LspRenderIntent["restartState"]): string {
+  return ({ none: "", requested: "已请求重启", restarted: "已重启", crashed: "已崩溃", unknown: "重启状态未知" } as Record<LspRenderIntent["restartState"], string>)[value];
 }
 
 function asRecord(value: unknown): Readonly<Record<string, unknown>> | undefined { return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : undefined; }
 function stringValue(value: unknown): string | undefined { return typeof value === "string" ? value : undefined; }
 function integer(value: unknown): number | undefined { return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined; }
-function severityLabel(value: unknown): string { return value === 1 ? "error" : value === 2 ? "warning" : value === 3 ? "info" : value === 4 ? "hint" : typeof value === "string" ? value : "unknown"; }
+function severityLabel(value: unknown): string { return value === 1 ? "错误" : value === 2 ? "警告" : value === 3 ? "信息" : value === 4 ? "提示" : typeof value === "string" ? value : "未知"; }
 function bounded(value: string, max: number): string { const normalized = value.trim(); return normalized.length <= max ? normalized : `${normalized.slice(0, Math.max(1, max - 1))}…`; }

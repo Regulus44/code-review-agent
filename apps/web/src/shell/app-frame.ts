@@ -36,5 +36,5 @@ export function applyShellFrame(elements: ShellFrameElements, intent: ShellLayou
   elements.app.dataset.mobileSidebarOpen = String(intent.mobileSidebarOpen);
   elements.mobileMenu.hidden = !intent.mobileMenuVisible;
   elements.mobileMenu.setAttribute("aria-expanded", String(intent.mobileSidebarOpen));
-  elements.mobileMenu.setAttribute("aria-label", intent.mobileSidebarOpen ? "Close sidebar" : "Open sidebar");
+  elements.mobileMenu.setAttribute("aria-label", intent.mobileSidebarOpen ? "关闭侧栏" : "打开侧栏");
 }

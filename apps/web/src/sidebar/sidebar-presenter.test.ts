@@ -37,7 +37,7 @@ describe("presentSidebarNavigation", () => {
     expect(projection.viewMode).toBe("tree");
     expect(projection.sort).toBe("recent");
     expect(projection.activeGroupKey).toBe(projection.activeWorkspaceKey);
-    expect(projection.emptyMessage).toBe("No sessions match this search.");
+    expect(projection.emptyMessage).toBe("没有匹配搜索条件的会话。");
   });
 
   it("keeps selection separate from visibility filters", () => {
@@ -46,7 +46,7 @@ describe("presentSidebarNavigation", () => {
 
     expect(projection.selectedSessionId).toBe(archived.id);
     expect(projection.activeGroupKey).toBeUndefined();
-    expect(projection.emptyMessage).toBe("No active sessions. Create a session to start coding.");
+    expect(projection.emptyMessage).toBe("没有活动会话。创建会话开始编码。");
   });
 });
 
@@ -63,9 +63,9 @@ describe("windowSessionGroup", () => {
 
 describe("navigationEmptyMessage", () => {
   it("prioritizes search, archived, and active empty states", () => {
-    expect(navigationEmptyMessage({ emptyState: "search", query: "x", showArchived: false })).toBe("No sessions match this search.");
-    expect(navigationEmptyMessage({ emptyState: "archived", query: "", showArchived: true })).toBe("No archived sessions.");
-    expect(navigationEmptyMessage({ emptyState: "none", query: "", showArchived: false })).toBe("No active sessions. Create a session to start coding.");
+    expect(navigationEmptyMessage({ emptyState: "search", query: "x", showArchived: false })).toBe("没有匹配搜索条件的会话。");
+    expect(navigationEmptyMessage({ emptyState: "archived", query: "", showArchived: true })).toBe("没有已归档会话。");
+    expect(navigationEmptyMessage({ emptyState: "none", query: "", showArchived: false })).toBe("没有活动会话。创建会话开始编码。");
   });
 });
 
@@ -74,13 +74,13 @@ describe("presentSessionStatus", () => {
     expect(presentSessionStatus({ status: "running" }, { pendingInteraction: true })).toMatchObject({
       status: "pending",
       cssClass: "queued",
-      label: "Needs attention",
-      ariaLabel: "Session status: Needs attention",
+      label: "需要处理",
+      ariaLabel: "会话状态：需要处理",
     });
   });
 
   it("maps terminal host states to stable row states without changing the contract", () => {
-    expect(presentSessionStatus({ status: "idle" })).toMatchObject({ status: "completed", cssClass: "completed", label: "Completed" });
+    expect(presentSessionStatus({ status: "idle" })).toMatchObject({ status: "completed", cssClass: "completed", label: "已完成" });
     expect(presentSessionStatus({ status: "failed" }).status).toBe("failed");
     expect(presentSessionStatus({ status: "interrupted" }).status).toBe("stopped");
     expect(presentSessionStatus({ status: "running" }, { runningChild: true }).status).toBe("running");

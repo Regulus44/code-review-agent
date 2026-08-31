@@ -14,7 +14,7 @@ export interface ContextMeterRenderIntent {
 }
 
 export function presentContextMeter(session: SessionProjection | undefined, maxTokens?: number): ContextMeterRenderIntent {
-  if (session === undefined) return { status: "unknown", label: "Context · unknown", detail: "No session projection is available." };
+  if (session === undefined) return { status: "unknown", label: "上下文 · 未知", detail: "没有可用的会话投影。" };
   const diagnostics = session.contextDiagnostics;
   if (diagnostics !== undefined) return presentDurableContextMeter(diagnostics);
   const budget = maxTokens !== undefined && Number.isFinite(maxTokens) && maxTokens > 0 ? Math.floor(maxTokens) : undefined;
@@ -23,8 +23,8 @@ export function presentContextMeter(session: SessionProjection | undefined, maxT
   const effectiveUsed = compaction?.estimatedTokens ?? usedTokens;
   const status = compaction?.status === "failed" ? "failed" : compaction?.status === "completed" ? "compacted" : budget === undefined ? "unknown" : "healthy";
   const ratio = budget === undefined ? undefined : Math.min(1, effectiveUsed / budget);
-  const label = budget === undefined ? `Context · ${effectiveUsed} tokens` : `Context · ${effectiveUsed}/${budget}`;
-  const detail = compaction?.status === "failed" ? `Compaction failed: ${compaction.error ?? "unknown error"}` : compaction?.status === "completed" ? `Compacted ${compaction.droppedMessages} message${compaction.droppedMessages === 1 ? "" : "s"} at sequence ${compaction.lastSequence}${compaction.truncatedToolResults === undefined || compaction.truncatedToolResults === 0 ? "" : `; truncated ${compaction.truncatedToolResults} tool result${compaction.truncatedToolResults === 1 ? "" : "s"}`}.` : "Context is estimated from the replayed session messages.";
+  const label = budget === undefined ? `上下文 · ${effectiveUsed} tokens` : `上下文 · ${effectiveUsed}/${budget}`;
+  const detail = compaction?.status === "failed" ? `上下文压缩失败：${compaction.error ?? "未知错误"}` : compaction?.status === "completed" ? `已在序列 ${compaction.lastSequence} 压缩 ${compaction.droppedMessages} 条消息${compaction.truncatedToolResults === undefined || compaction.truncatedToolResults === 0 ? "" : `，截断 ${compaction.truncatedToolResults} 个工具结果`}。` : "上下文 token 数根据回放后的会话消息估算。";
   return { status, label, ...(budget === undefined ? {} : { maxTokens: budget, ratio: ratio as number }), usedTokens: effectiveUsed, detail };
 }
 
@@ -36,13 +36,13 @@ function presentDurableContextMeter(diagnostics: ContextDiagnosticsProjection): 
   const compactDetail = compact === undefined
     ? ""
     : compact.status === "failed"
-      ? ` Last compact failed${compact.error === undefined ? "" : `: ${compact.error}`}.`
-      : ` Last compact${compact.kind === undefined ? "" : ` (${compact.kind})`}${compact.tokensSaved === undefined ? "" : ` saved ${compact.tokensSaved} tokens`}.`;
-  const recoveryDetail = recovery === 0 ? "" : ` Recovery chain: ${recovery} event${recovery === 1 ? "" : "s"}.`;
-  const detail = `Token source: ${diagnostics.tokenSource} (${diagnostics.tokenConfidence}); ${diagnostics.percentLeft}% remaining. Thresholds warning/error/auto/blocking: ${diagnostics.warningThreshold}/${diagnostics.errorThreshold}/${diagnostics.autoCompactThreshold}/${diagnostics.blockingThreshold}.${compactDetail}${recoveryDetail}`;
+      ? ` 上次压缩失败${compact.error === undefined ? "" : `：${compact.error}`}。`
+      : ` 上次压缩${compact.kind === undefined ? "" : `（${compact.kind}）`}${compact.tokensSaved === undefined ? "" : `，节省 ${compact.tokensSaved} tokens`}。`;
+  const recoveryDetail = recovery === 0 ? "" : ` 恢复链：${recovery} 个事件。`;
+  const detail = `Token 来源：${diagnostics.tokenSource}（${diagnostics.tokenConfidence}）；剩余 ${diagnostics.percentLeft}%。阈值（警告/错误/自动压缩/阻断）：${diagnostics.warningThreshold}/${diagnostics.errorThreshold}/${diagnostics.autoCompactThreshold}/${diagnostics.blockingThreshold}.${compactDetail}${recoveryDetail}`;
   return {
     status: diagnostics.level,
-    label: maxTokens > 0 ? `Context · ${diagnostics.tokenUsage}/${maxTokens}` : `Context · ${diagnostics.tokenUsage} tokens`,
+    label: maxTokens > 0 ? `上下文 · ${diagnostics.tokenUsage}/${maxTokens}` : `上下文 · ${diagnostics.tokenUsage} tokens`,
     usedTokens: diagnostics.tokenUsage,
     ...(maxTokens > 0 && ratio !== undefined ? { maxTokens, ratio } : {}),
     detail,
@@ -54,10 +54,10 @@ function presentDurableContextMeter(diagnostics: ContextDiagnosticsProjection): 
 
 export function presentContextDiagnostics(session: SessionProjection | undefined): ContextDiagnosticsRenderIntent {
   const diagnostics = session?.contextDiagnostics;
-  if (diagnostics === undefined) return { status: "unknown", detail: "No durable context diagnostics are available." };
+  if (diagnostics === undefined) return { status: "unknown", detail: "暂无持久化上下文诊断信息。" };
   return {
     status: diagnostics.level,
-    detail: `Context ${diagnostics.tokenUsage}/${diagnostics.effectiveWindowTokens} tokens; ${diagnostics.percentLeft}% remaining; source ${diagnostics.tokenSource}/${diagnostics.tokenConfidence}.`,
+    detail: `上下文 ${diagnostics.tokenUsage}/${diagnostics.effectiveWindowTokens} tokens；剩余 ${diagnostics.percentLeft}%；来源 ${diagnostics.tokenSource}/${diagnostics.tokenConfidence}。`,
     diagnostics,
   };
 }

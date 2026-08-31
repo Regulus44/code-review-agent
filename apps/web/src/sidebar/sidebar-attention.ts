@@ -41,8 +41,8 @@ export function presentSidebarAttention(input: SidebarAttentionInput = {}): Side
       visible: true,
       targetGroup: "requests",
       count: pending,
-      label: "Needs attention",
-      ariaLabel: `Open details: ${pending} pending request${pending === 1 ? "" : "s"}`,
+      label: "需要处理",
+      ariaLabel: `打开详情：${pending} 个待处理请求`,
     };
   }
   if (runningChildren > 0) {
@@ -50,8 +50,8 @@ export function presentSidebarAttention(input: SidebarAttentionInput = {}): Side
       visible: true,
       targetGroup: "planning",
       count: runningChildren,
-      label: "Child task running",
-      ariaLabel: `Open details: ${runningChildren} child task${runningChildren === 1 ? "" : "s"} running`,
+      label: "子任务运行中",
+      ariaLabel: `打开详情：${runningChildren} 个子任务正在运行`,
     };
   }
   if (mcpFailures > 0) {
@@ -59,14 +59,14 @@ export function presentSidebarAttention(input: SidebarAttentionInput = {}): Side
       visible: true,
       targetGroup: "integrations",
       count: mcpFailures,
-      label: "Integration attention",
-      ariaLabel: `Open details: ${mcpFailures} MCP integration${mcpFailures === 1 ? "" : "s"} need attention`,
+      label: "集成需要处理",
+      ariaLabel: `打开详情：${mcpFailures} 个 MCP 集成需要处理`,
     };
   }
   return {
     visible: false,
     count: 0,
     label: "",
-    ariaLabel: "No pending attention",
+    ariaLabel: "没有待处理事项",
   };
 }

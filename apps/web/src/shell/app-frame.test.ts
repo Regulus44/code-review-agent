@@ -32,7 +32,7 @@ describe("physical Shell frame", () => {
     });
     expect(app.className).toBe("app-shell details-collapsed mobile-sidebar-open");
     expect(mobileMenu.hidden).toBe(false);
-    expect(attributes).toEqual(new Map([["aria-expanded", "true"], ["aria-label", "Close sidebar"]]));
+    expect(attributes).toEqual(new Map([["aria-expanded", "true"], ["aria-label", "关闭侧栏"]]));
   });
 
   it("returns undefined when the static fallback does not expose the frame contract", () => {

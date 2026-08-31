@@ -18,19 +18,19 @@ describe("presentGoalBar", () => {
     const view = presentGoalBar([goal({ lastSequence: 2 }), goal({ lastSequence: 4 })]);
     expect(view).toMatchObject({ visible: true, title: "Ship Phase 8", status: "active", canPause: false });
     expect(view.criteria.every((item) => item.state === "unknown")).toBe(true);
-    expect(view.completion.label).toBe("0/2 criteria satisfied");
-    expect(view.unavailableReason).toContain("idempotent command");
+    expect(view.completion.label).toBe("0/2 项标准已满足");
+    expect(view.unavailableReason).toContain("幂等目标操作接口");
   });
 
   it("marks all criteria satisfied only after a completed goal", () => {
     const view = presentGoalBar([goal({ status: "completed" })]);
     expect(view.completion).toMatchObject({ satisfied: 2, total: 2 });
-    expect(view.statusLabel).toBe("Completed");
+    expect(view.statusLabel).toBe("已完成");
   });
 
   it("exposes host-backed pause and resume actions without inventing a command", () => {
     expect(presentGoalBar([goal()], { commandSurfaceAvailable: true })).toMatchObject({ canPause: true, canResume: false, canClear: true });
-    expect(presentGoalBar([goal({ status: "paused" })], { commandSurfaceAvailable: true })).toMatchObject({ statusLabel: "Paused", canPause: false, canResume: true });
+    expect(presentGoalBar([goal({ status: "paused" })], { commandSurfaceAvailable: true })).toMatchObject({ statusLabel: "已暂停", canPause: false, canResume: true });
   });
 
   it("returns an explicit empty state", () => {

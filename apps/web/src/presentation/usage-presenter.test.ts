@@ -23,7 +23,7 @@ describe("usage presenter", () => {
     const view = presentUsage([event(1, "turn/started", "2026-08-25T00:00:00.000Z")]);
     expect(view.compactLabel).toContain("LLM —");
     expect(view.summary.outputTokens).toBeUndefined();
-    expect(view.details.find((item) => item.label === "Generation speed")?.value).toBe("—");
+    expect(view.details.find((item) => item.label === "生成速度")?.value).toBe("—");
   });
 
   it("formats compact token and duration values", () => {
@@ -49,6 +49,6 @@ describe("usage presenter", () => {
     expect(view.source).toBe("projection");
     expect(view.complete).toBe(true);
     expect(view.summary).toMatchObject({ turnCount: 1, stepCount: 1, inputTokens: 100, outputTokens: 20, latestPrompt: "latest" });
-    expect(view.title).toContain("complete session log");
+    expect(view.title).toContain("完整会话日志");
   });
 });

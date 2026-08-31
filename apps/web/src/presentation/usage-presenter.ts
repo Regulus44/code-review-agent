@@ -56,20 +56,20 @@ export function presentUsage(source: readonly UsageEvent[] | SessionStatsProject
     `缓存 ${formatTokens(summary.cacheReadTokens)}`,
   ].join(" · ");
   const details: UsageDetail[] = [
-    { label: "Turns", value: String(summary.turnCount) },
-    { label: "Steps", value: String(summary.stepCount) },
-    { label: "Turn elapsed", value: formatDuration(summary.turnDurationMs) },
-    { label: "LLM elapsed", value: formatDuration(summary.llmDurationMs), detail: "Derived from step/started to assistant response events." },
-    { label: "Tool calls", value: `${summary.toolCallCount} · ${formatDuration(summary.toolDurationMs)}` },
-    { label: "First token", value: formatDuration(summary.ttftMs), detail: "Provider TTFT when reported; otherwise derived from the first assistant chunk." },
-    { label: "Input tokens", value: formatTokens(summary.inputTokens) },
-    { label: "Output tokens", value: formatTokens(summary.outputTokens) },
-    { label: "Total tokens", value: formatTokens(summary.totalTokens) },
-    { label: "Reasoning tokens", value: formatTokens(summary.reasoningTokens) },
-    { label: "Generation speed", value: summary.outputTokensPerSecond === undefined ? "—" : `${formatDecimal(summary.outputTokensPerSecond)} tok/s` },
-    { label: "Cache hit", value: summary.cacheHitPercent === undefined ? "—" : `${formatDecimal(summary.cacheHitPercent)}%` },
-    { label: "Latest prompt", value: summary.latestPrompt === undefined ? "—" : truncatePrompt(summary.latestPrompt) },
-    { label: "Status", value: summary.status ?? "unknown" },
+    { label: "回合数", value: String(summary.turnCount) },
+    { label: "步骤数", value: String(summary.stepCount) },
+    { label: "回合耗时", value: formatDuration(summary.turnDurationMs) },
+    { label: "LLM 耗时", value: formatDuration(summary.llmDurationMs), detail: "根据步骤开始到智能体响应事件推导。" },
+    { label: "工具调用", value: `${summary.toolCallCount} · ${formatDuration(summary.toolDurationMs)}` },
+    { label: "首 token", value: formatDuration(summary.ttftMs), detail: "优先使用提供方报告的 TTFT，否则根据首个智能体分片推导。" },
+    { label: "输入 token", value: formatTokens(summary.inputTokens) },
+    { label: "输出 token", value: formatTokens(summary.outputTokens) },
+    { label: "总 token", value: formatTokens(summary.totalTokens) },
+    { label: "推理 token", value: formatTokens(summary.reasoningTokens) },
+    { label: "生成速度", value: summary.outputTokensPerSecond === undefined ? "—" : `${formatDecimal(summary.outputTokensPerSecond)} token/s` },
+    { label: "缓存命中", value: summary.cacheHitPercent === undefined ? "—" : `${formatDecimal(summary.cacheHitPercent)}%` },
+    { label: "最近提示", value: summary.latestPrompt === undefined ? "—" : truncatePrompt(summary.latestPrompt) },
+    { label: "状态", value: localizeStatus(summary.status) },
   ];
   const hasData = projection === undefined
     ? ordered.some((event) => ["turn/queued", "turn/started", "step/started", "assistant/chunk", "assistant/message", "tool/call", "tool/result", "turn/ended"].includes(event.type))
@@ -77,14 +77,19 @@ export function presentUsage(source: readonly UsageEvent[] | SessionStatsProject
   return {
     compactLabel,
     title: projection === undefined
-      ? "Runtime usage and timing from the currently loaded history window. Unknown provider values are shown as —."
-      : `Runtime usage and timing from the complete session log through sequence ${projection.sourceSequence}. Unknown provider values are shown as —.`,
+      ? "当前加载历史窗口中的运行时用量与耗时。提供方未知值显示为 —。"
+      : `截至序列 ${projection.sourceSequence} 的完整会话日志中的运行时用量与耗时。提供方未知值显示为 —。`,
     hasData,
     summary,
     details,
     source: projection === undefined ? "events" : "projection",
     complete: projection?.complete === true,
   };
+}
+
+function localizeStatus(value: string | undefined): string {
+  if (value === undefined) return "未知";
+  return ({ queued: "排队中", running: "运行中", completed: "已完成", failed: "失败", cancelled: "已取消", canceled: "已取消", stopped: "已停止", interrupted: "已中断" } as Record<string, string>)[value] ?? value;
 }
 
 export function presentUsageProjection(projection: SessionStatsProjection): UsageRenderIntent {

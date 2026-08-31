@@ -50,7 +50,7 @@ export function presentDeliverables(
       kind: artifact.kind,
       ...(path === undefined ? {} : { path }),
       scope,
-      scopeLabel: scope === "workspace" ? "workspace" : scope === "unsafe" ? "blocked" : scope,
+      scopeLabel: scope === "workspace" ? "工作区内" : scope === "unsafe" ? "已阻止" : scope === "external" ? "外部" : "未知",
       sourceTaskId: taskId,
       ...(artifact.mediaType === undefined ? {} : { mediaType: artifact.mediaType }),
       ...(artifact.sizeBytes === undefined ? {} : { sizeBytes: artifact.sizeBytes }),
@@ -79,8 +79,8 @@ function normalize(value: string): string {
 }
 
 function actionReason(scope: DeliverableScope, artifact: ArtifactRef): string {
-  if (scope === "workspace") return artifact.preview === undefined ? "Host validates the workspace path before opening or downloading." : "Preview is available; host revalidates the workspace path before opening or downloading.";
-  if (scope === "external") return "External artifact opening requires an explicit host policy.";
-  if (scope === "unsafe") return "Path is outside the current workspace scope.";
-  return "Artifact has no readable workspace path.";
+  if (scope === "workspace") return artifact.preview === undefined ? "打开或下载前，主机会校验工作区路径。" : "已有预览；打开或下载前，主机会重新校验工作区路径。";
+  if (scope === "external") return "打开外部产物需要主机显式授权。";
+  if (scope === "unsafe") return "路径位于当前工作区范围之外。";
+  return "产物没有可读取的工作区路径。";
 }

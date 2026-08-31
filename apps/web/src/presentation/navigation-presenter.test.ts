@@ -87,7 +87,7 @@ describe("buildNavigationModel", () => {
     const sessions = [session("ses_a")];
     expect(buildNavigationModel(sessions, { query: "missing" }).emptyState).toBe("search");
     expect(buildNavigationModel(sessions, { showArchived: true }).emptyState).toBe("archived");
-    expect(sessionRelativeTime("2026-08-23T09:59:30.000Z", Date.parse("2026-08-23T10:00:00.000Z"))).toBe("now");
+    expect(sessionRelativeTime("2026-08-23T09:59:30.000Z", Date.parse("2026-08-23T10:00:00.000Z"))).toBe("刚刚");
     expect(sessionRelativeTime("invalid", Date.now())).toBe("");
   });
 

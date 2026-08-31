@@ -27,7 +27,7 @@ export function presentTodoPanel(todos: readonly TodoItem[] | undefined, maxItem
     content: bounded(todo.content, maxChars),
     ...(todo.activeForm === undefined ? {} : { activeForm: bounded(todo.activeForm, maxChars) }),
     status: todo.status,
-    statusLabel: todo.status === "in_progress" ? "In progress" : todo.status === "completed" ? "Completed" : todo.status === "cancelled" ? "Cancelled" : "Pending",
+    statusLabel: todo.status === "in_progress" ? "进行中" : todo.status === "completed" ? "已完成" : todo.status === "cancelled" ? "已取消" : "待处理",
     detail: todo.status === "in_progress" ? bounded(todo.activeForm ?? todo.content, maxChars) : bounded(todo.content, maxChars),
   }));
   const completed = all.filter((todo) => todo.status === "completed").length;
@@ -41,7 +41,7 @@ export function presentTodoPanel(todos: readonly TodoItem[] | undefined, maxItem
     inProgress,
     pending,
     collapsedByDefault: all.length > 5,
-    summary: all.length === 0 ? "No todo items" : `${completed}/${all.length} completed · ${inProgress} in progress · ${pending} pending`,
+    summary: all.length === 0 ? "没有待办事项" : `${completed}/${all.length} 已完成 · ${inProgress} 进行中 · ${pending} 待处理`,
   };
 }
 

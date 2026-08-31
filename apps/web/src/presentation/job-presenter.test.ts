@@ -36,7 +36,7 @@ describe("presentRuntimeDiagnostics", () => {
       event(3, "agent/status", { status: "interrupted", reason: "process_restart" }),
     ]);
     expect(view.orphanedJobs).toBe(1);
-    expect(view.jobs[0]).toMatchObject({ status: "orphaned", recovery: "orphaned", diagnostics: "Host restarted before the job emitted a terminal event." });
+    expect(view.jobs[0]).toMatchObject({ status: "orphaned", recovery: "orphaned", diagnostics: "主机在作业发出终止事件前重启。" });
   });
 
   it("bounds output and exposes failed exit diagnostics", () => {
