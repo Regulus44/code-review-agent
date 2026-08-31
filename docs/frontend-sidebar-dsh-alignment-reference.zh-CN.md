@@ -260,9 +260,9 @@ git diff --check
 
 **本仓库需要修改**
 
-- `apps/web/index.html:711-733`：将现有 `<aside>` 重新组织为 header、primary action、browser slot、footer 四块；
-- `apps/web/index.html:59, 716-732`：把 `.sidebar-content` 的整体滚动拆为固定控制区 + `.sidebar-list-scroll`；
-- `apps/web/index.html:52-74, 150-153`：收敛 header、secondary、footer 的样式；
+- `apps/web/index.html:715-741`：将现有 `<aside>` 重新组织为 header、primary action、browser slot、footer 四块；
+- `apps/web/index.html:61, 720-740`：把 `.sidebar-content` 的整体滚动拆为固定控制区 + `.sidebar-list-scroll`；
+- `apps/web/index.html:52-77, 150-153`：收敛 header、secondary、footer 的样式；
 - `apps/web/src/shell/app-frame.ts:1-40`：继续只应用 layout intent，必要时补充 sidebar slot/数据属性，不承载 Session 业务；
 - `apps/web/src/shell/layout.ts`、`columns.ts`：仅补充测试或可访问性属性，不改现有让步链。
 
@@ -280,6 +280,28 @@ git diff --check
 - 低频 Integrations/Tasks 不再和列表共享滚动上下文。
 
 **验收/回滚**：600/900/1024 宽度截图和键盘滚动通过；回滚只恢复旧 DOM/CSS 结构。
+
+#### M1 实施记录（2026-08-31）
+
+本轮完成了最小可验证的 Sidebar shell 与滚动边界切片，未提前实现 M2 的 WorkspaceBrowser 文件拆分或 M4 的浏览状态持久化：
+
+- `apps/web/index.html:61-63`：`.sidebar-content` 改为 `display:flex; flex-direction:column; overflow:hidden`，新增 `.sidebar-primary` 固定顶部控制区；原有三栏 `.app-shell`、rail/mobile 断点和 sidebar footer 结构保持不变。
+- `apps/web/index.html:97-100`：`.workspace-browser` 成为可收缩的列式 flex 区域；新增 `.sidebar-list-scroll`（`min-height:0; flex:1; overflow:auto`），将 `#session-list` 放入带 `role="region"`、`aria-label` 和键盘 `tabindex` 的唯一主滚动容器。Workspace toolbar、New session 和 Archived 控件不再随列表滚动。
+- `apps/web/index.html:69`：Integrations/Tasks `details.sidebar-secondary` 作为固定 shell 的低频折叠区保留在 list scrollport 之外；M6 再迁移其承载位置，本轮不改变 `renderMcp()`/`renderSubagents()` 行为。
+- `apps/web/index.html:715-741`：保留 `sidebar-header`、`new-session`、`session-list`、`mcp-list`、`subagent-list`、`settings-button` 等既有 id，新增的 wrapper 仅用于布局分区，不改变 `showSessionsTree()`、REST/SSE 或 typed bridge 入口。
+- `apps/web/src/shell/sidebar-shell.test.ts:1-32`：新增静态 shell 契约测试，锁定固定区域、滚动容器和 footer 的 DOM 顺序及 CSS 非滚动/滚动边界。
+
+**M1 验收结果**
+
+```powershell
+pnpm typecheck
+pnpm --filter @code-review-agent/web test
+git diff --check
+```
+
+2026-08-31：`pnpm typecheck` 通过；Web 37 个测试文件、153 个测试通过（含新增 sidebar shell 2 个测试）；`git diff --check` 通过。`apps/web/src/shell/app-frame.ts`、`layout.ts`、`columns.ts` 未修改，现有三栏计算、pointer capture/rAF resize 和移动 rail 语义保持不变。
+
+**M1 回滚边界**：删除 `sidebar-primary`/`sidebar-list-scroll` wrapper、恢复 `.sidebar-content { overflow:auto }` 和 `.workspace-browser` 原有 grid 声明即可回退；不得回滚 EventStore、Session/Workspace contract、API/SSE 或导航 presenter。M1 不需要 feature flag，若后续启用 `WEB_SIDEBAR_DENSITY_V2`，可将本切片作为其 shell 子开关。
 
 ### M2：WorkspaceBrowser（浏览器控制层）
 
@@ -580,6 +602,7 @@ WEB_SESSION_CONTENT_SEARCH   // 可选：Host 内容搜索，默认关闭
 | 2026-08-31 | 核对 DSH `SidebarRoot`、`WorkspaceBrowser`、`Rows`、`tree.ts`、`stores.ts`、`AppFrame`、`columns.ts` 及对应测试入口。 | 第 5–9 节 | 进入 P0/P1/P2 实施拆分和验收门禁。 |
 | 2026-08-31 | 将改造分为 M0–M7 模块、P0–P2 阶段，写入 feature flag、回滚和许可证边界。 | 第 10–13 节 | 后续若发现新入口或 contract 需求，先更新本节与 ADR，再编码。 |
 | 2026-08-31 | 完成 M0 事实与契约冻结：在 `navigation-presenter.ts` 明确 Web-only `SidebarNavigationState`、`selectedSessionId` 输入/回显和 `activeWorkspaceKey` 派生边界；补充 API、SessionStore、typed bridge 注释与 3 组 presenter contract 测试。 | 第 8 节 M0；第 15 节 | 进入 M1/M2 前端结构实施；M4 只能在本冻结之上接 reducer/持久化。 |
+| 2026-08-31 | 完成 M1 Sidebar shell 最小切片：`index.html` 新增 `sidebar-primary` 与 `sidebar-list-scroll` 分区，固定 header/New session/toolbar/footer，独立 Workspace/Session scrollport；新增 `sidebar-shell.test.ts` 并通过 typecheck、Web 全量测试和 diff 检查。 | 第 8 节 M1；第 11–12 节 | 由主 agent 复核后建立 Phase 8 M1 checkpoint；后续进入 M2 浏览器控制层。 |
 
 ## 15. 防漂移检查清单（每个后续 PR 必填）
 
