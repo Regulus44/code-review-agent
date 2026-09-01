@@ -166,6 +166,9 @@ importers:
       '@coding-agent/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@coding-agent/skills':
+        specifier: workspace:*
+        version: link:../skills
       '@coding-agent/subagent':
         specifier: workspace:*
         version: link:../subagent

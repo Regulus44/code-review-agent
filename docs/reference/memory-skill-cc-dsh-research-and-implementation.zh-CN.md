@@ -354,6 +354,8 @@ S1 实际结果：新增 `@coding-agent/skills-filesystem` 的 `FileSystemSkillP
 - **验收**：模型自动调用、用户-only Skill、inline/fork 隔离、工具结果 replay、compact 后 catalog 重建、重复 `/name`、Skill 名与命令冲突、取消/approval replay。
 - **禁用/回滚**：只关闭 model-facing catalog/tool；用户显式调用可单独保留；已写事件仍由通用 renderer 回放。
 
+S2 实际结果：新增 `packages/context/src/skill-catalog.ts`，提供稳定 digest、字符预算和摘要优先的 catalog renderer，以及 `$ARGUMENTS` canonical 内容渲染。新增 `packages/tools/src/skill.ts` SkillTool，调用前重新从 registry 读取定义并校验 model/user invocation；未知 frontmatter 或 remote/unknown trust 通过 ToolRuntime interaction 请求审批，正文仅作为即时 ToolResult 返回，`tool/result` 持久化与 `skill/invocation`/`skill/result` 事件仅保留名称、模式和字节数。`AgentHost` 增加 `skillToolEnabled` feature gate、模型 catalog 注入和严格 `/name` 用户入口；能力关闭或未注册 SkillTool 时回退普通消息路径。工具结果脱敏避免正文进入 EventStore/SSE；compact/replay 通过每次 assembleTurnContext 重新构建 catalog。当前 fork 仅保留隔离模式标记，尚未创建独立子 Session。
+
 ### S3：动态 invalidation、path 条件和 Web presenter
 
 - **范围**：文件工具变更触发 registry invalidation；`paths` 条件激活；`/v1/skills` 列表、composer suggestions、dedicated Skill tool row。

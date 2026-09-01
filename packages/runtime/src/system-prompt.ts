@@ -11,6 +11,7 @@ export interface AgentPromptContext {
   readonly customInstructions?: string;
   readonly recovery?: boolean;
   readonly projectMemoryPrompt?: string;
+  readonly skillCatalog?: string;
 }
 
 export type AgentPromptTool = Pick<ToolDefinition, "name" | "riskLevel" | "approvalMode" | "executionMode">;
@@ -45,6 +46,7 @@ export function buildAgentSystemPromptSections(context: AgentPromptContext): rea
     { id: "permissions", phase: "dynamic", order: 130, content: permissionSection(context.permissionPreset) },
     context.recovery === true ? { id: "recovery", phase: "dynamic", order: 140, content: recoverySection() } : undefined,
     optionalSection("project_memory", 145, projectMemorySection(context.projectMemoryPrompt)),
+    optionalSection("skill_catalog", 146, context.skillCatalog),
     optionalSection("custom_instructions", 150, customInstructionsSection(context.customInstructions)),
   ];
   return sections.filter((section): section is SystemPromptSection => section !== undefined);

@@ -461,12 +461,15 @@ export class ToolRuntime {
     if (output.result === undefined || output.status === "awaiting_permission" || output.status === "awaiting_interaction") {
       throw new Error("TOOL_RESULT_COMMIT_INVALID: a deferred tool result must be settled");
     }
+    const durableResult = output.result && output.result.output && typeof output.result.output === "object" && (output.result.output as Record<string, unknown>).skill !== undefined
+      ? { ...output.result, output: (() => { const value = output.result!.output as Record<string, unknown>; const { content: _content, ...rest } = value; return { ...rest, ...(typeof _content === "string" ? { contentBytes: Buffer.byteLength(_content, "utf8") } : {}) }; })() }
+      : output.result;
     await this.options.store.append({
       sessionId: input.sessionId,
       ...(input.turnId === undefined ? {} : { turnId: input.turnId }),
       ...(input.commandId === undefined ? {} : { correlationId: input.commandId }),
       type: "tool/result",
-      payload: { toolCallId: output.toolCallId, status: output.status, result: output.result },
+      payload: { toolCallId: output.toolCallId, status: output.status, result: durableResult },
     });
     if (output.result.diff !== undefined) {
       await this.options.store.append({

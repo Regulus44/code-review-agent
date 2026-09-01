@@ -389,3 +389,11 @@ S1 新增 `@coding-agent/skills-filesystem`，将 project、user、custom、bund
 API Host 默认装配 filesystem provider，但 `modelToolExposed` 仍为 false；`skillFilesystem.enabled=false` 可禁用。正文、绝对路径和 provider 异常文本不进入 catalog/SSE/EventStore。该阶段参考 Claude Code `loadSkillsDir.ts` 的来源/去重/延迟正文行为和 DSH `skill-filesystem` 的 rank、watcher、incomplete 观察，仅重新实现，不复制上游代码。
 
 回滚策略：设置 `skillFilesystem.enabled=false` 或不向 `AgentHost` 注入 registry；保留本地 Skill 文件和 S0 registry/attachment 语义，普通 turn 不受影响。
+
+## ADR-032：S2 Skill catalog 与 SkillTool 统一执行边界
+
+状态：accepted（2026-09-01，S2）
+
+S2 增加确定性 bounded Skill catalog（digest/预算/摘要优先）与按需正文加载；正文通过 canonical renderer 生成仅当前 ToolResult model view 可见的内容，`tool/result` 与专用 skill 事件只保存名称、模式和字节数等元数据。SkillTool 支持 inline 与 fork 标记、用户 `/name` 显式入口，并复用 ToolRuntime 的 workspace、取消、交互和事件管线。remote/unknown source 或未知 frontmatter 属性进入用户交互审批，capability disabled 时不注册工具；`allowedTools` 不扩大宿主权限。
+
+回滚策略：关闭 `skillToolEnabled` 或 skill capability 即停止模型 catalog/tool；保留已写事件并由通用 reducer 忽略正文缺失，用户可继续使用 S1 只读 catalog。

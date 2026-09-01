@@ -668,3 +668,31 @@ ID:
 本项目路径：`packages/skills-filesystem/src/index.ts`、`packages/skills/src/index.ts`、`apps/api/src/server.ts`。
 
 范围：cwd/project root 解析、rank/provider composition、bounded depth/size/count、symlink/gitignore fail-closed、last-good incomplete observation 和可选 watcher 生命周期。
+
+### CC-023
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`packages/builtin-tools/src/tools/SkillTool/SkillTool.ts`、`packages/builtin-tools/src/tools/SkillTool/prompt.ts`
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；本项目仅重新实现 SkillTool 校验、摘要预算和按需渲染。
+
+本项目路径：`packages/context/src/skill-catalog.ts`、`packages/tools/src/skill.ts`、`packages/runtime/src/index.ts`。
+
+范围：catalog digest/预算、摘要→正文二次校验、inline/fork 标记和用户调用审批；不复制上游账户、CLI 或 provider。
+
+### DSH-019
+
+来源仓库：`D:/Develop/deepseek-harness-fork`
+
+来源路径：`packages/skill/tool-skill/src/index.ts` 的 durable catalog/source、pre-step user gesture、renderSkillContent
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：`D:/Develop/deepseek-harness-fork/LICENSE` 为 MIT；本项目未复制 DSH 实现。
+
+本项目路径：`packages/context/src/skill-catalog.ts`、`packages/tools/src/skill.ts`、`apps/api/src/server.ts`。
+
+范围：用户 `/name` ingress、canonical renderer、交互审批与正文脱敏事件。

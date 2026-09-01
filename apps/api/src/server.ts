@@ -1260,6 +1260,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const body = await readJson(request);
         const content = body.content;
         if (typeof content !== "string") throw new HttpError(400, "content is required");
+        if (/^\/[a-z0-9]+(?:-[a-z0-9]+)*(?:\s|$)/u.test(content)) {
+          const invoked = await host.invokeSkill(id, content, commandId(request, body));
+          if (invoked !== undefined) {
+            sendJson(response, invoked.status === "awaiting_permission" ? 202 : 200, invoked);
+            return;
+          }
+        }
         const reasoningEffort = body.reasoningEffort === undefined ? undefined : requireReasoningEffort(body.reasoningEffort);
         sendJson(response, 202, { turnId: await host.sendMessage(id, content, commandId(request, body), reasoningEffort === undefined ? undefined : { reasoningEffort }) });
         return;

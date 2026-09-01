@@ -84,6 +84,8 @@ export type AgentEventType =
   | "context/transcript_segment"
   | "context/session_restored"
   | "skills/change"
+  | "skill/invocation"
+  | "skill/result"
   | "worktree/created"
   | "worktree/attached"
   | "worktree/switched"
@@ -133,7 +135,7 @@ export const AGENT_EVENT_TYPES: readonly AgentEventType[] = [
   "context/summary_compacted", "context/summary_compaction_failed", "context/compact_boundary",
   "context/post_compact_rebuild_failed", "context/recovery_started", "context/recovery_transition",
   "context/recovery_succeeded", "context/recovery_failed", "context/recovery_circuit_open", "context/transcript_segment",
-  "context/session_restored", "skills/change", "worktree/created", "worktree/attached", "worktree/switched", "worktree/cleaned",
+  "context/session_restored", "skills/change", "skill/invocation", "skill/result", "worktree/created", "worktree/attached", "worktree/switched", "worktree/cleaned",
   "worktree/failed", "tool/call", "tool/progress", "tool/result", "diff/preview", "patch/preview", "patch/applied",
   "patch/rejected", "patch/rolled_back", "lsp/server", "lsp/request", "permission/requested", "permission/resolved",
   "interaction/requested", "interaction/resolved", "terminal/session", "job/started", "job/output", "job/ended",

@@ -47,11 +47,11 @@ import {
 import type { SkillRegistry } from "@coding-agent/skills";
 import { EchoChatModel, modelFailureMetadata, sanitizeFailureMessage } from "@coding-agent/llm";
 import { compactMessages, DEFAULT_CONTEXT_BUDGET, type ContextBudget } from "@coding-agent/compaction";
-import { applyToolResultBudgetAsync, assembleContext, buildPostCompactMessages, buildProjectMemoryPrompt, buildToolResultModelView, calculateContextWarningState, classifyProviderContextError, compactWithSessionMemory, compactWithSummaryModel, ContextRecoveryGuard, countContextTokens, createSessionMemoryFileWriteGuard, createTokenCounter, createToolResultBudgetState, createToolResultStorage, ensureToolResultPairing, estimateContextTokens, extractContextAttachmentIds, fallbackModelContextCapability, fingerprintModelRequest, groupMessagesByApiRound, hydrateToolResultBudgetState, isReactiveContextError, normalizeMessagesForAPI, normalizeExtractionConfig, recallRelevantProjectMemory, resolveContextBudget, restoreModelViewFromTranscript, selectPostCompactAttachments, SessionMemoryExtractionScheduler, sessionMemoryStats, shouldCompactBeforeRequest, shouldExtractSessionMemory, shouldUseExactTokenCount, truncateProjectMemoryEntrypoint, validateProjectMemoryTopic, type ApiRound, type ContextAssembly, type ContextAttachment, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type PostCompactAttachmentConfig, type PostCompactAttachmentProvider, type ProjectMemoryScope, type ProjectMemoryStore, type ProjectMemoryTopic, type SessionMemoryCompactConfig, type SessionMemoryExtractionConfig, type SessionMemoryExtractionState, type SessionMemoryExtractor, type SessionMemoryStore, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport, type ToolResultBudgetState, type ToolResultStorage } from "@coding-agent/context";
+import { applyToolResultBudgetAsync, assembleContext, buildPostCompactMessages, buildProjectMemoryPrompt, buildToolResultModelView, calculateContextWarningState, classifyProviderContextError, compactWithSessionMemory, compactWithSummaryModel, ContextRecoveryGuard, countContextTokens, createSessionMemoryFileWriteGuard, createTokenCounter, createToolResultBudgetState, createToolResultStorage, ensureToolResultPairing, estimateContextTokens, extractContextAttachmentIds, fallbackModelContextCapability, fingerprintModelRequest, groupMessagesByApiRound, hydrateToolResultBudgetState, isReactiveContextError, normalizeMessagesForAPI, normalizeExtractionConfig, recallRelevantProjectMemory, renderSkillCatalog, resolveContextBudget, restoreModelViewFromTranscript, selectPostCompactAttachments, SessionMemoryExtractionScheduler, sessionMemoryStats, shouldCompactBeforeRequest, shouldExtractSessionMemory, shouldUseExactTokenCount, truncateProjectMemoryEntrypoint, validateProjectMemoryTopic, type ApiRound, type ContextAssembly, type ContextAttachment, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type PostCompactAttachmentConfig, type PostCompactAttachmentProvider, type ProjectMemoryScope, type ProjectMemoryStore, type ProjectMemoryTopic, type SessionMemoryCompactConfig, type SessionMemoryExtractionConfig, type SessionMemoryExtractionState, type SessionMemoryExtractor, type SessionMemoryStore, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport, type ToolResultBudgetState, type ToolResultStorage } from "@coding-agent/context";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, DefaultPermissionPolicy, FileObservationPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModePolicySnapshot, type CodeModeSandbox, type ExecuteToolOutput, type JobSummary, type LspServerConfig, type PermissionPreset } from "@coding-agent/tools";
+import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, createSkillTool, DefaultPermissionPolicy, FileObservationPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModePolicySnapshot, type CodeModeSandbox, type ExecuteToolOutput, type JobSummary, type LspServerConfig, type PermissionPreset } from "@coding-agent/tools";
 import type { SubagentRuntime } from "@coding-agent/subagent";
 import { GitWorktreeManager, WorkspaceResolver } from "@coding-agent/workspace";
 import { buildAgentSystemPromptSections } from "./system-prompt.js";
@@ -84,6 +84,8 @@ export interface AgentHostOptions {
   readonly codeMode?: CodeModeSandbox;
   readonly capabilities?: CapabilityRegistry;
   readonly skills?: SkillRegistry;
+  /** Enables model-facing SkillTool; user invocation remains available through executeTool. */
+  readonly skillToolEnabled?: boolean;
   readonly subagentRuntime?: SubagentRuntime;
   readonly compactionEnabled?: boolean;
   readonly contextBudget?: Partial<ContextBudget>;
@@ -351,6 +353,7 @@ export class AgentHost {
       this.permissionPreset = options.permissionPreset;
     }
     if (options.subagentRuntime !== undefined) registry.registerMany(createSubagentTools({ runtime: options.subagentRuntime }).filter((tool) => !registry.has(tool.name)));
+    if (options.skills !== undefined && options.skillToolEnabled === true && (options.capabilities === undefined || options.capabilities.isEnabled("skill")) && !registry.has("skill")) registry.register(createSkillTool(options.skills));
     this.toolRuntime = options.toolRuntime ?? new ToolRuntime({ store: options.store, registry, ...(this.terminalManager === undefined ? {} : { terminalManager: this.terminalManager }), ...(options.permissionPreset === undefined ? {} : { policy: new DefaultPermissionPolicy({ preset: options.permissionPreset }) }) });
     this.ready = this.restoreQueuedTurns();
   }
@@ -1291,6 +1294,14 @@ export class AgentHost {
     return this.toolRuntime.execute({ sessionId, ...(projection.ownership?.tenantId === undefined ? {} : { tenantId: projection.ownership.tenantId }), workspaceRoot: effectiveWorkspaceRoot(projection), name, input, ...(turnId === undefined ? {} : { turnId }), toolCallId, ...(commandId === undefined ? {} : { commandId }), ...(signal === undefined ? {} : { signal }), caller });
   }
 
+  /** Explicit user `/name` ingress. Parsing is intentionally strict and bounded. */
+  async invokeSkill(sessionId: SessionId, content: string, commandId?: string, signal?: AbortSignal): Promise<ExecuteToolOutput | undefined> {
+    if (!this.toolRuntime.registry.has("skill")) return undefined;
+    const match = /^\/([a-z0-9]+(?:-[a-z0-9]+)*)(?:\s+([\s\S]{0,8192}))?\s*$/u.exec(content);
+    if (match === null) return undefined;
+    return this.executeTool(sessionId, "skill", { skill: match[1], args: match[2] ?? "", context: "inline" }, undefined, commandId, signal, "user");
+  }
+
   async resolvePermission(sessionId: SessionId, permissionId: PermissionId, status: "approved" | "denied" | "cancelled", commandId?: string): Promise<ExecuteToolOutput> {
     await this.ready;
     const projection = await this.options.store.project(sessionId);
@@ -2051,6 +2062,9 @@ export class AgentHost {
     const tools = this.toolRuntime.listTools(sessionId, tenantId);
     const attachments = await this.postCompactAttachmentsForSession(sessionId, history, projection);
     const projectMemory = await this.projectMemoryContext(sessionId, history, projection, turnId);
+    const skillCatalog = this.skills === undefined || this.options.skillToolEnabled !== true
+      ? undefined
+      : renderSkillCatalog(await this.skills.snapshot(projection === undefined ? {} : { cwd: effectiveWorkspaceRoot(projection) }), { maxChars: 8_000 }).rendered;
     return assembleContext({
       systemSections: buildAgentSystemPromptSections({
         workspaceRoot: projection === undefined ? "." : effectiveWorkspaceRoot(projection),
@@ -2059,6 +2073,7 @@ export class AgentHost {
         permissionPreset: projection?.permissionPreset ?? this.permissionPreset ?? "ask-on-write",
         ...(this.customSystemPrompt === undefined ? {} : { customInstructions: this.customSystemPrompt }),
         ...(projectMemory.prompt === undefined ? {} : { projectMemoryPrompt: projectMemory.prompt }),
+        ...(skillCatalog === undefined ? {} : { skillCatalog }),
         ...(recovery ? { recovery: true } : {}),
       }),
       visibleTools: this.modelTools(sessionId, tenantId),

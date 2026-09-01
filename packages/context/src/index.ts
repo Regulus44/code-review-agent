@@ -85,6 +85,8 @@ export {
   PROJECT_MEMORY_TYPES,
 } from "./project-memory.js";
 export { FileProjectMemoryStore, ProjectMemoryWriterPolicy, DEFAULT_PROJECT_MEMORY_MAX_TOPIC_BYTES, DEFAULT_PROJECT_MEMORY_MAX_TOPICS, PROJECT_MEMORY_FILE_VERSION } from "./project-memory-fs.js";
+export { renderSkillCatalog, skillCatalogDigest, renderSkillContent } from "./skill-catalog.js";
+export type { SkillCatalogBudget, SkillCatalogProjection } from "./skill-catalog.js";
 export {
   classifyProviderContextError,
   fingerprintModelRequest,

@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@coding-agent/contracts": "workspace:*",
+    "@coding-agent/skills": "workspace:*",
     "@coding-agent/subagent": "workspace:*",
     "@coding-agent/workspace": "workspace:*"
   },
