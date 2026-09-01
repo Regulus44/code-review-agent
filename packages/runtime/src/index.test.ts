@@ -1953,4 +1953,25 @@ describe("AgentHost", () => {
     expect((await host.getSession(session.id))?.contextProjectMemory).toMatchObject({ status: "incomplete", usingLastGood: false });
     expect((await host.events(session.id)).some((event) => event.type === "context/project_memory_recalled")).toBe(false);
   });
+
+  it("bounds custom Project Memory scan diagnostics before they enter the event stream", async () => {
+    const store = new InMemoryEventStore();
+    const host = new AgentHost({
+      store,
+      projectMemory: {
+        async getEntrypoint() { return undefined; },
+        async listTopics() { return []; },
+        async scanTopics() { return { headers: [], status: "incomplete" as const, usingLastGood: false, reason: `${"x".repeat(1_000)}\nsecret` }; },
+        async readTopic() { return undefined; },
+      },
+    });
+    const session = await host.createSession("D:/m3-bounded-reason");
+    const turn = await host.sendMessage(session.id, "review normally");
+    await host.waitForTurn(turn);
+    const event = (await host.events(session.id)).find((item) => item.type === "context/project_memory_incomplete");
+    expect(event).toBeDefined();
+    expect(typeof event?.payload["reason"]).toBe("string");
+    expect(String(event?.payload["reason"]).length).toBeLessThanOrEqual(240);
+    expect(String(event?.payload["reason"])).not.toContain("\n");
+  });
 });

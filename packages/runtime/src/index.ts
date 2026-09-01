@@ -2220,7 +2220,7 @@ export class AgentHost {
     payload: Readonly<Record<string, unknown>>,
   ): Promise<void> {
     try {
-      await this.options.store.append({ sessionId, ...(turnId === undefined ? {} : { turnId }), type, payload });
+      await this.options.store.append({ sessionId, ...(turnId === undefined ? {} : { turnId }), type, payload: sanitizeProjectMemoryEventPayload(payload) });
     } catch {
       // Project Memory is optional context; an adapter/diagnostic write failure
       // must not turn a normal user request into a failed turn.
@@ -3398,6 +3398,26 @@ export class AgentHost {
   private settlePermissionWaiter(permissionId: PermissionId, output: ExecuteToolOutput): void {
     this.permissionWaiters.get(permissionId)?.resolve(output);
   }
+}
+
+function sanitizeProjectMemoryEventPayload(payload: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  const bounded: Record<string, unknown> = {};
+  if (typeof payload["scopeKey"] === "string") bounded.scopeKey = payload["scopeKey"].slice(0, 128);
+  bounded.entrypointName = "MEMORY.md";
+  for (const key of ["entrypointBytes", "entrypointLines", "topicCount"] as const) {
+    const value = payload[key];
+    if (typeof value === "number" && Number.isFinite(value)) bounded[key] = Math.max(0, Math.min(Math.floor(value), 1_000_000));
+  }
+  for (const key of ["truncated", "ignored", "scanStatus", "usingLastGood"] as const) {
+    const value = payload[key];
+    if (typeof value === "boolean" || (key === "scanStatus" && (value === "complete" || value === "incomplete"))) bounded[key] = value;
+  }
+  for (const key of ["recalledTopicIds", "staleTopicIds", "failedTopicIds"] as const) {
+    const value = payload[key];
+    if (Array.isArray(value)) bounded[key] = value.filter((item): item is string => typeof item === "string").slice(0, key === "failedTopicIds" ? 8 : 5).map((item) => item.slice(0, 96));
+  }
+  if (typeof payload["reason"] === "string") bounded.reason = payload["reason"].replace(/[\r\n]+/gu, " ").slice(0, 240);
+  return bounded;
 }
 
 export { createInProcessSubagentProvider, type InProcessProviderOptions } from "./subagent-provider.js";
