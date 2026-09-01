@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const root = process.cwd();
-const policy = JSON.parse(await readFile(join(root, "docs/phase8-deployment-policy.json"), "utf8"));
+const policy = JSON.parse(await readFile(join(root, "docs/archive/phases/phase8-deployment-policy.json"), "utf8"));
 const [dockerfile, compose] = await Promise.all([
   readFile(join(root, "Dockerfile"), "utf8"),
   readFile(join(root, "docker-compose.yml"), "utf8"),

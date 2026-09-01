@@ -187,7 +187,7 @@ ID:
 
 许可证/来源证据：`D:/Develop/deepseek-harness-fork/LICENSE` 为 MIT；本次只登记 capability、scope、budget、depth、iteration、stop-condition 参考，没有复制运行时实现。
 
-本项目路径：`packages/tools/src/capabilities.ts`、`packages/tools/src/builtin.ts`、`docs/phase-plans/phase-3b-tool-hardening.zh-CN.md`。
+本项目路径：`packages/tools/src/capabilities.ts`、`packages/tools/src/builtin.ts`、`docs/archive/phases/phase-plans/phase-3b-tool-hardening.zh-CN.md`。
 
 范围：Web 默认关闭和 host allowlist、Skill 低优先级不可覆盖安全规则、Subagent 深度/工具白名单/预算、Workflow 最大迭代与停止条件。
 
@@ -235,7 +235,7 @@ ID:
 
 许可证/来源证据：`D:/Develop/deepseek-harness-fork/LICENSE` 为 MIT；本轮没有复制 DSH 运行时代码、Cordis、内部类型或 Web 组件。
 
-本项目路径：`docs/phase-plans/phase-5-subagents.zh-CN.md`、未来的 `packages/subagent`、`packages/contracts`、`packages/storage`、`packages/runtime`、`packages/tools` 和 `apps/api`/`apps/web`。
+本项目路径：`docs/archive/phases/phase-plans/phase-5-subagents.zh-CN.md`、未来的 `packages/subagent`、`packages/contracts`、`packages/storage`、`packages/runtime`、`packages/tools` 和 `apps/api`/`apps/web`。
 
 范围：provider registry、one-shot run ownership、continuable child inbox、descriptor/versioning、parent/ancestor authority、depth/budget、child-scoped report、Task projection 和 browser-safe subagent API。
 

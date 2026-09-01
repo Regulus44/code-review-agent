@@ -1,42 +1,15 @@
-# 开发日志
+# 当前开发记录
 
-这里记录每个阶段的实际开发过程、关键决策、验证证据和未完成事项。阶段状态看板位于 [../phase-status.zh-CN.md](../phase-status.zh-CN.md)，本目录记录比状态表更细的过程信息。
+本目录只保留仍可能影响当前运行、评测或安全边界的记录。当前能力和优先级以 [docs/status.zh-CN.md](../status.zh-CN.md) 为准，历史阶段记录统一放在 [archive/development-log](../archive/development-log/README.zh-CN.md)。
 
-## 规则
+## 当前记录
 
-- 每个 Phase 开始时建立或更新对应日志；
-- 每个重要架构裁决、可运行里程碑、失败修复和验收门禁都追加一条记录；
-- 记录必须包含日期、提交或工作树证据、验证命令和下一步；
-- 阶段完成时追加最终验收、checkpoint 和遗留风险；
-- 日志是过程记录，不替代 ADR、阶段计划或公共契约。
+- [正常 Web Agent 评测执行基线](../evaluation/normal-web-agent-evaluation-baseline-2026-08-30.zh-CN.md)
+- [评测执行复跑](../evaluation/logs/agent-evaluation-rerun-2026-08-29.zh-CN.md)
+- [评测 Trace 门禁](../evaluation/logs/evaluation-trace-gate-2026-08-30.zh-CN.md)
+- [Workspace full-access 评测边界](../evaluation/logs/workspace-full-access-evaluation-boundary-2026-08-30.zh-CN.md)
+- [Workspace command guard 实现](../operations/workspace-command-guard-implementation-2026-08-30.zh-CN.md)
+- [Windows 隐藏进程执行](windows-hidden-process-execution-2026-08-30.zh-CN.md)
+- [Context capability 基线](context-window-capability-2026-08-28.zh-CN.md)
 
-## 阶段日志
-
-- [Phase 1：AgentHost 与 Web Shell](phase-1-agenthost-web.zh-CN.md)
-- [Phase 1：Agentic Coding Core 校正记录](phase-1-agenthost-web.zh-CN.md#2026-08-22重新打开-phase-1-的-coding-agent-门禁)
-- [Phase 2：事件、持久化与恢复](phase-2-events-persistence-recovery.zh-CN.md)
-- [Phase 3：工具运行时与权限](phase-3-tools-permissions.zh-CN.md)
-- [Phase 4：MCP Client](phase-4-mcp-client.zh-CN.md)
-- [Phase 5：内部 Task/Subagent 多 Agent](phase-5-subagents.zh-CN.md)
-- [Phase 7：DSH Web 前端收敛](phase-7-web-convergence.zh-CN.md)
-- [Phase 8：高级能力与产品化](phase-8-productization.zh-CN.md)
-- [阶段 1：Anthropic-compatible 输出能力实施日志（2026-08-28）](phase-1-anthropic-output-limits-2026-08-28.zh-CN.md)
-- [阶段 2：Context fallback、Step 上限与 Summary 预算实施日志（2026-08-28）](phase-2-context-step-summary-2026-08-28.zh-CN.md)
-- [阶段 3：单工具结果落盘与预览实施日志（2026-08-28）](phase-3-tool-result-storage-2026-08-28.zh-CN.md)
-- [阶段 4：单消息工具结果聚合与时间型 MicroCompact 实施日志（2026-08-28）](phase-4-tool-result-aggregate-microcompact-2026-08-28.zh-CN.md)
-- [阶段 5：最多 10 个并行工具调用 Scheduler 实施日志（2026-08-28）](phase-5-parallel-tool-scheduler-2026-08-28.zh-CN.md)
-- [阶段 6：集成门禁、迁移说明和文档收敛实施日志（2026-08-28）](phase-6-integration-gate-2026-08-28.zh-CN.md)
-- [M01：Claude Code 式 Context Window 与 Auto-Compact Budget](m01-context-budget.zh-CN.md)
-- [M02：Claude Code 式 Token Estimation 与 Provider Exact Count](m02-token-estimation.zh-CN.md)
-- [M03：Claude Code 式 Context Assembly 与 System Prompt Sections](m03-context-assembly.zh-CN.md)
-- [M04：Claude Code 式 API Round、Message Normalize 与 Tool Pairing](m04-api-round-pairing.zh-CN.md)
-- [M05：Claude Code 式 Tool Result Budget 与 MicroCompact](m05-tool-result-microcompact.zh-CN.md)
-- [M06：Claude Code 式 Session Memory Compact](m06-session-memory-compact.zh-CN.md)
-- [M07：Claude Code 式 LLM Summary Compact](m07-summary-compact.zh-CN.md)
-- [M08：Claude Code 式 Compact Boundary 与 Post-Compact Rebuild](m08-compact-boundary.zh-CN.md)
-- [M09：Claude Code 式 Query Proactive 与 Reactive Recovery](m09-context-recovery.zh-CN.md)
-- [M10：Claude Code 式 Transcript、Boundary Replay 与 Session Restore](m10-transcript-session-restore.zh-CN.md)
-- [M11：Claude Code 式 Session Memory Extraction](m11-session-memory-extraction.zh-CN.md)
-- [M12：Claude Code 式 Project Memory / memdir](m12-project-memory.zh-CN.md)
-- [M13：Claude Code 式 Context Diagnostics 与 Web Projection](m13-context-diagnostics.zh-CN.md)
-- [M14：Context Collapse Capability Boundary](m14-context-collapse.zh-CN.md)
+日志是过程证据，不替代 ADR、公共契约和当前状态页。新增记录应说明日期、变更范围、验证命令、结果和回滚方式。

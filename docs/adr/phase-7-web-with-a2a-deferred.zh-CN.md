@@ -27,7 +27,7 @@ Phase 7 Web 前端已经开始建设。如果把 A2A HTTP endpoint、Agent Card 
 
 ## 参考
 
-- [Phase 5：内部 Task/Subagent 多 Agent](../phase-plans/phase-5-subagents.zh-CN.md)
-- [Phase 6：A2A 互操作层](../phase-plans/phase-6-a2a.zh-CN.md)
+- [Phase 5：内部 Task/Subagent 多 Agent](../archive/phases/phase-plans/phase-5-subagents.zh-CN.md)
+- [Phase 6：A2A 互操作层](../archive/phases/phase-plans/phase-6-a2a.zh-CN.md)
 - [协议边界](../protocol-boundaries.md)
-- [Phase 7 DSH Web 调研](../phase-7-dsh-web-research.zh-CN.md)
+- [Phase 7 DSH Web 调研](../archive/references/phase-7-dsh-web-research.zh-CN.md)

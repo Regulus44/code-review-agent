@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const root = process.cwd();
-const baselineRoot = join(root, "docs", "phase8-visual-baselines");
+const baselineRoot = join(root, "docs", "archive", "phases", "phase8-visual-baselines");
 const manifest = JSON.parse(await readFile(join(baselineRoot, "manifest.json"), "utf8"));
 const shellMarkup = await readFile(join(root, "apps", "web", "index.html"), "utf8");
 const assert = (condition, message) => { if (!condition) throw new Error(`Phase 8 visual gate: ${message}`); };

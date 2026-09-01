@@ -3,9 +3,9 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const root = process.cwd();
-const evidence = JSON.parse(await readFile(join(root, "docs", "phase8-browser-evidence.json"), "utf8"));
+const evidence = JSON.parse(await readFile(join(root, "docs", "archive", "phases", "phase8-browser-evidence.json"), "utf8"));
 const shell = await readFile(join(root, "apps", "web", "index.html"), "utf8");
-const manifest = JSON.parse(await readFile(join(root, "docs", "phase8-visual-baselines", "manifest.json"), "utf8"));
+const manifest = JSON.parse(await readFile(join(root, "docs", "archive", "phases", "phase8-visual-baselines", "manifest.json"), "utf8"));
 const assert = (condition, message) => { if (!condition) throw new Error(`Phase 8 browser evidence gate: ${message}`); };
 
 assert(evidence.schemaVersion === 1, "evidence schemaVersion must be 1");
