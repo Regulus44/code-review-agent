@@ -1915,4 +1915,42 @@ describe("AgentHost", () => {
     expect(events.some((event) => event.type === "context/project_memory_stale")).toBe(true);
     expect(events.some((event) => event.type === "context/project_memory_recalled")).toBe(false);
   });
+
+  it("uses a last-good Project Memory scan and records one bounded incomplete receipt", async () => {
+    const store = new InMemoryEventStore();
+    const host = new AgentHost({
+      store,
+      projectMemory: {
+        async getEntrypoint() { return { content: "- [Deploy](topics/deploy.md)" }; },
+        async listTopics() { return []; },
+        async scanTopics() { return { headers: [{ id: "deploy", path: "topics/deploy.md", title: "Deploy", description: "release" }], status: "incomplete" as const, usingLastGood: true, reason: "topic_scan_incomplete" }; },
+        async readTopic(_scope, id) { return id === "deploy" ? { id, path: "topics/deploy.md", title: "Deploy", description: "release", content: "safe deployment note" } : undefined; },
+      },
+    });
+    const session = await host.createSession("D:/m3-last-good");
+    const turn = await host.sendMessage(session.id, "review deploy release");
+    await host.waitForTurn(turn);
+    const events = await host.events(session.id);
+    expect(events.filter((event) => event.type === "context/project_memory_incomplete")).toHaveLength(1);
+    expect((await host.getSession(session.id))?.contextProjectMemory).toMatchObject({ status: "incomplete", scanStatus: "incomplete", usingLastGood: true, recalledTopicIds: ["deploy"] });
+    expect(JSON.stringify(events.filter((event) => event.type.startsWith("context/project_memory")))).not.toContain("safe deployment note");
+  });
+
+  it("fails closed when the Project Memory scan has no last-good result", async () => {
+    const store = new InMemoryEventStore();
+    const host = new AgentHost({
+      store,
+      projectMemory: {
+        async getEntrypoint() { return { content: "- [Broken](topics/broken.md)" }; },
+        async listTopics() { return []; },
+        async scanTopics() { return { headers: [], status: "incomplete" as const, usingLastGood: false, reason: "scan_failed" }; },
+        async readTopic() { throw new Error("must not read"); },
+      },
+    });
+    const session = await host.createSession("D:/m3-fail-closed");
+    const turn = await host.sendMessage(session.id, "review deploy");
+    await host.waitForTurn(turn);
+    expect((await host.getSession(session.id))?.contextProjectMemory).toMatchObject({ status: "incomplete", usingLastGood: false });
+    expect((await host.events(session.id)).some((event) => event.type === "context/project_memory_recalled")).toBe(false);
+  });
 });

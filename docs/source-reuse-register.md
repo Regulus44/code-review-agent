@@ -584,3 +584,31 @@ ID:
 本项目路径：`packages/context/src/project-memory-fs.ts`、`apps/api/src/server.ts`。
 
 范围：host-owned root、workspace/tenant scope 边界、只读扫描失败保留 last-good、显式 writer policy；不引入 DSH Skill registry 或 Cordis runtime。
+
+### CC-020
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`src/memdir/findRelevantMemories.ts`、`src/memdir/memoryScan.ts`
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；本项目没有复制 Claude Code 代码，只重新实现安全 manifest 交集、词法排序、last-good/incomplete 观察和 bounded recall。
+
+本项目路径：`packages/context/src/project-memory.ts`、`packages/context/src/project-memory-fs.ts`、`packages/runtime/src/index.ts`、`packages/contracts/src/index.ts`、`packages/storage/src/index.ts`。
+
+范围：MEMORY.md 安全链接约束、最多五个 topic、alreadySurfaced 去重、读取/验证失败 fail-closed、有限扫描状态和正文不进入 EventStore/SSE/projection。
+
+### DSH-016
+
+来源仓库：`D:/Develop/deepseek-harness-fork`
+
+来源路径：`packages/host/apiproxy/src/api/sessions.ts`、`packages/host/apiproxy/src/api/events.ts`、`packages/skill/skill/src/index.ts` 的 digest/replay 观察形状
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：`D:/Develop/deepseek-harness-fork/LICENSE` 为 MIT；本项目没有复制 DSH 类型或 Web 组件。
+
+本项目路径：`packages/contracts/src/index.ts`、`packages/storage/src/index.ts`、`apps/api/src/server.ts`、`apps/web/src/client/store.ts`、`apps/web/src/presentation/memory-presenter.ts`。
+
+范围：只读 Memory inspector、bounded projection、SSE/replay 一致性和 unavailable/incomplete 状态展示；API 不读取或返回 Memory 正文。

@@ -26,6 +26,7 @@ import type {
   ProviderCatalogGroup,
   ProviderProfileRecord,
   MemoryCapability,
+  MemoryInspectionResponse,
 } from "@coding-agent/contracts";
 
 export interface ToolCatalogEntry {
@@ -542,6 +543,11 @@ export class WebApiClient {
 
   listCapabilities(): Promise<CapabilityResponse> {
     return this.request("/v1/capabilities");
+  }
+
+  /** Read bounded Memory readiness/projection metadata; the response never contains Memory正文. */
+  inspectMemory(sessionId: SessionId): Promise<MemoryInspectionResponse> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/memory`);
   }
 
   uploadAttachment(sessionId: SessionId, input: { readonly fileName: string; readonly mediaType: string; readonly data: string }, commandId?: string): Promise<AttachmentReceipt> {

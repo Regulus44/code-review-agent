@@ -310,11 +310,17 @@ M2 实际结果：新增 `FileProjectMemoryStore` 与 `ProjectMemoryWriterPolicy
 
 ### M3：Memory 召回、观测和 Web
 
+状态：`implemented`（2026-09-01，M3）
+
 - **范围**：manifest/lexical recall、最多 5 topic、`alreadySurfaced` 去重、last-good incomplete、Memory projection/API/Web 只读面。
 - **入口**：`packages/context/src/project-memory.ts`、`packages/runtime/src/index.ts:assembleTurnContext()`、`packages/contracts/src/index.ts`、`apps/web/src/client/store.ts`、`src/presentation`、`apps/api/src/server.ts`。
 - **参照**：CC `findRelevantMemories.ts` 与 memory trust 规则；DSH `session-projection`、`skill-catalog` digest/replay。
 - **验收**：模型不可用时 deterministic fallback；刷新、SSE 重连、从日志回放的 Memory 状态一致；Web 不显示未落盘成功的写入；敏感正文默认不进入 SSE。
 - **禁用/回滚**：关闭 recall 仍保留可手工查看的 bounded index；Web capability 缺失显示 unavailable。
+
+M3 实际结果：`packages/context/src/project-memory.ts` 增加安全 manifest 交集和 deterministic lexical recall；`ProjectMemoryStore.scanTopics()` 可报告 incomplete/last-good，文件 adapter 对损坏 topic、symlink 和超限扫描保留最近成功的 bounded headers，没有可用快照时 fail closed。Runtime 在 `assembleTurnContext()` 中复用一次扫描结果，按 turn 去重 `alreadySurfacedIds`，最多注入 5 个 topic，并通过 `context/project_memory_incomplete` 记录有限失败元数据。Context Project Memory projection 增加 `scanStatus`、`usingLastGood`、`failedTopicIds` 和 incomplete 状态，正文仍只存在当前 model view。
+
+API 新增 `GET /v1/sessions/:id/memory`，仅返回 capability 与 Session/Project bounded projection；Web `SessionStore` 支持 live/SSE/replay 折叠，`presentMemoryInspector` 展示可用、禁用、不可用和 last-good/incomplete 状态，不显示未落盘正文或 optimistic 写入。无模型时保持标题/描述/路径词法 fallback；adapter/scan 失败均不阻塞主 turn且不注入不可信正文。
 
 ### S0：Skill contract、registry 和安全模型
 
@@ -395,6 +401,6 @@ M2 实际结果：新增 `FileProjectMemoryStore` 与 `ProjectMemoryWriterPolicy
 
 ## 9. 当前结论与下一步
 
-M0/M1 已完成 Memory readiness、默认 Session Memory 持久化和后台 extraction 的第一条可回放链路。当前缺口集中在 Project Memory 默认 filesystem adapter、Memory 读写/召回 API、Web 观察面，以及可替换的 model-backed extractor。Skill 仍处于 capability/attachment seam 阶段，尚未形成 loader、registry、catalog、SkillTool、permission 生命周期或 plugin runtime。
+M0–M3 已完成 Memory readiness、默认 Session/Project Memory 持久化、bounded recall 和只读观察面。当前缺口集中在可替换的 model-backed Session extractor、Memory 正文编辑 API（仍需独立权限/审计契约）和更完整的自动 stale/观测链路。Skill 仍处于 capability/attachment seam 阶段，尚未形成 loader、registry、catalog、SkillTool、permission 生命周期或 plugin runtime。
 
-下一阶段应进入 **M3：Memory 召回、观测和 Web**，同时保留 M2 的 filesystem adapter 与 writer policy 回滚路径；随后再实施 S0 Skill contract/registry。这样可以继续复用本项目 EventStore、projection、permission 和 workspace 安全边界，不引入第二套事实来源。
+下一阶段应进入 **S0：Skill contract、registry 和安全模型**，同时保留 M2/M3 的 filesystem adapter、bounded recall 与只读 inspector 回滚路径。这样可以继续复用本项目 EventStore、projection、permission 和 workspace 安全边界，不引入第二套事实来源。

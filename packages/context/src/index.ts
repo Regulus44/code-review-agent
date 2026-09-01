@@ -72,6 +72,7 @@ export { buildPostCompactMessages } from "./post-compact.js";
 export { restoreModelViewFromTranscript } from "./transcript-replay.js";
 export {
   buildProjectMemoryPrompt,
+  buildProjectMemoryRecallCandidates,
   parseProjectMemoryIndex,
   recallRelevantProjectMemory,
   selectProjectMemoryHeaders,
@@ -198,6 +199,7 @@ export type {
   ProjectMemoryReference,
   ProjectMemoryRecallOptions,
   ProjectMemoryRecallResult,
+  ProjectMemoryScan,
   ProjectMemoryScope,
   ProjectMemoryStore,
   ProjectMemoryTopic,

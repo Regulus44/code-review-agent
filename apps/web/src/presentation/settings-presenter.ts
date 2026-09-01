@@ -1,4 +1,4 @@
-import type { PermissionPreset, SessionProjection } from "@coding-agent/contracts";
+import type { PermissionPreset, SessionProjection, MemoryCapability } from "@coding-agent/contracts";
 import type { AttachmentCapability, CodeModeCapability, ContextCapability, LspCapability, ModelCatalogResponse, McpServerView, PluginsCapability, ProductizationCapabilityResponse, ToolCatalogEntry } from "../client/api.js";
 import type { ProviderCatalogGroup } from "@coding-agent/contracts";
 
@@ -49,6 +49,7 @@ export interface SettingsPresenterOptions {
   readonly lspCapability?: LspCapability;
   readonly pluginsCapability?: PluginsCapability;
   readonly productizationCapability?: ProductizationCapabilityResponse;
+  readonly memoryCapability?: MemoryCapability;
   readonly modelState?: {
     readonly status: "loading" | "ready" | "error";
     readonly error?: string;
@@ -95,6 +96,7 @@ export function presentSettings(
   const lsp = options.lspCapability;
   const plugins = options.pluginsCapability;
   const productization = options.productizationCapability;
+  const memory = options.memoryCapability ?? context?.memory;
   const modelState = options.modelState ?? { status: models === undefined ? "loading" : "ready" };
   const codeModeNetworkDetail = codeMode?.limits?.networkEnforcement === "process-policy"
     ? `Network deny-by-default is enforced by the child process policy; OS isolation: ${codeMode.limits.osNetworkIsolation === true ? "enabled" : "unavailable"}.`
@@ -108,6 +110,8 @@ export function presentSettings(
     { key: "attachments", label: "附件", status: attachment === undefined ? "unavailable" : attachment.enabled ? "available" : "unavailable", detail: attachment === undefined ? "主机未提供附件能力元数据。" : attachment.enabled ? `文件上限 ${Math.floor(attachment.maxBytes / 1024)} KiB；图片${attachment.imagesEnabled ? "已启用" : "已禁用"}。` : attachment.reason ?? "附件已被主机策略禁用。" },
     { key: "context-compaction", label: "上下文压缩", status: context === undefined ? "unavailable" : context.enabled ? (context.configured ? "configured" : "available") : "unavailable", detail: context === undefined ? "主机未提供上下文预算元数据。" : !context.enabled ? "上下文压缩已被主机禁用。" : context.budget?.maxTokens === undefined ? "上下文压缩已启用，但提供方上下文预算未知。" : `压缩预算：${context.budget.maxTokens} tokens。` },
     { key: "context-collapse", label: "上下文折叠", status: context?.collapse?.status ?? "unavailable", detail: context?.collapse?.reason ?? "主机未提供上下文折叠能力元数据。" },
+    { key: "session-memory", label: "会话记忆", status: memory?.session.status === "available" ? "available" : memory?.session.status === "disabled" ? "deferred" : "unavailable", detail: memory?.session.reason ?? (memory === undefined ? "主机未提供 Memory 能力元数据。" : "Session Memory 已连接。") },
+    { key: "project-memory", label: "项目记忆", status: memory?.project.status === "available" ? "available" : memory?.project.status === "disabled" ? "deferred" : "unavailable", detail: memory?.project.reason ?? (memory === undefined ? "主机未提供 Memory 能力元数据。" : "Project Memory 已连接。") },
     { key: "code-mode", label: "代码模式", status: codeMode === undefined ? "unavailable" : codeMode.enabled ? "configured" : codeMode.configured ? "unavailable" : "unavailable", detail: codeMode === undefined ? "主机未提供代码模式策略元数据。" : codeMode.enabled ? `沙箱已启用；输出和运行时限制由主机控制。${codeModeNetworkDetail}` : codeMode.configured ? "代码模式已配置，但被策略禁用。" : "代码模式未配置。" },
     { key: "lsp", label: "语言服务器", status: lsp === undefined ? "unavailable" : lsp.configured ? "configured" : "available", detail: lsp === undefined ? "主机未提供语言服务器元数据。" : lsp.configured ? `${lsp.servers.length} 个已配置服务器：${lsp.servers.join("、")}。` : "尚未配置语言服务器。" },
     { key: "plugins", label: "插件", status: plugins?.status ?? "unavailable", detail: plugins === undefined ? "主机未提供插件运行时元数据。" : plugins.reason },

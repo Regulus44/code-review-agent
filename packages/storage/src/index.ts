@@ -407,18 +407,23 @@ function contextProjectMemoryProjection(value: unknown, event: AgentEvent, previ
   if (typeof value !== "object" || value === null) return undefined;
   const payload = value as Record<string, unknown>;
   const status = payload["status"];
-  if (status !== "loaded" && status !== "recalled" && status !== "stale" && status !== "disabled") return undefined;
+  if (status !== "loaded" && status !== "recalled" && status !== "stale" && status !== "incomplete" && status !== "disabled") return undefined;
   const scopeKey = typeof payload["scopeKey"] === "string" ? payload["scopeKey"].slice(0, 128) : previous?.scopeKey;
   if (scopeKey === undefined) return undefined;
   const entrypointBytes = typeof payload["entrypointBytes"] === "number" ? Math.max(0, Math.floor(payload["entrypointBytes"])) : previous?.entrypointBytes ?? 0;
   const entrypointLines = typeof payload["entrypointLines"] === "number" ? Math.max(0, Math.floor(payload["entrypointLines"])) : previous?.entrypointLines ?? 0;
   const topicCount = typeof payload["topicCount"] === "number" ? Math.max(0, Math.floor(payload["topicCount"])) : previous?.topicCount ?? 0;
+  const scanStatus = payload["scanStatus"] === "incomplete" ? "incomplete" : payload["scanStatus"] === "complete" ? "complete" : previous?.scanStatus ?? (status === "incomplete" ? "incomplete" : "complete");
+  const usingLastGood = payload["usingLastGood"] === undefined ? previous?.usingLastGood === true : payload["usingLastGood"] === true;
   const recalledTopicIds = Array.isArray(payload["recalledTopicIds"])
     ? payload["recalledTopicIds"].filter((item): item is string => typeof item === "string").slice(0, 32)
     : previous?.recalledTopicIds;
   const staleTopicIds = Array.isArray(payload["staleTopicIds"])
     ? payload["staleTopicIds"].filter((item): item is string => typeof item === "string").slice(0, 32)
     : previous?.staleTopicIds;
+  const failedTopicIds = Array.isArray(payload["failedTopicIds"])
+    ? payload["failedTopicIds"].filter((item): item is string => typeof item === "string").slice(0, 8)
+    : previous?.failedTopicIds;
   return {
     version: 1,
     status,
@@ -428,8 +433,11 @@ function contextProjectMemoryProjection(value: unknown, event: AgentEvent, previ
     entrypointLines,
     truncated: payload["truncated"] === undefined ? previous?.truncated === true : payload["truncated"] === true,
     topicCount,
+    scanStatus,
+    usingLastGood,
     ...(recalledTopicIds === undefined ? {} : { recalledTopicIds }),
     ...(staleTopicIds === undefined ? {} : { staleTopicIds }),
+    ...(failedTopicIds === undefined ? {} : { failedTopicIds }),
     ignored: payload["ignored"] === undefined ? previous?.ignored === true : payload["ignored"] === true,
     ...(typeof payload["reason"] === "string" ? { reason: payload["reason"].slice(0, 240) } : previous?.reason === undefined ? {} : { reason: previous.reason }),
     updatedAt: event.createdAt,
@@ -894,12 +902,12 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
     if (projected !== undefined) next = { ...next, contextSessionMemory: projected };
   }
 
-  if (event.type === "context/project_memory_loaded" || event.type === "context/project_memory_recalled" || event.type === "context/project_memory_stale" || event.type === "context/project_memory_disabled") {
+  if (event.type === "context/project_memory_loaded" || event.type === "context/project_memory_recalled" || event.type === "context/project_memory_stale" || event.type === "context/project_memory_incomplete" || event.type === "context/project_memory_disabled") {
     const status = event.type === "context/project_memory_loaded"
       ? "loaded"
       : event.type === "context/project_memory_recalled"
         ? "recalled"
-        : event.type === "context/project_memory_stale" ? "stale" : "disabled";
+        : event.type === "context/project_memory_stale" ? "stale" : event.type === "context/project_memory_incomplete" ? "incomplete" : "disabled";
     const projected = contextProjectMemoryProjection({ ...event.payload, status }, event, next.contextProjectMemory);
     if (projected !== undefined) next = { ...next, contextProjectMemory: projected };
   }

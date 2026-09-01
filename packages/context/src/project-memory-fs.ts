@@ -9,6 +9,7 @@ import type {
   ProjectMemoryTopicHeader,
   ProjectMemoryTopicInput,
   ProjectMemoryType,
+  ProjectMemoryScan,
 } from "./project-memory.js";
 
 export const PROJECT_MEMORY_FILE_VERSION = 1 as const;
@@ -69,6 +70,8 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
   readonly maxTopics: number;
   readonly writerPolicy: ProjectMemoryWriterPolicy;
   private readonly tails = new Map<string, Promise<void>>();
+  private readonly lastGoodScans = new Map<string, readonly ProjectMemoryTopicHeader[]>();
+  private readonly lastGoodEntrypoints = new Map<string, ProjectMemoryEntrypoint>();
   constructor(options: ProjectMemoryFileStoreOptions) {
     if (!options.rootDir?.trim()) throw new Error("PROJECT_MEMORY_ROOT_REQUIRED");
     this.rootDir = path.resolve(options.rootDir);
@@ -78,23 +81,50 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
     this.writerPolicy = options.writerPolicy ?? new ProjectMemoryWriterPolicy({ maxContentBytes: this.maxTopicBytes });
   }
   async getEntrypoint(scope: ProjectMemoryScope): Promise<ProjectMemoryEntrypoint | undefined> {
-    const file = await this.safePath(scope, "MEMORY.md", false);
-    return this.readBounded(file, this.maxEntrypointBytes, "PROJECT_MEMORY_ENTRYPOINT");
+    try {
+      const file = await this.safePath(scope, "MEMORY.md", false);
+      const result = await this.readBounded(file, this.maxEntrypointBytes, "PROJECT_MEMORY_ENTRYPOINT");
+      if (result === undefined) return undefined;
+      const entrypoint = { content: result.content, ...(result.mtimeMs === undefined ? {} : { updatedAt: new Date(result.mtimeMs).toISOString() }), usingLastGood: false };
+      this.lastGoodEntrypoints.set(scope.scopeKey, entrypoint);
+      return entrypoint;
+    } catch (error) {
+      const lastGood = this.lastGoodEntrypoints.get(scope.scopeKey);
+      if (lastGood !== undefined && canUseLastGoodEntrypoint(error)) return { ...lastGood, usingLastGood: true };
+      throw error;
+    }
   }
   async listTopics(scope: ProjectMemoryScope): Promise<readonly ProjectMemoryTopicHeader[]> {
+    return (await this.scanTopics(scope)).headers;
+  }
+  async scanTopics(scope: ProjectMemoryScope): Promise<ProjectMemoryScan> {
     const dir = await this.scopeTopicsDir(scope, false);
     let entries;
-    try { entries = await readdir(dir, { withFileTypes: true }); } catch (error) { if (isMissing(error)) return []; throw storageError("PROJECT_MEMORY_SCAN_FAILED", error); }
+    try { entries = await readdir(dir, { withFileTypes: true }); } catch (error) {
+      if (isMissing(error)) return { headers: [], status: "complete", usingLastGood: false };
+      const lastGood = this.lastGoodScans.get(scope.scopeKey);
+      if (lastGood !== undefined) return { headers: lastGood, status: "incomplete", usingLastGood: true, reason: "scan_failed" };
+      return { headers: [], status: "incomplete", usingLastGood: false, reason: "scan_failed" };
+    }
     const result: ProjectMemoryTopicHeader[] = [];
-    for (const entry of entries) {
+    let incomplete = false;
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
       if (result.length >= this.maxTopics) break;
+      if (entry.isSymbolicLink()) { incomplete = true; continue; }
       if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
       try {
         const topic = await this.readTopic(scope, entry.name.slice(0, -3));
         if (topic !== undefined) result.push(topic);
-      } catch { /* malformed/incomplete topic is ignored (last-good scan) */ }
+      } catch { incomplete = true; /* malformed/incomplete topic is ignored */ }
     }
-    return result;
+    if (result.length >= this.maxTopics && entries.filter((entry) => entry.isFile() && entry.name.endsWith(".md")).length > this.maxTopics) incomplete = true;
+    if (!incomplete) {
+      this.lastGoodScans.set(scope.scopeKey, result);
+      return { headers: result, status: "complete", usingLastGood: false };
+    }
+    const lastGood = this.lastGoodScans.get(scope.scopeKey);
+    if (lastGood !== undefined) return { headers: lastGood, status: "incomplete", usingLastGood: true, reason: "topic_scan_incomplete" };
+    return { headers: [], status: "incomplete", usingLastGood: false, reason: "topic_scan_incomplete" };
   }
   async readTopic(scope: ProjectMemoryScope, topicId: string): Promise<ProjectMemoryTopic | undefined> {
     const id = normalizeTopicId(topicId);
@@ -191,3 +221,7 @@ async function ensureDir(dir: string, create: boolean, label: string): Promise<v
 async function atomicWrite(target: string, content: string): Promise<void> { const temp = `${target}.tmp-${randomUUID()}`; try { const handle = await open(temp, "wx", 0o600); try { await handle.writeFile(content, "utf8"); await handle.sync(); } finally { await handle.close(); } try { await rename(temp, target); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EPERM" && (error as NodeJS.ErrnoException).code !== "EEXIST") throw error; await rm(target, { force: true }); await rename(temp, target); } } catch (error) { await rm(temp, { force: true }).catch(() => undefined); throw storageError("PROJECT_MEMORY_WRITE_FAILED", error); } }
 function isMissing(error: unknown): boolean { return typeof error === "object" && error !== null && (error as NodeJS.ErrnoException).code === "ENOENT"; }
 function storageError(code: string, error: unknown): Error { return Object.assign(new Error(`${code}: ${error instanceof Error ? error.message : String(error)}`), { code }); }
+function canUseLastGoodEntrypoint(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return !/(?:SYMLINK|PATH_ESCAPE|SCOPE_INVALID|ROOT_INVALID|TARGET_INVALID)/u.test(message);
+}

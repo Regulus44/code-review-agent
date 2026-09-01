@@ -18,6 +18,7 @@ export interface ProjectMemoryEntrypoint {
   readonly content: string;
   readonly path?: string;
   readonly updatedAt?: string;
+  readonly usingLastGood?: boolean;
 }
 
 export interface ProjectMemoryTopicHeader {
@@ -44,10 +45,20 @@ export interface ProjectMemoryTopic extends ProjectMemoryTopicHeader {
 export interface ProjectMemoryStore {
   readonly getEntrypoint: (scope: ProjectMemoryScope) => Promise<ProjectMemoryEntrypoint | undefined>;
   readonly listTopics: (scope: ProjectMemoryScope) => Promise<readonly ProjectMemoryTopicHeader[]>;
+  /** Optional richer scan used to surface incomplete observations and retain a host-owned last-good catalog. */
+  readonly scanTopics?: (scope: ProjectMemoryScope) => Promise<ProjectMemoryScan>;
   readonly readTopic: (scope: ProjectMemoryScope, topicId: string) => Promise<ProjectMemoryTopic | undefined>;
   /** Optional host-owned writer. Memory正文 remains outside EventStore. */
   readonly writeEntrypoint?: (scope: ProjectMemoryScope, content: string) => Promise<void>;
   readonly writeTopic?: (scope: ProjectMemoryScope, topic: ProjectMemoryTopicInput) => Promise<ProjectMemoryTopic>;
+}
+
+export interface ProjectMemoryScan {
+  readonly headers: readonly ProjectMemoryTopicHeader[];
+  readonly status: "complete" | "incomplete";
+  readonly usingLastGood: boolean;
+  /** Bounded machine-readable reason; never contains memory正文. */
+  readonly reason?: string;
 }
 
 export interface ProjectMemoryTopicInput {
@@ -122,6 +133,10 @@ export function buildProjectMemoryPrompt(input: {
 export interface ProjectMemoryRecallOptions {
   readonly maxTopics?: number;
   readonly alreadySurfacedIds?: ReadonlySet<string>;
+  /** Pre-scanned headers avoid a second adapter scan during one turn. */
+  readonly headers?: readonly ProjectMemoryTopicHeader[];
+  /** MEMORY.md manifest content; valid links constrain lexical candidates. */
+  readonly manifest?: string;
   readonly validate?: (topic: ProjectMemoryTopic, scope: ProjectMemoryScope) => Promise<ProjectMemoryValidation>;
 }
 
@@ -134,6 +149,8 @@ export interface ProjectMemoryRecallResult {
   readonly topics: readonly ProjectMemoryTopic[];
   readonly staleTopicIds: readonly string[];
   readonly candidateCount: number;
+  readonly incomplete: boolean;
+  readonly failedTopicIds: readonly string[];
 }
 
 export async function recallRelevantProjectMemory(
@@ -142,24 +159,61 @@ export async function recallRelevantProjectMemory(
   query: string,
   options: ProjectMemoryRecallOptions = {},
 ): Promise<ProjectMemoryRecallResult> {
-  const headers = await store.listTopics(scope);
+  const headers = options.headers ?? await store.listTopics(scope);
   const already = options.alreadySurfacedIds ?? new Set<string>();
-  const candidates = headers.filter((header) => !already.has(header.id));
+  const candidates = buildProjectMemoryRecallCandidates(headers, options.manifest).filter((header) => !already.has(header.id));
   const selected = selectProjectMemoryHeaders(candidates, query, options.maxTopics ?? PROJECT_MEMORY_MAX_RECALLED_TOPICS);
   const topics: ProjectMemoryTopic[] = [];
   const staleTopicIds: string[] = [];
+  const failedTopicIds: string[] = [];
   for (const header of selected) {
-    const topic = await store.readTopic(scope, header.id);
+    let topic: ProjectMemoryTopic | undefined;
+    try {
+      topic = await store.readTopic(scope, header.id);
+    } catch {
+      failedTopicIds.push(header.id);
+      continue;
+    }
     if (topic === undefined) continue;
     if (!isSafeTopicPath(header.path) || !isSafeTopicPath(topic.path) || topic.path !== header.path) continue;
-    const validation = options.validate === undefined ? { status: "unknown" as const, issues: [] } : await options.validate(topic, scope);
+    let validation: ProjectMemoryValidation;
+    try {
+      validation = options.validate === undefined ? { status: "unknown" as const, issues: [] } : await options.validate(topic, scope);
+    } catch {
+      failedTopicIds.push(topic.id);
+      continue;
+    }
     if (validation.status === "stale") {
       staleTopicIds.push(topic.id);
       continue;
     }
     topics.push(topic);
   }
-  return { topics, staleTopicIds, candidateCount: candidates.length };
+  return { topics, staleTopicIds, candidateCount: candidates.length, incomplete: failedTopicIds.length > 0, failedTopicIds: failedTopicIds.slice(0, 8) };
+}
+
+/**
+ * Intersects the host-owned topic scan with safe links in MEMORY.md. A
+ * manifest containing links is authoritative; a narrative-only manifest keeps
+ * the adapter catalog as the candidate set. This is deterministic and needs no
+ * model, so recall remains available when the configured model is unavailable.
+ */
+export function buildProjectMemoryRecallCandidates(
+  headers: readonly ProjectMemoryTopicHeader[],
+  manifest?: string,
+): readonly ProjectMemoryTopicHeader[] {
+  if (manifest === undefined || !/\[[^\]]+\]\([^\)]+\)/u.test(manifest)) return headers;
+  const entries = parseProjectMemoryIndex(manifest);
+  if (entries.length === 0) return [];
+  const byPath = new Map(headers.map((header) => [header.path, header]));
+  const byId = new Map(headers.map((header) => [header.id, header]));
+  const result: ProjectMemoryTopicHeader[] = [];
+  for (const entry of entries) {
+    const header = byPath.get(entry.path) ?? byId.get(entry.id);
+    if (header === undefined || result.some((item) => item.id === header.id)) continue;
+    result.push({ ...header, title: entry.title || header.title, ...(entry.description ? { description: entry.description } : {}) });
+  }
+  return result;
 }
 
 export function selectProjectMemoryHeaders(headers: readonly ProjectMemoryTopicHeader[], query: string, maxTopics = PROJECT_MEMORY_MAX_RECALLED_TOPICS): readonly ProjectMemoryTopicHeader[] {

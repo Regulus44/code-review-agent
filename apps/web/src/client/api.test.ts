@@ -121,6 +121,19 @@ describe("WebApiClient", () => {
     expect(calls[1]?.init?.body).toBe(JSON.stringify({ fileName: "notes.txt", mediaType: "text/plain", data: "aGVsbG8=" }));
   });
 
+  it("builds the read-only Memory inspection query", async () => {
+    const calls: string[] = [];
+    const client = new WebApiClient({
+      baseUrl: "http://localhost:4317",
+      fetcher: async (input) => {
+        calls.push(String(input));
+        return new Response(JSON.stringify({ version: 1, sessionId: "ses_memory", capability: { version: 1, session: { status: "unavailable", configured: false, enabled: false }, project: { status: "unavailable", configured: false, enabled: false }, scope: { strategy: "workspace-tenant-sha256", keyPrefix: "pm_", digestHexLength: 24 } } }), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+    await client.inspectMemory("ses/memory" as never);
+    expect(calls).toEqual(["http://localhost:4317/v1/sessions/ses%2Fmemory/memory"]);
+  });
+
   it("normalizes non-2xx JSON responses as ApiError", async () => {
     const client = new WebApiClient({
       fetcher: async () => new Response(JSON.stringify({ error: "permission denied" }), { status: 403, headers: { "content-type": "application/json" } }),

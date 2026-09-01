@@ -125,6 +125,16 @@ describe("InMemoryEventStore", () => {
     }
   });
 
+  it("replays bounded incomplete Project Memory status without正文", async () => {
+    const store = new InMemoryEventStore();
+    const sessionId = await store.createSession("D:/m3-memory");
+    await store.append({ sessionId, type: "context/project_memory_loaded", payload: { scopeKey: "pm_m3", entrypointName: "MEMORY.md", entrypointBytes: 20, entrypointLines: 2, truncated: false, topicCount: 1, scanStatus: "complete", usingLastGood: false, ignored: false } });
+    await store.append({ sessionId, type: "context/project_memory_incomplete", payload: { scopeKey: "pm_m3", entrypointName: "MEMORY.md", topicCount: 1, scanStatus: "incomplete", usingLastGood: true, failedTopicIds: ["broken"], ignored: false, reason: "topic_scan_incomplete", body: "secret memory body" } });
+    const projection = await store.project(sessionId);
+    expect(projection?.contextProjectMemory).toMatchObject({ status: "incomplete", scanStatus: "incomplete", usingLastGood: true, failedTopicIds: ["broken"] });
+    expect(JSON.stringify(projection?.contextProjectMemory)).not.toContain("secret memory body");
+  });
+
   it("serves bounded latest and older pages without changing the full replay contract", async () => {
     const store = new InMemoryEventStore();
     const sessionId = await store.createSession("D:/workspace");

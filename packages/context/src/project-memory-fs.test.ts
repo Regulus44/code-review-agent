@@ -67,4 +67,15 @@ describe("FileProjectMemoryStore", () => {
       expect((await store.readTopic(other, "same"))?.content).toBe("tenant b");
     } finally { await rm(root, { recursive: true, force: true }); }
   });
+
+  it("retains a last-good topic manifest when a later scan is incomplete", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "project-memory-"));
+    try {
+      const store = new FileProjectMemoryStore({ rootDir: root });
+      await store.writeTopic(scope, { id: "good", title: "Good", content: "safe" });
+      expect((await store.scanTopics(scope)).status).toBe("complete");
+      await writeFile(path.join(root, scope.scopeKey, "topics", "broken.md"), "not frontmatter", "utf8");
+      await expect(store.scanTopics(scope)).resolves.toMatchObject({ status: "incomplete", usingLastGood: true, headers: [{ id: "good" }] });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
 });

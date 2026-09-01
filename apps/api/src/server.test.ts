@@ -71,6 +71,25 @@ describe("Phase 2 API", () => {
     }
   });
 
+  it("exposes a bounded read-only Memory inspection response without正文", async () => {
+    const server = createApiServer({ store: new InMemoryEventStore(), projectMemory: { getEntrypoint: async () => ({ content: "secret memory body" }), listTopics: async () => [], readTopic: async () => undefined } });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("Memory inspection API did not bind");
+      const base = `http://127.0.0.1:${address.port}`;
+      const created = await fetch(`${base}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: "D:/m3-inspector" }) });
+      const session = await created.json() as { id: string };
+      const response = await fetch(`${base}/v1/sessions/${encodeURIComponent(session.id)}/memory`);
+      expect(response.status).toBe(200);
+      const body = await response.json() as { version: number; sessionId: string; capability: { project: { status: string } }; project?: unknown };
+      expect(body).toMatchObject({ version: 1, sessionId: session.id, capability: { project: { status: "available" } } });
+      expect(JSON.stringify(body)).not.toContain("secret memory body");
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
   it("accepts the legacy maxSteps option without imposing a turn limit", () => {
     expect(() => createApiServer({ store: new InMemoryEventStore(), maxSteps: 512 })).not.toThrow();
     expect(() => createApiServer({ store: new InMemoryEventStore(), maxSteps: 513 })).not.toThrow();

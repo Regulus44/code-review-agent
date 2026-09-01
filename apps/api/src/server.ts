@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { createDefaultSessionMemoryExtractor, FileSessionMemoryStore, FileProjectMemoryStore, createInProcessSubagentProvider, sessionId, AgentHost, turnId, type AgentHostOptions, type TenantModelRoute } from "@coding-agent/runtime";
 import { resolveDefaultSqliteDatabasePath, SqliteEventStore } from "@coding-agent/storage";
-import { brand, type AgentEvent, type ChatModel, type ContextBudgetConfig, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem, type ProductizationCapability, type SessionOwnership, type ModelRouteBackend, type ModelRouteRecord, type CredentialBackend, type McpCredentialReference, type PrincipalBackend, type ModelSelection as ContractModelSelection, type ModelCatalogEntry, type ProviderCatalogGroup, type ProviderProfileRecord } from "@coding-agent/contracts";
+import { brand, type AgentEvent, type ChatModel, type ContextBudgetConfig, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem, type ProductizationCapability, type SessionOwnership, type ModelRouteBackend, type ModelRouteRecord, type CredentialBackend, type McpCredentialReference, type PrincipalBackend, type ModelSelection as ContractModelSelection, type ModelCatalogEntry, type ProviderCatalogGroup, type ProviderProfileRecord, type MemoryInspectionResponse } from "@coding-agent/contracts";
 import { SubagentRuntime } from "@coding-agent/subagent";
 import { ANTHROPIC_MESSAGES_DEFAULT_MAX_OUTPUT_TOKENS, ANTHROPIC_MESSAGES_MAX_OUTPUT_TOKENS, createBuiltInModelProtocolRegistry, createConfiguredModelBootstrap, createModelFromProviderProfile, ModelCatalog, type ModelConfigView, type ProviderCredentialMaterial } from "@coding-agent/llm";
 import { McpConnectionManager, type McpServerConfig } from "@coding-agent/mcp-client";
@@ -888,6 +888,21 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "GET" && url.pathname === "/v1/sessions") {
       const sessions = await host.listSessions(url.searchParams.get("include_archived") === "true");
       sendJson(response, 200, { sessions: identity === undefined ? sessions : sessions.filter((session) => session.ownership?.tenantId === identity.tenantId) });
+      return;
+    }
+    const memoryInspectionMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/memory$/u);
+    if (request.method === "GET" && memoryInspectionMatch?.[1] !== undefined) {
+      const targetSessionId = sessionId(decodeURIComponent(memoryInspectionMatch[1]));
+      const projection = await host.getSession(targetSessionId);
+      if (projection === undefined) throw new HttpError(404, "session not found");
+      const responseBody: MemoryInspectionResponse = {
+        version: 1,
+        sessionId: targetSessionId,
+        capability: host.memorySettings(),
+        ...(projection.contextSessionMemory === undefined ? {} : { session: projection.contextSessionMemory }),
+        ...(projection.contextProjectMemory === undefined ? {} : { project: projection.contextProjectMemory }),
+      };
+      sendJson(response, 200, responseBody);
       return;
     }
     const attachmentMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/attachments$/u);

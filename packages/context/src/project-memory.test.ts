@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseProjectMemoryIndex,
+  buildProjectMemoryRecallCandidates,
   recallRelevantProjectMemory,
   selectProjectMemoryHeaders,
   truncateProjectMemoryEntrypoint,
@@ -58,5 +59,26 @@ describe("M12 Project Memory", () => {
     const second = await recallRelevantProjectMemory(store, scope, "deploy release", { alreadySurfacedIds: new Set(["deploy", "old"]) });
     expect(second.topics).toEqual([]);
     expect(second.candidateCount).toBe(0);
+  });
+
+  it("uses MEMORY.md links as the deterministic lexical manifest", () => {
+    const headers = [
+      { id: "deploy", path: "topics/deploy.md", title: "Deployment", description: "release" },
+      { id: "secret", path: "topics/secret.md", title: "Secret", description: "credentials" },
+    ];
+    expect(buildProjectMemoryRecallCandidates(headers, "- [Ship](topics/deploy.md) — production release")).toMatchObject([{ id: "deploy", title: "Ship", description: "production release" }]);
+    expect(buildProjectMemoryRecallCandidates(headers, "- [Missing](topics/missing.md)")).toEqual([]);
+  });
+
+  it("fails closed for a topic read error while retaining deterministic results", async () => {
+    const store: ProjectMemoryStore = {
+      getEntrypoint: async () => undefined,
+      listTopics: async () => [{ id: "broken", path: "topics/broken.md", title: "Broken" }],
+      readTopic: async () => { throw new Error("half-written"); },
+    };
+    const result = await recallRelevantProjectMemory(store, scope, "broken");
+    expect(result.topics).toEqual([]);
+    expect(result.incomplete).toBe(true);
+    expect(result.failedTopicIds).toEqual(["broken"]);
   });
 });

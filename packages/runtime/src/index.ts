@@ -284,7 +284,7 @@ export class AgentHost {
   private readonly projectMemoryEnabled: boolean;
   private readonly projectMemoryValidation: AgentHostOptions["projectMemoryValidation"];
   private readonly projectMemoryScopeKey: AgentHostOptions["projectMemoryScopeKey"];
-  private readonly projectMemoryTurnStates = new Map<string, { readonly loaded: boolean; readonly surfacedIds: Set<string>; readonly staleIds: Set<string>; readonly cachedTopics: Map<string, ProjectMemoryTopic>; readonly disabled: boolean }>();
+  private readonly projectMemoryTurnStates = new Map<string, { readonly loaded: boolean; readonly surfacedIds: Set<string>; readonly staleIds: Set<string>; readonly cachedTopics: Map<string, ProjectMemoryTopic>; readonly disabled: boolean; readonly incompleteRecorded?: boolean }>();
   private readonly sessionMemoryScheduler = new SessionMemoryExtractionScheduler();
   private readonly sessionMemoryScheduleTails = new Map<SessionId, Promise<void>>();
   private readonly summaryCompact: Partial<SummaryCompactConfig> | undefined;
@@ -2083,12 +2083,12 @@ export class AgentHost {
 
     const scope = createProjectMemoryScope(sessionId, projection, this.projectMemoryScopeKey);
     let entrypoint;
-    let headers;
+    let scan: Awaited<ReturnType<NonNullable<ProjectMemoryStore["scanTopics"]>>>;
     try {
-      [entrypoint, headers] = await Promise.all([
-        this.projectMemory.getEntrypoint(scope),
-        this.projectMemory.listTopics(scope),
-      ]);
+      entrypoint = await this.projectMemory.getEntrypoint(scope);
+      scan = this.projectMemory.scanTopics === undefined
+        ? { headers: await this.projectMemory.listTopics(scope), status: "complete" as const, usingLastGood: false }
+        : await this.projectMemory.scanTopics(scope);
     } catch (error) {
       await this.appendProjectMemoryEvent(sessionId, turnId, "context/project_memory_disabled", {
         scopeKey: scope.scopeKey,
@@ -2100,6 +2100,30 @@ export class AgentHost {
       return { attachments: [] };
     }
 
+    const headers = scan.headers;
+    const scanStatus = scan.status === "incomplete" || entrypoint?.usingLastGood === true ? "incomplete" as const : "complete" as const;
+    const usingLastGood = scan.usingLastGood || entrypoint?.usingLastGood === true;
+    let incompleteRecorded = current.incompleteRecorded === true;
+    if (scanStatus === "incomplete" && !usingLastGood) {
+      if (incompleteRecorded) return { attachments: [] };
+      await this.appendProjectMemoryEvent(sessionId, turnId, "context/project_memory_incomplete", {
+        scopeKey: scope.scopeKey,
+        entrypointName: "MEMORY.md",
+        entrypointBytes: 0,
+        entrypointLines: 0,
+        truncated: false,
+        topicCount: 0,
+        scanStatus,
+        usingLastGood,
+        ignored: true,
+        reason: scan.reason ?? "scan_incomplete",
+      });
+      this.projectMemoryTurnStates.set(stateKey, { ...current, loaded: true, disabled: true, incompleteRecorded: true });
+      return { attachments: [] };
+    }
+
+    /* The adapter may expose a last-good catalog while reporting an incomplete
+       scan. Keep that observation visible, but only inject the verified files. */
     const bounded = truncateProjectMemoryEntrypoint(entrypoint?.content ?? "");
     if (!current.loaded) {
       await this.appendProjectMemoryEvent(sessionId, turnId, "context/project_memory_loaded", {
@@ -2109,13 +2133,17 @@ export class AgentHost {
         entrypointLines: bounded.lineCount,
         truncated: bounded.wasLineTruncated || bounded.wasByteTruncated,
         topicCount: headers.length,
+        scanStatus,
+        usingLastGood,
         ignored: false,
       });
       this.projectMemoryTurnStates.set(stateKey, { ...current, loaded: true });
     }
 
     const recallOptions = {
+      headers,
       alreadySurfacedIds: current.surfacedIds,
+      ...(entrypoint?.content === undefined ? {} : { manifest: entrypoint.content }),
       ...(this.projectMemoryValidation === undefined ? {} : { validate: (topic: Parameters<typeof validateProjectMemoryTopic>[0], scoped: ProjectMemoryScope) => validateProjectMemoryTopic(topic, this.projectMemoryValidation!, scoped) }),
     };
     const recall = await recallRelevantProjectMemory(this.projectMemory, scope, query, recallOptions);
@@ -2124,6 +2152,7 @@ export class AgentHost {
     for (const topic of recall.topics) nextSurfaced.add(topic.id);
     for (const topic of recall.topics) nextCachedTopics.set(topic.id, topic);
     for (const topicId of recall.staleTopicIds) nextSurfaced.add(topicId);
+    for (const topicId of recall.failedTopicIds) nextSurfaced.add(topicId);
     const staleIds = new Set(current.staleIds);
     const newStaleIds = recall.staleTopicIds.filter((topicId) => !staleIds.has(topicId));
     for (const topicId of newStaleIds) staleIds.add(topicId);
@@ -2136,7 +2165,9 @@ export class AgentHost {
         entrypointLines: bounded.lineCount,
         truncated: bounded.wasLineTruncated || bounded.wasByteTruncated,
         topicCount: headers.length,
-        recalledTopicIds: newTopicIds,
+        recalledTopicIds: newTopicIds.slice(0, 5),
+        scanStatus,
+        usingLastGood,
         ignored: false,
       });
     }
@@ -2148,12 +2179,30 @@ export class AgentHost {
         entrypointLines: bounded.lineCount,
         truncated: bounded.wasLineTruncated || bounded.wasByteTruncated,
         topicCount: headers.length,
-        staleTopicIds: newStaleIds,
+        staleTopicIds: newStaleIds.slice(0, 5),
+        scanStatus,
+        usingLastGood,
         ignored: false,
         reason: "references_not_found",
       });
     }
-    this.projectMemoryTurnStates.set(stateKey, { ...current, loaded: true, surfacedIds: nextSurfaced, staleIds, cachedTopics: nextCachedTopics });
+    if ((scanStatus === "incomplete" || recall.incomplete) && !incompleteRecorded) {
+      await this.appendProjectMemoryEvent(sessionId, turnId, "context/project_memory_incomplete", {
+        scopeKey: scope.scopeKey,
+        entrypointName: "MEMORY.md",
+        entrypointBytes: bounded.byteCount,
+        entrypointLines: bounded.lineCount,
+        truncated: bounded.wasLineTruncated || bounded.wasByteTruncated,
+        topicCount: headers.length,
+        failedTopicIds: recall.failedTopicIds.slice(0, 8),
+        scanStatus: "incomplete",
+        usingLastGood,
+        ignored: false,
+        reason: scan.reason ?? (recall.incomplete ? "topic_read_failed" : "scan_incomplete"),
+      });
+      incompleteRecorded = true;
+    }
+    this.projectMemoryTurnStates.set(stateKey, { ...current, loaded: true, surfacedIds: nextSurfaced, staleIds, cachedTopics: nextCachedTopics, incompleteRecorded });
     return {
       prompt: buildProjectMemoryPrompt({ scope, ...(entrypoint === undefined ? {} : { entrypoint }) }),
       attachments: [...nextCachedTopics.values()].filter((topic) => !staleIds.has(topic.id)).map((topic) => ({
@@ -2167,7 +2216,7 @@ export class AgentHost {
   private async appendProjectMemoryEvent(
     sessionId: SessionId,
     turnId: TurnId | undefined,
-    type: "context/project_memory_loaded" | "context/project_memory_recalled" | "context/project_memory_stale" | "context/project_memory_disabled",
+    type: "context/project_memory_loaded" | "context/project_memory_recalled" | "context/project_memory_stale" | "context/project_memory_incomplete" | "context/project_memory_disabled",
     payload: Readonly<Record<string, unknown>>,
   ): Promise<void> {
     try {

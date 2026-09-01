@@ -68,6 +68,7 @@ export type AgentEventType =
   | "context/project_memory_loaded"
   | "context/project_memory_recalled"
   | "context/project_memory_stale"
+  | "context/project_memory_incomplete"
   | "context/project_memory_disabled"
   | "context/summary_started"
   | "context/summary_retried"
@@ -127,7 +128,7 @@ export const AGENT_EVENT_TYPES: readonly AgentEventType[] = [
   "context/session_memory_compaction_failed", "context/session_memory_extraction_started",
   "context/session_memory_extraction_completed", "context/session_memory_extraction_failed",
   "context/session_memory_extraction_cancelled", "context/project_memory_loaded", "context/project_memory_recalled",
-  "context/project_memory_stale", "context/project_memory_disabled", "context/summary_started", "context/summary_retried",
+  "context/project_memory_stale", "context/project_memory_incomplete", "context/project_memory_disabled", "context/summary_started", "context/summary_retried",
   "context/summary_compacted", "context/summary_compaction_failed", "context/compact_boundary",
   "context/post_compact_rebuild_failed", "context/recovery_started", "context/recovery_transition",
   "context/recovery_succeeded", "context/recovery_failed", "context/recovery_circuit_open", "context/transcript_segment",
@@ -741,9 +742,9 @@ export interface ContextSessionMemoryProjection {
   readonly error?: string;
 }
 
-export type ContextProjectMemoryStatus = "loaded" | "recalled" | "stale" | "disabled";
+export type ContextProjectMemoryStatus = "loaded" | "recalled" | "stale" | "incomplete" | "disabled";
 
-/** Bounded projection for workspace/tenant-scoped Project Memory (M12). */
+/** Bounded projection for workspace/tenant-scoped Project Memory (M12/M3). */
 export interface ContextProjectMemoryProjection {
   readonly version: 1;
   readonly status: ContextProjectMemoryStatus;
@@ -753,8 +754,11 @@ export interface ContextProjectMemoryProjection {
   readonly entrypointLines: number;
   readonly truncated: boolean;
   readonly topicCount: number;
+  readonly scanStatus: "complete" | "incomplete";
+  readonly usingLastGood: boolean;
   readonly recalledTopicIds?: readonly string[];
   readonly staleTopicIds?: readonly string[];
+  readonly failedTopicIds?: readonly string[];
   readonly ignored: boolean;
   readonly reason?: string;
   readonly updatedAt: string;
@@ -1352,6 +1356,15 @@ export interface MemoryCapability {
     readonly keyPrefix: "pm_";
     readonly digestHexLength: 24;
   };
+}
+
+/** Read-only Memory inspector response; it intentionally contains no memory正文. */
+export interface MemoryInspectionResponse {
+  readonly version: 1;
+  readonly sessionId: SessionId;
+  readonly capability: MemoryCapability;
+  readonly session?: ContextSessionMemoryProjection;
+  readonly project?: ContextProjectMemoryProjection;
 }
 
 /** Host policy knobs for Claude Code-style context budgeting. */

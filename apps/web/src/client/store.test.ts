@@ -85,6 +85,16 @@ describe("SessionStore", () => {
     expect(JSON.stringify(store.getSnapshot())).not.toContain("token");
   });
 
+  it("replays bounded Project Memory metadata on live and reconnect history", () => {
+    const store = new SessionStore();
+    store.open(session());
+    store.apply(event(1, "context/project_memory_loaded", { scopeKey: "pm_web", entrypointName: "MEMORY.md", entrypointBytes: 120, entrypointLines: 3, truncated: false, topicCount: 2, scanStatus: "complete", usingLastGood: false, ignored: false }));
+    store.apply(event(2, "context/project_memory_recalled", { scopeKey: "pm_web", recalledTopicIds: ["deploy"], topicCount: 2, scanStatus: "complete", usingLastGood: false, ignored: false }));
+    store.apply(event(3, "context/project_memory_incomplete", { scopeKey: "pm_web", failedTopicIds: ["broken"], topicCount: 2, scanStatus: "incomplete", usingLastGood: true, ignored: false, reason: "topic_scan_incomplete" }));
+    expect(store.getSnapshot().session?.contextProjectMemory).toMatchObject({ status: "incomplete", recalledTopicIds: ["deploy"], failedTopicIds: ["broken"], usingLastGood: true });
+    expect(JSON.stringify(store.getSnapshot())).not.toContain("memory body");
+  });
+
   it("updates whole-log stats on a live tail without recounting older-page events", () => {
     const store = new SessionStore();
     const initialStats = reduceSessionStats(createSessionStatsProjection("2026-08-23T00:00:00.000Z"), event(1, "user/message", { content: "older" }));

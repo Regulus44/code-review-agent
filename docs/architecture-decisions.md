@@ -344,6 +344,20 @@ M2 为 SQLite API Host 默认装配 `FileProjectMemoryStore`，目录位于数�
 
 回滚策略：设置 `projectMemoryEnabled=false` 或停止 API 默认装配即可回到 adapter-unavailable/旧自定义 adapter；已有 Project Memory 文件保留，不清理、不迁移覆盖。
 
+## ADR-029：M3 Project Memory 召回与观察面只传递 bounded metadata
+
+状态：accepted（2026-09-01，M3）
+
+M3 在 M12 的 host-owned Project Memory adapter 之上增加确定性的 manifest/lexical recall。`MEMORY.md` 中存在安全链接时，链接集合约束 topic 候选；随后使用标题、描述和相对路径的词法评分排序，最多召回五个 topic。未配置模型、模型不可用或无法使用语义搜索时继续使用该 deterministic fallback。每个 turn 维护 `alreadySurfacedIds`，同一 topic 不会重复注入 model view；stale 或读取失败的 topic 只进入 bounded 诊断，不进入 model view。
+
+文件 adapter 可选地暴露 `scanTopics()`，在部分损坏、symlink、超限或读取失败时返回 `incomplete`。如果 host 已有成功扫描结果，adapter 返回 last-good headers 并标记 `usingLastGood`；没有 last-good 时 Runtime fail closed。Memory 正文永远不进入事件、projection、SSE 或 API inspector。
+
+新增 `ContextProjectMemoryProjection.scanStatus`、`usingLastGood`、`failedTopicIds` 和 `incomplete` 状态，以及只读 `GET /v1/sessions/:id/memory` typed inspector。API 只返回 Memory capability 和 Session/Project bounded projection；Web `SessionStore` 从事件回放同样的 projection，`presentMemoryInspector` 明确显示 unavailable/disabled/incomplete/last-good，不对未落盘正文做 optimistic 展示。
+
+该决策参考 Claude Code `findRelevantMemories.ts` 的 trust/相关性边界和 DSH `session-projection`、`skill-catalog` 的 digest/replay 观察方式；本项目仅复现行为并重新实现，没有复制上游源码。M3 不实现语义向量搜索、Memory 编辑 API、Web 正文浏览器或远程同步。
+
+回滚策略：停止调用 `scanTopics`、manifest recall 和 `/memory` inspector 即可回退到 M12 的 bounded metadata；已有 M3 事件作为可忽略扩展保留，Memory 文件和模型 transcript 不删除。
+
 ## 参考代码入口
 
 - DSH Agent Loop：`D:/Develop/deepseek-harness-fork/packages/core/agent-loop/src/agent.ts`

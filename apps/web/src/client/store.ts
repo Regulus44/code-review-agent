@@ -2,6 +2,7 @@ import type {
   AgentEvent,
   ContextDiagnosticRecovery,
   ContextToolResultBudgetProjection,
+  ContextProjectMemoryProjection,
   SessionId,
   SessionProjection,
   SessionStatus,
@@ -457,8 +458,45 @@ function foldProjectionCore(session: SessionProjection, event: AgentEvent): Sess
       };
     }
     default:
-      return foldContextDiagnostics(session, event) ?? { ...session, updatedAt: event.createdAt, lastSequence: Math.max(session.lastSequence, event.sequence) };
+      return foldContextDiagnostics(session, event) ?? foldProjectMemory(session, event) ?? { ...session, updatedAt: event.createdAt, lastSequence: Math.max(session.lastSequence, event.sequence) };
   }
+}
+
+function foldProjectMemory(session: SessionProjection, event: AgentEvent): SessionProjection | undefined {
+  if (event.type !== "context/project_memory_loaded" && event.type !== "context/project_memory_recalled" && event.type !== "context/project_memory_stale" && event.type !== "context/project_memory_incomplete" && event.type !== "context/project_memory_disabled") return undefined;
+  const payload = event.payload;
+  const previous = session.contextProjectMemory;
+  const scopeKey = stringValue(payload["scopeKey"]) ?? previous?.scopeKey;
+  if (scopeKey === undefined) return undefined;
+  const status: ContextProjectMemoryProjection["status"] = event.type === "context/project_memory_loaded" ? "loaded" : event.type === "context/project_memory_recalled" ? "recalled" : event.type === "context/project_memory_stale" ? "stale" : event.type === "context/project_memory_incomplete" ? "incomplete" : "disabled";
+  const ids = (value: unknown, fallback?: readonly string[], limit = 5): readonly string[] | undefined => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").slice(0, limit) : fallback;
+  const recalledTopicIds = ids(payload["recalledTopicIds"], previous?.recalledTopicIds);
+  const staleTopicIds = ids(payload["staleTopicIds"], previous?.staleTopicIds);
+  const failedTopicIds = ids(payload["failedTopicIds"], previous?.failedTopicIds, 8);
+  return {
+    ...session,
+    contextProjectMemory: {
+      version: 1,
+      status,
+      scopeKey: scopeKey.slice(0, 128),
+      entrypointName: "MEMORY.md",
+      entrypointBytes: numberValue(payload["entrypointBytes"], previous?.entrypointBytes ?? 0),
+      entrypointLines: numberValue(payload["entrypointLines"], previous?.entrypointLines ?? 0),
+      truncated: typeof payload["truncated"] === "boolean" ? payload["truncated"] : previous?.truncated === true,
+      topicCount: numberValue(payload["topicCount"], previous?.topicCount ?? 0),
+      scanStatus: payload["scanStatus"] === "incomplete" ? "incomplete" : payload["scanStatus"] === "complete" ? "complete" : previous?.scanStatus ?? (status === "incomplete" ? "incomplete" : "complete"),
+      usingLastGood: typeof payload["usingLastGood"] === "boolean" ? payload["usingLastGood"] : previous?.usingLastGood === true,
+      ...(recalledTopicIds === undefined ? {} : { recalledTopicIds }),
+      ...(staleTopicIds === undefined ? {} : { staleTopicIds }),
+      ...(failedTopicIds === undefined ? {} : { failedTopicIds }),
+      ignored: typeof payload["ignored"] === "boolean" ? payload["ignored"] : previous?.ignored === true,
+      ...(typeof payload["reason"] === "string" ? { reason: payload["reason"].slice(0, 240) } : previous?.reason === undefined ? {} : { reason: previous.reason }),
+      updatedAt: event.createdAt,
+      lastSequence: event.sequence,
+    },
+    updatedAt: event.createdAt,
+    lastSequence: event.sequence,
+  };
 }
 
 function appendMessage(messages: SessionProjection["messages"], message: SessionProjection["messages"][number]): SessionProjection["messages"] {
