@@ -17,7 +17,7 @@ export interface SkillCatalogProjection {
 export function renderSkillCatalog(snapshot: SkillCatalogSnapshot, budget: SkillCatalogBudget = { maxChars: 8_000 }): SkillCatalogProjection {
   const max = Math.max(0, Math.floor(budget.maxChars));
   const descMax = Math.max(1, Math.floor(budget.maxDescriptionChars ?? 250));
-  const ordered = [...snapshot.skills].sort((a, b) => a.name.localeCompare(b.name));
+  const ordered = snapshot.skills.filter((skill) => skill.invocation.modelInvocable).sort((a, b) => a.name.localeCompare(b.name));
   const lines: string[] = [];
   for (const skill of ordered) {
     const description = skill.description.slice(0, descMax);
@@ -41,4 +41,3 @@ export function renderSkillContent(definition: SkillDefinition, args = ""): stri
   const body = definition.content.replace(/\$\{?ARGUMENTS\}?/gu, args);
   return `<skill name=${JSON.stringify(definition.name)} source=${JSON.stringify(definition.source)}>${body}</skill>`;
 }
-
