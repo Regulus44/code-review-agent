@@ -160,6 +160,7 @@ Web `SessionStore` 只将 stats 作为服务端全日志 baseline，并在无 ga
 - 重复 steer command 必须返回同一个 receipt；只有当前运行中的 turn 可以接受 steer；
 - 客户端可以用 `Last-Event-ID` 或 `after_sequence` 补发事件；
 - 事件 payload 不直接暴露第三方仓库的内部类型。
+- `skill/invocation` 与 `skill/result` 仅记录 Skill 名称、调用模式、调用方和正文字节数；Skill 正文不得进入 EventStore/SSE。catalog digest 在每次 model context assemble 时可重建。
 
 ## SSE 规则
 

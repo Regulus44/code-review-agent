@@ -171,6 +171,10 @@ LSP 只读工具必须遵守以下不变量：
 
 未选中的 shell 不进入 `ToolRegistry.list()`、`ToolRuntime.listTools()`、模型 schema 或工具 Prompt。直接查找未注册 shell 时，`ToolRegistry` 抛出 `ToolNotFoundError`，稳定错误码为 `TOOL_NOT_FOUND`；AgentHost 的模型工具调用边界会将该错误记录为失败的 `tool/result`。系统不会把 Bash 文本转换为 PowerShell，也不会把 PowerShell 文本转换为 Bash 或 `cmd.exe`；Windows 应用别名的存在不代表 WSL `/bin/bash` 可用。
 
+## SkillTool（S2）
+
+SkillTool 通过 `ToolRuntime` 执行，Skill catalog 仅暴露有界摘要与 digest；调用时重新读取并校验正文。`remote`/`unknown` 来源或未知 frontmatter 属性必须走 `interaction/requested` 审批，`allowedTools` 只能缩小宿主 allowlist。正文只作为当前调用结果返回，持久化 `tool/result`、`skill/invocation` 和 `skill/result` 仅保留 bounded metadata。用户 `/name` 入口使用同一工具管线并支持幂等、取消和重放。
+
 ## 调度与禁用
 
 - `parallel` 工具可以并行执行；`exclusive` 工具在同一 Session 内串行；
