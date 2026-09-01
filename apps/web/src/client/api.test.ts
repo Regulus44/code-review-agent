@@ -134,6 +134,19 @@ describe("WebApiClient", () => {
     expect(calls).toEqual(["http://localhost:4317/v1/sessions/ses%2Fmemory/memory"]);
   });
 
+  it("builds the read-only Skill catalog query with bounded filters", async () => {
+    const calls: string[] = [];
+    const client = new WebApiClient({
+      baseUrl: "http://localhost:4317",
+      fetcher: async (input) => {
+        calls.push(String(input));
+        return new Response(JSON.stringify({ version: 1, revision: 2, complete: true, skills: [], suggestions: [] }), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+    await client.listSkills("ses/skills" as never, ["src/index.ts", "docs/readme.md"]);
+    expect(calls[0]).toBe("http://localhost:4317/v1/skills?session_id=ses%2Fskills&paths=src%2Findex.ts%2Cdocs%2Freadme.md");
+  });
+
   it("normalizes non-2xx JSON responses as ApiError", async () => {
     const client = new WebApiClient({
       fetcher: async () => new Response(JSON.stringify({ error: "permission denied" }), { status: 403, headers: { "content-type": "application/json" } }),
