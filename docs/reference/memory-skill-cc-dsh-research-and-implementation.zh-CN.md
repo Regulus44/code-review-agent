@@ -29,7 +29,7 @@
 需要区分“包内实现”与“默认 Host 可用”：
 
 - EventStore transcript、compact、summary、compact boundary、replay 和 diagnostics 已进入默认 Runtime 主路径；
-- Session Memory 和 Project Memory 已有 Context/Runtime/Storage 契约与测试，但通过可选 adapter 注入；默认 API Host 没有配置这些 adapter；
+- Session Memory 和 Project Memory 已有 Context/Runtime/Storage 契约与测试；M0 已冻结 adapter readiness，M1 已为 SQLite API Host 默认装配 bounded 文件 adapter 与受限 fallback extractor。裸 `AgentHost`/InMemory 仍需显式注入 host-owned adapter，避免低层 Runtime 擅自决定持久化目录；
 - Skill 目前只有 capability guard、`skill` attachment 类型和 `capability_status` 只读观察入口；没有 `SKILL.md` loader、discovery、install、version 或 Web 管理面；
 - `/v1/capabilities.plugins` 由 Runtime 明确返回 `deferred`，不能把 prompt catalog 或 attachment support 当作完整 Skill runtime。
 
@@ -226,7 +226,7 @@ DSH 通过 Cordis Loader 将插件作为 service definition/provider/consumer �
 
 | 模块 | 本仓库现状 | Claude Code | DSH | 差距判定 |
 |---|---|---|---|---|
-| Session Memory 存储 | adapter 契约、bounded compact、metadata projection；默认 Host 未装配 | Markdown 文件 + post-sampling forked extractor + exact-path write guard | 无语义 Memory；以 Session Event/compaction 为基础 | P0：先完成默认 durable adapter 与 host 装配 |
+| Session Memory 存储 | adapter 契约、bounded compact、metadata projection；M1 已由 SQLite API Host 默认装配 `FileSessionMemoryStore` | Markdown 文件 + post-sampling forked extractor + exact-path write guard | 无语义 Memory；以 Session Event/compaction 为基础 | M1 已完成；后续补 model-backed extractor、读写/观测 API |
 | Project Memory | bounded `MEMORY.md`/topic taxonomy、relevance/stale 纯函数；无默认 filesystem adapter | memdir 文件树、topic frontmatter、最多 5 条轻量召回、team/KAIROS 扩展 | 无等价实现 | P1：filesystem adapter、trust、recall API |
 | Transcript/Replay | EventStore + replay + compact boundary 已进入主路径 | transcript 与 Memory 分离，compact 时保护 tool pair | append-only event + `deriveMessages()` + lifecycle event | 已具备；以 DSH 作为恢复验收基线 |
 | Skill discovery | 无 `SKILL.md` loader；仅 attachment/capability | managed/user/project/add-dir/plugin/bundled/MCP；dynamic path activation | provider registry、scope、rank、watcher、incomplete snapshot | P0：定义 contract + loader/provider |
@@ -274,19 +274,27 @@ DSH 通过 Cordis Loader 将插件作为 service definition/provider/consumer �
 
 ### M0：契约与 Host 装配基线
 
+状态：`implemented`（2026-09-01，checkpoint `a2f8d71`）
+
 - **范围**：确认 Session Memory/Project Memory adapter 的默认实现、scope key、错误和 disabled 语义；补 `ApiServerOptions` 注入参数；为 Memory metadata 定义事件/Projection 形状。
 - **入口**：`apps/api/src/server.ts`、`packages/runtime/src/index.ts`、`packages/contracts/src/index.ts`、`packages/storage/src/index.ts`、`docs/event-contract.md`、`docs/tool-contract.md`。
 - **参照**：CC `sessionMemoryUtils.ts` 的门控；DSH `SessionEventMap`、`ProjectionDefinition`、`SkillCatalogSource` 的 source metadata。
 - **验收**：默认 Host 启动后可读空 Memory、adapter 明确 `disabled/unavailable`；InMemory/SQLite replay 相同；`pnpm typecheck`、`pnpm test`。
 - **禁用/回滚**：保留可选 adapter 注入；通过配置关闭自动抽取，不改变既有 compact/replay。
 
+M0 实际结果：`MemoryCapability`/adapter readiness 已进入 Runtime/API capability projection；未配置 adapter 为 `unavailable`，显式关闭为 `disabled`，没有引入 no-op adapter，也没有把 Memory 正文写入 EventStore/SSE/projection。
+
 ### M1：默认 durable Session Memory
+
+状态：`implemented`（2026-09-01，checkpoint `da5c7a7`）
 
 - **范围**：本地 bounded Markdown/SQLite adapter（二选一，推荐先文件 adapter + metadata receipt）；threshold、串行 extractor、exact-path writer、重启恢复。
 - **入口**：`packages/context/src/session-memory.ts`、`session-memory-compact.ts`、`packages/runtime/src/index.ts` 的 `scheduleSessionMemoryExtraction()` / `executeSessionMemoryExtraction()`、`apps/api/src/server.ts`。
 - **参照**：CC `SessionMemory/sessionMemory.ts`、`prompts.ts`、`filesystem.ts`；DSH `session` event log 和 compaction lifecycle。
 - **验收**：首次/后续阈值、自然断点、tool pair 未闭合保护、重复 extraction 幂等、崩溃后 receipt 恢复、取消不污染主 turn；安全测试覆盖路径穿越/symlink/并发写。
 - **禁用/回滚**：feature flag 关闭 scheduler，保留已写文件只读；发生 schema 迁移问题可回退到 adapter-only 模式。
+
+M1 实际结果：`packages/context/src/session-memory-file.ts` 提供 frontmatter + etag、字符/UTF-8 bytes bound、临时文件 `fsync` + 同目录 rename、session id/path/symlink fail-closed 和单 session 串行写；`apps/api/src/server.ts:createApiServer()` 对 SQLite 默认按数据库绝对路径 hash 隔离目录，并支持 `sessionMemoryRootDir` 覆盖。无模型 fallback extractor 只读取 user/assistant transcript，固定 restricted capabilities；runtime 已覆盖取消、主 turn 隔离、保存后幂等 receipt 和重启恢复。M1 不提供 Project Memory 默认 adapter、Memory 读写/召回 API 或 Web 管理面。
 
 ### M2：Project Memory filesystem 与 writer policy
 
@@ -383,6 +391,6 @@ DSH 通过 Cordis Loader 将插件作为 service definition/provider/consumer �
 
 ## 9. 当前结论与下一步
 
-本仓库的 Memory 纯函数、compact、replay 和 metadata 基础已经达到可以进入产品化装配的阶段；主要缺口是默认 Host 没有注入 durable Session/Project Memory adapter、没有 Memory 读写/召回 API 和 Web 观察面。Skill 仍处于 capability/attachment seam 阶段，尚未形成 loader、registry、catalog、SkillTool、permission 生命周期或 plugin runtime。
+M0/M1 已完成 Memory readiness、默认 Session Memory 持久化和后台 extraction 的第一条可回放链路。当前缺口集中在 Project Memory 默认 filesystem adapter、Memory 读写/召回 API、Web 观察面，以及可替换的 model-backed extractor。Skill 仍处于 capability/attachment seam 阶段，尚未形成 loader、registry、catalog、SkillTool、permission 生命周期或 plugin runtime。
 
-建议下一次编码切片从 **M0 + S0** 开始：先冻结 Memory/Skill 的公共 contract、source metadata、disabled/incomplete 语义和 Host 装配，再分别实现 M1 与 S1。这样可以保证后续参考 Claude Code 的文件化 Memory 和 DSH 的 provider/catalog 架构时，不会引入第二套事实来源或越过本仓库安全边界。
+下一阶段应进入 **M2：Project Memory filesystem 与 writer policy**，同时保留 M1 的 adapter-only 回滚路径；随后再实施 S0 Skill contract/registry。这样可以继续复用本项目 EventStore、projection、permission 和 workspace 安全边界，不引入第二套事实来源。
