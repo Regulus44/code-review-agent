@@ -72,7 +72,10 @@ mcp/server
 mcp/tool
 mcp/resource
 mcp/prompt
+skills/change
 ```
+
+`skills/change` is a bounded invalidation lifecycle event. Its payload is `{ version: 1, revision, reason, provider?, scope? }`; it never contains SKILL.md正文, absolute paths, prompt text, credentials or provider error details. Consumers refetch their own cwd/scope catalog and may safely ignore unknown reasons. A registry invalidation is not a successful Skill invocation and must not create a tool/result event.
 
 `step/started` / `step/ended` 标记一个 turn 内的模型请求和工具执行边界。`assistant/message` 的 payload 可以包含 `toolCalls`，每个元素至少包含 `id`、`name` 和 JSON `arguments`；后续 `tool/result` 通过 `toolCallId` 关联到该调用。`plan/updated` 是当前实施计划的全量替换事件，`todo/updated` 是当前待办列表的全量替换事件。`interaction/requested` / `interaction/resolved` 表示 `ask_user` 暂停和恢复，不等同于工具权限审批。工具、权限、交互和 queue 事件都必须经过同一事件存储和 SSE 回放管线。
 

@@ -760,7 +760,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/capabilities") {
-        sendJson(response, 200, { attachments: currentAttachmentCapability(attachmentPolicy, modelRuntime, tenantIdentity?.tenantId), context: host.contextSettings(tenantIdentity?.tenantId), toolExecution: host.toolExecutionSettings(), codeMode: host.codeModeSettings(), lsp: host.lspSettings(), plugins: host.pluginsSettings(), productization: productizationCapability(host.productizationSettings(tenantIdentity?.tenantId), productization, principals, credentials) });
+        sendJson(response, 200, { attachments: currentAttachmentCapability(attachmentPolicy, modelRuntime, tenantIdentity?.tenantId), context: host.contextSettings(tenantIdentity?.tenantId), toolExecution: host.toolExecutionSettings(), codeMode: host.codeModeSettings(), lsp: host.lspSettings(), skills: host.skillSettings(), plugins: host.pluginsSettings(), productization: productizationCapability(host.productizationSettings(tenantIdentity?.tenantId), productization, principals, credentials) });
       return;
     }
     if (request.method === "GET" && (url.pathname === "/v1/principals" || url.pathname.startsWith("/v1/principals/"))) {

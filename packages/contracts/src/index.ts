@@ -83,6 +83,7 @@ export type AgentEventType =
   | "context/recovery_circuit_open"
   | "context/transcript_segment"
   | "context/session_restored"
+  | "skills/change"
   | "worktree/created"
   | "worktree/attached"
   | "worktree/switched"
@@ -132,7 +133,7 @@ export const AGENT_EVENT_TYPES: readonly AgentEventType[] = [
   "context/summary_compacted", "context/summary_compaction_failed", "context/compact_boundary",
   "context/post_compact_rebuild_failed", "context/recovery_started", "context/recovery_transition",
   "context/recovery_succeeded", "context/recovery_failed", "context/recovery_circuit_open", "context/transcript_segment",
-  "context/session_restored", "worktree/created", "worktree/attached", "worktree/switched", "worktree/cleaned",
+  "context/session_restored", "skills/change", "worktree/created", "worktree/attached", "worktree/switched", "worktree/cleaned",
   "worktree/failed", "tool/call", "tool/progress", "tool/result", "diff/preview", "patch/preview", "patch/applied",
   "patch/rejected", "patch/rolled_back", "lsp/server", "lsp/request", "permission/requested", "permission/resolved",
   "interaction/requested", "interaction/resolved", "terminal/session", "job/started", "job/output", "job/ended",
@@ -1365,6 +1366,119 @@ export interface MemoryInspectionResponse {
   readonly capability: MemoryCapability;
   readonly session?: ContextSessionMemoryProjection;
   readonly project?: ContextProjectMemoryProjection;
+}
+
+/** Source trust is descriptive metadata; it never expands the host permission baseline. */
+export type SkillSourceTrust = "bundled" | "local" | "remote" | "unknown";
+
+/** Stable invocation policy shared by catalog, explicit user invocation and future SkillTool. */
+export interface SkillInvocationPolicy {
+  readonly modelInvocable: boolean;
+  readonly userInvocable: boolean;
+}
+
+/** A scoped registry layer. Scope chains are supplied outermost to innermost. */
+export type SkillScope = string;
+
+export type SkillResourceBase =
+  | { readonly kind: "directory"; readonly path: string }
+  | { readonly kind: "url"; readonly url: string }
+  | { readonly kind: "opaque"; readonly description: string };
+
+/** Metadata safe to place in a future bounded model catalog. It contains no body or absolute path. */
+export interface SkillSummary {
+  readonly name: string;
+  readonly description: string;
+  readonly whenToUse?: string;
+  readonly invocation: SkillInvocationPolicy;
+  readonly source: string;
+  readonly provider: string;
+  readonly trust: SkillSourceTrust;
+  readonly resourceBase?: SkillResourceBase;
+}
+
+/** Provider-owned candidate handle. `locator` and `path` are never catalog/SSE data. */
+export interface SkillCandidate extends SkillSummary {
+  readonly rank: number;
+  readonly locator: unknown;
+  readonly path?: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+export interface SkillDefinition extends SkillSummary {
+  readonly content: string;
+  readonly path?: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+export type SkillRegistration = Omit<SkillDefinition, "provider" | "invocation" | "source" | "trust"> & {
+  readonly provider?: string;
+  readonly invocation?: SkillInvocationPolicy;
+  readonly source?: string;
+  readonly trust?: SkillSourceTrust;
+};
+
+/** Cwd and cancellation are passed through without making provider state durable. */
+export interface SkillLookupOptions {
+  readonly cwd?: string;
+  readonly signal?: AbortSignal;
+  readonly scope?: SkillScope;
+  readonly scopeChain?: readonly SkillScope[];
+}
+
+export interface SkillProviderObservation {
+  readonly candidates: readonly SkillCandidate[];
+  readonly complete: boolean;
+}
+
+export interface SkillProviderControl {
+  readonly signal: AbortSignal;
+  invalidate(): void;
+}
+
+export interface SkillProvider {
+  readonly name: string;
+  readonly list: (options: SkillLookupOptions) => Promise<readonly SkillCandidate[] | SkillProviderObservation>;
+  readonly get: (candidate: SkillCandidate, options: SkillLookupOptions) => Promise<SkillDefinition | undefined>;
+  /** Optional lifecycle hook for filesystem watchers or remote refresh loops. */
+  readonly start?: (control: SkillProviderControl) => void;
+}
+
+/** Bounded failure metadata; provider error text and skill content never cross this boundary. */
+export interface SkillCatalogSnapshot {
+  readonly version: 1;
+  readonly revision: number;
+  readonly complete: boolean;
+  readonly skills: readonly SkillSummary[];
+  readonly failures?: readonly { readonly provider: string; readonly code: "provider-failed" | "candidate-invalid" }[];
+}
+
+/** An in-process invalidation signal. S3 maps it to durable `skills/change` events. */
+export interface SkillChangeEvent {
+  readonly version: 1;
+  readonly revision: number;
+  readonly reason: "provider-registered" | "provider-removed" | "provider-invalidated" | "runtime-registered" | "runtime-removed";
+  readonly provider?: string;
+  readonly scope?: SkillScope;
+}
+
+export type SkillPermissionDecision = "allow" | "ask" | "deny";
+export interface SkillPermissionAssessment {
+  readonly decision: SkillPermissionDecision;
+  readonly effectiveAllowedTools: readonly string[];
+  readonly reason: "allowlisted" | "unknown-properties" | "untrusted-source" | "capability-disabled";
+  readonly unknownProperties?: readonly string[];
+}
+
+/** Read-only API capability. S0 intentionally reports no provider/catalog by default. */
+export interface SkillCapability {
+  readonly version: 1;
+  readonly configured: boolean;
+  readonly enabled: boolean;
+  readonly status: "available" | "deferred" | "unavailable" | "disabled";
+  readonly reason: string;
+  readonly modelToolExposed: boolean;
+  readonly providerCount: number;
 }
 
 /** Host policy knobs for Claude Code-style context budgeting. */

@@ -27,4 +27,15 @@ describe("CapabilityRegistry", () => {
     expect(() => registry.authorizeWebUrl("file:///secret")).toThrowError(expect.objectContaining({ code: "WEB_PROTOCOL_DENIED" }));
     expect(() => registry.authorizeWebUrl("https://evil.example.net")).toThrowError(expect.objectContaining({ code: "WEB_HOST_DENIED" }));
   });
+
+  it("keeps SkillTool hidden in S0 and asks for unknown or untrusted declarations", () => {
+    const disabled = new CapabilityRegistry();
+    expect(disabled.skillCapability()).toMatchObject({ status: "deferred", modelToolExposed: false });
+    expect(disabled.authorizeSkillInvocation({ trust: "local" })).toMatchObject({ decision: "deny", reason: "capability-disabled" });
+    const enabled = new CapabilityRegistry({ skill: { enabled: true, allowedTools: ["read_file"] } });
+    expect(enabled.skillCapability(2)).toMatchObject({ status: "available", enabled: true, providerCount: 2, modelToolExposed: false });
+    expect(enabled.authorizeSkillInvocation({ trust: "local", unknownProperties: ["shell"] })).toMatchObject({ decision: "ask" });
+    expect(enabled.authorizeSkillInvocation({ trust: "remote" })).toMatchObject({ decision: "ask", reason: "untrusted-source" });
+    expect(enabled.authorizeSkillInvocation({ trust: "local", allowedTools: ["read_file", "write_file"] })).toMatchObject({ decision: "allow", effectiveAllowedTools: ["read_file"] });
+  });
 });

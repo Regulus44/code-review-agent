@@ -612,3 +612,31 @@ ID:
 本项目路径：`packages/contracts/src/index.ts`、`packages/storage/src/index.ts`、`apps/api/src/server.ts`、`apps/web/src/client/store.ts`、`apps/web/src/presentation/memory-presenter.ts`。
 
 范围：只读 Memory inspector、bounded projection、SSE/replay 一致性和 unavailable/incomplete 状态展示；API 不读取或返回 Memory 正文。
+
+### CC-021
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`packages/builtin-tools/src/tools/SkillTool/SkillTool.ts` 的 `checkPermissions()`、`src/skills/loadSkillsDir.ts` 的来源优先级与 name shadow 行为
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；本项目未复制 Claude Code 代码。
+
+本项目路径：`packages/skills/src/index.ts`、`packages/tools/src/capabilities.ts`、`packages/contracts/src/index.ts`。
+
+范围：正向 allowlist、unknown property ask、source trust 降权、provider/rank/scope 合并和 cwd/signal 传递；model-facing SkillTool 留待 S2。
+
+### DSH-017
+
+来源仓库：`D:/Develop/deepseek-harness-fork`
+
+来源路径：`packages/skill/skill/src/index.ts` 的 `SkillSummary`/`SkillCandidate`/`SkillDefinition`/`SkillProvider`/`SkillRegistry`、scope chain 和 `skills/change` 观察
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：`D:/Develop/deepseek-harness-fork/LICENSE` 为 MIT；本项目重新实现类型和 registry，未复制 DSH 代码或 Cordis 依赖。
+
+本项目路径：`packages/skills/src/index.ts`、`packages/contracts/src/index.ts`、`packages/runtime/src/index.ts`、`apps/api/src/server.ts`。
+
+范围：分层 registry、最近 scope shadow、同层稳定 rank 排序、provider incomplete/failure bounded metadata、AbortSignal 和可回放 `skills/change` 生命周期；不引入 DSH 插件平台。

@@ -50,6 +50,29 @@ export class CapabilityRegistry {
     return { text, priority: "low", mayOverrideSafety: false };
   }
 
+  /** S0 trust/permission gate. Skill declarations can only reduce the host allowlist. */
+  authorizeSkillInvocation(input: {
+    readonly trust: SkillSourceTrust;
+    readonly allowedTools?: readonly string[];
+    readonly unknownProperties?: readonly string[];
+  }): SkillPermissionAssessment {
+    const policy = this.policies.get("skill") ?? { enabled: false };
+    if (!policy.enabled) return { decision: "deny", effectiveAllowedTools: [], reason: "capability-disabled" };
+    const unknown = [...new Set(input.unknownProperties ?? [])].sort();
+    if (unknown.length > 0) return { decision: "ask", effectiveAllowedTools: [], reason: "unknown-properties", unknownProperties: unknown };
+    if (input.trust === "remote" || input.trust === "unknown") return { decision: "ask", effectiveAllowedTools: [], reason: "untrusted-source" };
+    const requested = [...new Set(input.allowedTools ?? [])];
+    const effectiveAllowedTools = policy.allowedTools === undefined ? requested : requested.filter((tool) => policy.allowedTools!.includes(tool));
+    return { decision: "allow", effectiveAllowedTools, reason: "allowlisted" };
+  }
+
+  /** Capability metadata for the S0 contract; model-facing SkillTool remains gated until S2. */
+  skillCapability(providerCount = 0): SkillCapability {
+    const policy = this.policies.get("skill") ?? { enabled: false };
+    if (!policy.enabled) return { version: 1, configured: false, enabled: false, status: "deferred", reason: "Skill registry is available as an opt-in contract; model-facing SkillTool is deferred until S2.", modelToolExposed: false, providerCount };
+    return { version: 1, configured: true, enabled: true, status: "available", reason: "Skill contract and registry are configured; model-facing SkillTool remains disabled until S2.", modelToolExposed: false, providerCount };
+  }
+
   authorizeSubagent(parentDepth: number, requestedTools: readonly string[], requestedBudget = 0): { readonly depth: number; readonly tools: readonly string[]; readonly budget: number } {
     const policy = this.require("subagent");
     const maxDepth = policy.maxDepth ?? 1;
@@ -80,3 +103,4 @@ export class CapabilityRegistry {
 function normalizePolicy(policy: CapabilityPolicy): CapabilityPolicy {
   return { enabled: policy.enabled === true, ...(policy.maxBytes === undefined ? {} : { maxBytes: Math.max(1, Math.floor(policy.maxBytes)) }), ...(policy.maxDepth === undefined ? {} : { maxDepth: Math.max(1, Math.floor(policy.maxDepth)) }), ...(policy.maxIterations === undefined ? {} : { maxIterations: Math.max(1, Math.floor(policy.maxIterations)) }), ...(policy.allowedTools === undefined ? {} : { allowedTools: [...new Set(policy.allowedTools)] }), ...(policy.allowedHosts === undefined ? {} : { allowedHosts: [...new Set(policy.allowedHosts.map((host) => host.toLowerCase().trim()).filter(Boolean))] }) };
 }
+import type { SkillCapability, SkillPermissionAssessment, SkillSourceTrust } from "@coding-agent/contracts";

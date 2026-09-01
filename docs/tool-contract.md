@@ -36,6 +36,8 @@ type ToolDefinition = {
 
 `ToolContext` 还提供两个受 Runtime 控制的协作入口：`appendEvent(type, payload)` 用于 `plan` / `todo_write` 这类 session projection 工具，`requestUserInput(input)` 用于 `ask_user`。工具不能自行写数据库、绕过 workspace 或直接操作 SSE；这两个入口最终仍由 ToolRuntime 追加事件。
 
+Skill 在 S0 只建立独立的 provider/registry contract，不暴露模型侧 Tool。Skill 的摘要（name、description、invocation、source trust）可用于未来 catalog；正文只能由 registry 按需读取。`allowedTools` 是正向收缩列表，未知 frontmatter 属性和 remote/unknown source 默认进入 `ask`，不能提升宿主 permission preset；provider failure/incomplete 仅返回 bounded metadata。Skill registry 的 cwd、scope 和 AbortSignal 必须由调用方传入，不能从全局隐式推断。
+
 MCP 工具使用 `mcp__<server>__<tool>` 的稳定 namespace；原始 MCP 名称只用于 wire call，不从 public name 反解析。`source` 只用于 API/Web 展示，执行仍由本地 ToolRuntime 负责。
 
 ## 统一执行流程

@@ -369,3 +369,11 @@ M3 在 M12 的 host-owned Project Memory adapter 之上增加确定性的 manife
 - Claude Code Streaming Tool Executor：`D:/Develop/claude-code/src/services/tools/StreamingToolExecutor.ts`
 - Claude Code 工具总表：`D:/Develop/claude-code/src/tools.ts`
 - Claude Code 上下文压缩：`D:/Develop/claude-code/src/services/contextCollapse`
+
+## ADR-030：S0 Skill contract 与分层 registry
+
+状态：accepted（2026-09-01，S0）
+
+为 Skill 建立 provider-neutral `SkillSummary`、`SkillCandidate`、`SkillDefinition`、`SkillInvocationPolicy`、`SkillProvider` 和 `SkillRegistry`；支持 cwd、显式 scope chain 和 AbortSignal。全局层与调用方 scope chain 按最近层 shadow；同层按 rank、provider registration order、local order 稳定排序。provider 错误/不完整返回 bounded `complete=false` 与 provider/code，不泄露正文、路径或异常文本；registry 变更只发 `skills/change` 生命周期通知，S0 不把它伪装成 Skill invocation/tool result。
+
+source trust 仅能降低权限；remote/unknown 来源、未知 frontmatter 属性必须 `ask`；`allowedTools` 只能与宿主 allowlist 求交，不能绕过 workspace、approval、audit、cancel。默认 capability 为 deferred，model-facing SkillTool 延后至 S2。移除 registry 注册和 API `skills` capability 即可回退；保留 `attachment.kind=skill` 原语义。参照 DSH `packages/skill/skill/src/index.ts` registry/provider/scope/rank 和 Claude Code `SkillTool.ts` `checkPermissions()` 的正向安全白名单，仅参考行为结构，不复制上游代码。

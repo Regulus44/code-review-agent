@@ -18,6 +18,7 @@
     "@coding-agent/llm": "workspace:*",
     "@coding-agent/subagent": "workspace:*",
     "@coding-agent/storage": "workspace:*",
+    "@coding-agent/skills": "workspace:*",
     "@coding-agent/tools": "workspace:*",
     "@coding-agent/workspace": "workspace:*"
   },

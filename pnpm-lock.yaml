@@ -109,6 +109,9 @@ importers:
       '@coding-agent/llm':
         specifier: workspace:*
         version: link:../llm
+      '@coding-agent/skills':
+        specifier: workspace:*
+        version: link:../skills
       '@coding-agent/storage':
         specifier: workspace:*
         version: link:../storage
@@ -121,6 +124,12 @@ importers:
       '@coding-agent/workspace':
         specifier: workspace:*
         version: link:../workspace
+
+  packages/skills:
+    dependencies:
+      '@coding-agent/contracts':
+        specifier: workspace:*
+        version: link:../contracts
 
   packages/storage:
     dependencies:

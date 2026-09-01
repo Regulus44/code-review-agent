@@ -44,6 +44,7 @@ import {
   type MemoryCapability,
   type MemoryAdapterCapability,
 } from "@coding-agent/contracts";
+import type { SkillRegistry } from "@coding-agent/skills";
 import { EchoChatModel, modelFailureMetadata, sanitizeFailureMessage } from "@coding-agent/llm";
 import { compactMessages, DEFAULT_CONTEXT_BUDGET, type ContextBudget } from "@coding-agent/compaction";
 import { applyToolResultBudgetAsync, assembleContext, buildPostCompactMessages, buildProjectMemoryPrompt, buildToolResultModelView, calculateContextWarningState, classifyProviderContextError, compactWithSessionMemory, compactWithSummaryModel, ContextRecoveryGuard, countContextTokens, createSessionMemoryFileWriteGuard, createTokenCounter, createToolResultBudgetState, createToolResultStorage, ensureToolResultPairing, estimateContextTokens, extractContextAttachmentIds, fallbackModelContextCapability, fingerprintModelRequest, groupMessagesByApiRound, hydrateToolResultBudgetState, isReactiveContextError, normalizeMessagesForAPI, normalizeExtractionConfig, recallRelevantProjectMemory, resolveContextBudget, restoreModelViewFromTranscript, selectPostCompactAttachments, SessionMemoryExtractionScheduler, sessionMemoryStats, shouldCompactBeforeRequest, shouldExtractSessionMemory, shouldUseExactTokenCount, truncateProjectMemoryEntrypoint, validateProjectMemoryTopic, type ApiRound, type ContextAssembly, type ContextAttachment, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type PostCompactAttachmentConfig, type PostCompactAttachmentProvider, type ProjectMemoryScope, type ProjectMemoryStore, type ProjectMemoryTopic, type SessionMemoryCompactConfig, type SessionMemoryExtractionConfig, type SessionMemoryExtractionState, type SessionMemoryExtractor, type SessionMemoryStore, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport, type ToolResultBudgetState, type ToolResultStorage } from "@coding-agent/context";
@@ -82,6 +83,7 @@ export interface AgentHostOptions {
   readonly lspServers?: Readonly<Record<string, LspServerConfig>>;
   readonly codeMode?: CodeModeSandbox;
   readonly capabilities?: CapabilityRegistry;
+  readonly skills?: SkillRegistry;
   readonly subagentRuntime?: SubagentRuntime;
   readonly compactionEnabled?: boolean;
   readonly contextBudget?: Partial<ContextBudget>;
@@ -285,6 +287,7 @@ export class AgentHost {
   private readonly projectMemoryValidation: AgentHostOptions["projectMemoryValidation"];
   private readonly projectMemoryScopeKey: AgentHostOptions["projectMemoryScopeKey"];
   private readonly projectMemoryTurnStates = new Map<string, { readonly loaded: boolean; readonly surfacedIds: Set<string>; readonly staleIds: Set<string>; readonly cachedTopics: Map<string, ProjectMemoryTopic>; readonly disabled: boolean; readonly incompleteRecorded?: boolean }>();
+  private readonly skills: SkillRegistry | undefined;
   private readonly sessionMemoryScheduler = new SessionMemoryExtractionScheduler();
   private readonly sessionMemoryScheduleTails = new Map<SessionId, Promise<void>>();
   private readonly summaryCompact: Partial<SummaryCompactConfig> | undefined;
@@ -329,6 +332,7 @@ export class AgentHost {
     this.contextRecovery = options.contextRecovery;
     this.quota = options.quota;
     this.operations = options.operations ?? { backup: "deferred", migration: "deferred", upgrade: "deferred" };
+    this.skills = options.skills;
     this.customSystemPrompt = options.systemPrompt;
     this.maxParallelToolCallsLimit = resolveMaxParallelToolCalls(options.maxParallelToolCalls);
     this.repeatToolReminder = new RepeatToolReminder(options.repeatToolReminder);
@@ -551,6 +555,12 @@ export class AgentHost {
       status: "deferred",
       reason: "Plugin runtime is deferred until a Phase 8.5 productization requirement is accepted.",
     };
+  }
+
+  skillSettings(): import("@coding-agent/contracts").SkillCapability {
+    const capability = this.options.capabilities?.skillCapability(this.skills?.providerCount() ?? 0);
+    if (capability !== undefined) return capability;
+    return { version: 1, configured: this.skills !== undefined, enabled: this.skills !== undefined, status: this.skills === undefined ? "deferred" : "available", reason: this.skills === undefined ? "Skill registry is not configured; model-facing SkillTool is deferred until S2." : "Skill registry is configured; model-facing SkillTool remains disabled until S2.", modelToolExposed: false, providerCount: this.skills?.providerCount() ?? 0 };
   }
 
   /**

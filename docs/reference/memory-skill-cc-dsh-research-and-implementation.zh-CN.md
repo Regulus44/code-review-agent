@@ -324,11 +324,17 @@ API 新增 `GET /v1/sessions/:id/memory`，仅返回 capability 与 Session/Proj
 
 ### S0：Skill contract、registry 和安全模型
 
+状态：`implemented`（2026-09-01，S0 checkpoint 待本阶段提交）
+
 - **范围**：建立 `SkillSummary/Candidate/Definition/InvocationPolicy/Provider`、rank/scope/cwd/signal、`skills/change`、source trust 和正向 permission。
 - **入口**：新增 `packages/skills` 与 `packages/contracts` 类型；扩展 `packages/tools/src/capabilities.ts`、`apps/api/src/server.ts:/v1/capabilities`。
 - **参照**：DSH `packages/skill/skill/src/index.ts` 是主要骨架；CC `SkillTool.checkPermissions()` 是行为参考。
 - **验收**：重名 shadow、scope chain、provider failure/incomplete、abort、unknown property ask、model/user 四象限；无 provider 时 capability absent/deferred。
 - **禁用/回滚**：registry 可装配但默认不暴露模型工具；不修改现有 attachment `kind:'skill'` 语义。
+
+S0 实际结果：新增 `packages/skills`（`@coding-agent/skills`）提供 provider-neutral contract 与分层 `SkillRegistry`。registry 将 global 与显式 scope chain 合并，最近 scope 对重名条目进行 shadow，同层按 rank、provider 注册顺序和候选顺序稳定排序；`cwd` 和 `AbortSignal` 原样传递给 provider，provider failure/incomplete 仅产生 bounded `{provider, code}` 观察，不泄露异常正文。runtime registration 和 provider dispose 通过 `skills/change` 生命周期通知触发失效，事件 payload 不包含正文、绝对路径或 secret。
+
+`CapabilityRegistry` 新增 `authorizeSkillInvocation()` 与 `skillCapability()`：Skill `allowedTools` 只能与宿主 allowlist 求交，unknown properties 与 remote/unknown source 默认 `ask`，capability disabled 为 `deny`。`AgentHost.skillSettings()` 和 `/v1/capabilities.skills` 已接入只读 capability；S0 明确 `modelToolExposed=false`，不会改变现有 `attachment.kind:'skill'` 语义。测试覆盖重名 shadow、scope/rank 排序、provider incomplete/failure、abort、change 生命周期和四象限权限评估。
 
 ### S1：本地 SKILL.md loader/provider
 
@@ -401,6 +407,6 @@ API 新增 `GET /v1/sessions/:id/memory`，仅返回 capability 与 Session/Proj
 
 ## 9. 当前结论与下一步
 
-M0–M3 已完成 Memory readiness、默认 Session/Project Memory 持久化、bounded recall 和只读观察面。当前缺口集中在可替换的 model-backed Session extractor、Memory 正文编辑 API（仍需独立权限/审计契约）和更完整的自动 stale/观测链路。Skill 仍处于 capability/attachment seam 阶段，尚未形成 loader、registry、catalog、SkillTool、permission 生命周期或 plugin runtime。
+M0–M3 已完成 Memory readiness、默认 Session/Project Memory 持久化、bounded recall 和只读观察面；S0 已完成 Skill contract、分层 registry、provider failure/incomplete 观察、`skills/change` 生命周期和正向 trust/permission 模型。当前缺口集中在可替换的 model-backed Session extractor、Memory 正文编辑 API（仍需独立权限/审计契约），以及 Skill 的本地 loader、catalog、SkillTool、用户 `/name`、动态 path 激活和 plugin runtime。
 
-下一阶段应进入 **S0：Skill contract、registry 和安全模型**，同时保留 M2/M3 的 filesystem adapter、bounded recall 与只读 inspector 回滚路径。这样可以继续复用本项目 EventStore、projection、permission 和 workspace 安全边界，不引入第二套事实来源。
+下一阶段应进入 **S1：本地 SKILL.md loader/provider**，同时保留 S0 registry 与 M2/M3 Memory 回滚路径。这样可以继续复用本项目 EventStore、projection、permission 和 workspace 安全边界，不引入第二套事实来源。
