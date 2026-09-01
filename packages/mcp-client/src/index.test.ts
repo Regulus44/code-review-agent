@@ -229,6 +229,25 @@ describe("MCP client bridge", () => {
     await manager.close();
   });
 
+  it("notifies resource consumers on connect and resources/list_changed", async () => {
+    const fixture = createFixtureTransport();
+    const changes: string[] = [];
+    const manager = new McpConnectionManager({
+      registry: new ToolRegistry(),
+      configStore: new McpConfigStore([{ name: "resource-events", scope: "user", transport: "stdio", command: "fixture", riskLevel: "read", reconnect: { enabled: false } }]),
+      transportFactory: () => fixture.client,
+    });
+    const unsubscribe = manager.subscribeResourceChanges((name) => changes.push(name));
+    await manager.start("resource-events");
+    const before = changes.length;
+    await fixture.server.sendResourceListChanged();
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(changes.slice(0, before).every((name) => name === "resource-events")).toBe(true);
+    expect(changes.length).toBeGreaterThan(before);
+    unsubscribe();
+    await manager.close();
+  });
+
   it("projects MCP lifecycle events only to sessions visible in the configured scope", async () => {
     const store = new InMemoryEventStore();
     const visible = await store.createSession("D:/workspace/visible");
@@ -250,7 +269,7 @@ describe("MCP client bridge", () => {
 function createFixtureTransport(): { client: InMemoryTransport; server: Server; listCalls: { value: number } } {
   const [client, serverTransport] = InMemoryTransport.createLinkedPair();
   const listCalls = { value: 0 };
-  const server = new Server({ name: "fixture-server", version: "1.0.0" }, { capabilities: { tools: { listChanged: true }, resources: {}, prompts: {} } });
+  const server = new Server({ name: "fixture-server", version: "1.0.0" }, { capabilities: { tools: { listChanged: true }, resources: { listChanged: true }, prompts: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => { listCalls.value += 1; return { tools: [{ name: "echo", description: "Echo text", inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } }] }; });
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [{ uri: "fixture://readme", name: "readme", mimeType: "text/plain" }] }));
   server.setRequestHandler(ReadResourceRequestSchema, async () => ({ contents: [{ uri: "fixture://readme", mimeType: "text/plain", text: "fixture readme" }] }));

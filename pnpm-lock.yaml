@@ -47,6 +47,9 @@ importers:
       '@coding-agent/skills-filesystem':
         specifier: workspace:*
         version: link:../../packages/skills-filesystem
+      '@coding-agent/skills-mcp':
+        specifier: workspace:*
+        version: link:../../packages/skills-mcp
       '@coding-agent/storage':
         specifier: workspace:*
         version: link:../../packages/storage
@@ -163,6 +166,18 @@ importers:
       '@coding-agent/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@coding-agent/skills':
+        specifier: workspace:*
+        version: link:../skills
+
+  packages/skills-mcp:
+    dependencies:
+      '@coding-agent/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@coding-agent/mcp-client':
+        specifier: workspace:*
+        version: link:../mcp-client
       '@coding-agent/skills':
         specifier: workspace:*
         version: link:../skills

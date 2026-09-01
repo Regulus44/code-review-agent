@@ -20,4 +20,19 @@ describe("SkillTool", () => {
     expect(events).toHaveLength(2);
     expect(JSON.stringify(events)).not.toContain("Hello world");
   });
+
+  it("does not expand arguments for remote declarative content", async () => {
+    const registry = new SkillRegistry();
+    registry.register({ name: "remote", description: "remote", content: "Use $ARGUMENTS; never execute !echo", source: "mcp", trust: "remote", metadata: { disableShellExpansion: true } });
+    const tool = createSkillTool(registry);
+    const result = await tool.execute({ skill: "remote", args: "secret" }, {
+      sessionId: brand<string, "SessionId">("s"), toolCallId: brand<string, "ToolCallId">("t"), workspaceRoot: ".", permissionPreset: "read-only", caller: "user", signal: new AbortController().signal,
+      reportProgress: async () => undefined,
+      appendEvent: async () => undefined,
+      requestUserInput: async () => ({ interactionId: brand<string, "InteractionId">("i"), status: "answered", answer: "allow" }),
+    });
+    expect(result.ok).toBe(true);
+    expect((result.output as { content: string }).content).toContain("$ARGUMENTS");
+    expect((result.output as { content: string }).content).not.toContain("secret");
+  });
 });

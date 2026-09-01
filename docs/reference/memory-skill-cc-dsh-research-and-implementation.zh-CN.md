@@ -233,7 +233,7 @@ DSH 通过 Cordis Loader 将插件作为 service definition/provider/consumer �
 | Skill catalog | 无独立 catalog projection | prompt budget 约 1%，描述截断/降级 | durable `skill-catalog` message + digest replacement | P1：事件化 catalog，预算可配置 |
 | Skill invocation | 无 SkillTool；`authorizeSkill()` 只是 guard | SkillTool validate/permission/call，inline/fork | `skill` tool + user `/name` pre-step injection | P0：统一 ToolRuntime 管线和两种入口 |
 | Skill policy | optional capability 默认关闭；不可覆盖 safety | deny/allow + safe properties 正向白名单 | model/user 双布尔 policy，边界重复校验 | P0：将 model/user policy 设为显式 contract |
-| MCP/远程 Skill | 未实现完整 runtime | MCP skill feature gate；远程 canonical skill 实验能力 | provider 可扩展 URL/opaque resourceBase，但无 CC marketplace | P2：先本地，后 MCP provider；远程默认 fail closed |
+| MCP/远程 Skill | 未实现完整 runtime | MCP skill feature gate；远程 canonical skill 实验能力 | provider 可扩展 URL/opaque resourceBase，但无 CC marketplace | S5 已实施最小 MCP provider；任意 URL/marketplace/语义搜索仍 deferred |
 | Plugin install/version | `plugins` capability 明确 deferred | manifest、marketplace、cache、reconcile、install/update | Cordis Loader/package plugins、只读 inventory | P2：最小本地 bundle/registry，暂不做商业 marketplace |
 | Web/API | 无 Memory/Skill 专用面 | CLI/TUI 菜单、权限请求、技能变化 hook | `skill.list` RPC、SkillRow、settings inventory、e2e | P1：catalog API + tool row + settings 只读面 |
 | 观测/恢复 | Memory metadata、token diagnostics 已有；Skill 无事件 | telemetry/usage ranking/feature gates | `skills/change`、session source metadata、完整 replay | P1：事件、digest、incomplete、恢复和审计 |
@@ -385,6 +385,8 @@ S4 实际结果：新增 `@coding-agent/plugin-runtime` 与 `@coding-agent/skill
 - **参照**：CC `mcpSkills.ts`、`mcpSkillBuilders.ts`、`SkillTool.executeRemoteSkill()`；实验搜索只参考其 feature-gate/stub 边界；DSH provider 的 URL/opaque resourceBase。
 - **验收**：远程 shell 注入、URL SSRF、超大正文、断线取消、缓存失效、MCP resources/list_changed；默认关闭且失败不影响本地 Skill。
 - **禁用/回滚**：feature flag 关闭即不加载模块；搜索 stub 继续标记 deferred，不宣称已实现。
+
+S5 实际实施：新增 `@coding-agent/skills-mcp`，通过 `McpConnectionManager.discovery/readResource` 读取显式 allowlist server 的 `skill://` 资源；资源 scheme、用户信息/端口、URI prefix、frontmatter、正文大小、数量、TTL、超时和 AbortSignal 均受限。远程候选与正文为 `trust=remote`，使用 opaque `resourceBase`；MCP `resources/list_changed`/重连通过 manager subscription 清理缓存并触发 registry invalidation。SkillTool 对 remote/`disableShellExpansion` 正文不做 `$ARGUMENTS` 替换，`allowed-tools` 仍只进入既有 ask/宿主 allowlist 评估。API 通过 `mcpSkills.enabled` + `serverNames` 显式装配。未实现任意 HTTP 抓取、marketplace、自动远程安装或语义搜索；搜索继续为 deferred。
 
 ## 8. 测试、迁移、运维与“不应实现”的边界
 

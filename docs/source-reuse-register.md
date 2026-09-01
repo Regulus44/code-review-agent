@@ -752,3 +752,31 @@ ID:
 本项目路径：packages/plugin-runtime/src/index.ts、packages/skills-plugin/src/index.ts、apps/api/src/server.ts、apps/web/src/client/api.ts。
 
 范围：显式 bind/dispose 生命周期、直接从 runtime 记录生成只读 inventory、插件贡献 Skill provider/tool/prompt；贡献仍经过本项目 registry、permission、workspace、cancel 和事件管线。
+
+### CC-026
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`src/skills/mcpSkills.ts`、`src/skills/mcpSkillBuilders.ts`、`packages/builtin-tools/src/tools/SkillTool/SkillTool.ts` 的 `executeRemoteSkill()`、`docs/features/mcp-skills.md`
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；本项目未复制 Claude Code 代码。
+
+本项目路径：`packages/skills-mcp/src/index.ts`、`packages/tools/src/skill.ts`、`packages/mcp-client/src/manager.ts`、`apps/api/src/server.ts`。
+
+范围：显式门控的 `skill://` 资源发现、按需读取、bounded cache/timeout/AbortSignal、resource list 变化失效、远程正文不做 shell/参数展开；不实现 CC 实验性语义搜索、canonical remote URL 下载或 marketplace。
+
+### DSH-022
+
+来源仓库：`D:/Develop/deepseek-harness-fork`
+
+来源路径：`packages/skill/skill/src/index.ts` 的 `SkillResourceBase` URL/opaque 结构、`packages/skill/skill-filesystem/src/index.ts` 的 provider URL/locator 边界
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：`D:/Develop/deepseek-harness-fork/LICENSE` 为 MIT；本项目重新实现 MCP provider，未复制 DSH 类型或代码。
+
+本项目路径：`packages/skills-mcp/src/index.ts`、`packages/contracts/src/index.ts`。
+
+范围：远程资源以 opaque `resourceBase` 表达，不向 catalog 暴露凭据、绝对路径或可直接执行的 URL；MCP 服务器/tenant 访问继续由 `McpConnectionManager` 负责。

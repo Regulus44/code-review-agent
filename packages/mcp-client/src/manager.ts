@@ -1,5 +1,5 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
+import { ResourceListChangedNotificationSchema, ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpConfigBackend, McpCredentialReference, SessionEventStore } from "@coding-agent/contracts";
 import { ToolRegistry } from "@coding-agent/tools";
 import { McpConfigStore, type McpServerConfig, type McpServerRecord, type McpServerStatus, type McpToolCatalogEntry } from "./config.js";
@@ -52,6 +52,7 @@ export class McpConnectionManager {
   private closed = false;
   private readonly listChangedDebounceMs = 50;
   private readonly stableWindowMs = 5_000;
+  private readonly resourceChangeListeners = new Set<(serverName: string) => void>();
 
   constructor(private readonly options: McpConnectionManagerOptions) {
     this.configs = options.configStore ?? new McpConfigStore([], options.configBackend);
@@ -73,6 +74,12 @@ export class McpConnectionManager {
   discovery(name: string, tenantId?: string): McpDiscoverySnapshot | undefined {
     if (this.get(name, tenantId) === undefined) return undefined;
     return this.states.get(name)?.discovery;
+  }
+
+  /** Subscribe to resource catalog changes without exposing MCP clients or credentials. */
+  subscribeResourceChanges(listener: (serverName: string) => void): () => void {
+    this.resourceChangeListeners.add(listener);
+    return () => this.resourceChangeListeners.delete(listener);
   }
 
   async readResource(name: string, uri: string, signal?: AbortSignal, tenantId?: string): Promise<Awaited<ReturnType<Client["readResource"]>>> {
@@ -264,8 +271,11 @@ export class McpConnectionManager {
       state.status = "failed";
       state.lastError = "MCP transport closed";
       state.connectedAt = undefined;
+      state.discovery = undefined;
+      state.catalog = [];
       unregisterMcpTools(this.options.registry, state.toolNames);
       state.toolNames = [];
+      this.notifyResourceChange(state.name);
       void this.emitServer(state, "failed", state.lastError);
       this.scheduleReconnect(state, config);
     };
@@ -276,9 +286,14 @@ export class McpConnectionManager {
       if (state.generation !== generation || state.client !== client || state.intentionalClose) return;
       this.queueRefresh(state, config, client, generation);
     });
+    client.setNotificationHandler(ResourceListChangedNotificationSchema, async () => {
+      if (state.generation !== generation || state.client !== client || state.intentionalClose) return;
+      this.queueRefresh(state, config, client, generation);
+    });
     await client.connect(transport);
     if (state.generation !== generation || state.intentionalClose) return;
     await this.refreshTools(state, config, client, generation);
+    this.notifyResourceChange(state.name);
     state.status = "connected";
     state.lastError = undefined;
     state.connectedAt = Date.now();
@@ -298,6 +313,7 @@ export class McpConnectionManager {
         if (state.generation !== generation || state.client !== client || state.intentionalClose) return;
         try {
           await this.refreshTools(state, config, client, generation);
+          this.notifyResourceChange(state.name);
         } catch (error) {
           state.lastError = safeMessage(error);
           await this.emitServer(state, "failed", state.lastError);
@@ -305,6 +321,12 @@ export class McpConnectionManager {
       }).catch(() => undefined);
     }, this.listChangedDebounceMs);
     state.listChangedTimer.unref();
+  }
+
+  private notifyResourceChange(serverName: string): void {
+    for (const listener of this.resourceChangeListeners) {
+      try { listener(serverName); } catch { /* observers cannot veto MCP lifecycle */ }
+    }
   }
 
   private async refreshTools(state: RuntimeState, config: McpServerConfig, client: Client, generation: number): Promise<void> {
@@ -349,6 +371,9 @@ export class McpConnectionManager {
     await sync;
     unregisterMcpTools(this.options.registry, state.toolNames);
     state.toolNames = [];
+    state.discovery = undefined;
+    state.catalog = [];
+    this.notifyResourceChange(state.name);
     const client = state.client;
     state.client = undefined;
     state.transport = undefined;

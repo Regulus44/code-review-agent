@@ -415,3 +415,15 @@ S4 只支持宿主显式提供的本地目录 bundle。`plugin.json` 使用版�
 插件 enable/disable 和 reconcile 状态写入 cache 目录的 bounded state 文件；激活失败不会替换已有 active 记录，inventory 从 Runtime 当前记录直接投影，避免第二套生命周期缓存。插件模块只能通过 `PluginActivationContext` 注册 Skill provider、Tool 和 ToolPrompt；Tool 仍进入 ToolRegistry/ToolRuntime，Skill 仍进入 SkillRegistry，不能绕过 permission、workspace、cancel 或事件审计。插件来源和绝对路径不进入 Web inventory。
 
 默认不启用插件能力。移除 `plugins` 注入、设置 runtime disabled 或删除 cache 均可回滚；重建 cache 时从显式 bundle 重新 reconcile。该阶段参考 Claude Code `schemas.ts`、`validatePlugin.ts`、`pluginLoader.ts`、`reconciler.ts` 的校验/安装/缓存/状态拆分，以及 DSH Cordis Loader 的显式生命周期和 plugin-inventory 的直接状态投影；没有复制上游实现。
+
+## ADR-035：S5 显式门控的 MCP `skill://` provider
+
+状态：accepted（2026-09-01，S5）
+
+S5 仅接入宿主显式允许的 MCP server 资源。`@coding-agent/skills-mcp` 通过 `McpConnectionManager` 的 discovery/read seam 发现并按需读取 `skill://` URI；不执行任意 HTTP URL 抓取，不把远端 `resourceBase` 暴露为可直接访问的本地目录，使用 DSH 风格的 opaque resource base。provider 默认 disabled，API 只有在 `mcpSkills.enabled=true` 且 server 名称位于显式 allowlist 时装配。
+
+资源 URI 必须是 `skill:` scheme、无用户信息/端口且通过可选 prefix allowlist；正文和 frontmatter 均受字节、描述、数量和超时上限约束，AbortSignal 贯穿 MCP adapter。远程正文 trust 为 `remote`，未知属性/`allowed-tools` 只能触发既有 approval 并与宿主 allowlist 求交，正文不做 `$ARGUMENTS` 或 shell expansion。读取失败返回 provider `complete=false` 并保留 last-good candidates，不影响本地 provider。
+
+provider 对 resource catalog/body 使用 bounded TTL cache；MCP `notifications/resources/list_changed` 和重连会通过 manager seam 触发失效。资源读取继续追加已有 `mcp/resource` bounded audit，SkillTool 继续追加 `skill/*` bounded metadata；远程正文、绝对地址、凭据和错误文本不进入事件、catalog 或 Web DTO。搜索能力仍为 deferred，不以 stub 宣称已实现。
+
+参考 Claude Code `src/skills/mcpSkills.ts`、`mcpSkillBuilders.ts`、`SkillTool.executeRemoteSkill()` 的 feature gate、skill URI 筛选、cache/invalidation 和远程内容不展开行为；参考 DSH `packages/skill/skill/src/index.ts` 的 `resourceBase` URL/opaque 边界。两者仅作行为参考，本项目仍以 MCP manager、SkillRegistry、ToolRuntime、permission/workspace/tenant contract 为事实来源。回滚方式是删除 provider 注册或关闭 `mcpSkills.enabled`；本地 Skill 和 MCP tools/resources 不受影响。

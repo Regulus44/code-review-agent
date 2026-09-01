@@ -11,6 +11,7 @@ import { SubagentRuntime } from "@coding-agent/subagent";
 import { SkillRegistry } from "@coding-agent/skills";
 import type { PluginRuntime } from "@coding-agent/plugin-runtime";
 import { FileSystemSkillProvider, defaultSkillFilesystemRoots, type SkillFilesystemLimits, type SkillFilesystemRoot } from "@coding-agent/skills-filesystem";
+import { McpSkillProvider } from "@coding-agent/skills-mcp";
 import { ANTHROPIC_MESSAGES_DEFAULT_MAX_OUTPUT_TOKENS, ANTHROPIC_MESSAGES_MAX_OUTPUT_TOKENS, createBuiltInModelProtocolRegistry, createConfiguredModelBootstrap, createModelFromProviderProfile, ModelCatalog, type ModelConfigView, type ProviderCredentialMaterial } from "@coding-agent/llm";
 import { McpConnectionManager, type McpServerConfig } from "@coding-agent/mcp-client";
 import type { CodeModeSandbox, PermissionPreset } from "@coding-agent/tools";
@@ -89,6 +90,8 @@ export interface ApiServerOptions {
   readonly plugins?: PluginRuntime;
   readonly skillToolEnabled?: AgentHostOptions["skillToolEnabled"];
   readonly skillFilesystem?: { readonly enabled?: boolean; readonly roots?: readonly SkillFilesystemRoot[]; readonly customPaths?: readonly string[]; readonly bundledPath?: string; readonly userPath?: string; readonly limits?: SkillFilesystemLimits; readonly watch?: boolean };
+  /** Explicit opt-in MCP `skill://` resource provider. Server names are an allowlist. */
+  readonly mcpSkills?: { readonly enabled?: boolean; readonly serverNames: readonly string[]; readonly allowedResourceUriPrefixes?: readonly string[]; readonly maxContentBytes?: number; readonly timeoutMs?: number; readonly cacheTtlMs?: number };
   /** Optional host-owned Session Memory store and background extractor. */
   readonly sessionMemory?: AgentHostOptions["sessionMemory"];
   /** Host-owned directory for the default local Session Memory adapter. */
@@ -185,6 +188,21 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
     ...(store instanceof SqliteEventStore ? { configBackend: store } : {}),
     credentialResolver: (reference, tenantId) => credentials.resolve(reference, tenantId),
   });
+  if (options.mcpSkills?.enabled === true && skills !== undefined) {
+    const serverNames = Array.isArray(options.mcpSkills.serverNames) ? options.mcpSkills.serverNames : [];
+    for (const serverName of [...new Set(serverNames)].slice(0, 32)) {
+      if (mcp.get(serverName) === undefined) continue;
+      skills.registerProvider(new McpSkillProvider({
+        manager: mcp,
+        serverName,
+        enabled: true,
+        ...(options.mcpSkills.allowedResourceUriPrefixes === undefined ? {} : { allowedResourceUriPrefixes: options.mcpSkills.allowedResourceUriPrefixes }),
+        ...(options.mcpSkills.maxContentBytes === undefined ? {} : { maxContentBytes: options.mcpSkills.maxContentBytes }),
+        ...(options.mcpSkills.timeoutMs === undefined ? {} : { timeoutMs: options.mcpSkills.timeoutMs }),
+        ...(options.mcpSkills.cacheTtlMs === undefined ? {} : { cacheTtlMs: options.mcpSkills.cacheTtlMs }),
+      }));
+    }
+  }
   void mcp.startConfigured();
   const persistence = store instanceof SqliteEventStore ? "sqlite" : "custom";
   const webRoot = options.webRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web");

@@ -2,7 +2,11 @@ import type { JsonSchema, SkillDefinition, ToolDefinition, ToolResult } from "@c
 import { assessSkillPermission } from "@coding-agent/skills";
 import type { SkillRegistry } from "@coding-agent/skills";
 function renderSkillContent(definition: SkillDefinition, args: string): string {
-  const body = definition.content.replace(/\$\{?ARGUMENTS\}?/gu, args);
+  // Claude Code's MCP path treats remote Markdown as declarative untrusted
+  // content: no local `$ARGUMENTS` or shell-style expansion is performed.
+  const body = definition.trust === "remote" || definition.metadata?.disableShellExpansion === true
+    ? definition.content
+    : definition.content.replace(/\$\{?ARGUMENTS\}?/gu, args);
   return `<skill name=${JSON.stringify(definition.name)} source=${JSON.stringify(definition.source)}>${body}</skill>`;
 }
 

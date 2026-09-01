@@ -15,6 +15,7 @@
     { "path": "packages/workspace" },
     { "path": "packages/tools" },
     { "path": "packages/mcp-client" },
+    { "path": "packages/skills-mcp" },
     { "path": "apps/api" },
     { "path": "apps/web" }
   ]

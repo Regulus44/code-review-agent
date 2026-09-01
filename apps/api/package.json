@@ -18,6 +18,7 @@
     "@coding-agent/runtime": "workspace:*",
     "@coding-agent/skills": "workspace:*",
     "@coding-agent/skills-filesystem": "workspace:*",
+    "@coding-agent/skills-mcp": "workspace:*",
     "@coding-agent/plugin-runtime": "workspace:*",
     "@coding-agent/subagent": "workspace:*",
     "@coding-agent/storage": "workspace:*",
