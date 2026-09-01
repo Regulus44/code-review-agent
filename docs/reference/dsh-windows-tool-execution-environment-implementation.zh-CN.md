@@ -4,7 +4,7 @@
 
 本文总结当前仓库针对“Windows 上 Agent 误调用 Bash，实际进入不可用 WSL `/bin/bash`”问题完成的改造。
 
-本文中的“阶段 1–6”是 [Windows 工具执行环境不匹配调研与改造指导](dsh-windows-tool-execution-environment-research.zh-CN.md) 定义的实施阶段，不是项目总阶段中的 Phase 5 Subagent 或 Phase 6 A2A。项目总阶段状态仍以 [phase-status.zh-CN.md](../archive/phases/phase-status.zh-CN.md) 为准。
+本文中的“阶段 1–6”是 [Windows 工具执行环境不匹配调研与改造指导](dsh-windows-tool-execution-environment-research.zh-CN.md) 定义的实施阶段，属于本专题内部的实施拆分。历史阶段状态可在 [phase-status.zh-CN.md](../archive/phases/phase-status.zh-CN.md) 中追溯。
 
 改造目标已经落地为：
 
@@ -195,7 +195,7 @@ git diff --check                               ✓
   - `packages/tools/src/index.test.ts`
   - `packages/tools/src/jobs.test.ts`
   - `docs/tool-contract.md`
-  - 本调研文档的实施验收记录和 `phase-status` 状态更新
+  - 本调研文档的实施验收记录和历史阶段状态更新
 
 这些 checkpoint 没有修改 `packages/contracts`、`packages/tools/src/registry.ts`、`packages/tools/src/runtime.ts`、`packages/runtime/src/system-prompt.ts`、`apps/api/src/server.ts` 或 `docs/event-contract.md` 的生产契约。用户已有的其他工作树修改没有并入上述 checkpoint。
 

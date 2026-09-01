@@ -798,7 +798,7 @@ M14 不是新的替代压缩系统，而是 Claude Code 在已有 microcompact�
 
 本项目已完成 M14 的能力边界改造，完整算法保持 `deferred`。`packages/contracts/src/index.ts` 新增 `ContextCollapseCapability`；`packages/runtime/src/index.ts` 的 `ContextSettings.collapse` 固定返回 `enabled: false/status: "deferred"`，并将 read-time projection、background collapse、overflow drain、snip 四项 feature 标记为 false；API/Web typed boundary 和 Settings presenter 同步展示该状态。旧 API 缺少 collapse metadata 时，Web 使用 `unavailable` fallback。
 
-M14 不新增 `context/collapse_*` 事件，不改变 M01–M13 已验收的 model view、compact boundary、recovery、transcript restore、memory 和 diagnostics。该决策记录于 `docs/reference/claude-code-context-m14-implementation.zh-CN.md`、`docs/development-log/m14-context-collapse.zh-CN.md` 和 ADR-026。只有真实 provider 场景证明前置模块不足时，才另行设计 `packages/context-collapse` 算法和 replay contract。
+M14 不新增 `context/collapse_*` 事件，不改变 M01–M13 已验收的 model view、compact boundary、recovery、transcript restore、memory 和 diagnostics。该决策记录于 `docs/reference/claude-code-context-m14-implementation.zh-CN.md`、`docs/archive/development-log/m14-context-collapse.zh-CN.md` 和 ADR-026。只有真实 provider 场景证明前置模块不足时，才另行设计 `packages/context-collapse` 算法和 replay contract。
 
 ## 6. 建议的公共契约与事件
 
