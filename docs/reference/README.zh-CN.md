@@ -9,5 +9,6 @@
 - `dsh-frontend-reference.zh-CN.md`：Web 信息架构与组件行为参考；
 - `dsh-session-replay-and-composer-reference.zh-CN.md`：Session、回放和 Composer 参考；
 - `claude-code-context-management-research.zh-CN.md`：Context、Compact、Memory 和 Recovery 研究；
+- `memory-skill-cc-dsh-research-and-implementation.zh-CN.md`：Claude Code / DSH / 本仓库 Memory 与 Skill 对照、模块改造点和分阶段实施方案；
 - `provider-model-routing-research.zh-CN.md`：Provider / model routing 研究；
 - `dsh-windows-tool-execution-environment-research.zh-CN.md`：Windows 工具执行环境研究。

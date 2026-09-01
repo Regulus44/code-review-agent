@@ -21,6 +21,8 @@
 
 设计参考、调研和实现说明集中在 [reference](reference/README.zh-CN.md)。它们不定义当前产品状态；状态以 [当前状态](status.zh-CN.md) 为准。
 
+Memory 与 Skill 的三方对照及实施路线见 [Memory 与 Skill：Claude Code / DSH 对照调研与分阶段实施方案](reference/memory-skill-cc-dsh-research-and-implementation.zh-CN.md)。
+
 ## 决策记录
 
 `docs/adr/` 保存已经接受的架构决策。ADR 是长期约束的补充，不替代公共契约和当前状态页。
