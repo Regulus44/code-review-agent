@@ -1,4 +1,4 @@
-import type { AgentEvent, SubagentDescriptor, SubagentMode, PermissionPreset, SessionId, TaskId } from "@code-review-agent/contracts";
+import type { AgentEvent, SubagentDescriptor, SubagentMode, PermissionPreset, SessionId, TaskId } from "@coding-agent/contracts";
 
 export const SUBAGENT_DESCRIPTOR_VERSION = 1 as const;
 

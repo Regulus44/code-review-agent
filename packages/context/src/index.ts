@@ -3,7 +3,7 @@ import type {
   ContextBudgetSnapshot,
   ContextWarningState,
   ModelContextCapability,
-} from "@code-review-agent/contracts";
+} from "@coding-agent/contracts";
 
 export {
   assembleContext,
@@ -203,7 +203,7 @@ export type {
   ContextBudgetSnapshot,
   ContextWarningState,
   ModelContextCapability,
-} from "@code-review-agent/contracts";
+} from "@coding-agent/contracts";
 
 export const DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000;
 export const DEFAULT_MAX_OUTPUT_TOKENS = 64_000;

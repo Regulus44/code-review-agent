@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { ProviderProfileRecord } from "@code-review-agent/contracts";
+import type { ProviderProfileRecord } from "@coding-agent/contracts";
 
 interface ProviderProfileFile {
   readonly version: 1;

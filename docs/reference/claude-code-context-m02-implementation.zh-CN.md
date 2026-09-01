@@ -124,8 +124,8 @@ resolve M01 budget snapshot
 ```text
 pnpm typecheck                                  ✓
 pnpm test                                       ✓ all workspace tests
-pnpm --filter @code-review-agent/context test    ✓ 8 tests
-pnpm --filter @code-review-agent/runtime test    ✓ 36 tests
+pnpm --filter @coding-agent/context test    ✓ 8 tests
+pnpm --filter @coding-agent/runtime test    ✓ 36 tests
 git diff --check                                ✓
 ```
 

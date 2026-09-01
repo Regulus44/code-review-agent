@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { InteractionProjection } from "@code-review-agent/contracts";
+import type { InteractionProjection } from "@coding-agent/contracts";
 import { presentQuestionBatch } from "./question-presenter.js";
 
 const interaction = (overrides: Partial<InteractionProjection> = {}): InteractionProjection => ({

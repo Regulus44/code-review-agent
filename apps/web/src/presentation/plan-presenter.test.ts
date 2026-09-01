@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PlanProjection } from "@code-review-agent/contracts";
+import type { PlanProjection } from "@coding-agent/contracts";
 import { presentPlan } from "./plan-presenter.js";
 
 const plan: PlanProjection = { content: "Inspect, edit, test", status: "active", updatedAt: "2026-08-23T00:00:00.000Z", lastSequence: 3 };

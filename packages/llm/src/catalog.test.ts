@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ProviderProfileRecord } from "@code-review-agent/contracts";
+import type { ProviderProfileRecord } from "@coding-agent/contracts";
 import { ModelCatalog, createModelFromProviderProfile } from "./catalog.js";
 import { EchoChatModel, ModelProtocolRegistry, createBuiltInModelProtocolRegistry } from "./index.js";
 

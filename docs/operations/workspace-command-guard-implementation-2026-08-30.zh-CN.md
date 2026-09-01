@@ -92,13 +92,13 @@ Guard 不读取外部文件内容，也不会在被拒绝前创建目标进程�
 ## 验证结果
 
 ```text
-pnpm --filter @code-review-agent/tools test
+pnpm --filter @coding-agent/tools test
 11 files passed，97 tests passed
 
-pnpm --filter @code-review-agent/runtime test
+pnpm --filter @coding-agent/runtime test
 4 files passed，78 tests passed
 
-pnpm --filter @code-review-agent/api test
+pnpm --filter @coding-agent/api test
 7 files passed，55 tests passed
 
 pnpm typecheck

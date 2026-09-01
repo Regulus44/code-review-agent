@@ -20,9 +20,10 @@ describe("PowerShell executable resolution", () => {
     expect(candidatePwshPaths(env, "linux")).toEqual([]);
   });
 
-  it("trusts an explicit path and uses bare pwsh when no platform candidate exists", () => {
+  it("prefers Coding Agent configuration and accepts the legacy PowerShell variable", () => {
     expect(resolvePwshPath("C:\\Tools\\pwsh.exe", {}, "win32")).toBe("C:\\Tools\\pwsh.exe");
-    expect(resolvePwshPath(undefined, { CODE_REVIEW_AGENT_PWSH: "C:\\Env\\pwsh.exe" }, "win32")).toBe("C:\\Env\\pwsh.exe");
+    expect(resolvePwshPath(undefined, { CODING_AGENT_PWSH: "C:\\New\\pwsh.exe", CODE_REVIEW_AGENT_PWSH: "C:\\Legacy\\pwsh.exe" }, "win32")).toBe("C:\\New\\pwsh.exe");
+    expect(resolvePwshPath(undefined, { CODE_REVIEW_AGENT_PWSH: "C:\\Legacy\\pwsh.exe" }, "win32")).toBe("C:\\Legacy\\pwsh.exe");
     expect(resolvePwshPath(undefined, { ProgramFiles: "C:\\missing", SystemRoot: "C:\\missing", PATH: "" }, "win32")).toBe("pwsh");
     expect(resolvePwshPath(undefined, {}, "linux")).toBe("pwsh");
   });

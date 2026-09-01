@@ -1,4 +1,4 @@
-import { brand, type AgentEvent, type TaskId, type TaskProjection, type TaskStatus, type ArtifactRef, type TaskReport, type TaskStopReason, type ToolError } from "@code-review-agent/contracts";
+import { brand, type AgentEvent, type TaskId, type TaskProjection, type TaskStatus, type ArtifactRef, type TaskReport, type TaskStopReason, type ToolError } from "@coding-agent/contracts";
 
 function status(value: unknown, fallback: TaskStatus): TaskStatus {
   return value === "queued" || value === "running" || value === "waiting" || value === "completed" || value === "failed" || value === "cancelled" || value === "blocked" ? value : fallback;

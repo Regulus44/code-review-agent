@@ -9,14 +9,14 @@ import {
   type SessionId,
   type TaskReport,
   type TurnId,
-} from "@code-review-agent/contracts";
+} from "@coding-agent/contracts";
 import {
   SubagentRuntime,
   type ProviderRun,
   type ProviderRunContext,
   type SubagentProvider,
   type SpawnReceipt,
-} from "@code-review-agent/subagent";
+} from "@coding-agent/subagent";
 
 /**
  * Phase 7 browser/API fixture provider.

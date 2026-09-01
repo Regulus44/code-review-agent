@@ -6,10 +6,10 @@ import { join } from "node:path";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createApiServer, createConfiguredApiServer } from "./server.js";
-import { InMemoryEventStore } from "@code-review-agent/storage";
-import { sessionId } from "@code-review-agent/runtime";
-import { DEEPSEEK_MODELS, OpenAICompatibleChatModel } from "@code-review-agent/llm";
-import { SubagentRuntime } from "@code-review-agent/subagent";
+import { InMemoryEventStore } from "@coding-agent/storage";
+import { sessionId } from "@coding-agent/runtime";
+import { DEEPSEEK_MODELS, OpenAICompatibleChatModel } from "@coding-agent/llm";
+import { SubagentRuntime } from "@coding-agent/subagent";
 import { createDelegationFixtureProvider, seedDelegationFixture } from "./fixtures/delegation.js";
 
 describe("Phase 2 API", () => {
@@ -71,7 +71,7 @@ describe("Phase 2 API", () => {
     }
     expect(projection!.messages.at(-1)?.content).toBe("Echo: hello");
     const shell = await fetch(`${baseUrl}/`);
-    expect(await shell.text()).toContain("Code Review Agent");
+    expect(await shell.text()).toContain("Coding Agent");
   });
 
   it("persists Goal CAS, Plan review, and Todo commands through the API", async () => {
@@ -155,7 +155,7 @@ describe("Phase 2 API", () => {
   });
 
   it("replays a non-empty isolated delegation fixture and prevents sibling task history access", async () => {
-    const root = mkdtempSync(join(tmpdir(), "code-review-agent-delegation-fixture-"));
+    const root = mkdtempSync(join(tmpdir(), "coding-agent-delegation-fixture-"));
     const childCompletedRoot = join(root, "completed-child");
     const childCancellableRoot = join(root, "cancellable-child");
     const siblingRoot = join(root, "sibling");
@@ -238,7 +238,7 @@ describe("Phase 2 API", () => {
       const childArtifactLookup = await fetch(`${url}/v1/sessions/${seeded.completed.childSessionId}/artifacts/${workspaceArtifactId}`);
       expect(childArtifactLookup.status).toBe(404);
 
-      const outsideRoot = mkdtempSync(join(tmpdir(), "code-review-agent-artifact-outside-"));
+      const outsideRoot = mkdtempSync(join(tmpdir(), "coding-agent-artifact-outside-"));
       try {
         writeFileSync(join(outsideRoot, "secret.txt"), "secret");
         const link = join(childCompletedRoot, "escape-link");
@@ -280,7 +280,7 @@ describe("Phase 2 API", () => {
   });
 
   it("validates a local workspace directory before creating a session", async () => {
-    const root = mkdtempSync(join(tmpdir(), "code-review-agent-workspace-"));
+    const root = mkdtempSync(join(tmpdir(), "coding-agent-workspace-"));
     try {
       const valid = await fetch(`${baseUrl}/v1/workspaces/validate`, {
         method: "POST",
@@ -340,7 +340,7 @@ describe("Phase 2 API", () => {
   });
 
   it("persists scoped MCP settings and exposes catalog diagnostics without secrets", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-api-mcp-"));
+    const directory = mkdtempSync(join(tmpdir(), "coding-agent-api-mcp-"));
     const databasePath = join(directory, "agent.sqlite");
     let owned: Server | undefined;
     try {
@@ -462,7 +462,7 @@ describe("Phase 2 API", () => {
   });
 
   it("serves attachment capability, bounded upload receipts and rejection replay", async () => {
-    const root = mkdtempSync(join(tmpdir(), "code-review-agent-api-attachment-"));
+    const root = mkdtempSync(join(tmpdir(), "coding-agent-api-attachment-"));
     try {
       const capability = await (await fetch(`${baseUrl}/v1/capabilities`)).json() as { attachments: { enabled: boolean; maxBytes: number; imagesEnabled: boolean } };
       expect(capability.attachments).toMatchObject({ enabled: true, maxBytes: 524288, imagesEnabled: false });
@@ -541,7 +541,7 @@ describe("Phase 2 API", () => {
   });
 
   it("lists tools and completes an approved workspace edit", async () => {
-    const root = mkdtempSync(join(tmpdir(), "code-review-agent-tools-"));
+    const root = mkdtempSync(join(tmpdir(), "coding-agent-tools-"));
     writeFileSync(join(root, "note.txt"), "before", "utf8");
     try {
       const created = await fetch(`${baseUrl}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: root }) });
@@ -1162,7 +1162,7 @@ describe("Phase 2 API", () => {
   });
 
   it("reopens the same SQLite database with session history intact", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-api-"));
+    const directory = mkdtempSync(join(tmpdir(), "coding-agent-api-"));
     const databasePath = join(directory, "agent.sqlite");
     const first = createApiServer({ databasePath });
     await new Promise<void>((resolve) => first.listen(0, "127.0.0.1", resolve));
@@ -1189,7 +1189,7 @@ describe("Phase 2 API", () => {
   });
 
   it("restores a pending tool permission after an API restart", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-permission-recovery-"));
+    const directory = mkdtempSync(join(tmpdir(), "coding-agent-permission-recovery-"));
     const databasePath = join(directory, "agent.sqlite");
     const first = createApiServer({ databasePath });
     await new Promise<void>((resolve) => first.listen(0, "127.0.0.1", resolve));
@@ -1211,7 +1211,7 @@ describe("Phase 2 API", () => {
   });
 
   it("restores a pending user interaction after an API restart", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-interaction-recovery-"));
+    const directory = mkdtempSync(join(tmpdir(), "coding-agent-interaction-recovery-"));
     const databasePath = join(directory, "agent.sqlite");
     let modelCalls = 0;
     const model = {

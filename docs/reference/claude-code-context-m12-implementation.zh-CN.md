@@ -70,9 +70,9 @@ turn/started
 
 ```text
 pnpm typecheck
-pnpm --filter @code-review-agent/context test -- --run
-pnpm --filter @code-review-agent/storage test -- --run
-pnpm --filter @code-review-agent/runtime test -- --run
+pnpm --filter @coding-agent/context test -- --run
+pnpm --filter @coding-agent/storage test -- --run
+pnpm --filter @coding-agent/runtime test -- --run
 pnpm test
 git diff --check
 ```

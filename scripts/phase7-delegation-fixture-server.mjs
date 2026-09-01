@@ -15,7 +15,7 @@ import { InMemoryEventStore } from "../packages/storage/dist/index.js";
 import { SubagentRuntime } from "../packages/subagent/dist/index.js";
 
 const store = new InMemoryEventStore();
-const fixtureRoot = await mkdtemp(join(tmpdir(), "code-review-agent-phase7-delegation-"));
+const fixtureRoot = await mkdtemp(join(tmpdir(), "coding-agent-phase7-delegation-"));
 const subagentRuntime = new SubagentRuntime({ store });
 subagentRuntime.registerProvider(createDelegationFixtureProvider({ store }));
 const server = createApiServer({ store, subagentRuntime });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createSessionStatsProjection, reduceSessionStats, brand, type AgentEvent } from "@code-review-agent/contracts";
+import { createSessionStatsProjection, reduceSessionStats, brand, type AgentEvent } from "@coding-agent/contracts";
 import { formatDuration, formatTokens, presentUsage, summarizeUsage } from "./usage-presenter.js";
 
 const event = (sequence: number, type: string, createdAt: string, payload: Record<string, unknown> = {}, turnId = "turn_1") => ({ sequence, type, createdAt, payload, turnId });

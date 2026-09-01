@@ -1,4 +1,4 @@
-import type { SessionProjection, TurnId, TurnProjection } from "@code-review-agent/contracts";
+import type { SessionProjection, TurnId, TurnProjection } from "@coding-agent/contracts";
 
 export type QueueItemStatus = "queued" | "running";
 

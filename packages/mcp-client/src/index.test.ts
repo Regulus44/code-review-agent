@@ -7,9 +7,9 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { CallToolRequestSchema, GetPromptRequestSchema, ListPromptsRequestSchema, ListResourcesRequestSchema, ListToolsRequestSchema, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { InMemoryEventStore, SqliteEventStore } from "@code-review-agent/storage";
-import { ToolRegistry, ToolRuntime } from "@code-review-agent/tools";
-import { brand } from "@code-review-agent/contracts";
+import { InMemoryEventStore, SqliteEventStore } from "@coding-agent/storage";
+import { ToolRegistry, ToolRuntime } from "@coding-agent/tools";
+import { brand } from "@coding-agent/contracts";
 import { createMcpToolRegistrations, McpConnectionManager, McpConfigStore, publicToolName, type McpServerConfig } from "./index.js";
 
 describe("MCP client bridge", () => {

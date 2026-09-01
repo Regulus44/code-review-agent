@@ -16,7 +16,7 @@ import {
   type TaskStopReason,
   type ToolError,
   type SessionOwnership,
-} from "@code-review-agent/contracts";
+} from "@coding-agent/contracts";
 import { randomUUID } from "node:crypto";
 import { foldSubagentDescriptor, snapshotDescriptor } from "./descriptor.js";
 import { TaskService, childMetadata } from "./task-service.js";
@@ -90,7 +90,7 @@ export interface SpawnReceipt {
 export interface TaskOutput {
   readonly task: TaskProjection;
   readonly report?: TaskReport;
-  readonly events: readonly import("@code-review-agent/contracts").AgentEvent[];
+  readonly events: readonly import("@coding-agent/contracts").AgentEvent[];
 }
 
 interface LiveChild {

@@ -1,4 +1,4 @@
-import type { ChatMessage, ModelToolDefinition, ModelUsage } from "@code-review-agent/contracts";
+import type { ChatMessage, ModelToolDefinition, ModelUsage } from "@coding-agent/contracts";
 import { adjustIndexToPreserveAPIInvariants } from "./session-memory-compact.js";
 import { buildSummaryInput, ensureSummaryStartsWithUser } from "./summary-input.js";
 import { estimateContextTokens } from "./estimator.js";

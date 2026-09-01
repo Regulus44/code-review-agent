@@ -1,5 +1,5 @@
 {
-  "name": "@code-review-agent/contracts",
+  "name": "@coding-agent/contracts",
   "version": "0.2.0-dev.1",
   "private": true,
   "type": "module",

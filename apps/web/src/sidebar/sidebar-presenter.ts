@@ -1,4 +1,4 @@
-import type { SessionId, SessionStatus, SessionSummary, WorkspaceSummary } from "@code-review-agent/contracts";
+import type { SessionId, SessionStatus, SessionSummary, WorkspaceSummary } from "@coding-agent/contracts";
 import {
   buildNavigationModel,
   type NavigationRenderIntent,

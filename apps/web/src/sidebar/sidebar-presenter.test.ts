@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { brand, type SessionSummary } from "@code-review-agent/contracts";
+import { brand, type SessionSummary } from "@coding-agent/contracts";
 import {
   COLLAPSED_SESSION_LIMIT,
   navigationEmptyMessage,

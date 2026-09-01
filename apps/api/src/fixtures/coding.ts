@@ -7,9 +7,9 @@ import type {
   SessionId,
   ToolCallId,
   TurnId,
-} from "@code-review-agent/contracts";
-import { brand, type AgentEvent } from "@code-review-agent/contracts";
-import type { AgentHost } from "@code-review-agent/runtime";
+} from "@coding-agent/contracts";
+import { brand, type AgentEvent } from "@coding-agent/contracts";
+import type { AgentHost } from "@coding-agent/runtime";
 
 export type CodingFixtureScenario = "read-only" | "edit" | "test-recovery";
 

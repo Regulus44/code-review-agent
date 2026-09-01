@@ -147,8 +147,8 @@ repair 实际发生时追加：
 ```text
 pnpm typecheck
 pnpm test
-pnpm --filter @code-review-agent/context test
-pnpm --filter @code-review-agent/runtime test
+pnpm --filter @coding-agent/context test
+pnpm --filter @coding-agent/runtime test
 git diff --check
 ```
 

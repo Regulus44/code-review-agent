@@ -1,4 +1,4 @@
-import type { ModelSelection, ProviderCatalogGroup, SessionId } from "@code-review-agent/contracts";
+import type { ModelSelection, ProviderCatalogGroup, SessionId } from "@coding-agent/contracts";
 import type { WebApiClient, SessionModelsResponse } from "./api.js";
 
 export type ModelDirectoryStatus = "idle" | "loading" | "ready" | "selecting" | "error";

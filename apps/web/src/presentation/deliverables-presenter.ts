@@ -1,4 +1,4 @@
-import type { ArtifactRef, TaskProjection } from "@code-review-agent/contracts";
+import type { ArtifactRef, TaskProjection } from "@coding-agent/contracts";
 
 export type DeliverableScope = "workspace" | "external" | "unsafe" | "unknown";
 

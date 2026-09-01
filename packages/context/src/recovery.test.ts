@@ -1,4 +1,4 @@
-import type { ModelRequest } from "@code-review-agent/contracts";
+import type { ModelRequest } from "@coding-agent/contracts";
 import { describe, expect, it } from "vitest";
 import { classifyProviderContextError, ContextRecoveryGuard, fingerprintModelRequest, isReactiveContextError } from "./recovery.js";
 

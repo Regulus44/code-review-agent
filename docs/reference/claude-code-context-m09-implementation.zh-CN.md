@@ -127,10 +127,10 @@ error?
 验证命令：
 
 ```text
-pnpm --filter @code-review-agent/context test -- --run   ✓
-pnpm --filter @code-review-agent/storage test -- --run   ✓
-pnpm --filter @code-review-agent/runtime test -- --run    ✓
-pnpm --filter @code-review-agent/llm test -- --run        ✓
+pnpm --filter @coding-agent/context test -- --run   ✓
+pnpm --filter @coding-agent/storage test -- --run   ✓
+pnpm --filter @coding-agent/runtime test -- --run    ✓
+pnpm --filter @coding-agent/llm test -- --run        ✓
 pnpm typecheck                                           ✓
 ```
 

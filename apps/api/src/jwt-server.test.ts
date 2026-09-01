@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { brand } from "@code-review-agent/contracts";
-import { InMemoryEventStore } from "@code-review-agent/storage";
+import { brand } from "@coding-agent/contracts";
+import { InMemoryEventStore } from "@coding-agent/storage";
 import { createApiServer } from "./server.js";
 
 function jwt(secret: string, payload: Record<string, unknown>): string {
@@ -16,13 +16,13 @@ describe("API external IdP JWT boundary", () => {
   it("accepts only a verified JWT mapped through the durable principal catalog", async () => {
     const store = new InMemoryEventStore();
     store.upsertPrincipal({ id: brand<string, "PrincipalId">("principal-idp-a"), subject: "idp|a", tenantId: brand<string, "TenantId">("tenant-idp-a"), roles: ["member"], status: "active", createdAt: "2026-08-24T00:00:00.000Z", updatedAt: "2026-08-24T00:00:00.000Z" });
-    const server = createApiServer({ store, productization: { auth: { required: true, tokens: [], jwt: { issuer: "https://idp.example", audience: "code-review-agent", keys: [{ kid: "fixture-key", alg: "HS256", secret: "fixture-secret" }] } } } });
+    const server = createApiServer({ store, productization: { auth: { required: true, tokens: [], jwt: { issuer: "https://idp.example", audience: "coding-agent", keys: [{ kid: "fixture-key", alg: "HS256", secret: "fixture-secret" }] } } } });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
     if (address === null || typeof address === "string") throw new Error("JWT API did not bind");
     const baseUrl = "http://127.0.0.1:" + address.port;
     const now = Math.floor(Date.now() / 1_000);
-    const signed = jwt("fixture-secret", { iss: "https://idp.example", aud: "code-review-agent", sub: "idp|a", tenant_id: "tenant-idp-a", exp: now + 120 });
+    const signed = jwt("fixture-secret", { iss: "https://idp.example", aud: "coding-agent", sub: "idp|a", tenant_id: "tenant-idp-a", exp: now + 120 });
     try {
       const capabilities = await fetch(baseUrl + "/v1/capabilities", { headers: { authorization: "Bearer " + signed } });
       expect(capabilities.status).toBe(200);

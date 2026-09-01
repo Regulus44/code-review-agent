@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { AttachmentKind, AttachmentReceipt, SessionProjection } from "@code-review-agent/contracts";
-import { WorkspaceResolver, WorkspaceViolation } from "@code-review-agent/workspace";
+import type { AttachmentKind, AttachmentReceipt, SessionProjection } from "@coding-agent/contracts";
+import { WorkspaceResolver, WorkspaceViolation } from "@coding-agent/workspace";
 
 export interface AttachmentPolicy {
   readonly enabled?: boolean;

@@ -49,9 +49,9 @@
 
 ```text
 pnpm typecheck
-pnpm --filter @code-review-agent/contracts test
-pnpm --filter @code-review-agent/storage test
-pnpm --filter @code-review-agent/web test
+pnpm --filter @coding-agent/contracts test
+pnpm --filter @coding-agent/storage test
+pnpm --filter @coding-agent/web test
 ```
 
 覆盖场景：

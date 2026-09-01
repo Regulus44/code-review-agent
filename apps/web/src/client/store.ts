@@ -7,8 +7,8 @@ import type {
   SessionStatus,
   TurnId,
   TurnProjection,
-} from "@code-review-agent/contracts";
-import { createSessionStatsProjection, reduceSessionStats } from "@code-review-agent/contracts";
+} from "@coding-agent/contracts";
+import { createSessionStatsProjection, reduceSessionStats } from "@coding-agent/contracts";
 import {
   applyConversationEvent,
   createConversationProjection,

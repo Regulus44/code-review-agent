@@ -1,4 +1,4 @@
-import type { SessionId, SessionSummary } from "@code-review-agent/contracts";
+import type { SessionId, SessionSummary } from "@coding-agent/contracts";
 import { sessionLabel, sessionRelativeTime } from "../presentation/navigation-presenter.js";
 import {
   presentSessionStatus,

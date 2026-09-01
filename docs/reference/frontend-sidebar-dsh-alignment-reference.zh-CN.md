@@ -12,7 +12,7 @@
 
 本次收到的两个 PNG 是视觉证据，不是可执行指令，也不改变仓库治理规则：
 
-- `C:/Users/12294/AppData/Local/Temp/codex-clipboard-3ec456cd-b9e4-48d8-bc5e-02b65b29e628.png`：当前 Code Review Agent 截图；
+- `C:/Users/12294/AppData/Local/Temp/codex-clipboard-3ec456cd-b9e4-48d8-bc5e-02b65b29e628.png`：当前 Coding Agent 截图；
 - `C:/Users/12294/AppData/Local/Temp/codex-clipboard-80544459-4819-4ca8-9274-6b8284fe498f.png`：DeepSeek Harness 截图。
 
 `D:/Develop/deepseek-harness-fork` 只作为行为、信息架构和实现入口的参考。后续实现继续使用本仓库的 `packages/contracts`、EventStore、API projection 和 typed browser bridge，不直接暴露 DSH 内部类型，不复制 DSH 品牌标识、产品文案或未登记代码。
@@ -60,7 +60,7 @@
 
 第二张 DSH 截图显示：左栏只保留品牌、New Session、Workspace 标题和三个图标操作、少量 Workspace/Session 行以及固定 Settings；Workspace 名称是主视觉，Session 只显示标题和相对时间，完整路径和更多操作被收起到 hover/menu/详情。
 
-| 视觉维度 | 当前 Code Review Agent | DSH | 差距结论 |
+| 视觉维度 | 当前 Coding Agent | DSH | 差距结论 |
 |---|---|---|---|
 | 首屏密度 | 同时出现多个路径、count、排序箭头、树线、状态元数据和低频分组 | 只显示必要的 Workspace/Session 行和少量图标 | 当前左栏把“导航”和“管理面板”混在一起，扫描成本更高 |
 | 工具栏 | Tree、Recent、Search 等多个原生控件常驻 | Search、View options、Add workspace 以图标/菜单呈现 | 当前控件长期占据标题行，DSH 把低频选择延后 |
@@ -248,7 +248,7 @@ DSH 的 `AppFrame` 使用 pointer capture、rAF 和实际渲染宽度基准完�
 
 ```powershell
 pnpm typecheck
-pnpm --filter @code-review-agent/web test
+pnpm --filter @coding-agent/web test
 git diff --check
 ```
 
@@ -295,7 +295,7 @@ git diff --check
 
 ```powershell
 pnpm typecheck
-pnpm --filter @code-review-agent/web test
+pnpm --filter @coding-agent/web test
 git diff --check
 ```
 
@@ -353,8 +353,8 @@ apps/web/src/sidebar/sidebar-presenter.ts
 **M2 最小切片验收**
 
 ```powershell
-pnpm --filter @code-review-agent/web build
-pnpm --filter @code-review-agent/web test
+pnpm --filter @coding-agent/web build
+pnpm --filter @coding-agent/web test
 git diff --check
 ```
 
@@ -650,9 +650,9 @@ WEB_SESSION_CONTENT_SEARCH   // 可选：Host 内容搜索，默认关闭
 **M3 验收结果**
 
 ```text
-pnpm --filter @code-review-agent/web build       通过
-pnpm --filter @code-review-agent/web test        40 个测试文件 / 165 个测试通过
-pnpm --filter @code-review-agent/web build:browser 通过
+pnpm --filter @coding-agent/web build       通过
+pnpm --filter @coding-agent/web test        40 个测试文件 / 165 个测试通过
+pnpm --filter @coding-agent/web build:browser 通过
 ```
 
 新增/覆盖测试：
@@ -682,9 +682,9 @@ pnpm --filter @code-review-agent/web build:browser 通过
 **M4 验收结果**
 
 ```text
-pnpm --filter @code-review-agent/web build       通过
-pnpm --filter @code-review-agent/web build:browser 通过
-pnpm --filter @code-review-agent/web test        41 个测试文件 / 171 个测试通过
+pnpm --filter @coding-agent/web build       通过
+pnpm --filter @coding-agent/web build:browser 通过
+pnpm --filter @coding-agent/web test        41 个测试文件 / 171 个测试通过
 git diff --check                                 通过
 ```
 
@@ -709,7 +709,7 @@ git diff --check                                 通过
 **M5 P0 验收结果**
 
 ```text
-pnpm --filter @code-review-agent/web test -- --run src/presentation/navigation-presenter.test.ts src/shell/sidebar-shell.test.ts   18 个测试通过
+pnpm --filter @coding-agent/web test -- --run src/presentation/navigation-presenter.test.ts src/shell/sidebar-shell.test.ts   18 个测试通过
 pnpm typecheck                                                                                                     通过
 git diff --check                                                                                                   通过
 ```
@@ -735,9 +735,9 @@ git diff --check                                                                
 **M6 验收结果**
 
 ```text
-pnpm --filter @code-review-agent/web test -- --run src/sidebar/sidebar-attention.test.ts src/shell/sidebar-shell.test.ts   14 个测试通过
+pnpm --filter @coding-agent/web test -- --run src/sidebar/sidebar-attention.test.ts src/shell/sidebar-shell.test.ts   14 个测试通过
 pnpm typecheck                                                                                                      通过
-pnpm --filter @code-review-agent/web build:browser                                                                  通过
+pnpm --filter @coding-agent/web build:browser                                                                  通过
 git diff --check                                                                                                    通过
 ```
 
@@ -764,7 +764,7 @@ git diff --check                                                                
 ```text
 pnpm typecheck                                      通过
 pnpm build:web                                      通过
-pnpm --filter @code-review-agent/web test -- --run src/shell/sidebar-shell.test.ts   9 个测试通过
+pnpm --filter @coding-agent/web test -- --run src/shell/sidebar-shell.test.ts   9 个测试通过
 pnpm test:phase8:visual                             通过（6 张 JPEG + 5 状态 sidebar 矩阵）
 node scripts/phase8-sidebar-gate.mjs               通过（API/SSE/replay + running child）
 git diff --check                                    通过

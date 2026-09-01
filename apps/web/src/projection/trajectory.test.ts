@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { brand, type AgentEvent } from "@code-review-agent/contracts";
+import { brand, type AgentEvent } from "@coding-agent/contracts";
 import { projectTrajectory } from "./trajectory.js";
 
 const sessionId = brand<string, "SessionId">("ses_trajectory");

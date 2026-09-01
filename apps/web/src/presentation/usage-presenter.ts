@@ -1,4 +1,4 @@
-import type { SessionStatsProjection } from "@code-review-agent/contracts";
+import type { SessionStatsProjection } from "@coding-agent/contracts";
 
 export interface UsageSummary {
   readonly turnCount: number;

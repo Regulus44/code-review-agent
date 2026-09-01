@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { brand } from "@code-review-agent/contracts";
+import { brand } from "@coding-agent/contracts";
 import type { TrajectoryProjection, TrajectoryRecord } from "../projection/trajectory.js";
 import { buildTrajectoryTimeline, inspectTrajectory, queryTrajectory } from "./trajectory-presenter.js";
 

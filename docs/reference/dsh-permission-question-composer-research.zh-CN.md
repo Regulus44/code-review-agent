@@ -381,11 +381,11 @@ Runtime 已有 expiry/resolved 事件。前端只把 expired request 呈现为�
 
 ### 本项目
 
-- `D:\Develop\code-review-agent\apps\web\index.html`
-- `D:\Develop\code-review-agent\apps\web\src\presentation\request-presenter.ts`
-- `D:\Develop\code-review-agent\apps\web\src\projection\conversation.ts`
-- `D:\Develop\code-review-agent\apps\web\src\client\store.ts`
-- `D:\Develop\code-review-agent\apps\web\src\client\api.ts`
-- `D:\Develop\code-review-agent\apps\api\src\server.ts`
-- `D:\Develop\code-review-agent\packages\runtime\src\index.ts`
-- `D:\Develop\code-review-agent\packages\tools\src\runtime.ts`
+- `D:\Develop\coding-agent\apps\web\index.html`
+- `D:\Develop\coding-agent\apps\web\src\presentation\request-presenter.ts`
+- `D:\Develop\coding-agent\apps\web\src\projection\conversation.ts`
+- `D:\Develop\coding-agent\apps\web\src\client\store.ts`
+- `D:\Develop\coding-agent\apps\web\src\client\api.ts`
+- `D:\Develop\coding-agent\apps\api\src\server.ts`
+- `D:\Develop\coding-agent\packages\runtime\src\index.ts`
+- `D:\Develop\coding-agent\packages\tools\src\runtime.ts`

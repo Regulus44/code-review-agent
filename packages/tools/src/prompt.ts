@@ -1,4 +1,4 @@
-import type { ToolDefinition } from "@code-review-agent/contracts";
+import type { ToolDefinition } from "@coding-agent/contracts";
 
 /** Structured, testable guidance for one tool across multiple model calls. */
 export interface ToolPromptSpec {

@@ -1,4 +1,4 @@
-import type { ChatMessage } from "@code-review-agent/contracts";
+import type { ChatMessage } from "@coding-agent/contracts";
 
 export interface ApiRound {
   readonly index: number;

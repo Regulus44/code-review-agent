@@ -5,7 +5,7 @@ import type {
   ContextBoundaryMetadata,
   ContextBoundaryTrigger,
   ContextPreservedSegment,
-} from "@code-review-agent/contracts";
+} from "@coding-agent/contracts";
 
 export interface CompactBoundaryOptions {
   readonly id?: string;

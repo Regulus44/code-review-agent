@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ModelStreamPart } from "@code-review-agent/contracts";
+import type { ModelStreamPart } from "@coding-agent/contracts";
 import { AnthropicMessagesChatModel } from "./adapter.js";
 import { serializeAnthropicRequest } from "./serialize.js";
 

@@ -1,4 +1,4 @@
-import type { ModelContextCapability, ModelRequest, ModelToolDefinition, ModelUsage } from "@code-review-agent/contracts";
+import type { ModelContextCapability, ModelRequest, ModelToolDefinition, ModelUsage } from "@coding-agent/contracts";
 
 /** Anthropic-compatible request defaults and protocol guardrails. */
 export const ANTHROPIC_MESSAGES_DEFAULT_MAX_OUTPUT_TOKENS = 32_000;

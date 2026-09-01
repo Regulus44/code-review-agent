@@ -1,24 +1,24 @@
 {
-  "name": "@code-review-agent/api",
+  "name": "@coding-agent/api",
   "version": "0.2.0-dev.1",
   "private": true,
   "type": "module",
   "main": "dist/server.js",
   "types": "dist/server.d.ts",
   "scripts": {
-    "predev": "pnpm --filter @code-review-agent/web build:browser",
+    "predev": "pnpm --filter @coding-agent/web build:browser",
     "dev": "node --env-file-if-exists=../../.env --import tsx src/server.ts",
     "start": "node --env-file-if-exists=../../.env dist/server.js",
     "test": "vitest run"
   },
   "dependencies": {
-    "@code-review-agent/contracts": "workspace:*",
-    "@code-review-agent/llm": "workspace:*",
-    "@code-review-agent/mcp-client": "workspace:*",
-    "@code-review-agent/runtime": "workspace:*",
-    "@code-review-agent/subagent": "workspace:*",
-    "@code-review-agent/storage": "workspace:*",
-    "@code-review-agent/tools": "workspace:*",
-    "@code-review-agent/workspace": "workspace:*"
+    "@coding-agent/contracts": "workspace:*",
+    "@coding-agent/llm": "workspace:*",
+    "@coding-agent/mcp-client": "workspace:*",
+    "@coding-agent/runtime": "workspace:*",
+    "@coding-agent/subagent": "workspace:*",
+    "@coding-agent/storage": "workspace:*",
+    "@coding-agent/tools": "workspace:*",
+    "@coding-agent/workspace": "workspace:*"
   }
 }

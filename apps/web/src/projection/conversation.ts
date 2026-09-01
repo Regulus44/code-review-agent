@@ -9,7 +9,7 @@ import type {
   ToolCaller,
   ToolRiskLevel,
   TurnId,
-} from "@code-review-agent/contracts";
+} from "@coding-agent/contracts";
 
 export type ConversationNodeKind =
   | "user"

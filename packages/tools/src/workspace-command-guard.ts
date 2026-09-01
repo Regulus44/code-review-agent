@@ -1,4 +1,4 @@
-import type { ToolResult } from "@code-review-agent/contracts";
+import type { ToolResult } from "@coding-agent/contracts";
 import { access, realpath } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

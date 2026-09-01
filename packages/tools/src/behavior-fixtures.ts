@@ -1,4 +1,4 @@
-import type { ToolApprovalMode, ToolExecutionMode, ToolRiskLevel } from "@code-review-agent/contracts";
+import type { ToolApprovalMode, ToolExecutionMode, ToolRiskLevel } from "@coding-agent/contracts";
 
 /**
  * Provider-independent P0 contract fixtures. They intentionally describe

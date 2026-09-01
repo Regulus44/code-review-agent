@@ -2,13 +2,13 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { AgentHost } from "@code-review-agent/runtime";
-import { InMemoryEventStore } from "@code-review-agent/storage";
+import { AgentHost } from "@coding-agent/runtime";
+import { InMemoryEventStore } from "@coding-agent/storage";
 import { seedCodingFixture } from "./coding.js";
 
 describe("Phase 7 coding browser fixture", () => {
   it("seeds completed read-only and recoverable edit/test permission paths", async () => {
-    const root = await mkdtemp(join(tmpdir(), "code-review-agent-phase7-coding-test-"));
+    const root = await mkdtemp(join(tmpdir(), "coding-agent-phase7-coding-test-"));
     try {
       const store = new InMemoryEventStore();
       const host = new AgentHost({ store });

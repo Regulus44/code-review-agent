@@ -15,7 +15,7 @@
 ## 验证
 
 - `pnpm typecheck` 通过。
-- `pnpm --filter @code-review-agent/llm test -- --run`：5 个测试文件、27 个测试通过。
+- `pnpm --filter @coding-agent/llm test -- --run`：5 个测试文件、27 个测试通过。
 - 3210 服务 `/v1/models` 已验证：内置 DeepSeek 与 Yayi DS 为 `1000000`，Yayi GL/QW 为 `200000`。
 
 ## 回滚

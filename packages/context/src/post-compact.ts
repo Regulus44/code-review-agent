@@ -1,4 +1,4 @@
-import type { ChatMessage } from "@code-review-agent/contracts";
+import type { ChatMessage } from "@coding-agent/contracts";
 import { annotateBoundaryWithPreservedSegment, type CompactBoundaryMessage, type CompactBoundaryOptions, createCompactBoundaryMessage } from "./boundary.js";
 import {
   DEFAULT_POST_COMPACT_ATTACHMENT_CONFIG,

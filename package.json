@@ -1,5 +1,5 @@
 {
-  "name": "code-review-agent",
+  "name": "coding-agent",
   "version": "0.2.0-dev.1",
   "private": true,
   "type": "module",
@@ -9,8 +9,8 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "build:web": "pnpm --filter @code-review-agent/web build && pnpm --filter @code-review-agent/web build:browser",
-    "build:web:browser": "pnpm --filter @code-review-agent/web build:browser",
+    "build:web": "pnpm --filter @coding-agent/web build && pnpm --filter @coding-agent/web build:browser",
+    "build:web:browser": "pnpm --filter @coding-agent/web build:browser",
     "test:phase5:browser": "pnpm typecheck && pnpm build:web && node scripts/phase5-browser-gate.mjs",
     "test:phase7:browser": "pnpm typecheck && pnpm build:web && node scripts/phase7-browser-gate.mjs",
     "test:phase8:worktree": "pnpm typecheck && pnpm build:web && node scripts/phase8-worktree-gate.mjs",
@@ -21,7 +21,7 @@
     "test:phase8:browser:evidence": "pnpm typecheck && pnpm build:web && node scripts/phase8-browser-evidence-gate.mjs",
     "test:phase8:parity": "pnpm typecheck && pnpm build:web && node scripts/phase8-parity-gate.mjs",
     "test:phase8:visual": "node scripts/phase8-visual-gate.mjs",
-    "test:phase8:sidebar": "pnpm typecheck && pnpm build:web && pnpm --filter @code-review-agent/web test -- --run src/shell/sidebar-shell.test.ts && node scripts/phase8-sidebar-gate.mjs",
+    "test:phase8:sidebar": "pnpm typecheck && pnpm build:web && pnpm --filter @coding-agent/web test -- --run src/shell/sidebar-shell.test.ts && node scripts/phase8-sidebar-gate.mjs",
     "test:phase8:lsp": "pnpm typecheck && pnpm build:web && node scripts/phase8-lsp-codemode-gate.mjs",
     "test:phase8:lsp:exit": "pnpm typecheck && pnpm build:web && node scripts/phase8-lsp-codemode-exit-gate.mjs",
     "test:phase8:deployment": "pnpm typecheck && pnpm build && node scripts/phase8-deployment-audit.mjs",
@@ -37,10 +37,10 @@
     "eval:mvp:run-pilot": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/eval-mvp/run-pilot.ps1",
     "typecheck": "tsc -b",
     "test": "pnpm -r --workspace-concurrency=1 --if-present test",
-    "test:contracts": "pnpm --filter @code-review-agent/contracts test",
-    "test:storage": "pnpm --filter @code-review-agent/storage test",
-    "dev:api": "pnpm --filter @code-review-agent/api dev",
-    "dev:web": "pnpm --filter @code-review-agent/web dev"
+    "test:contracts": "pnpm --filter @coding-agent/contracts test",
+    "test:storage": "pnpm --filter @coding-agent/storage test",
+    "dev:api": "pnpm --filter @coding-agent/api dev",
+    "dev:web": "pnpm --filter @coding-agent/web dev"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

@@ -1,4 +1,4 @@
-import type { ChatModel, ModelContextCapability } from "@code-review-agent/contracts";
+import type { ChatModel, ModelContextCapability } from "@coding-agent/contracts";
 
 /** Transient input passed from a provider bootstrap to one protocol adapter. */
 export interface ModelProtocolModelConfig {

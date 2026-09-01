@@ -1,7 +1,7 @@
-import type { ToolResult } from "@code-review-agent/contracts";
+import type { ToolResult } from "@coding-agent/contracts";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { WorkspaceResolver } from "@code-review-agent/workspace";
+import { WorkspaceResolver } from "@coding-agent/workspace";
 
 export interface CodeModePolicy {
   readonly enabled?: boolean;

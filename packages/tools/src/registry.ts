@@ -1,4 +1,4 @@
-import type { ToolDefinition } from "@code-review-agent/contracts";
+import type { ToolDefinition } from "@coding-agent/contracts";
 import { assertValidInput } from "./schema.js";
 
 export class ToolNotFoundError extends Error {

@@ -72,7 +72,7 @@ import {
   type ModelSelection,
   type PrincipalBackend,
   type PrincipalRecord,
-} from "@code-review-agent/contracts";
+} from "@coding-agent/contracts";
 import { DatabaseSync } from "node:sqlite";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
@@ -2204,10 +2204,32 @@ function assertSameCommand(existing: CommandRecord, input: ClaimCommandInput): v
   }
 }
 
-function defaultDatabasePath(): string {
-  const configured = process.env["CODE_REVIEW_AGENT_DB_PATH"];
+/**
+ * Resolves the durable SQLite location without moving an existing database.
+ * The legacy names are read-only compatibility inputs for installations that
+ * predate the Coding Agent rebrand; new configuration must use CODING_AGENT.
+ */
+export function resolveDefaultSqliteDatabasePath(
+  environment: NodeJS.ProcessEnv = process.env,
+  workingDirectory = process.cwd(),
+  pathExists: (candidate: string) => boolean = existsSync,
+): string {
+  const configured = environment["CODING_AGENT_DB_PATH"];
   if (configured !== undefined && configured.length > 0) return configured;
-  return isAbsolute(process.cwd()) ? resolve(process.cwd(), ".data", "code-review-agent.sqlite") : ".data/code-review-agent.sqlite";
+  const legacyConfigured = environment["CODE_REVIEW_AGENT_DB_PATH"];
+  if (legacyConfigured !== undefined && legacyConfigured.length > 0) return legacyConfigured;
+
+  const currentPath = isAbsolute(workingDirectory)
+    ? resolve(workingDirectory, ".data", "coding-agent.sqlite")
+    : ".data/coding-agent.sqlite";
+  const legacyPath = isAbsolute(workingDirectory)
+    ? resolve(workingDirectory, ".data", "code-review-agent.sqlite")
+    : ".data/code-review-agent.sqlite";
+  return pathExists(currentPath) || !pathExists(legacyPath) ? currentPath : legacyPath;
+}
+
+function defaultDatabasePath(): string {
+  return resolveDefaultSqliteDatabasePath();
 }
 
 /** Inspects a closed SQLite database before it is accepted as an operational input. */

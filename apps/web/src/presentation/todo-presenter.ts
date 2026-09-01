@@ -1,4 +1,4 @@
-import type { TodoItem } from "@code-review-agent/contracts";
+import type { TodoItem } from "@coding-agent/contracts";
 
 export interface TodoItemRenderIntent {
   readonly id: string;

@@ -17,7 +17,7 @@ import {
   type UserInteractionAnswer,
   type UserInteractionInput,
   type UserInteractionRequest,
-} from "@code-review-agent/contracts";
+} from "@coding-agent/contracts";
 import { randomUUID } from "node:crypto";
 import { ToolRegistry } from "./registry.js";
 import { assertValidInput } from "./schema.js";

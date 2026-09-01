@@ -8,8 +8,8 @@
 |---|---|---|
 | 单任务运行 | `../../scripts/eval-mvp/run-agent-task.ts` | 准备隔离 workspace，创建 API Session，授予 `workspace-full-access`，发送任务和固定边界说明，等待终态，保存事件、diff、Git 状态和结果 |
 | 批量运行 | `../../scripts/eval-mvp/run-pilot.ps1` | 串行启动单任务入口，保存日志并汇总完成率 |
-| 配置 | `apps/api/.data/provider-profiles.json`、`credentials.secrets.json`、`code-review-agent.sqlite` | 沿用日常 provider/model 配置 |
-| 数据集 | `D:/Develop/coding-agent-test` | 仓库外保存任务、workspace 和运行结果 |
+| 配置 | `apps/api/.data/provider-profiles.json`、`credentials.secrets.json`、`coding-agent.sqlite` | 沿用日常 provider/model 配置 |
+| 数据集 | `D:/Develop/code-review-agent-test` | 仓库外保存任务、workspace 和运行结果 |
 
 ## 当前不再存在的组件
 

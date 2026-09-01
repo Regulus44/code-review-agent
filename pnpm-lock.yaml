@@ -26,49 +26,49 @@ importers:
 
   apps/api:
     dependencies:
-      '@code-review-agent/contracts':
+      '@coding-agent/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@code-review-agent/llm':
+      '@coding-agent/llm':
         specifier: workspace:*
         version: link:../../packages/llm
-      '@code-review-agent/mcp-client':
+      '@coding-agent/mcp-client':
         specifier: workspace:*
         version: link:../../packages/mcp-client
-      '@code-review-agent/runtime':
+      '@coding-agent/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
-      '@code-review-agent/storage':
+      '@coding-agent/storage':
         specifier: workspace:*
         version: link:../../packages/storage
-      '@code-review-agent/subagent':
+      '@coding-agent/subagent':
         specifier: workspace:*
         version: link:../../packages/subagent
-      '@code-review-agent/tools':
+      '@coding-agent/tools':
         specifier: workspace:*
         version: link:../../packages/tools
-      '@code-review-agent/workspace':
+      '@coding-agent/workspace':
         specifier: workspace:*
         version: link:../../packages/workspace
 
   apps/web:
     dependencies:
-      '@code-review-agent/compaction':
+      '@coding-agent/compaction':
         specifier: workspace:*
         version: link:../../packages/compaction
-      '@code-review-agent/contracts':
+      '@coding-agent/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
 
   packages/compaction:
     dependencies:
-      '@code-review-agent/contracts':
+      '@coding-agent/contracts':
         specifier: workspace:*
         version: link:../contracts
 
   packages/context:
     dependencies:
-      '@code-review-agent/contracts':
+      '@coding-agent/contracts':
         specifier: workspace:*
         version: link:../contracts
 
@@ -76,19 +76,19 @@ importers:
 
   packages/llm:
     dependencies:
-      '@code-review-agent/contracts':
+      '@coding-agent/contracts':
         specifier: workspace:*
         version: link:../contracts
 
   packages/mcp-client:
     dependencies:
-      '@code-review-agent/contracts':
+      '@coding-agent/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@code-review-agent/storage':
+      '@coding-agent/storage':
         specifier: workspace:*
         version: link:../storage
-      '@code-review-agent/tools':
+      '@coding-agent/tools':
         specifier: workspace:*
         version: link:../tools
       '@modelcontextprotocol/sdk':
@@ -97,61 +97,61 @@ importers:
 
   packages/runtime:
     dependencies:
-      '@code-review-agent/compaction':
+      '@coding-agent/compaction':
         specifier: workspace:*
         version: link:../compaction
-      '@code-review-agent/context':
+      '@coding-agent/context':
         specifier: workspace:*
         version: link:../context
-      '@code-review-agent/contracts':
+      '@coding-agent/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@code-review-agent/llm':
+      '@coding-agent/llm':
         specifier: workspace:*
         version: link:../llm
-      '@code-review-agent/storage':
+      '@coding-agent/storage':
         specifier: workspace:*
         version: link:../storage
-      '@code-review-agent/subagent':
+      '@coding-agent/subagent':
         specifier: workspace:*
         version: link:../subagent
-      '@code-review-agent/tools':
+      '@coding-agent/tools':
         specifier: workspace:*
         version: link:../tools
-      '@code-review-agent/workspace':
+      '@coding-agent/workspace':
         specifier: workspace:*
         version: link:../workspace
 
   packages/storage:
     dependencies:
-      '@code-review-agent/contracts':
+      '@coding-agent/contracts':
         specifier: workspace:*
         version: link:../contracts
 
   packages/subagent:
     dependencies:
-      '@code-review-agent/contracts':
+      '@coding-agent/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@code-review-agent/storage':
+      '@coding-agent/storage':
         specifier: workspace:*
         version: link:../storage
 
   packages/tools:
     dependencies:
-      '@code-review-agent/contracts':
+      '@coding-agent/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@code-review-agent/subagent':
+      '@coding-agent/subagent':
         specifier: workspace:*
         version: link:../subagent
-      '@code-review-agent/workspace':
+      '@coding-agent/workspace':
         specifier: workspace:*
         version: link:../workspace
 
   packages/workspace:
     dependencies:
-      '@code-review-agent/contracts':
+      '@coding-agent/contracts':
         specifier: workspace:*
         version: link:../contracts
 

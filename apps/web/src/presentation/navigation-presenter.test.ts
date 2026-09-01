@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { brand, type SessionSummary, type WorkspaceSummary } from "@code-review-agent/contracts";
+import { brand, type SessionSummary, type WorkspaceSummary } from "@coding-agent/contracts";
 import { buildNavigationModel, sessionRelativeTime, workspaceKey, type SidebarNavigationState } from "./navigation-presenter.js";
 
 function session(id: string, overrides: Partial<SessionSummary> = {}): SessionSummary {

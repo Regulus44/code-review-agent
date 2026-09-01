@@ -1,7 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
-import type { McpConfigBackend, McpCredentialReference, SessionEventStore } from "@code-review-agent/contracts";
-import { ToolRegistry } from "@code-review-agent/tools";
+import type { McpConfigBackend, McpCredentialReference, SessionEventStore } from "@coding-agent/contracts";
+import { ToolRegistry } from "@coding-agent/tools";
 import { McpConfigStore, type McpServerConfig, type McpServerRecord, type McpServerStatus, type McpToolCatalogEntry } from "./config.js";
 import { createMcpToolRegistrations, replaceMcpTools, unregisterMcpTools } from "./bridge.js";
 import { discover, type McpDiscoverySnapshot } from "./discovery.js";
@@ -56,7 +56,7 @@ export class McpConnectionManager {
   constructor(private readonly options: McpConnectionManagerOptions) {
     this.configs = options.configStore ?? new McpConfigStore([], options.configBackend);
     this.transportFactory = options.transportFactory ?? createMcpTransport;
-    this.clientName = options.clientName ?? "code-review-agent";
+    this.clientName = options.clientName ?? "coding-agent";
     this.clientVersion = options.clientVersion ?? "0.2.0-dev.1";
     for (const config of this.configs.list()) this.ensureState(config);
   }

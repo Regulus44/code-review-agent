@@ -1,6 +1,6 @@
 import { createHmac, createVerify, timingSafeEqual } from "node:crypto";
-import type { PrincipalBackend, SessionOwnership } from "@code-review-agent/contracts";
-import { brand } from "@code-review-agent/contracts";
+import type { PrincipalBackend, SessionOwnership } from "@coding-agent/contracts";
+import { brand } from "@coding-agent/contracts";
 
 export interface ProductizationJwtKey {
   readonly kid: string;

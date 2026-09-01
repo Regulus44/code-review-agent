@@ -1,4 +1,4 @@
-import type { JsonSchema } from "@code-review-agent/contracts";
+import type { JsonSchema } from "@coding-agent/contracts";
 
 export interface SchemaIssue {
   readonly path: string;

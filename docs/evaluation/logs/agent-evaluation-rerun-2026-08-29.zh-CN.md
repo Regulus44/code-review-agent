@@ -74,4 +74,4 @@ Grader 结果文件：
 - `../../scripts/eval-mvp/run-agent-task.ts` 的 Git `execFile` 调用设置 `windowsHide=true`；
 - `../../scripts/eval-mvp/scope-audit-cli.ts` 的 Git 调用设置 `windowsHide=true`。
 
-验证结果：`pnpm typecheck`、`@code-review-agent/tools` 测试和 `scope-audit.test.ts` 均通过。下一次批量评测应使用这些修复后的 Runner。
+验证结果：`pnpm typecheck`、`@coding-agent/tools` 测试和 `scope-audit.test.ts` 均通过。下一次批量评测应使用这些修复后的 Runner。

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TaskProjection } from "@code-review-agent/contracts";
+import type { TaskProjection } from "@coding-agent/contracts";
 import { presentDeliverables } from "./deliverables-presenter.js";
 
 const task = (id: string, artifacts: TaskProjection["artifacts"]): TaskProjection => ({

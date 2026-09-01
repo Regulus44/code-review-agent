@@ -1,8 +1,8 @@
-import type { ToolResult } from "@code-review-agent/contracts";
+import type { ToolResult } from "@coding-agent/contracts";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { WorkspaceResolver } from "@code-review-agent/workspace";
+import { WorkspaceResolver } from "@coding-agent/workspace";
 
 export interface LspServerConfig {
   readonly command: string;

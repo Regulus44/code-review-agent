@@ -31,7 +31,7 @@ const checks = [
 for (const [name, passed] of checks) assert(passed, `${name} evidence is missing`);
 
 assert(codeMode.includes("CODE_MODE_OS_ISOLATION_UNAVAILABLE"), "missing fail-closed error for unavailable host isolation");
-assert(compose.includes("${CODE_REVIEW_WORKSPACE_HOST_ROOT:-.}:/workspaces/project"), "workspace bind is not explicit and bounded in compose");
+assert(compose.includes("${CODING_AGENT_WORKSPACE_HOST_ROOT:-${CODE_REVIEW_WORKSPACE_HOST_ROOT:-.}}:/workspaces/project"), "workspace bind is not explicit, bounded, and backward compatible in compose");
 
 console.log(JSON.stringify({
   phase: "8.3",

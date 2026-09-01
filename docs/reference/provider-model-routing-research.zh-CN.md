@@ -8,7 +8,7 @@
 
 调研对象：
 
-- 当前项目：`D:/Develop/code-review-agent`
+- 当前项目：本仓库根目录
 - DSH：`D:/Develop/deepseek-harness-fork`
 - Claude Code 本地快照：`D:/Develop/claude-code`
 

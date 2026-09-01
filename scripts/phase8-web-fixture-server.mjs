@@ -14,7 +14,7 @@ import { AgentHost } from "../packages/runtime/dist/index.js";
 import { SqliteEventStore } from "../packages/storage/dist/index.js";
 import { brand } from "../packages/contracts/dist/index.js";
 
-const root = await mkdtemp(join(tmpdir(), "code-review-agent-phase8-web-"));
+const root = await mkdtemp(join(tmpdir(), "coding-agent-phase8-web-"));
 const databasePath = join(root, "events.sqlite");
 const webRoot = process.env.PHASE8_WEB_ROOT;
 const productizationEnabled = process.env.PHASE8_PRODUCTIZATION === "1";

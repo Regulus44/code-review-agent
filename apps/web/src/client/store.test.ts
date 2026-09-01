@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { brand, createSessionStatsProjection, reduceSessionStats, type AgentEvent, type SessionProjection } from "@code-review-agent/contracts";
+import { brand, createSessionStatsProjection, reduceSessionStats, type AgentEvent, type SessionProjection } from "@coding-agent/contracts";
 import { SessionStore } from "./store.js";
 
 const sessionId = brand<string, "SessionId">("ses_test");

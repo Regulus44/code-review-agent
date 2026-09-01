@@ -1,4 +1,4 @@
-import type { ChatMessage, ToolResultReplacementRecord } from "@code-review-agent/contracts";
+import type { ChatMessage, ToolResultReplacementRecord } from "@coding-agent/contracts";
 import { containsNonTextContent, type ToolResultStorageOutcome } from "./tool-result-storage.js";
 
 export const DEFAULT_MICROCOMPACT_MESSAGE = "[Old tool result content cleared]";

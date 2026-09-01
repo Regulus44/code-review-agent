@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { brand, type AgentEvent, type EventStore, type SessionProjection, type SessionId } from "@code-review-agent/contracts";
+import { brand, type AgentEvent, type EventStore, type SessionProjection, type SessionId } from "@coding-agent/contracts";
 import { createBuiltinTools } from "./builtin.js";
 import { ToolRegistry } from "./registry.js";
 import { ToolRuntime } from "./runtime.js";

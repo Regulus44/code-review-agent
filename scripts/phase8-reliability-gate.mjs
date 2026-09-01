@@ -6,7 +6,7 @@ import { JobManager } from "../packages/tools/dist/index.js";
 import { InMemoryEventStore } from "../packages/storage/dist/index.js";
 import { createApiServer } from "../apps/api/dist/server.js";
 
-const root = await mkdtemp(join(tmpdir(), "code-review-agent-phase8-reliability-"));
+const root = await mkdtemp(join(tmpdir(), "coding-agent-phase8-reliability-"));
 const assert = (condition, message) => { if (!condition) throw new Error(`Phase 8.4 gate: ${message}`); };
 const waitFor = async (predicate, attempts = 100, delayMs = 15) => {
   for (let attempt = 0; attempt < attempts; attempt += 1) {

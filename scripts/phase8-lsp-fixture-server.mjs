@@ -13,7 +13,7 @@ import { AgentHost } from "../packages/runtime/dist/index.js";
 import { CodeModeSandbox } from "../packages/tools/dist/index.js";
 import { SqliteEventStore } from "../packages/storage/dist/index.js";
 
-const root = await mkdtemp(join(tmpdir(), "code-review-agent-phase8-lsp-web-"));
+const root = await mkdtemp(join(tmpdir(), "coding-agent-phase8-lsp-web-"));
 const databasePath = join(root, "events.sqlite");
 const workspaceRoot = join(root, "workspace");
 await mkdir(workspaceRoot, { recursive: true });

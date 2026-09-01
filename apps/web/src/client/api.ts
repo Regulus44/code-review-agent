@@ -25,7 +25,7 @@ import type {
   ModelSelection,
   ProviderCatalogGroup,
   ProviderProfileRecord,
-} from "@code-review-agent/contracts";
+} from "@coding-agent/contracts";
 
 export interface ToolCatalogEntry {
   readonly name: string;

@@ -5,12 +5,12 @@ import type {
   ToolResult,
   TodoItem,
   TodoStatus,
-} from "@code-review-agent/contracts";
+} from "@coding-agent/contracts";
 import { readFile, writeFile, readdir, stat, mkdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { WorkspaceResolver } from "@code-review-agent/workspace";
+import { WorkspaceResolver } from "@coding-agent/workspace";
 import { FileObservationPolicy } from "./file-observation.js";
 import { JobManager } from "./jobs.js";
 import { readWorkspaceImage } from "./image.js";

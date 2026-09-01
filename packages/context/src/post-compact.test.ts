@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ChatMessage } from "@code-review-agent/contracts";
+import type { ChatMessage } from "@coding-agent/contracts";
 import { createCompactBoundaryMessage, getMessagesAfterCompactBoundary } from "./boundary.js";
 import { selectPostCompactAttachments } from "./attachments.js";
 import { buildPostCompactMessages } from "./post-compact.js";

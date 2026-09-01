@@ -1,4 +1,4 @@
-import type { ModelStreamPart } from "@code-review-agent/contracts";
+import type { ModelStreamPart } from "@coding-agent/contracts";
 
 /** Provider-neutral failure classes used by adapters and Runtime diagnostics. */
 export type ModelFailureCode =

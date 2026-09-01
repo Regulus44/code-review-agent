@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { CredentialBackend, CredentialRecord, McpCredentialReference } from "@code-review-agent/contracts";
+import type { CredentialBackend, CredentialRecord, McpCredentialReference } from "@coding-agent/contracts";
 
 export interface CredentialMaterial {
   readonly env?: Readonly<Record<string, string>>;

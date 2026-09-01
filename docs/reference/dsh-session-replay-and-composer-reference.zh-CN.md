@@ -287,10 +287,10 @@ TrajectoryTable 的 requestOlder 和 onScroll：
 
 本仓库入口：
 
-- [apps/web/src/client/connection.ts](D:/Develop/code-review-agent/apps/web/src/client/connection.ts)
-- [apps/web/src/client/store.ts](D:/Develop/code-review-agent/apps/web/src/client/store.ts)
-- [apps/web/src/client/api.ts](D:/Develop/code-review-agent/apps/web/src/client/api.ts)
-- [packages/contracts/src/index.ts](D:/Develop/code-review-agent/packages/contracts/src/index.ts)
+- [apps/web/src/client/connection.ts](../../apps/web/src/client/connection.ts)
+- [apps/web/src/client/store.ts](../../apps/web/src/client/store.ts)
+- [apps/web/src/client/api.ts](../../apps/web/src/client/api.ts)
+- [packages/contracts/src/index.ts](../../packages/contracts/src/index.ts)
 
 DSH 对照入口：
 
@@ -308,8 +308,8 @@ DSH 对照入口：
 
 本仓库入口：
 
-- [apps/web/index.html](D:/Develop/code-review-agent/apps/web/index.html)
-- [apps/web/src/client/connection.ts](D:/Develop/code-review-agent/apps/web/src/client/connection.ts)
+- [apps/web/index.html](../../apps/web/index.html)
+- [apps/web/src/client/connection.ts](../../apps/web/src/client/connection.ts)
 
 DSH 对照入口：
 
@@ -327,9 +327,9 @@ DSH 对照入口：
 
 本仓库入口：
 
-- [apps/web/index.html](D:/Develop/code-review-agent/apps/web/index.html)
-- [apps/web/src/client/store.ts](D:/Develop/code-review-agent/apps/web/src/client/store.ts)
-- [apps/web/src/client/connection.ts](D:/Develop/code-review-agent/apps/web/src/client/connection.ts)
+- [apps/web/index.html](../../apps/web/index.html)
+- [apps/web/src/client/store.ts](../../apps/web/src/client/store.ts)
+- [apps/web/src/client/connection.ts](../../apps/web/src/client/connection.ts)
 
 DSH 对照入口：
 
@@ -348,9 +348,9 @@ Conversation 顶部自动 loadOlder；Trajectory 保留显式按钮；两个视�
 
 本仓库入口：
 
-- [packages/runtime/src/index.ts](D:/Develop/code-review-agent/packages/runtime/src/index.ts)
-- [packages/storage/src/index.ts](D:/Develop/code-review-agent/packages/storage/src/index.ts)
-- [packages/contracts/src/index.ts](D:/Develop/code-review-agent/packages/contracts/src/index.ts)
+- [packages/runtime/src/index.ts](../../packages/runtime/src/index.ts)
+- [packages/storage/src/index.ts](../../packages/storage/src/index.ts)
+- [packages/contracts/src/index.ts](../../packages/contracts/src/index.ts)
 
 DSH 对照入口：
 
@@ -368,9 +368,9 @@ DSH 对照入口：
 
 本仓库入口：
 
-- [apps/web/tests](D:/Develop/code-review-agent/apps/web/tests)：补充连续 turn、刷新回放、SSE gap repair、Composer draft 和分页锚点测试；
-- [apps/api/src/server.test.ts](D:/Develop/code-review-agent/apps/api/src/server.test.ts)：补充 history page、sequence continuity 和 replay contract 测试；
-- [apps/web/src/client/connection.test.ts](D:/Develop/code-review-agent/apps/web/src/client/connection.test.ts)：补充 generation、重连和事件列表覆盖测试。
+- [apps/web/tests](../../apps/web/tests)：补充连续 turn、刷新回放、SSE gap repair、Composer draft 和分页锚点测试；
+- [apps/api/src/server.test.ts](../../apps/api/src/server.test.ts)：补充 history page、sequence continuity 和 replay contract 测试；
+- [apps/web/src/client/connection.test.ts](../../apps/web/src/client/connection.test.ts)：补充 generation、重连和事件列表覆盖测试。
 
 DSH 对照入口：
 

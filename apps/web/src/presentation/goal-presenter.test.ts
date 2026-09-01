@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { GoalProjection } from "@code-review-agent/contracts";
+import type { GoalProjection } from "@coding-agent/contracts";
 import { presentGoalBar } from "./goal-presenter.js";
 
 const goal = (overrides: Partial<GoalProjection> = {}): GoalProjection => ({

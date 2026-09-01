@@ -13,7 +13,7 @@ import { seedCodingFixture } from "../apps/api/dist/fixtures/coding.js";
 import { AgentHost } from "../packages/runtime/dist/index.js";
 import { SqliteEventStore } from "../packages/storage/dist/index.js";
 
-const root = await mkdtemp(join(tmpdir(), "code-review-agent-phase7-coding-"));
+const root = await mkdtemp(join(tmpdir(), "coding-agent-phase7-coding-"));
 const databasePath = join(root, "events.sqlite");
 const webRoot = process.env.PHASE7_WEB_ROOT;
 

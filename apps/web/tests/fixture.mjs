@@ -14,7 +14,7 @@ const webRoot = join(fileURLToPath(new URL("../..", import.meta.url)), "web");
  * used to create deterministic dropped-frame and long-history fixtures.
  */
 export async function withFixture(run) {
-  const root = await mkdtemp(join(tmpdir(), "code-review-agent-phase5-"));
+  const root = await mkdtemp(join(tmpdir(), "coding-agent-phase5-"));
   const databasePath = join(root, "events.sqlite");
   let store = new SqliteEventStore({ databasePath });
   let host = new AgentHost({ store });

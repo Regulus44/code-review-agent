@@ -5,7 +5,7 @@ import type {
   ContextBudgetSnapshot,
   ModelRequest,
   ModelToolDefinition,
-} from "@code-review-agent/contracts";
+} from "@coding-agent/contracts";
 
 export type TokenCountSource = "provider" | "estimate" | "stale_usage";
 export type TokenCountConfidence = "exact" | "high" | "medium" | "low";

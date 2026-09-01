@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { brand, type AgentEvent, type EventStore, type SessionId, type SessionProjection, type ToolDefinition } from "@code-review-agent/contracts";
+import { brand, type AgentEvent, type EventStore, type SessionId, type SessionProjection, type ToolDefinition } from "@coding-agent/contracts";
 import { createBuiltinTools, TerminalManager } from "./builtin.js";
 import { P0_TOOL_FIXTURES } from "./behavior-fixtures.js";
 import { ToolDisabledError, ToolNotFoundError, ToolRegistry } from "./registry.js";

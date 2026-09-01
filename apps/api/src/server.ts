@@ -4,13 +4,13 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
-import { createInProcessSubagentProvider, sessionId, AgentHost, turnId, type TenantModelRoute } from "@code-review-agent/runtime";
-import { SqliteEventStore } from "@code-review-agent/storage";
-import { brand, type AgentEvent, type ChatModel, type ContextBudgetConfig, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem, type ProductizationCapability, type SessionOwnership, type ModelRouteBackend, type ModelRouteRecord, type CredentialBackend, type McpCredentialReference, type PrincipalBackend, type ModelSelection as ContractModelSelection, type ModelCatalogEntry, type ProviderCatalogGroup, type ProviderProfileRecord } from "@code-review-agent/contracts";
-import { SubagentRuntime } from "@code-review-agent/subagent";
-import { ANTHROPIC_MESSAGES_DEFAULT_MAX_OUTPUT_TOKENS, ANTHROPIC_MESSAGES_MAX_OUTPUT_TOKENS, createBuiltInModelProtocolRegistry, createConfiguredModelBootstrap, createModelFromProviderProfile, ModelCatalog, type ModelConfigView, type ProviderCredentialMaterial } from "@code-review-agent/llm";
-import { McpConnectionManager, type McpServerConfig } from "@code-review-agent/mcp-client";
-import type { CodeModeSandbox, PermissionPreset } from "@code-review-agent/tools";
+import { createInProcessSubagentProvider, sessionId, AgentHost, turnId, type TenantModelRoute } from "@coding-agent/runtime";
+import { resolveDefaultSqliteDatabasePath, SqliteEventStore } from "@coding-agent/storage";
+import { brand, type AgentEvent, type ChatModel, type ContextBudgetConfig, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem, type ProductizationCapability, type SessionOwnership, type ModelRouteBackend, type ModelRouteRecord, type CredentialBackend, type McpCredentialReference, type PrincipalBackend, type ModelSelection as ContractModelSelection, type ModelCatalogEntry, type ProviderCatalogGroup, type ProviderProfileRecord } from "@coding-agent/contracts";
+import { SubagentRuntime } from "@coding-agent/subagent";
+import { ANTHROPIC_MESSAGES_DEFAULT_MAX_OUTPUT_TOKENS, ANTHROPIC_MESSAGES_MAX_OUTPUT_TOKENS, createBuiltInModelProtocolRegistry, createConfiguredModelBootstrap, createModelFromProviderProfile, ModelCatalog, type ModelConfigView, type ProviderCredentialMaterial } from "@coding-agent/llm";
+import { McpConnectionManager, type McpServerConfig } from "@coding-agent/mcp-client";
+import type { CodeModeSandbox, PermissionPreset } from "@coding-agent/tools";
 import { artifactAccessResponse, inspectArtifact, isAvailableArtifact, type ArtifactAccess } from "./artifacts.js";
 import { attachmentCapability, AttachmentInputError, stageAttachment, type AttachmentPolicy } from "./attachments.js";
 import { CredentialLifecycleError, CredentialVault, LocalFileSecretProvider, type CredentialInput, type CredentialMaterial, type SecretProvider } from "./credentials.js";
@@ -156,7 +156,10 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
 function defaultDatabasePath(): string {
   // Keep the local database stable when the API is started from the repository
   // root, apps/api, or a process manager with a different working directory.
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.data/code-review-agent.sqlite");
+  return resolveDefaultSqliteDatabasePath(
+    process.env,
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
+  );
 }
 
 function defaultCredentialSecretsPath(): string {
@@ -326,7 +329,7 @@ function requireTenantIdentity(identity: SessionOwnership | undefined): SessionO
   return identity;
 }
 
-function publicCredential(record: import("@code-review-agent/contracts").CredentialRecord): Record<string, unknown> {
+function publicCredential(record: import("@coding-agent/contracts").CredentialRecord): Record<string, unknown> {
   return {
     id: record.id,
     tenantId: record.tenantId,
@@ -430,7 +433,7 @@ function isCredentialReferenced(tenantId: string, credentialId: string, modelRun
   return mcp.configs.list(undefined, tenantId, true).some((config) => config.credentialRef?.id === credentialId);
 }
 
-function rebindModelCredential(tenantId: string, credentialId: string, record: import("@code-review-agent/contracts").CredentialRecord, host: AgentHost, modelRuntime: ModelRuntimeState, credentials: CredentialVault): void {
+function rebindModelCredential(tenantId: string, credentialId: string, record: import("@coding-agent/contracts").CredentialRecord, host: AgentHost, modelRuntime: ModelRuntimeState, credentials: CredentialVault): void {
   const reference = credentials.reference(record);
   const material = credentials.resolve(reference, tenantId);
   for (const route of [...modelRuntime.routes.values()]) {
@@ -487,7 +490,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     }
     if (identity !== undefined && (url.pathname === "/v1/metrics" || url.pathname === "/v1/diagnostics")) throw new HttpError(403, "Global diagnostics are not exposed across tenant scope");
     if (request.method === "GET" && url.pathname === "/health") {
-      sendJson(response, 200, { ok: true, service: "code-review-agent", runtime: "typescript", persistence, ...(modelRuntime.info === undefined ? {} : { model: modelRuntime.info }) });
+      sendJson(response, 200, { ok: true, service: "coding-agent", runtime: "typescript", persistence, ...(modelRuntime.info === undefined ? {} : { model: modelRuntime.info }) });
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/diagnostics") {
@@ -1406,7 +1409,7 @@ function publicModelRoute(route: ModelRouteRecord): Record<string, unknown> {
   };
 }
 
-function publicPrincipal(principal: import("@code-review-agent/contracts").PrincipalRecord): Record<string, unknown> {
+function publicPrincipal(principal: import("@coding-agent/contracts").PrincipalRecord): Record<string, unknown> {
   return { id: principal.id, subject: principal.subject, tenantId: principal.tenantId, ...(principal.displayName === undefined ? {} : { displayName: principal.displayName }), roles: principal.roles, status: principal.status, createdAt: principal.createdAt, updatedAt: principal.updatedAt };
 }
 
@@ -1597,6 +1600,6 @@ class HttpError extends Error {
 if (process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number.parseInt(process.env["PORT"] ?? "3210", 10);
   createConfiguredApiServer().listen(port, "127.0.0.1", () => {
-    console.log(`Code Review Agent API listening on http://127.0.0.1:${port}`);
+    console.log(`Coding Agent API listening on http://127.0.0.1:${port}`);
   });
 }

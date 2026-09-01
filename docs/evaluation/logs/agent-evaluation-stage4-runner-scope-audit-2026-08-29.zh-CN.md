@@ -57,12 +57,12 @@
 ```text
 pnpm exec vitest run ../../scripts/eval-mvp/scope-audit.test.ts
 pwsh -NoProfile -ExecutionPolicy Bypass -File ../../scripts/eval-mvp/scope-audit-fixture.ps1
-pnpm --filter @code-review-agent/runtime test
-pnpm --filter @code-review-agent/tools test
+pnpm --filter @coding-agent/runtime test
+pnpm --filter @coding-agent/tools test
 pnpm typecheck
 pnpm test
-pwsh -NoProfile -ExecutionPolicy Bypass -File ../../scripts/eval-mvp/verify-grader.ps1 -Mode gold -TaskId django__django-16046 -Python D:/Develop/coding-agent-test/datasets/swebench-lite/pilot-01/runtime/venvs/django__django-16046/Scripts/python.exe
-pwsh -NoProfile -ExecutionPolicy Bypass -File ../../scripts/eval-mvp/verify-grader.ps1 -Mode empty -TaskId django__django-16046 -Python D:/Develop/coding-agent-test/datasets/swebench-lite/pilot-01/runtime/venvs/django__django-16046/Scripts/python.exe
+pwsh -NoProfile -ExecutionPolicy Bypass -File ../../scripts/eval-mvp/verify-grader.ps1 -Mode gold -TaskId django__django-16046 -Python D:/Develop/code-review-agent-test/datasets/swebench-lite/pilot-01/runtime/venvs/django__django-16046/Scripts/python.exe
+pwsh -NoProfile -ExecutionPolicy Bypass -File ../../scripts/eval-mvp/verify-grader.ps1 -Mode empty -TaskId django__django-16046 -Python D:/Develop/code-review-agent-test/datasets/swebench-lite/pilot-01/runtime/venvs/django__django-16046/Scripts/python.exe
 ```
 
 脚本级 scope fixture、Runtime/Tools 定向测试、全 workspace 测试和类型检查均通过；Django gold self-test 通过，empty self-test 按预期失败，并继续确认 `django-native` / `tests/runtests.py` adapter。

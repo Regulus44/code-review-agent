@@ -11,7 +11,7 @@ import {
   assessSqliteUpgrade,
 } from "../packages/storage/dist/index.js";
 
-const root = mkdtempSync(join(tmpdir(), "code-review-agent-phase8-operations-"));
+const root = mkdtempSync(join(tmpdir(), "coding-agent-phase8-operations-"));
 const assert = (condition, message) => { if (!condition) throw new Error(`Phase 8.5 operations gate: ${message}`); };
 const databasePath = join(root, "active.sqlite");
 const backupPath = join(root, "backup.sqlite");

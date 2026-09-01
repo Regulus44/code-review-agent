@@ -1,8 +1,8 @@
 import { access, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import type { ToolResult } from "@code-review-agent/contracts";
-import { WorkspaceResolver } from "@code-review-agent/workspace";
+import type { ToolResult } from "@coding-agent/contracts";
+import { WorkspaceResolver } from "@coding-agent/workspace";
 
 export interface PatchLine {
   readonly kind: "context" | "add" | "remove";

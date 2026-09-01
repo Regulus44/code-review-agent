@@ -14,7 +14,7 @@ import { AgentHost } from "../packages/runtime/dist/index.js";
 import { SqliteEventStore } from "../packages/storage/dist/index.js";
 
 const mode = process.env.PHASE8_JOB_RECOVERY_MODE ?? "seed";
-const root = process.env.PHASE8_JOB_RECOVERY_ROOT ?? await mkdtemp(join(tmpdir(), "code-review-agent-phase8-job-recovery-"));
+const root = process.env.PHASE8_JOB_RECOVERY_ROOT ?? await mkdtemp(join(tmpdir(), "coding-agent-phase8-job-recovery-"));
 const databasePath = process.env.PHASE8_JOB_RECOVERY_DB ?? join(root, "events.sqlite");
 const workspaceRoot = process.env.PHASE8_JOB_RECOVERY_WORKSPACE ?? join(root, "workspace");
 await mkdir(workspaceRoot, { recursive: true });

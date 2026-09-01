@@ -1,4 +1,4 @@
-import type { SessionEventStore, SessionId } from "@code-review-agent/contracts";
+import type { SessionEventStore, SessionId } from "@coding-agent/contracts";
 
 export interface TrajectoryFixtureSeed {
   readonly sessionId: SessionId;

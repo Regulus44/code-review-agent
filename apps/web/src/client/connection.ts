@@ -1,5 +1,5 @@
-import { AGENT_EVENT_TYPES } from "@code-review-agent/contracts";
-import type { AgentEvent, SessionId, TurnId } from "@code-review-agent/contracts";
+import { AGENT_EVENT_TYPES } from "@coding-agent/contracts";
+import type { AgentEvent, SessionId, TurnId } from "@coding-agent/contracts";
 import { WebApiClient } from "./api.js";
 import { SessionStore } from "./store.js";
 

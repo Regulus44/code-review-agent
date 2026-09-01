@@ -3,7 +3,7 @@ import { access, mkdir, realpath } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
-import type { WorktreeProjection, WorktreeStatus } from "@code-review-agent/contracts";
+import type { WorktreeProjection, WorktreeStatus } from "@coding-agent/contracts";
 
 const execFileAsync = promisify(execFile);
 

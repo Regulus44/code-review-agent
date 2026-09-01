@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { brand, type TaskId } from "@code-review-agent/contracts";
-import { InMemoryEventStore, SqliteEventStore } from "@code-review-agent/storage";
+import { brand, type TaskId } from "@coding-agent/contracts";
+import { InMemoryEventStore, SqliteEventStore } from "@coding-agent/storage";
 import { DescriptorError, foldSubagentDescriptor, snapshotDescriptor } from "./descriptor.js";
 import { SubagentRuntime, type ProviderRun, type SubagentProvider } from "./runtime.js";
 

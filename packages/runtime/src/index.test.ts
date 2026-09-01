@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { brand, type AttachmentReceipt, type ChatModel, type InteractionId, type ModelRequest, type ModelStreamPart, type PermissionId, type ToolDefinition } from "@code-review-agent/contracts";
-import { InMemoryEventStore, SqliteEventStore } from "@code-review-agent/storage";
-import { ContextRecoveryGuard } from "@code-review-agent/context";
-import { createBuiltinTools, DefaultPermissionPolicy, ToolRegistry, ToolRuntime } from "@code-review-agent/tools";
-import { GitWorktreeManager } from "@code-review-agent/workspace";
+import { brand, type AttachmentReceipt, type ChatModel, type InteractionId, type ModelRequest, type ModelStreamPart, type PermissionId, type ToolDefinition } from "@coding-agent/contracts";
+import { InMemoryEventStore, SqliteEventStore } from "@coding-agent/storage";
+import { ContextRecoveryGuard } from "@coding-agent/context";
+import { createBuiltinTools, DefaultPermissionPolicy, ToolRegistry, ToolRuntime } from "@coding-agent/tools";
+import { GitWorktreeManager } from "@coding-agent/workspace";
 import { AgentHost } from "./index.js";
 
 const execFileAsync = promisify(execFile);
@@ -496,7 +496,7 @@ describe("AgentHost", () => {
         yield { type: "done" };
       },
     };
-    const explodingBudget = {} as Partial<import("@code-review-agent/compaction").ContextBudget>;
+    const explodingBudget = {} as Partial<import("@coding-agent/compaction").ContextBudget>;
     Object.defineProperty(explodingBudget, "maxTokens", { enumerable: true, get: () => { throw new Error("budget fixture unavailable"); } });
     const host = new AgentHost({ store, model, contextBudget: explodingBudget, contextPolicy: { contextWindowTokens: 30_000 } });
     const session = await host.createSession("D:/compaction-failure-fixture");
@@ -1498,7 +1498,7 @@ describe("AgentHost", () => {
   });
 
   it("replays tenant workspace metadata after SQLite reopen", async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), "code-review-agent-tenant-workspace-"));
+    const directory = await mkdtemp(path.join(tmpdir(), "coding-agent-tenant-workspace-"));
     const databasePath = path.join(directory, "events.sqlite");
     const ownership = { principalId: brand<string, "PrincipalId">("user-a"), tenantId: brand<string, "TenantId">("tenant-a") };
     const firstStore = new SqliteEventStore({ databasePath });

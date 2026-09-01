@@ -1,7 +1,7 @@
 import path from "node:path";
 import { stat } from "node:fs/promises";
-import type { ArtifactRef, SessionProjection, TaskId } from "@code-review-agent/contracts";
-import { WorkspaceResolver, WorkspaceViolation } from "@code-review-agent/workspace";
+import type { ArtifactRef, SessionProjection, TaskId } from "@coding-agent/contracts";
+import { WorkspaceResolver, WorkspaceViolation } from "@coding-agent/workspace";
 
 export const MAX_ARTIFACT_CONTENT_BYTES = 8 * 1024 * 1024;
 

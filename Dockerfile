@@ -9,14 +9,13 @@ COPY apps ./apps
 
 RUN pnpm install --frozen-lockfile
 RUN pnpm build
-RUN pnpm deploy --filter @code-review-agent/api --prod /out
+RUN pnpm deploy --filter @coding-agent/api --prod /out
 
 FROM node:22-bookworm-slim AS runtime
 
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3210
-ENV CODE_REVIEW_AGENT_DB_PATH=/app/.data/code-review-agent.sqlite
 
 COPY --from=build /out/ ./
 

@@ -1,4 +1,4 @@
-import type { ChatMessage } from "@code-review-agent/contracts";
+import type { ChatMessage } from "@coding-agent/contracts";
 
 export interface SummaryInputOptions {
   /** Removes attachments that the post-compact builder will re-inject. */

@@ -1,4 +1,4 @@
-import type { InteractionProjection, InteractionStatus } from "@code-review-agent/contracts";
+import type { InteractionProjection, InteractionStatus } from "@coding-agent/contracts";
 
 export interface QuestionRenderIntent {
   readonly id: string;

@@ -1,5 +1,5 @@
 {
-  "name": "@code-review-agent/mcp-client",
+  "name": "@coding-agent/mcp-client",
   "version": "0.2.0-dev.1",
   "private": true,
   "type": "module",
@@ -12,9 +12,9 @@
     }
   },
   "dependencies": {
-    "@code-review-agent/contracts": "workspace:*",
-    "@code-review-agent/storage": "workspace:*",
-    "@code-review-agent/tools": "workspace:*",
+    "@coding-agent/contracts": "workspace:*",
+    "@coding-agent/storage": "workspace:*",
+    "@coding-agent/tools": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.30.0"
   },
   "scripts": {

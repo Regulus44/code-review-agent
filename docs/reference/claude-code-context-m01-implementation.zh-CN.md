@@ -95,7 +95,7 @@ M01 仍通过现有 `compactMessages()` 执行压缩，动态使用 `autoCompact
 | 现有能力 | M01 处理方式 |
 |---|---|
 | `ContextBudget.maxTokens` | 保留；仅在没有 model capability 时作为 context window fallback |
-| `recentMessageTokens`、`maxToolResultChars`、`maxSummaryChars` | 继续由 `@code-review-agent/compaction` 使用，M01 不重写其算法 |
+| `recentMessageTokens`、`maxToolResultChars`、`maxSummaryChars` | 继续由 `@coding-agent/compaction` 使用，M01 不重写其算法 |
 | 现有 `estimateMessagesTokens()` | 仅作为 preflight 的临时 usage 来源；精确/估算双路径属于 M02 |
 | `compactionEnabled: false` | 不执行 compact；仍可记录预算和 warning 状态 |
 | 自定义 `ChatModel` | `contextCapability` 可省略，自动走 estimate fallback |
@@ -113,9 +113,9 @@ M01 仍通过现有 `compactMessages()` 执行压缩，动态使用 `autoCompact
 ```text
 pnpm typecheck                                  ✓
 pnpm test                                       ✓ all workspace tests
-pnpm --filter @code-review-agent/context test    ✓ 4 tests
-pnpm --filter @code-review-agent/compaction test ✓ 3 tests
-pnpm --filter @code-review-agent/runtime test    ✓ 35 tests
+pnpm --filter @coding-agent/context test    ✓ 4 tests
+pnpm --filter @coding-agent/compaction test ✓ 3 tests
+pnpm --filter @coding-agent/runtime test    ✓ 35 tests
 git diff --check                                ✓
 ```
 

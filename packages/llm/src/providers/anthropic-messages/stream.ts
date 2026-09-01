@@ -1,4 +1,4 @@
-import type { ModelStreamPart, ModelUsage } from "@code-review-agent/contracts";
+import type { ModelStreamPart, ModelUsage } from "@coding-agent/contracts";
 import { AnthropicMessagesError } from "./errors.js";
 import type { AnthropicOpenBlock, AnthropicSseEvent } from "./types.js";
 

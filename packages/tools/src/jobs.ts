@@ -1,4 +1,4 @@
-import { brand, type AgentEvent, type EventStore, type ToolResult } from "@code-review-agent/contracts";
+import { brand, type AgentEvent, type EventStore, type ToolResult } from "@coding-agent/contracts";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, open, readFile, stat, writeFile } from "node:fs/promises";

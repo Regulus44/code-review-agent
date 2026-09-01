@@ -1,4 +1,4 @@
-import type { PlanProjection } from "@code-review-agent/contracts";
+import type { PlanProjection } from "@coding-agent/contracts";
 import { presentBoundedValue, type BoundedDisplayValue } from "./safe-value.js";
 
 export interface PlanRenderIntent {

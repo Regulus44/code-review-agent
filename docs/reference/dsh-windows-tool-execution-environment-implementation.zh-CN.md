@@ -54,7 +54,7 @@
 `resolvePwshPath()` 在 Windows 上按以下顺序解析：
 
 1. 调用方传入的显式路径；
-2. `CODE_REVIEW_AGENT_PWSH`；
+2. `CODING_AGENT_PWSH`；
 3. `ProgramFiles\\PowerShell\\7\\pwsh.exe`；
 4. `PATH`/`Path` 中各目录下的 `pwsh.exe`；
 5. `SystemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`；
@@ -159,8 +159,8 @@ DSH 的关键边界是“composition/provider 先决定平台工具 roster，Age
 已执行并通过：
 
 ```text
-pnpm --filter @code-review-agent/tools test   ✓ 9 个测试文件 / 68 tests
-pnpm --filter @code-review-agent/runtime test ✓ 1 个测试文件 / 56 tests
+pnpm --filter @coding-agent/tools test   ✓ 9 个测试文件 / 68 tests
+pnpm --filter @coding-agent/runtime test ✓ 1 个测试文件 / 56 tests
 pnpm typecheck                                ✓
 pnpm test                                      ✓ 全 workspace 通过
 git diff --check                               ✓
@@ -210,7 +210,7 @@ pwsh → PowerShell 原生命令
 如 PowerShell 7 不在默认目录或 PATH，可设置：
 
 ```text
-CODE_REVIEW_AGENT_PWSH=C:\\Tools\\pwsh.exe
+CODING_AGENT_PWSH=C:\\Tools\\pwsh.exe
 ```
 
 Linux/macOS 环境默认使用：

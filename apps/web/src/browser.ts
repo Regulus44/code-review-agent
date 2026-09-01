@@ -3,7 +3,7 @@ import { SessionConnectionController } from "./client/connection.js";
 import { SessionStore } from "./client/store.js";
 import { ModelDirectory } from "./client/model-directory.js";
 import { ModelPopupController } from "./client/model-popup.js";
-import type { SessionId } from "@code-review-agent/contracts";
+import type { SessionId } from "@coding-agent/contracts";
 import { projectConversation } from "./projection/conversation.js";
 import { buildToolCallTree } from "./projection/tool-call-tree.js";
 import { projectTrajectory } from "./projection/trajectory.js";

@@ -71,7 +71,7 @@ async function readSseReplay(baseUrl, pathname, afterSequence, expectedEvent) {
 }
 
 async function runLocalRecoveryScenario() {
-  const root = await mkdtemp(join(tmpdir(), "code-review-agent-phase8.5-m5-"));
+  const root = await mkdtemp(join(tmpdir(), "coding-agent-phase8.5-m5-"));
   const databasePath = join(root, "events.sqlite");
   const credentialSecretsPath = join(root, "credentials.secrets.json");
   const providerProfilesPath = join(root, "provider-profiles.json");

@@ -1,4 +1,4 @@
-import type { ChatMessage, ModelToolCall } from "@code-review-agent/contracts";
+import type { ChatMessage, ModelToolCall } from "@coding-agent/contracts";
 
 export type ToolPairingMode = "repair" | "strict";
 

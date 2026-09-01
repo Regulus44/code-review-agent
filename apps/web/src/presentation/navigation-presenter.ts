@@ -1,4 +1,4 @@
-import type { SessionId, SessionSummary, WorkspaceSummary } from "@code-review-agent/contracts";
+import type { SessionId, SessionSummary, WorkspaceSummary } from "@coding-agent/contracts";
 import type { SidebarNavigationState as SidebarNavigationStateContract } from "../sidebar/sidebar-navigation-state.js";
 
 export interface NavigationSession extends SessionSummary {

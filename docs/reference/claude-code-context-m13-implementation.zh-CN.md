@@ -99,9 +99,9 @@ compact projection 同步保留前后 token 和节省量，避免 boundary event
 
 ```text
 pnpm typecheck
-pnpm --filter @code-review-agent/web test -- --run
-pnpm --filter @code-review-agent/storage test -- --run
-pnpm --filter @code-review-agent/runtime test -- --run
+pnpm --filter @coding-agent/web test -- --run
+pnpm --filter @coding-agent/storage test -- --run
+pnpm --filter @coding-agent/runtime test -- --run
 pnpm test
 git diff --check
 ```

@@ -50,8 +50,10 @@ export function resolvePwshPath(
 ): string {
   if (configured !== undefined && configured.length > 0) return configured;
   if (platform === "win32") {
-    const environmentPath = env.CODE_REVIEW_AGENT_PWSH;
+    const environmentPath = env.CODING_AGENT_PWSH;
     if (environmentPath !== undefined && environmentPath.length > 0) return environmentPath;
+    const legacyEnvironmentPath = env.CODE_REVIEW_AGENT_PWSH;
+    if (legacyEnvironmentPath !== undefined && legacyEnvironmentPath.length > 0) return legacyEnvironmentPath;
   }
   for (const candidate of candidatePwshPaths(env, platform)) {
     if (candidateExists(candidate)) return candidate;

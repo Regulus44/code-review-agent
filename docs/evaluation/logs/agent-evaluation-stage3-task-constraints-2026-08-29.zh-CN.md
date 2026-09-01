@@ -47,11 +47,11 @@
 ## 验收记录
 
 ```text
-pnpm --filter @code-review-agent/runtime test
-pnpm --filter @code-review-agent/tools test
+pnpm --filter @coding-agent/runtime test
+pnpm --filter @coding-agent/tools test
 pnpm typecheck
-pwsh -NoProfile -ExecutionPolicy Bypass -File ../../scripts/eval-mvp/verify-grader.ps1 -Mode gold -TaskId django__django-16046 -Python D:/Develop/coding-agent-test/datasets/swebench-lite/pilot-01/runtime/venvs/django__django-16046/Scripts/python.exe
-pwsh -NoProfile -ExecutionPolicy Bypass -File ../../scripts/eval-mvp/verify-grader.ps1 -Mode empty -TaskId django__django-16046 -Python D:/Develop/coding-agent-test/datasets/swebench-lite/pilot-01/runtime/venvs/django__django-16046/Scripts/python.exe
+pwsh -NoProfile -ExecutionPolicy Bypass -File ../../scripts/eval-mvp/verify-grader.ps1 -Mode gold -TaskId django__django-16046 -Python D:/Develop/code-review-agent-test/datasets/swebench-lite/pilot-01/runtime/venvs/django__django-16046/Scripts/python.exe
+pwsh -NoProfile -ExecutionPolicy Bypass -File ../../scripts/eval-mvp/verify-grader.ps1 -Mode empty -TaskId django__django-16046 -Python D:/Develop/code-review-agent-test/datasets/swebench-lite/pilot-01/runtime/venvs/django__django-16046/Scripts/python.exe
 ```
 
 结果：Runtime 76 项、Tools 75 项、类型检查全部通过；Django gold self-test 通过，empty self-test 按预期判定失败；gold 日志确认使用 `django-native` 与 `tests/runtests.py`。

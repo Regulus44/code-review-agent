@@ -1,16 +1,16 @@
 {
-  "name": "@code-review-agent/web",
+  "name": "@coding-agent/web",
   "version": "0.2.0-dev.1",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "echo Web shell is served by @code-review-agent/api",
+    "dev": "echo Web shell is served by @coding-agent/api",
     "build": "tsc -b",
     "build:browser": "node ../../scripts/build-web.mjs",
     "test": "vitest run"
   },
   "dependencies": {
-    "@code-review-agent/contracts": "workspace:*",
-    "@code-review-agent/compaction": "workspace:*"
+    "@coding-agent/contracts": "workspace:*",
+    "@coding-agent/compaction": "workspace:*"
   }
 }

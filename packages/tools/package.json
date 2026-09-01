@@ -1,5 +1,5 @@
 {
-  "name": "@code-review-agent/tools",
+  "name": "@coding-agent/tools",
   "version": "0.2.0-dev.1",
   "private": true,
   "type": "module",
@@ -12,9 +12,9 @@
     }
   },
   "dependencies": {
-    "@code-review-agent/contracts": "workspace:*",
-    "@code-review-agent/subagent": "workspace:*",
-    "@code-review-agent/workspace": "workspace:*"
+    "@coding-agent/contracts": "workspace:*",
+    "@coding-agent/subagent": "workspace:*",
+    "@coding-agent/workspace": "workspace:*"
   },
   "scripts": {
     "test": "vitest run"

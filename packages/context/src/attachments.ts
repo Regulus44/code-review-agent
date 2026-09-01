@@ -1,6 +1,6 @@
 import type { ContextAttachment, ContextAttachmentKind } from "./assembler.js";
 import { estimateContextTokens } from "./estimator.js";
-import type { ContextAttachmentProjection } from "@code-review-agent/contracts";
+import type { ContextAttachmentProjection } from "@coding-agent/contracts";
 
 export interface PostCompactAttachmentConfig {
   readonly maxRecentFiles: number;

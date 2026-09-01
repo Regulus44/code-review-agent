@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SessionProjection } from "@code-review-agent/contracts";
+import type { SessionProjection } from "@coding-agent/contracts";
 import { presentContextDiagnostics, presentContextMeter } from "./context-presenter.js";
 
 const session = (overrides: Partial<SessionProjection> = {}): SessionProjection => ({

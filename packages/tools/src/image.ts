@@ -1,7 +1,7 @@
-import type { ToolResult } from "@code-review-agent/contracts";
+import type { ToolResult } from "@coding-agent/contracts";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { WorkspaceResolver } from "@code-review-agent/workspace";
+import { WorkspaceResolver } from "@coding-agent/workspace";
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MIME_BY_EXTENSION: Readonly<Record<string, string>> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp" };

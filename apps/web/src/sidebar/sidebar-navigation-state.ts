@@ -21,7 +21,7 @@ export interface SidebarNavigationState {
   readonly expandedSessionGroups: Readonly<Record<string, boolean>>;
 }
 
-export const SIDEBAR_NAVIGATION_STORAGE_KEY = "code-review-agent.sidebar.navigation.v1";
+export const SIDEBAR_NAVIGATION_STORAGE_KEY = "coding-agent.sidebar.navigation.v1";
 
 export const DEFAULT_SIDEBAR_NAVIGATION_STATE: SidebarNavigationState = {
   viewMode: "tree",

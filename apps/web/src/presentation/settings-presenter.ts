@@ -1,6 +1,6 @@
-import type { PermissionPreset, SessionProjection } from "@code-review-agent/contracts";
+import type { PermissionPreset, SessionProjection } from "@coding-agent/contracts";
 import type { AttachmentCapability, CodeModeCapability, ContextCapability, LspCapability, ModelCatalogResponse, McpServerView, PluginsCapability, ProductizationCapabilityResponse, ToolCatalogEntry } from "../client/api.js";
-import type { ProviderCatalogGroup } from "@code-review-agent/contracts";
+import type { ProviderCatalogGroup } from "@coding-agent/contracts";
 
 export interface SettingsCapability {
   readonly key: string;

@@ -4,7 +4,7 @@ import type {
   ModelContextCapability,
   ProviderCatalogGroup,
   ProviderProfileRecord,
-} from "@code-review-agent/contracts";
+} from "@coding-agent/contracts";
 import { createBuiltInModelProtocolRegistry, ModelConfigurationError, type ModelProtocolRegistry } from "./index.js";
 import { ANTHROPIC_MESSAGES_DEFAULT_MAX_OUTPUT_TOKENS, ANTHROPIC_MESSAGES_MAX_OUTPUT_TOKENS } from "./providers/anthropic-messages/types.js";
 

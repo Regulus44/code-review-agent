@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { brand } from "@code-review-agent/contracts";
-import type { TaskProjection } from "@code-review-agent/contracts";
+import { brand } from "@coding-agent/contracts";
+import type { TaskProjection } from "@coding-agent/contracts";
 import { presentTask } from "./task-presenter.js";
 
 const taskId = brand<string, "TaskId">("task_presenter");

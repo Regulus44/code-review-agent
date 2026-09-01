@@ -50,9 +50,9 @@
 ## 验证记录
 
 ```text
-pnpm --filter @code-review-agent/tools test
-pnpm --filter @code-review-agent/runtime test
-pnpm --filter @code-review-agent/api test -- src/fixtures/coding.test.ts
+pnpm --filter @coding-agent/tools test
+pnpm --filter @coding-agent/runtime test
+pnpm --filter @coding-agent/api test -- src/fixtures/coding.test.ts
 pnpm typecheck
 pnpm test
 git diff --check

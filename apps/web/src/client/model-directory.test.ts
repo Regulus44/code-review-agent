@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ModelSelection } from "@code-review-agent/contracts";
+import type { ModelSelection } from "@coding-agent/contracts";
 import type { SessionModelsResponse } from "./api.js";
 import { ModelDirectory } from "./model-directory.js";
 

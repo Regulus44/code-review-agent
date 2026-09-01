@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { WorktreeProjection } from "@code-review-agent/contracts";
+import type { WorktreeProjection } from "@coding-agent/contracts";
 import { presentWorktrees } from "./worktree-presenter.js";
 
 const worktree = (status: WorktreeProjection["status"]): WorktreeProjection => ({ id: `wt_${status}`, repoRoot: "D:/repo", path: `D:/repo-${status}`, status, branch: "feature/test", createdAt: "2026-08-24T00:00:00.000Z", updatedAt: "2026-08-24T00:00:00.000Z", lastSequence: 2 });

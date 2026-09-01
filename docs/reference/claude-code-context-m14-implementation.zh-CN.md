@@ -78,8 +78,8 @@ collapse metadata missing → status = unavailable
 
 ```text
 pnpm typecheck
-pnpm --filter @code-review-agent/web test -- --run src/presentation/settings-presenter.test.ts
-pnpm --filter @code-review-agent/runtime test -- --run src/index.test.ts
+pnpm --filter @coding-agent/web test -- --run src/presentation/settings-presenter.test.ts
+pnpm --filter @coding-agent/runtime test -- --run src/index.test.ts
 pnpm test
 pnpm build:web
 git diff --check

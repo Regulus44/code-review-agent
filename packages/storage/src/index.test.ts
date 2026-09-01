@@ -3,10 +3,20 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { InMemoryEventStore, replayProjection, restoreSqliteDatabase, rollbackSqliteRestore, SqliteEventStore } from "./index.js";
-import { brand } from "@code-review-agent/contracts";
+import { InMemoryEventStore, replayProjection, resolveDefaultSqliteDatabasePath, restoreSqliteDatabase, rollbackSqliteRestore, SqliteEventStore } from "./index.js";
+import { brand } from "@coding-agent/contracts";
 
 describe("InMemoryEventStore", () => {
+  it("uses Coding Agent database configuration first and retains an existing legacy default database", () => {
+    const root = join(tmpdir(), "coding-agent-default-db");
+    const currentPath = join(root, ".data", "coding-agent.sqlite");
+    const legacyPath = join(root, ".data", "code-review-agent.sqlite");
+    expect(resolveDefaultSqliteDatabasePath({ CODING_AGENT_DB_PATH: "D:/configured/new.sqlite", CODE_REVIEW_AGENT_DB_PATH: "D:/configured/legacy.sqlite" }, root)).toBe("D:/configured/new.sqlite");
+    expect(resolveDefaultSqliteDatabasePath({ CODE_REVIEW_AGENT_DB_PATH: "D:/configured/legacy.sqlite" }, root)).toBe("D:/configured/legacy.sqlite");
+    expect(resolveDefaultSqliteDatabasePath({}, root, (candidate) => candidate === legacyPath)).toBe(legacyPath);
+    expect(resolveDefaultSqliteDatabasePath({}, root, () => false)).toBe(currentPath);
+  });
+
   it("assigns monotonic session-local sequences and projects messages", async () => {
     const store = new InMemoryEventStore();
     const sessionId = await store.createSession("D:/workspace");
@@ -47,7 +57,7 @@ describe("InMemoryEventStore", () => {
   });
 
   it("rebuilds whole-log stats after SQLite reopen", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-stats-"));
+    const directory = mkdtempSync(join(tmpdir(), "coding-agent-stats-"));
     const databasePath = join(directory, "agent.sqlite");
     try {
       const first = new SqliteEventStore({ databasePath });
@@ -99,7 +109,7 @@ describe("InMemoryEventStore", () => {
   });
 
   it("persists M12 Project Memory projection across SQLite reopen", async () => {
-    const root = mkdtempSync(join(tmpdir(), "code-review-agent-m12-"));
+    const root = mkdtempSync(join(tmpdir(), "coding-agent-m12-"));
     const databasePath = join(root, "events.db");
     try {
       const first = new SqliteEventStore({ databasePath });
@@ -199,7 +209,7 @@ describe("InMemoryEventStore", () => {
   });
 
   it("replays the M10 transcript segment and restore decision across SQLite reopen", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-m10-"));
+    const directory = mkdtempSync(join(tmpdir(), "coding-agent-m10-"));
     const databasePath = join(directory, "agent.sqlite");
     try {
       const first = new SqliteEventStore({ databasePath });
@@ -283,7 +293,7 @@ describe("InMemoryEventStore", () => {
   });
 
   it("persists M13 diagnostics across SQLite reopen", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-m13-"));
+    const directory = mkdtempSync(join(tmpdir(), "coding-agent-m13-"));
     const databasePath = join(directory, "agent.sqlite");
     try {
       const first = new SqliteEventStore({ databasePath });
@@ -303,7 +313,7 @@ describe("InMemoryEventStore", () => {
   });
 
   it("persists events, projections, commands, and schema across reopen", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-"));
+    const directory = mkdtempSync(join(tmpdir(), "coding-agent-"));
     const databasePath = join(directory, "agent.sqlite");
     const first = new SqliteEventStore({ databasePath });
     const sessionId = await first.createSession("D:/workspace");
@@ -342,7 +352,7 @@ describe("InMemoryEventStore", () => {
   });
 
   it("replays durable tenant ownership across SQLite reopen", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-ownership-"));
+    const directory = mkdtempSync(join(tmpdir(), "coding-agent-ownership-"));
     const databasePath = join(directory, "agent.sqlite");
     const first = new SqliteEventStore({ databasePath });
     const ownership = { principalId: brand<string, "PrincipalId">("user-a"), tenantId: brand<string, "TenantId">("tenant-a") };
@@ -359,7 +369,7 @@ describe("InMemoryEventStore", () => {
   });
 
   it("marks an in-flight session interrupted after reopening", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-recovery-"));
+    const directory = mkdtempSync(join(tmpdir(), "coding-agent-recovery-"));
     const databasePath = join(directory, "agent.sqlite");
     const first = new SqliteEventStore({ databasePath });
     const sessionId = await first.createSession("D:/workspace");
@@ -379,7 +389,7 @@ describe("InMemoryEventStore", () => {
   });
 
   it("replays worktree lifecycle and active root across SQLite reopen", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-worktree-replay-"));
+    const directory = mkdtempSync(join(tmpdir(), "coding-agent-worktree-replay-"));
     const databasePath = join(directory, "agent.sqlite");
     const first = new SqliteEventStore({ databasePath });
     const sessionId = await first.createSession("D:/repo");
@@ -409,7 +419,7 @@ describe("InMemoryEventStore", () => {
   });
 
   it("persists scrubbed scoped MCP configuration and credential references", () => {
-    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-mcp-config-"));
+    const directory = mkdtempSync(join(tmpdir(), "coding-agent-mcp-config-"));
     const databasePath = join(directory, "agent.sqlite");
     const first = new SqliteEventStore({ databasePath });
     const stored = first.upsertMcpConfig({
@@ -435,7 +445,7 @@ describe("InMemoryEventStore", () => {
   });
 
   it("persists tenant model routes and opaque credential references across SQLite reopen", () => {
-    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-model-route-"));
+    const directory = mkdtempSync(join(tmpdir(), "coding-agent-model-route-"));
     const databasePath = join(directory, "agent.sqlite");
     const first = new SqliteEventStore({ databasePath });
     const stored = first.upsertModelRoute({
@@ -458,7 +468,7 @@ describe("InMemoryEventStore", () => {
   });
 
   it("persists tenant credential metadata and lifecycle versions without secret material", () => {
-    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-credentials-"));
+    const directory = mkdtempSync(join(tmpdir(), "coding-agent-credentials-"));
     const databasePath = join(directory, "agent.sqlite");
     const first = new SqliteEventStore({ databasePath });
     const created = first.upsertCredential({
@@ -485,7 +495,7 @@ describe("InMemoryEventStore", () => {
   });
 
   it("persists principal catalog entries and keeps subject/tenant lookup isolated", () => {
-    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-principals-"));
+    const directory = mkdtempSync(join(tmpdir(), "coding-agent-principals-"));
     const databasePath = join(directory, "agent.sqlite");
     const first = new SqliteEventStore({ databasePath });
     const principal = first.upsertPrincipal({
@@ -508,7 +518,7 @@ describe("InMemoryEventStore", () => {
   });
 
   it("creates consistent backups, migrates legacy snapshots, and preserves rollback targets", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "code-review-agent-operations-"));
+    const directory = mkdtempSync(join(tmpdir(), "coding-agent-operations-"));
     const databasePath = join(directory, "active.sqlite");
     const backupPath = join(directory, "backup.sqlite");
     const legacyPath = join(directory, "legacy-v5.sqlite");

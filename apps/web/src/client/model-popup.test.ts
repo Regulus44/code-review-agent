@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ModelSelection, ProviderCatalogGroup } from "@code-review-agent/contracts";
+import type { ModelSelection, ProviderCatalogGroup } from "@coding-agent/contracts";
 import { ModelDirectory } from "./model-directory.js";
 import { ModelPopupController } from "./model-popup.js";
 

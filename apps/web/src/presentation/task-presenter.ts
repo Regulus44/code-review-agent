@@ -1,4 +1,4 @@
-import type { TaskProjection } from "@code-review-agent/contracts";
+import type { TaskProjection } from "@coding-agent/contracts";
 import { presentBoundedValue, type BoundedDisplayValue } from "./safe-value.js";
 
 export interface TaskRenderIntent {

@@ -1,7 +1,7 @@
 import type {
   ChatMessage,
   ModelToolDefinition,
-} from "@code-review-agent/contracts";
+} from "@coding-agent/contracts";
 import type { ModelContextView } from "./estimator.js";
 
 export type SystemPromptSectionPhase = "static" | "dynamic";

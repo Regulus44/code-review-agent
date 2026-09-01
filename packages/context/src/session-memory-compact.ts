@@ -1,4 +1,4 @@
-import type { ChatMessage } from "@code-review-agent/contracts";
+import type { ChatMessage } from "@coding-agent/contracts";
 import { estimateContextTokens } from "./estimator.js";
 
 export interface SessionMemorySnapshot {

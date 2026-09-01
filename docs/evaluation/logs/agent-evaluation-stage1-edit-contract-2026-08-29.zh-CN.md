@@ -31,10 +31,10 @@
 
 ## 验证记录
 
-执行目录：`D:\Develop\code-review-agent`
+执行目录：`D:\Develop\coding-agent`
 
 ```text
-pnpm --filter @code-review-agent/tools test
+pnpm --filter @coding-agent/tools test
 ```
 
 结果：9 个测试文件、71 个测试全部通过。

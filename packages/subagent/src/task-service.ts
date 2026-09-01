@@ -1,4 +1,4 @@
-import { brand, type ArtifactRef, type ChildSessionMetadata, type PermissionPreset, type SessionEventStore, type SessionId, type TaskBudget, type TaskId, type TaskProjection, type TaskReport } from "@code-review-agent/contracts";
+import { brand, type ArtifactRef, type ChildSessionMetadata, type PermissionPreset, type SessionEventStore, type SessionId, type TaskBudget, type TaskId, type TaskProjection, type TaskReport } from "@coding-agent/contracts";
 import { randomUUID } from "node:crypto";
 
 export interface CreateTaskInput {
@@ -83,7 +83,7 @@ export class TaskService {
   }
 }
 
-export function childMetadata(descriptor: import("@code-review-agent/contracts").SubagentDescriptor): ChildSessionMetadata {
+export function childMetadata(descriptor: import("@coding-agent/contracts").SubagentDescriptor): ChildSessionMetadata {
   return {
     parentSessionId: descriptor.parentSessionId,
     ...(descriptor.parentTaskId === undefined ? {} : { parentTaskId: descriptor.parentTaskId }),

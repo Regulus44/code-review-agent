@@ -364,7 +364,7 @@ Details 不应继续使用 position: fixed 作为桌面主布局。Modal、permi
 ### 9.3 必跑命令和运行环境
 
     pnpm typecheck
-    pnpm --filter @code-review-agent/web test
+    pnpm --filter @coding-agent/web test
     pnpm build:web
     git diff --check
 

@@ -3,7 +3,7 @@ import type {
   ChatMessage,
   ModelRequest,
   ContextRecoveryErrorClass,
-} from "@code-review-agent/contracts";
+} from "@coding-agent/contracts";
 
 export interface ProviderContextError {
   readonly errorClass: ContextRecoveryErrorClass;

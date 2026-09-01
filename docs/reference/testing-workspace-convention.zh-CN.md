@@ -10,7 +10,7 @@
 
 | 用途 | Workspace 根目录 | 导航标签 |
 | --- | --- | --- |
-| 日常开发 | `D:\\Develop\\code-review-agent` | 主项目目录名 |
+| 日常开发 | `D:\\Develop\\coding-agent` | 主项目目录名 |
 | 普通测试、浏览器 smoke、手工验证 | `D:\\Develop\\coding-agent-test` | `Test workspace` |
 
 历史 smoke、benchmark 和临时目录通过 Workspace Archive 隐藏，不删除 Session、事件或评测产物。恢复入口使用 Web 的 Archived 视图或 `POST /v1/workspaces/{key}/archive` 搭配 `archived: false`。

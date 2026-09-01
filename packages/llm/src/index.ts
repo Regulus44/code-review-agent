@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatModel, ModelContextCapability, ModelRequest, ModelStreamPart, ModelToolCall, ModelUsage } from "@code-review-agent/contracts";
+import type { ChatMessage, ChatModel, ModelContextCapability, ModelRequest, ModelStreamPart, ModelToolCall, ModelUsage } from "@coding-agent/contracts";
 import { ModelProtocolRegistry, type ModelProtocolModelConfig } from "./registry.js";
 import { AnthropicMessagesChatModel } from "./providers/anthropic-messages/adapter.js";
 import { ANTHROPIC_MESSAGES_DEFAULT_MAX_OUTPUT_TOKENS, ANTHROPIC_MESSAGES_MAX_OUTPUT_TOKENS } from "./providers/anthropic-messages/types.js";

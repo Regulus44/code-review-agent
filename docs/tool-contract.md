@@ -164,7 +164,7 @@ LSP 只读工具必须遵守以下不变量：
 
 | 宿主平台 | 注册并暴露给 Agent 的 shell | 启动方式 |
 |---|---|---|
-| `win32` | `pwsh` | 解析 `CODE_REVIEW_AGENT_PWSH`、PowerShell 7 默认目录、PATH 和 Windows PowerShell 5.1，使用 `-NoLogo -NoProfile -NonInteractive -Command` |
+| `win32` | `pwsh` | 优先解析 `CODING_AGENT_PWSH`，兼容 `CODE_REVIEW_AGENT_PWSH`，再依次探测 PowerShell 7 默认目录、PATH 和 Windows PowerShell 5.1；使用 `-NoLogo -NoProfile -NonInteractive -Command` |
 | `linux` / `darwin` / 其他 POSIX | `bash` | 使用 `bash -lc` |
 
 未选中的 shell 不进入 `ToolRegistry.list()`、`ToolRuntime.listTools()`、模型 schema 或工具 Prompt。直接查找未注册 shell 时，`ToolRegistry` 抛出 `ToolNotFoundError`，稳定错误码为 `TOOL_NOT_FOUND`；AgentHost 的模型工具调用边界会将该错误记录为失败的 `tool/result`。系统不会把 Bash 文本转换为 PowerShell，也不会把 PowerShell 文本转换为 Bash 或 `cmd.exe`；Windows 应用别名的存在不代表 WSL `/bin/bash` 可用。

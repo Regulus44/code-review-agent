@@ -1,4 +1,4 @@
-import type { ChatMessage, ModelRequest, ModelToolDefinition } from "@code-review-agent/contracts";
+import type { ChatMessage, ModelRequest, ModelToolDefinition } from "@coding-agent/contracts";
 import { AnthropicMessagesError } from "./errors.js";
 import type { AnthropicContentBlock, AnthropicToolDefinition, AnthropicWireMessage, AnthropicWireRequest } from "./types.js";
 

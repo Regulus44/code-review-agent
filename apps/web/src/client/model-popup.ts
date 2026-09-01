@@ -1,4 +1,4 @@
-import type { ModelSelection } from "@code-review-agent/contracts";
+import type { ModelSelection } from "@coding-agent/contracts";
 import type { ModelDirectory, ModelDirectoryState } from "./model-directory.js";
 
 export interface ModelPopupOption {

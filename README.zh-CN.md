@@ -1,8 +1,8 @@
-# Code Review Agent
+# Coding Agent
 
 [English README](README.md)
 
-Code Review Agent 是一个基于 TypeScript/Node.js 的 Coding Agent。它通过 Web
+Coding Agent 是一个基于 TypeScript/Node.js 的 Coding Agent。它通过 Web
 工作台驱动流式 Agent Loop，在受权限控制的 workspace 中读取、修改、验证代码，
 并使用 append-only EventStore 持久化 Session、工具、权限和任务状态。
 
@@ -112,10 +112,12 @@ pnpm dev:api
 ```
 
 然后打开 `http://127.0.0.1:3210/`。不配置 `DEEPSEEK_API_KEY` 时使用 Echo
-模型；配置 key 后可使用 DeepSeek。Session 默认持久化到 API 工作目录的
-`.data/code-review-agent.sqlite`。
+模型；配置 key 后可使用 DeepSeek。源码 checkout 默认持久化到
+`apps/api/.data/coding-agent.sqlite`，容器镜像默认使用
+`/app/.data/coding-agent.sqlite`。同一数据目录中只有旧
+`code-review-agent.sqlite` 时，运行时会直接复用它，不复制也不改写数据。
 
-容器运行：将 `CODE_REVIEW_WORKSPACE_HOST_ROOT` 设置为要暴露给 Agent 的宿主目录，
+容器运行：将 `CODING_AGENT_WORKSPACE_HOST_ROOT` 设置为要暴露给 Agent 的宿主目录，
 然后执行：
 
 ```bash
@@ -133,7 +135,24 @@ docker compose up --build
 | `DEEPSEEK_BASE_URL` | 默认 `https://api.deepseek.com` |
 | `DEEPSEEK_MODEL` | 默认 `deepseek-v4-flash` |
 | `PORT` | API 端口，默认 `3210` |
-| `CODE_REVIEW_AGENT_DB_PATH` | SQLite 数据库路径 |
+| `CODING_AGENT_DB_PATH` | SQLite 数据库路径 |
+| `CODING_AGENT_PWSH` | `pwsh` 工具可选的 Windows PowerShell 可执行路径 |
+| `CODING_AGENT_PORT` | Docker 宿主机端口，默认 `3210` |
+| `CODING_AGENT_WORKSPACE_HOST_ROOT` | Docker workspace 挂载源，默认 `.` |
+
+## 命名迁移
+
+产品名称、私有 workspace scope、MCP client 标识、Docker service/image 和 health
+response 已统一为 `Coding Agent` / `coding-agent`。迁移期间仍兼容读取
+`CODE_REVIEW_AGENT_DB_PATH`、`CODE_REVIEW_AGENT_PWSH`、
+`CODE_REVIEW_AGENT_PORT` 与 `CODE_REVIEW_WORKSPACE_HOST_ROOT`；同时设置新旧变量时，
+`CODING_AGENT_*` 优先。Docker 在本次发布继续挂载原有命名 volume，因此本地已有的
+SQLite 数据库会保持连接。
+
+原有 `@code-review-agent/*` 是私有 workspace scope，现已改为
+`@coding-agent/*`。使用源码 checkout 的下游项目需要在同一变更中更新 import。
+若部署端显式配置 JWT audience，也应同步将 `code-review-agent` 改为
+`coding-agent`，并更新 identity provider。
 
 运行时 capability、context、tool execution 和 provider 信息可通过
 `GET /v1/capabilities`、`GET /health` 和 `GET /v1/models` 查看。

@@ -495,7 +495,7 @@ git diff --check
 ```text
 pnpm typecheck
 pnpm build:web
-pnpm --filter @code-review-agent/web test
+pnpm --filter @coding-agent/web test
 pnpm test
 pnpm test:phase8:parity
 pnpm test:phase8:visual

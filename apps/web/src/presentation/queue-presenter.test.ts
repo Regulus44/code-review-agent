@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SessionProjection } from "@code-review-agent/contracts";
+import type { SessionProjection } from "@coding-agent/contracts";
 import { presentQueue } from "./queue-presenter.js";
 
 const session = (turns: SessionProjection["turns"]): SessionProjection => ({

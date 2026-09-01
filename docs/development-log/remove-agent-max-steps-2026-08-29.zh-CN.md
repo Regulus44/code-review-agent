@@ -27,10 +27,10 @@
 pnpm build
 通过
 
-pnpm --filter @code-review-agent/runtime test -- --run src/index.test.ts
+pnpm --filter @coding-agent/runtime test -- --run src/index.test.ts
 1 file passed, 66 tests passed
 
-pnpm --filter @code-review-agent/api test -- --run src/server.test.ts
+pnpm --filter @coding-agent/api test -- --run src/server.test.ts
 1 file passed, 40 tests passed
 ```
 

@@ -1,7 +1,7 @@
-import { type ChatModel, type SessionEventStore, type TaskReport, type ToolDefinition } from "@code-review-agent/contracts";
-import { ToolRegistry } from "@code-review-agent/tools";
+import { type ChatModel, type SessionEventStore, type TaskReport, type ToolDefinition } from "@coding-agent/contracts";
+import { ToolRegistry } from "@coding-agent/tools";
 import { AgentHost, type AgentHostOptions } from "./index.js";
-import type { ProviderRun, ProviderRunContext, ProviderCapabilities, SubagentProvider } from "@code-review-agent/subagent";
+import type { ProviderRun, ProviderRunContext, ProviderCapabilities, SubagentProvider } from "@coding-agent/subagent";
 
 export interface InProcessProviderOptions {
   readonly store: SessionEventStore;
@@ -27,7 +27,7 @@ function childRegistry(definitions: readonly ToolDefinition[] | undefined, allow
 /** Adapter that runs each child in a fresh AgentHost while retaining the shared EventStore and ToolRuntime contracts. */
 export function createInProcessSubagentProvider(options: InProcessProviderOptions): SubagentProvider {
   const capabilities: ProviderCapabilities = { oneShot: true, continuable: true, outputSchema: false, toolFilter: true };
-  const start = async (request: { readonly prompt: string; readonly descriptor: import("@code-review-agent/contracts").SubagentDescriptor }, context: ProviderRunContext): Promise<ProviderRun> => {
+  const start = async (request: { readonly prompt: string; readonly descriptor: import("@coding-agent/contracts").SubagentDescriptor }, context: ProviderRunContext): Promise<ProviderRun> => {
     const registry = childRegistry(options.baseToolDefinitions, request.descriptor.toolAllowlist, request.descriptor.mcpAllowlist);
     const host = new AgentHost({
       store: options.store,
@@ -37,7 +37,7 @@ export function createInProcessSubagentProvider(options: InProcessProviderOption
       permissionPreset: request.descriptor.permissionPreset,
       ...(options.subagentRuntime === undefined ? {} : { subagentRuntime: options.subagentRuntime }),
     });
-    let currentTurn: import("@code-review-agent/contracts").TurnId | undefined;
+    let currentTurn: import("@coding-agent/contracts").TurnId | undefined;
     let disposed = false;
     const runTurn = async (prompt: string, signal: AbortSignal): Promise<TaskReport> => {
       if (disposed) throw new Error("SUBAGENT_DISPOSED");

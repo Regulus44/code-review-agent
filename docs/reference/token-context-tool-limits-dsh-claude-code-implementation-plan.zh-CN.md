@@ -5,7 +5,7 @@
 所属阶段：Phase 8，高级上下文能力与 Coding Agent 可靠性
 调研范围：
 
-- 当前仓库：`D:/Develop/code-review-agent`
+- 当前仓库：本仓库根目录
 - DSH：`D:/Develop/deepseek-harness-fork`
 - Claude Code：`D:/Develop/claude-code`
 
@@ -424,7 +424,7 @@ EventStore 的完整 `tool/result` 不被替换或删除。落盘、预览和 mi
 - `apps/api/src/server.ts` 的 bootstrap catalog 同步返回 Anthropic default/upper 元数据，v4pro 等 Yayi profile 通过同一推断链路传入 adapter。
 - 测试覆盖默认 `max_tokens=32000`、显式 `64000`、`64001` 请求前拒绝、模型 upper `8192` 的一致/不一致配置，以及 Yayi profile 的 `32000/64000` 解析。
 
-验证结果：`pnpm --filter @code-review-agent/llm test`（33 项通过）、`pnpm --filter @code-review-agent/api test`（51 项通过）、`pnpm typecheck`、`git diff --check` 均通过。阶段 2 的 200K context fallback、512 step、8192 字符 summary，以及阶段 3–5 的工具结果和并行调度本次未实施。
+验证结果：`pnpm --filter @coding-agent/llm test`（33 项通过）、`pnpm --filter @coding-agent/api test`（51 项通过）、`pnpm typecheck`、`git diff --check` 均通过。阶段 2 的 200K context fallback、512 step、8192 字符 summary，以及阶段 3–5 的工具结果和并行调度本次未实施。
 
 ## 阶段 2 实施结果（2026-08-28）
 

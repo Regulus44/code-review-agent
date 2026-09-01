@@ -31,7 +31,7 @@ provider 时保持 Session 恢复与凭据隔离。
 
 ### 2. 公共契约采用兼容追加
 
-`@code-review-agent/contracts` 新增以下没有 secret 的类型：
+`@coding-agent/contracts` 新增以下没有 secret 的类型：
 
 - `ModelSelection`：会话或默认路由的 provider/model/reasoning 选择；
 - `ModelCatalogEntry`：展示与能力提示使用的 advisory catalog 条目；

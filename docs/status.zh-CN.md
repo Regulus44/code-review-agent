@@ -8,6 +8,19 @@
 
 当前基础 Runtime 已经稳定，后续工作应优先围绕安全上线、代码交付和 Code Review 价值展开，而不是继续扩展历史阶段数量。
 
+## 命名迁移
+
+- 当前产品、私有 workspace scope、Docker service/image、MCP client 和 `/health` 的
+  `service` 值统一使用 `Coding Agent` / `coding-agent`。
+- `CODING_AGENT_*` 是当前环境变量前缀。`CODE_REVIEW_AGENT_DB_PATH`、
+  `CODE_REVIEW_AGENT_PWSH`、`CODE_REVIEW_AGENT_PORT` 和
+  `CODE_REVIEW_WORKSPACE_HOST_ROOT` 在迁移期继续作为 fallback；新变量优先。
+- 默认 SQLite 路径已改为 `coding-agent.sqlite`，并会在新文件不存在且旧
+  `code-review-agent.sqlite` 已存在时复用旧文件。Docker 仍保留旧命名数据 volume，
+  避免已有本地 Session 丢失。
+- 远程 GitHub 仓库仍需要由具有仓库管理权限的维护者改名为 `coding-agent`；完成后再更新
+  `origin` URL。JWT audience 由部署配置决定，使用旧值的部署应与 IdP 配置一起迁移。
+
 ## 已实现能力
 
 - AgentHost：turn → step → model → tool 的流式循环、并行工具、取消和错误恢复。
@@ -56,7 +69,8 @@
 ## 验证状态
 
 - `pnpm typecheck`：通过。
-- `pnpm test`：当前 API shell 测试仍有一个命名契约失败，测试期待 `Code Review Agent`，Web title 已为 `Coding Agent`；其余相关 Subagent、Storage、Runtime 和 Web 测试通过。
+- `pnpm test`：通过（12 个 workspace，全部测试通过）。
+- `docker compose config --quiet` 与 `node scripts/phase8-deployment-audit.mjs`：通过。
 
 ## 文档使用规则
 

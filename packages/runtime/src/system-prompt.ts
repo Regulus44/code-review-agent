@@ -1,6 +1,6 @@
-import type { ToolDefinition } from "@code-review-agent/contracts";
-import { assembleContext, type SystemPromptSection } from "@code-review-agent/context";
-import type { PermissionPreset } from "@code-review-agent/tools";
+import type { ToolDefinition } from "@coding-agent/contracts";
+import { assembleContext, type SystemPromptSection } from "@coding-agent/context";
+import type { PermissionPreset } from "@coding-agent/tools";
 
 /** The runtime context that is safe and useful to expose to the model for one turn. */
 export interface AgentPromptContext {

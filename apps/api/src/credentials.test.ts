@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { InMemoryEventStore } from "@code-review-agent/storage";
+import { InMemoryEventStore } from "@coding-agent/storage";
 import { CredentialLifecycleError, CredentialVault, ExternalSecretProvider, LocalFileSecretProvider, type CredentialMaterial, type SecretReference } from "./credentials.js";
 
 describe("CredentialVault", () => {

@@ -1,5 +1,5 @@
-import type { ContextDiagnosticsProjection, SessionProjection } from "@code-review-agent/contracts";
-import { estimateMessagesTokens } from "@code-review-agent/compaction";
+import type { ContextDiagnosticsProjection, SessionProjection } from "@coding-agent/contracts";
+import { estimateMessagesTokens } from "@coding-agent/compaction";
 
 export interface ContextMeterRenderIntent {
   readonly status: "unknown" | "healthy" | "warning" | "error" | "auto_compact" | "blocking" | "compacted" | "failed";

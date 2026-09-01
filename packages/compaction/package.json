@@ -1,5 +1,5 @@
 {
-  "name": "@code-review-agent/compaction",
+  "name": "@coding-agent/compaction",
   "version": "0.2.0-dev.1",
   "private": true,
   "type": "module",
@@ -12,7 +12,7 @@
     }
   },
   "dependencies": {
-    "@code-review-agent/contracts": "workspace:*"
+    "@coding-agent/contracts": "workspace:*"
   },
   "scripts": {
     "test": "vitest run"

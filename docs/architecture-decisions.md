@@ -122,7 +122,7 @@ Phase 7 只消费本项目内部 EventStore、Session、Task、Permission 和 Wo
 
 状态：accepted（2026-08-26，M01）
 
-上下文窗口、输出预留、auto-compact buffer、warning/error/auto/blocking threshold 不再由 `packages/compaction` 的固定压缩参数隐式推导。新增 `@code-review-agent/context` 预算层，输入为 `ModelContextCapability` 与 `ContextBudgetConfig`，输出为 request-scoped `ContextBudgetSnapshot` 和 `ContextWarningState`。
+上下文窗口、输出预留、auto-compact buffer、warning/error/auto/blocking threshold 不再由 `packages/compaction` 的固定压缩参数隐式推导。新增 `@coding-agent/context` 预算层，输入为 `ModelContextCapability` 与 `ContextBudgetConfig`，输出为 request-scoped `ContextBudgetSnapshot` 和 `ContextWarningState`。
 
 本决策直接仿照 Claude Code `src/utils/context.ts` 与 `src/services/compact/autoCompact.ts` 的职责分离：窗口能力只回答 provider/model 的上限；effective window 先扣除摘要/输出预留；auto-compact buffer 按窗口大小选择 13K、30K 或 50K；blocking threshold 单独保留 3K 手动 compact headroom。M01 不实现精确 token API、tool pairing、microcompact、summary agent、boundary recovery 或 context collapse，它们分别属于后续 M02、M04–M14。
 
@@ -134,7 +134,7 @@ Phase 7 只消费本项目内部 EventStore、Session、Task、Permission 和 Wo
 
 状态：accepted（2026-08-26，M02）
 
-上下文 token 计数由 `@code-review-agent/context` 的 `TokenCounter` 统一抽象。每个请求先使用 provider-neutral estimate；只有模型 capability 声明支持 exact count，且 estimate 已接近 warning 或 predictive boundary 时，才调用可选的 `ChatModel.countTokens()`。这样保留 Claude Code 的热路径低延迟和关键决策高准确度。
+上下文 token 计数由 `@coding-agent/context` 的 `TokenCounter` 统一抽象。每个请求先使用 provider-neutral estimate；只有模型 capability 声明支持 exact count，且 estimate 已接近 warning 或 predictive boundary 时，才调用可选的 `ChatModel.countTokens()`。这样保留 Claude Code 的热路径低延迟和关键决策高准确度。
 
 估算结果必须携带 `source`、`confidence` 和 breakdown。exact 调用失败不能返回 0，也不能覆盖为虚假的 provider usage：没有显式 stale usage 时保留 estimate 并记录 `exactError`；只有调用方明确提供旧 usage 时才允许返回 `source: "stale_usage"`。Runtime 将 token count 诊断写入 `step/started`，不把 provider 原始 body 或凭据写入事件。
 

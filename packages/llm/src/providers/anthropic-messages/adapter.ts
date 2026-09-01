@@ -1,4 +1,4 @@
-import type { ChatModel, ModelContextCapability, ModelRequest, ModelStreamPart } from "@code-review-agent/contracts";
+import type { ChatModel, ModelContextCapability, ModelRequest, ModelStreamPart } from "@coding-agent/contracts";
 import { AnthropicMessagesError, anthropicHttpError } from "./errors.js";
 import { parseRetryAfter, retryDelayMs } from "../../failures.js";
 import { serializeAnthropicRequest } from "./serialize.js";

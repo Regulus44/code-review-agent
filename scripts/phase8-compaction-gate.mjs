@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApiServer } from "../apps/api/dist/server.js";
 
-const root = await mkdtemp(join(tmpdir(), "code-review-agent-phase8-compaction-"));
+const root = await mkdtemp(join(tmpdir(), "coding-agent-phase8-compaction-"));
 const databasePath = join(root, "events.sqlite");
 const webRoot = fileURLToPath(new URL("../apps/web/", import.meta.url));
 let server;

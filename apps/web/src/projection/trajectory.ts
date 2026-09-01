@@ -1,4 +1,4 @@
-import type { AgentEvent, SessionId, TaskId, ToolCallId, TurnId } from "@code-review-agent/contracts";
+import type { AgentEvent, SessionId, TaskId, ToolCallId, TurnId } from "@coding-agent/contracts";
 
 export type TrajectoryKind = "turn" | "step" | "assistant" | "tool" | "task" | "permission" | "interaction" | "event";
 

@@ -1,7 +1,7 @@
-import type { McpConfigBackend, McpConfigRecord, McpCredentialReference, ToolApprovalMode, ToolRiskLevel } from "@code-review-agent/contracts";
+import type { McpConfigBackend, McpConfigRecord, McpCredentialReference, ToolApprovalMode, ToolRiskLevel } from "@coding-agent/contracts";
 
-export type { McpServerScope } from "@code-review-agent/contracts";
-import type { McpServerScope } from "@code-review-agent/contracts";
+export type { McpServerScope } from "@coding-agent/contracts";
+import type { McpServerScope } from "@coding-agent/contracts";
 export type McpTransportKind = "stdio" | "sse" | "streamable-http";
 export type McpServerStatus = "pending" | "connected" | "failed" | "needs_auth" | "disabled" | "stopped";
 

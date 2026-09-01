@@ -4,7 +4,7 @@
 
 调研仓库：
 
-- 当前仓库：`D:\Develop\code-review-agent`
+- 当前仓库：`D:\Develop\coding-agent`
 - DSH 参考仓库：`D:\Develop\deepseek-harness-fork`
 - 调研日期：2026-08-28
 
@@ -27,7 +27,7 @@
 - `packages/tools/src/runtime.ts:118-121` 的 `listTools()` 只按权限和 tenant 过滤，不检查 `process.platform`；
 - `packages/runtime/src/index.ts:2956` 对模型使用 `toolChoice: "auto"`，因此模型可以从同时可见的 `bash`/`pwsh` 中自行选择；
 - `packages/tools/src/builtin.ts:546-549` 将 `bash` 固定为 `bash -lc`，Windows 上不会自动切换到 PowerShell；
-- `packages/tools/src/builtin.ts:549` 只为 `pwsh` 在 Windows 使用 `CODE_REVIEW_AGENT_PWSH` 或裸 `pwsh`，没有对 bash 做可执行文件探测或路径配置。
+- `packages/tools/src/builtin.ts:549` 只为 `pwsh` 在 Windows 使用 `CODING_AGENT_PWSH` 或裸 `pwsh`，没有对 bash 做可执行文件探测或路径配置。
 
 因此问题根因是“平台不兼容的工具仍对 Agent 可见”，不是 WSL 错误没有被捕获。Windows 的 `bash.exe` 应用执行别名可能存在，但它实际转发到 WSL；别名存在不能证明 `/bin/bash` 可运行。
 
@@ -81,7 +81,7 @@ exit=1
 
 这里的 `NON_ZERO_EXIT` 会把“shell runner 不可用”伪装成“命令本身返回非零”。
 
-同一环境执行当前 `pwsh` 工具的 `Get-Location` 返回 `exitCode: 0`，cwd 为 `D:\Develop\code-review-agent`。这证明 Windows 默认执行器应优先使用 PowerShell，而不是依赖 WSL alias。
+同一环境执行当前 `pwsh` 工具的 `Get-Location` 返回 `exitCode: 0`，cwd 为 `D:\Develop\coding-agent`。这证明 Windows 默认执行器应优先使用 PowerShell，而不是依赖 WSL alias。
 
 ### 3.3 当前代码的关键缺口
 
@@ -187,7 +187,7 @@ DSH 学习入口：
 
 ### 5.2 PowerShell executable 解析：新增 `packages/tools/src/pwsh-path.ts`，并修改 `builtin.ts`
 
-1. 新增无副作用的 `candidatePwshPaths(env, platform)` 与 `resolvePwshPath(configured, env, platform)`；`platform !== "win32"` 时返回裸 `pwsh`，`win32` 时按固定顺序探测：显式 `CODE_REVIEW_AGENT_PWSH` → PowerShell 7 默认安装目录 → PATH 中的 `pwsh.exe` → Windows PowerShell 5.1。
+1. 新增无副作用的 `candidatePwshPaths(env, platform)` 与 `resolvePwshPath(configured, env, platform)`；`platform !== "win32"` 时返回裸 `pwsh`，`win32` 时按固定顺序探测：显式 `CODING_AGENT_PWSH` → PowerShell 7 默认安装目录 → PATH 中的 `pwsh.exe` → Windows PowerShell 5.1。
 2. `builtin.ts:shellLaunch("pwsh", ...)` 只调用该解析函数并把结果作为 `spawn()` 的 executable；继续使用 `{ shell: false, windowsHide: true }`。
 3. 不把 `WindowsApps\\bash.exe` 的存在当成 WSL 可用性证明；本次默认 Windows roster 不注册 Bash，因此不增加 WSL 探测或 Bash 自动 fallback。
 
@@ -271,7 +271,7 @@ apps/cli/src/bin.ts
 |---|---|
 | win32 + 无 `/bin/bash` + 默认 roster | `bash` 不在 `ToolRegistry`、模型 schema 和工具 prompt；`pwsh` 可见 |
 | win32 + 显式调用 `bash` | registry 返回 `TOOL_NOT_FOUND`；不自动改用 pwsh |
-| win32 + `CODE_REVIEW_AGENT_PWSH` 有效 | `pwsh` 前台和 background job 成功，cwd/exit/audit 正确 |
+| win32 + `CODING_AGENT_PWSH` 有效 | `pwsh` 前台和 background job 成功，cwd/exit/audit 正确 |
 | linux/macOS | `bash` roster 和现有语义保持；`pwsh` 不注册 |
 | Agent 重启/SSE replay | platform visibility 不改变历史 tool/result 事件；projection 可回放 |
 | 权限 preset | 平台过滤先于模型可见性，不能借平台切换绕过 permission/approval |
@@ -291,8 +291,8 @@ apps/cli/src/bin.ts
 阶段 6 验收命令及结果：
 
 ```text
-pnpm --filter @code-review-agent/tools test   ✓ 9 files / 68 tests
-pnpm --filter @code-review-agent/runtime test ✓ 1 file / 56 tests
+pnpm --filter @coding-agent/tools test   ✓ 9 files / 68 tests
+pnpm --filter @coding-agent/runtime test ✓ 1 file / 56 tests
 pnpm typecheck                                ✓
 pnpm test                                      ✓ workspace 全部通过
 git diff --check                               ✓

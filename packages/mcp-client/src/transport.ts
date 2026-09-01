@@ -3,7 +3,7 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { McpServerConfig } from "./config.js";
-import type { McpCredentialReference } from "@code-review-agent/contracts";
+import type { McpCredentialReference } from "@coding-agent/contracts";
 
 export interface McpCredentialMaterial {
   readonly env?: Readonly<Record<string, string>>;

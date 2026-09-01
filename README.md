@@ -1,8 +1,8 @@
-# Code Review Agent
+# Coding Agent
 
 [中文文档](README.zh-CN.md)
 
-Code Review Agent is a TypeScript/Node.js coding agent. It drives a streaming
+Coding Agent is a TypeScript/Node.js coding agent. It drives a streaming
 agent loop over a permission-scoped workspace, persists sessions and tool
 activity as an append-only event log, and exposes a web workspace for interactive
 coding and review tasks.
@@ -84,10 +84,12 @@ pnpm dev:api
 ```
 
 Open `http://127.0.0.1:3210/`. Without `DEEPSEEK_API_KEY`, the local Echo
-model is used. Sessions default to `.data/code-review-agent.sqlite` relative to
-the API working directory.
+model is used. Sessions default to `apps/api/.data/coding-agent.sqlite` in a
+source checkout, or `/app/.data/coding-agent.sqlite` in the container image.
+If only an existing `code-review-agent.sqlite` is present in that data
+directory, it is reused without copying or modifying it.
 
-For Docker, set `CODE_REVIEW_WORKSPACE_HOST_ROOT` and run:
+For Docker, set `CODING_AGENT_WORKSPACE_HOST_ROOT` and run:
 
 ```bash
 docker compose up --build
@@ -105,7 +107,26 @@ The mounted workspace is available inside the container at
 | `DEEPSEEK_BASE_URL` | Defaults to `https://api.deepseek.com` |
 | `DEEPSEEK_MODEL` | Defaults to `deepseek-v4-flash` |
 | `PORT` | API port; default `3210` |
-| `CODE_REVIEW_AGENT_DB_PATH` | SQLite database path |
+| `CODING_AGENT_DB_PATH` | SQLite database path |
+| `CODING_AGENT_PWSH` | Optional Windows PowerShell executable for the `pwsh` tool |
+| `CODING_AGENT_PORT` | Docker host port; default `3210` |
+| `CODING_AGENT_WORKSPACE_HOST_ROOT` | Docker workspace bind source; default `.` |
+
+## Naming migration
+
+The active product, private workspace scope, MCP client identity, Docker
+service/image, and health response are now `coding-agent` / `Coding Agent`.
+The legacy `CODE_REVIEW_AGENT_DB_PATH`, `CODE_REVIEW_AGENT_PWSH`,
+`CODE_REVIEW_AGENT_PORT`, and `CODE_REVIEW_WORKSPACE_HOST_ROOT` variables are
+accepted as fallbacks during migration; the `CODING_AGENT_*` variables win when
+both are set. Docker retains the old named data volume for this release so an
+existing local SQLite database remains attached.
+
+The `@code-review-agent/*` workspace scope was private and has changed to
+`@coding-agent/*`. Downstream users of a source checkout should update imports
+in the same change. Deployments that configure a JWT audience explicitly should
+move its value from `code-review-agent` to `coding-agent` together with their
+identity-provider configuration.
 
 Use `GET /health`, `GET /v1/capabilities`, and `GET /v1/models` for runtime
 discovery.

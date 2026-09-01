@@ -1,4 +1,4 @@
-import type { WorktreeProjection } from "@code-review-agent/contracts";
+import type { WorktreeProjection } from "@coding-agent/contracts";
 
 export interface WorktreeRenderIntent {
   readonly id: string;

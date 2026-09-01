@@ -11,7 +11,7 @@ import { createConfiguredApiServer } from "../../apps/api/src/server.ts";
 // own node_modules junction. Importing the source file here makes
 // `store instanceof SqliteEventStore` false inside the API and disables local
 // provider profiles.
-import { SqliteEventStore } from "../../apps/api/node_modules/@code-review-agent/storage/dist/index.js";
+import { SqliteEventStore } from "../../apps/api/node_modules/@coding-agent/storage/dist/index.js";
 import { buildEvaluationPrompt } from "./evaluation-prompt.ts";
 import { validateTrace, type TraceGateResult } from "./trace-gate.ts";
 
@@ -58,7 +58,7 @@ type AgentEvent = {
 };
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const datasetRoot = process.env["CODING_AGENT_DATASET_ROOT"] ?? "D:/Develop/coding-agent-test/datasets/swebench-lite/pilot-01";
+const datasetRoot = process.env["CODING_AGENT_DATASET_ROOT"] ?? "D:/Develop/code-review-agent-test/datasets/swebench-lite/pilot-01";
 const datasetVersion = path.basename(datasetRoot);
 const taskId = process.argv[2] ?? "pallets__flask-4045";
 const taskPath = path.join(datasetRoot, "public", "tasks", taskId, "task.json");
@@ -82,7 +82,7 @@ const autoApprovePermissions = process.env["EVAL_MVP_AUTO_APPROVE_PERMISSIONS"] 
 const evaluationProvider = process.env["EVAL_MVP_PROVIDER"]?.trim() || undefined;
 const evaluationModel = process.env["EVAL_MVP_MODEL"]?.trim() || undefined;
 const credentialMetadataPath = process.env["EVAL_MVP_CREDENTIAL_METADATA_PATH"]
-  ?? path.join(repoRoot, "apps", "api", ".data", "code-review-agent.sqlite");
+  ?? path.join(repoRoot, "apps", "api", ".data", "coding-agent.sqlite");
 
 async function main(): Promise<void> {
   const task = JSON.parse(await readFile(taskPath, "utf8")) as Task;

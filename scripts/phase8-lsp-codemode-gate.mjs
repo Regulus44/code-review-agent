@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CodeModeSandbox, LspManager } from "../packages/tools/dist/index.js";
 
-const root = await mkdtemp(join(tmpdir(), "code-review-agent-phase8-lsp-"));
+const root = await mkdtemp(join(tmpdir(), "coding-agent-phase8-lsp-"));
 const fixture = join(process.cwd(), "packages", "tools", "test-fixtures", "lsp-server.mjs");
 const assert = (condition, message) => { if (!condition) throw new Error(`Phase 8.3 gate: ${message}`); };
 const webShell = await readFile(join(process.cwd(), "apps", "web", "index.html"), "utf8");

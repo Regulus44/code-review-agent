@@ -12,7 +12,7 @@ import { createApiServer } from "../apps/api/dist/server.js";
 import { AgentHost } from "../packages/runtime/dist/index.js";
 import { SqliteEventStore } from "../packages/storage/dist/index.js";
 
-const root = await mkdtemp(join(tmpdir(), "code-review-agent-phase8-jobs-"));
+const root = await mkdtemp(join(tmpdir(), "coding-agent-phase8-jobs-"));
 const databasePath = join(root, "events.sqlite");
 const workspaceRoot = join(root, "workspace");
 await mkdir(workspaceRoot, { recursive: true });
@@ -23,7 +23,7 @@ const host = new AgentHost({ store });
 const session = await host.createSession(workspaceRoot, "danger-full-access");
 await store.append({ sessionId: session.id, type: "user/message", payload: { content: "Phase 8 Job Center browser fixture" } });
 
-const pwsh = process.env.CODE_REVIEW_AGENT_PWSH ?? "pwsh";
+const pwsh = process.env.CODING_AGENT_PWSH ?? process.env.CODE_REVIEW_AGENT_PWSH ?? "pwsh";
 const runningCommand = "Write-Output 'phase8-running'; Start-Sleep -Seconds 120";
 const running = await host.executeTool(session.id, "pwsh", { command: runningCommand, description: "Phase 8 running job", run_in_background: true }, undefined, "phase8-job-start-running", undefined, "system");
 if (!running.result?.ok && running.status !== "completed") throw new Error(`Unable to start running job: ${JSON.stringify(running)}`);

@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { InMemoryEventStore } from "@code-review-agent/storage";
+import { InMemoryEventStore } from "@coding-agent/storage";
 import { verifyProductizationJwt } from "./auth.js";
 
 function token(secret: string, payload: Record<string, unknown>, kid = "key-1"): string {
@@ -17,14 +17,14 @@ describe("Productization JWT verification", () => {
     const catalog = new InMemoryEventStore();
     catalog.upsertPrincipal({ id: "principal-a" as never, subject: "idp|a", tenantId: "tenant-a" as never, roles: ["member"], status: "active", createdAt: "2026-08-24T00:00:00.000Z", updatedAt: "2026-08-24T00:00:00.000Z" });
     const now = Math.floor(Date.now() / 1_000);
-    const identity = await verifyProductizationJwt(token("secret", { iss: "https://idp.example", aud: "code-review-agent", sub: "idp|a", tenant_id: "tenant-a", iat: now, exp: now + 120 }), { issuer: "https://idp.example", audience: "code-review-agent", keys: [{ kid: "key-1", alg: "HS256", secret: "secret" }] }, catalog);
+    const identity = await verifyProductizationJwt(token("secret", { iss: "https://idp.example", aud: "coding-agent", sub: "idp|a", tenant_id: "tenant-a", iat: now, exp: now + 120 }), { issuer: "https://idp.example", audience: "coding-agent", keys: [{ kid: "key-1", alg: "HS256", secret: "secret" }] }, catalog);
     expect(identity).toEqual({ principalId: "principal-a", tenantId: "tenant-a" });
   });
 
   it("fails closed for invalid signature, claims, expiry, and unknown principal", async () => {
     const catalog = new InMemoryEventStore();
     const now = Math.floor(Date.now() / 1_000);
-    const options = { issuer: "https://idp.example", audience: "code-review-agent", keys: [{ kid: "key-1", alg: "HS256" as const, secret: "secret" }] };
+    const options = { issuer: "https://idp.example", audience: "coding-agent", keys: [{ kid: "key-1", alg: "HS256" as const, secret: "secret" }] };
     await expect(verifyProductizationJwt(token("wrong", { iss: options.issuer, aud: options.audience, sub: "missing", exp: now + 120 }), options, catalog)).rejects.toThrow("signature");
     await expect(verifyProductizationJwt(token("secret", { iss: "wrong", aud: options.audience, sub: "missing", exp: now + 120 }), options, catalog)).rejects.toThrow("issuer");
     await expect(verifyProductizationJwt(token("secret", { iss: options.issuer, aud: options.audience, sub: "missing", exp: now - 120 }), options, catalog)).rejects.toThrow("expired");
@@ -35,7 +35,7 @@ describe("Productization JWT verification", () => {
     const catalog = new InMemoryEventStore();
     catalog.upsertPrincipal({ id: "principal-b" as never, subject: "idp|b", tenantId: "tenant-b" as never, roles: [], status: "active", createdAt: "2026-08-24T00:00:00.000Z", updatedAt: "2026-08-24T00:00:00.000Z" });
     const now = Math.floor(Date.now() / 1_000);
-    const identity = await verifyProductizationJwt(token("rotated", { iss: "https://idp.example", aud: ["other", "code-review-agent"], sub: "idp|b", exp: now + 120 }, "key-2"), { issuer: "https://idp.example", audience: "code-review-agent", keys: [], jwks: async () => [{ kid: "key-2", alg: "HS256", secret: "rotated" }] }, catalog);
+    const identity = await verifyProductizationJwt(token("rotated", { iss: "https://idp.example", aud: ["other", "coding-agent"], sub: "idp|b", exp: now + 120 }, "key-2"), { issuer: "https://idp.example", audience: "coding-agent", keys: [], jwks: async () => [{ kid: "key-2", alg: "HS256", secret: "rotated" }] }, catalog);
     expect(identity.tenantId).toBe("tenant-b");
   });
 });

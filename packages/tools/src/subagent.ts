@@ -1,5 +1,5 @@
-import type { ArtifactRef, ChildReportInput, TaskBudget, TaskId, ToolDefinition, ToolResult } from "@code-review-agent/contracts";
-import type { SubagentRuntime, SpawnSubagentRequest } from "@code-review-agent/subagent";
+import type { ArtifactRef, ChildReportInput, TaskBudget, TaskId, ToolDefinition, ToolResult } from "@coding-agent/contracts";
+import type { SubagentRuntime, SpawnSubagentRequest } from "@coding-agent/subagent";
 
 export interface SubagentToolOptions {
   readonly runtime: SubagentRuntime;

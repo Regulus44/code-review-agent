@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import type { SessionProjection, ToolResultReplacementRecord } from "@code-review-agent/contracts";
+import type { SessionProjection, ToolResultReplacementRecord } from "@coding-agent/contracts";
 import { artifactAccessResponse, inspectArtifact, isAvailableArtifact } from "./artifacts.js";
 
 function session(workspaceRoot: string, replacement: ToolResultReplacementRecord): SessionProjection {
@@ -11,7 +11,7 @@ function session(workspaceRoot: string, replacement: ToolResultReplacementRecord
 
 describe("tool-result artifact access", () => {
   it("resolves a replacement artifact through the workspace boundary without exposing an absolute path", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "code-review-agent-tool-artifact-"));
+    const root = await mkdtemp(path.join(tmpdir(), "coding-agent-tool-artifact-"));
     try {
       const relativePath = ".agent-artifacts/tool-results/ses_1/call_1.txt";
       await mkdir(path.dirname(path.join(root, relativePath)), { recursive: true });
@@ -40,7 +40,7 @@ describe("tool-result artifact access", () => {
   });
 
   it("rejects a replacement path that leaves the workspace", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "code-review-agent-tool-artifact-"));
+    const root = await mkdtemp(path.join(tmpdir(), "coding-agent-tool-artifact-"));
     try {
       const replacement: ToolResultReplacementRecord = {
         kind: "tool-result",

@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { createApiServer } from "../apps/api/dist/server.js";
 
 const execFileAsync = promisify(execFile);
-const root = await mkdtemp(join(tmpdir(), "code-review-agent-phase8-worktree-"));
+const root = await mkdtemp(join(tmpdir(), "coding-agent-phase8-worktree-"));
 const repo = join(root, "repo");
 const linked = join(root, "linked");
 const sibling = join(root, "feature-worktree");

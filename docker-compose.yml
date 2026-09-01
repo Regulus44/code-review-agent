@@ -1,19 +1,20 @@
 services:
-  code-review-agent:
+  coding-agent:
     build:
       context: .
       dockerfile: Dockerfile
-    image: code-review-agent:local
+    image: coding-agent:local
     ports:
-      - "${CODE_REVIEW_AGENT_PORT:-3210}:3210"
+      - "${CODING_AGENT_PORT:-${CODE_REVIEW_AGENT_PORT:-3210}}:3210"
     env_file:
       - .env
     environment:
       PORT: 3210
-      CODE_REVIEW_AGENT_DB_PATH: /app/.data/code-review-agent.sqlite
     volumes:
+      # Preserve the existing named volume during the rebrand. The database
+      # resolver will reuse code-review-agent.sqlite when it is the only file.
       - code-review-agent-data:/app/.data
-      - ${CODE_REVIEW_WORKSPACE_HOST_ROOT:-.}:/workspaces/project
+      - ${CODING_AGENT_WORKSPACE_HOST_ROOT:-${CODE_REVIEW_WORKSPACE_HOST_ROOT:-.}}:/workspaces/project
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m

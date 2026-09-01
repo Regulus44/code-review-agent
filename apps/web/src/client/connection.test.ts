@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AGENT_EVENT_TYPES as CONTRACT_EVENT_TYPES, brand, type AgentEvent, type SessionProjection } from "@code-review-agent/contracts";
+import { AGENT_EVENT_TYPES as CONTRACT_EVENT_TYPES, brand, type AgentEvent, type SessionProjection } from "@coding-agent/contracts";
 import { WebApiClient } from "./api.js";
 import { AGENT_EVENT_TYPES, SessionConnectionController, type EventSourceLike } from "./connection.js";
 

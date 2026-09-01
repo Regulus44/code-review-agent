@@ -16,7 +16,7 @@
 状态：`research`（仅调研，不代表已接受的实现决策）  
 日期：2026-08-26  
 归属：Phase 8 上下文管理能力的后续演进  
-范围：`D:/Develop/code-review-agent` 与本地参考快照 `D:/Develop/claude-code`
+范围：本仓库根目录与本地参考快照 `D:/Develop/claude-code`
 
 ## 1. Claude Code 上下文管理的总体架构分层
 
@@ -372,7 +372,7 @@ M14 Context Collapse（Claude Code 快照中仍是 stub，最后评估）
 | Claude Code 参考 | `D:/Develop/claude-code/src/utils/context.ts:60-120`；`src/services/compact/autoCompact.ts:33-165` |
 | 关键函数 | `getContextWindowForModel()`、`getEffectiveContextWindowSize()`、`getAutocompactBufferTokens()`、`getAutoCompactThreshold()`、`calculateTokenWarningState()` |
 | 子功能 | 模型窗口解析、1M capability、输出预留、自动压缩 buffer、warning/error/blocking、predictive growth |
-| 本项目落点 | `D:/Develop/code-review-agent/packages/context/src/budget.ts`（拟建）；读取 `ModelRoute`/provider capability；Runtime 在每次请求前生成 snapshot |
+| 本项目落点 | `packages/context/src/budget.ts`（拟建）；读取 `ModelRoute`/provider capability；Runtime 在每次请求前生成 snapshot |
 | 直接仿照程度 | 算法和字段职责可以直接仿照；模型能力来源必须接入本项目 adapter，不复制 Claude Code 的 provider 判断 |
 
 实现内容：
@@ -394,7 +394,7 @@ M14 Context Collapse（Claude Code 快照中仍是 stub，最后评估）
 | Claude Code 参考 | `D:/Develop/claude-code/src/services/tokenEstimation.ts:131-250,263-353`；`src/services/compact/microCompact.ts:137-205` |
 | 关键函数 | `countMessagesTokensWithAPI()`、`countTokensWithAPI()`、`roughTokenCountEstimation()`、`roughTokenCountEstimationForFileType()`、`estimateMessageTokens()` |
 | 子功能 | 热路径粗估、关键路径精确计数、provider fallback、JSON/媒体/thinking/tool input 分类 |
-| 本项目落点 | `D:/Develop/code-review-agent/packages/context/src/estimator.ts`（拟建）；ModelAdapter 暴露可选 `countTokens()` |
+| 本项目落点 | `packages/context/src/estimator.ts`（拟建）；ModelAdapter 暴露可选 `countTokens()` |
 | 直接仿照程度 | 两级计数和 fallback 直接仿照；Anthropic/Bedrock/Vertex 的具体调用改为 provider adapter |
 
 实现内容：
@@ -423,7 +423,7 @@ interface TokenCounter {
 | Claude Code 参考 | `D:/Develop/claude-code/src/context.ts`；`src/constants/prompts.ts`；`src/utils/systemPrompt.ts`；`src/utils/messages.ts:3841-4000` |
 | 关键结构 | 静态 system prompt、动态 boundary、workspace/tool/memory/session context、attachment |
 | 子功能 | system section 排序、动态上下文注入、tool schema、用户上下文、压缩后 attachment 注入 |
-| 本项目落点 | `D:/Develop/code-review-agent/packages/context/src/assembler.ts`、`packages/runtime/src/system-prompt.ts`、`packages/runtime/src/index.ts`（已实现） |
+| 本项目落点 | `packages/context/src/assembler.ts`、`packages/runtime/src/system-prompt.ts`、`packages/runtime/src/index.ts`（已实现） |
 | 直接仿照程度 | section 分层和稳定排序直接仿照；本项目安全规则和 EventStore projection 是权威来源 |
 
 Claude Code 把 system prompt 拆为稳定前缀和动态区，目的是让 workspace、tools、memory、日期和 session 状态变化时不破坏全部缓存前缀。后续本项目的 `ContextAssembler` 应接收：
@@ -1002,7 +1002,7 @@ export function resolveBudget(capability: ModelContextCapability): ContextBudget
 
 ### 12.2 当前项目的具体改写方式
 
-当前 `D:/Develop/code-review-agent/packages/compaction/src/index.ts` 的 `ContextBudget` 是静态压缩参数，不应继续承担模型能力解析。建议拆成：
+当前 `packages/compaction/src/index.ts` 的 `ContextBudget` 是静态压缩参数，不应继续承担模型能力解析。建议拆成：
 
 ```text
 ContextBudgetConfig       // 用户/Host 配置：buffer、摘要上限、工具上限

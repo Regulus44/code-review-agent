@@ -2,7 +2,7 @@ import type {
   ChatMessage,
   ContextBoundaryMetadata,
   ContextTranscriptSegment,
-} from "@code-review-agent/contracts";
+} from "@coding-agent/contracts";
 import { boundaryFromMetadata } from "./boundary.js";
 
 export interface TranscriptRestoreInput {

@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { brand, type ToolApprovalMode, type ToolDefinition, type ToolResult, type JsonSchema, type ToolRiskLevel } from "@code-review-agent/contracts";
+import { brand, type ToolApprovalMode, type ToolDefinition, type ToolResult, type JsonSchema, type ToolRiskLevel } from "@coding-agent/contracts";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { ToolRegistry } from "@code-review-agent/tools";
+import { ToolRegistry } from "@coding-agent/tools";
 import type { McpServerConfig } from "./config.js";
 import type { McpToolDescriptor } from "./discovery.js";
 

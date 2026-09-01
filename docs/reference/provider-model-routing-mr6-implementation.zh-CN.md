@@ -45,9 +45,9 @@ output 等 bounded 诊断字段；不写入 provider body、token、headers 或 
 ## 验收
 
 - `pnpm typecheck`
-- `pnpm --filter @code-review-agent/llm test -- --run`
-- `pnpm --filter @code-review-agent/context test -- --run`
-- `pnpm --filter @code-review-agent/runtime test -- --run`
+- `pnpm --filter @coding-agent/llm test -- --run`
+- `pnpm --filter @coding-agent/context test -- --run`
+- `pnpm --filter @coding-agent/runtime test -- --run`
 - `git diff --check`
 
 回滚时可移除 failure taxonomy 与 adapter retry 包装，恢复现有一次网络 retry 和

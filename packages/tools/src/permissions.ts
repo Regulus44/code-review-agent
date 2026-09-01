@@ -1,4 +1,4 @@
-import type { ToolApprovalMode, ToolDefinition, ToolRiskLevel } from "@code-review-agent/contracts";
+import type { ToolApprovalMode, ToolDefinition, ToolRiskLevel } from "@coding-agent/contracts";
 
 export interface PermissionEvaluation {
   readonly mode: ToolApprovalMode;

@@ -1,5 +1,5 @@
 {
-  "name": "@code-review-agent/runtime",
+  "name": "@coding-agent/runtime",
   "version": "0.2.0-dev.1",
   "private": true,
   "type": "module",
@@ -12,14 +12,14 @@
     }
   },
   "dependencies": {
-    "@code-review-agent/contracts": "workspace:*",
-    "@code-review-agent/context": "workspace:*",
-    "@code-review-agent/compaction": "workspace:*",
-    "@code-review-agent/llm": "workspace:*",
-    "@code-review-agent/subagent": "workspace:*",
-    "@code-review-agent/storage": "workspace:*",
-    "@code-review-agent/tools": "workspace:*",
-    "@code-review-agent/workspace": "workspace:*"
+    "@coding-agent/contracts": "workspace:*",
+    "@coding-agent/context": "workspace:*",
+    "@coding-agent/compaction": "workspace:*",
+    "@coding-agent/llm": "workspace:*",
+    "@coding-agent/subagent": "workspace:*",
+    "@coding-agent/storage": "workspace:*",
+    "@coding-agent/tools": "workspace:*",
+    "@coding-agent/workspace": "workspace:*"
   },
   "scripts": {
     "test": "vitest run"

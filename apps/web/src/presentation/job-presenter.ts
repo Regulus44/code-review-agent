@@ -1,4 +1,4 @@
-import type { AgentEvent } from "@code-review-agent/contracts";
+import type { AgentEvent } from "@coding-agent/contracts";
 
 export type JobViewStatus = "running" | "completed" | "failed" | "cancelled" | "orphaned";
 export type TerminalViewStatus = "running" | "exited" | "closed" | "interrupted";

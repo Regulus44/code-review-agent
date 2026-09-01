@@ -1,4 +1,4 @@
-import type { ArtifactRef, ToolResultReplacementRecord, ToolResultReplacementReason } from "@code-review-agent/contracts";
+import type { ArtifactRef, ToolResultReplacementRecord, ToolResultReplacementReason } from "@coding-agent/contracts";
 import { createHash } from "node:crypto";
 
 export const DEFAULT_TOOL_RESULT_PERSIST_THRESHOLD_CHARS = 50_000;

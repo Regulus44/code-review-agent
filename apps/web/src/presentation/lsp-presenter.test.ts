@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { brand } from "@code-review-agent/contracts";
+import { brand } from "@coding-agent/contracts";
 import { presentLspTool } from "./lsp-presenter.js";
 import type { ToolCallView } from "../projection/conversation.js";
 

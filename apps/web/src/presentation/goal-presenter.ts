@@ -1,4 +1,4 @@
-import type { GoalProjection, GoalStatus } from "@code-review-agent/contracts";
+import type { GoalProjection, GoalStatus } from "@coding-agent/contracts";
 import { presentBoundedValue, type BoundedDisplayValue } from "./safe-value.js";
 
 export interface GoalCriterionView {

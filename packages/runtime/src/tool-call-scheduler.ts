@@ -1,4 +1,4 @@
-import type { ToolExecutionMode } from "@code-review-agent/contracts";
+import type { ToolExecutionMode } from "@coding-agent/contracts";
 
 /** Default maximum number of in-flight parallel-safe tool calls per step. */
 export const DEFAULT_MAX_PARALLEL_TOOL_CALLS = 10;
