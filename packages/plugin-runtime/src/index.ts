@@ -81,6 +81,7 @@ const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u;
 const MAX_MANIFEST_BYTES = 64 * 1024;
 const MAX_BUNDLE_FILES = 2048;
+const MAX_BUNDLE_BYTES = 16 * 1024 * 1024;
 
 export class PluginRuntime {
   private readonly options: PluginRuntimeOptions;
@@ -300,6 +301,7 @@ function safeRelative(root: string, relative: string): string {
 
 async function copyBundle(source: string, target: string): Promise<void> {
   let count = 0;
+  let bytes = 0;
   async function walk(current: string, relative: string): Promise<void> {
     const entries = await readdir(current, { withFileTypes: true });
     for (const entry of entries) {
@@ -308,7 +310,12 @@ async function copyBundle(source: string, target: string): Promise<void> {
       const src = path.join(current, entry.name);
       const dest = path.join(target, relative, entry.name);
       if (entry.isDirectory()) { await mkdir(dest, { recursive: true }); await walk(src, path.join(relative, entry.name)); }
-      else if (entry.isFile()) { await mkdir(path.dirname(dest), { recursive: true }); await cp(src, dest); }
+      else if (entry.isFile()) {
+        const fileInfo = await stat(src);
+        bytes += fileInfo.size;
+        if (bytes > MAX_BUNDLE_BYTES) throw new PluginRuntimeError("PLUGIN_BUNDLE_TOO_LARGE", "Plugin bundle exceeds byte limit");
+        await mkdir(path.dirname(dest), { recursive: true }); await cp(src, dest);
+      }
       else throw new PluginRuntimeError("PLUGIN_ENTRY_TYPE_UNSUPPORTED", "Plugin bundle contains an unsupported filesystem entry");
     }
   }
