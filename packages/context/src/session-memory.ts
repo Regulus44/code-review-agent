@@ -97,6 +97,7 @@ export interface SessionMemorySnapshotLike {
   readonly content: string;
   readonly lastSummarizedMessageId?: string;
   readonly updatedAt?: string;
+  readonly etag?: string;
 }
 
 export interface SessionMemoryExtractionResult {
@@ -179,15 +180,19 @@ export function markExtractionCancelled(state: SessionMemoryExtractionState): Se
 
 export class SessionMemoryExtractionScheduler {
   private readonly tails = new Map<string, Promise<void>>();
-  private readonly controllers = new Map<string, AbortController>();
+  private readonly controllers = new Map<string, Set<AbortController>>();
 
   enqueue<T>(sessionId: string, task: (signal: AbortSignal) => Promise<T>): Promise<T> {
     const controller = new AbortController();
-    this.controllers.set(sessionId, controller);
+    const controllers = this.controllers.get(sessionId) ?? new Set<AbortController>();
+    controllers.add(controller);
+    this.controllers.set(sessionId, controllers);
     const previous = this.tails.get(sessionId) ?? Promise.resolve();
     const run = previous.catch(() => undefined).then(() => task(controller.signal));
     const settled = run.then(() => undefined, () => undefined).finally(() => {
-      if (this.controllers.get(sessionId) === controller) this.controllers.delete(sessionId);
+      const current = this.controllers.get(sessionId);
+      current?.delete(controller);
+      if (current !== undefined && current.size === 0) this.controllers.delete(sessionId);
       if (this.tails.get(sessionId) === settled) this.tails.delete(sessionId);
     });
     this.tails.set(sessionId, settled);
@@ -195,9 +200,9 @@ export class SessionMemoryExtractionScheduler {
   }
 
   cancel(sessionId: string, reason = "Session memory extraction cancelled"): boolean {
-    const controller = this.controllers.get(sessionId);
-    if (controller === undefined) return false;
-    controller.abort(new Error(reason));
+    const controllers = this.controllers.get(sessionId);
+    if (controllers === undefined || controllers.size === 0) return false;
+    for (const controller of controllers) controller.abort(new Error(reason));
     return true;
   }
 

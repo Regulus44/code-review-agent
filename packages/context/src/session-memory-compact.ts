@@ -6,6 +6,8 @@ export interface SessionMemorySnapshot {
   /** Durable message identity last covered by the memory summary. */
   readonly lastSummarizedMessageId?: string;
   readonly updatedAt?: string;
+  /** Integrity receipt for file-backed adapters; ignored by compaction. */
+  readonly etag?: string;
 }
 
 /** Host-owned durable source for session memory. The optional save operation is

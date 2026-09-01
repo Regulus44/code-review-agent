@@ -318,6 +318,20 @@ M14 不追加虚假的 `context/collapse_*` 事件，不改变 EventStore transc
 
 回滚策略：停止返回 `ContextSettings.collapse` 并移除 Web Settings capability 行即可；保留可选客户端字段和既有 compact/boundary/recovery 事件，模型请求、权限、transcript 和恢复不受影响。
 
+## ADR-027：M1 默认 Session Memory 使用 host-owned bounded Markdown adapter
+
+状态：accepted（2026-09-01，M1）
+
+M1 在不改变 EventStore 事实源的前提下，为 SQLite API Host 默认装配 `FileSessionMemoryStore` 和无模型受限 fallback extractor。Session Memory 正文存放在数据库同级的 `session-memory/<db-path-hash>/` 目录，显式 `sessionMemoryRootDir` 可用于测试或部署隔离；不同数据库路径使用独立 hash 目录，避免跨数据库串读。自定义 InMemory/其他 EventStore 只有显式提供 root 或 adapter 时才启用默认文件存储。
+
+文件采用版本化 frontmatter（version、etag、lastSummarizedMessageId、updatedAt）加 Markdown 正文。adapter 对 session id、root/target symlink、常规文件类型、字符/UTF-8 字节上限执行 fail-closed 校验；写入使用受限临时文件、`fsync` 和同目录 `rename`，同一 session 的并发写按 host 内串行化并对相同 etag 幂等收敛。读取损坏、etag 不匹配、半写残留或权限错误只生成 bounded extraction/compact failure receipt，不阻塞主 turn，也不把正文写入 EventStore、SSE 或 projection。
+
+默认 extractor 仅从 user/assistant transcript 生成 bounded Markdown，能力声明固定为不可使用父工具、workspace write 和 execute。部署可通过 `AgentHostOptions.sessionMemoryExtractor` 替换为隔离的模型 extractor；替换实现必须继续使用 exact-path write guard 和受限 capabilities。Host 重启沿用 ADR-023 的 running/queued receipt recovery：若文件的 lastSummarizedMessageId 已覆盖 source message，则追加幂等 completed receipt，否则重新排队 extraction。
+
+该决策参考 Claude Code `SessionMemory/sessionMemory.ts`、`sessionMemoryUtils.ts` 的门控、文件边界和精确写入行为，以及 DSH `core/session` 的 append-only receipt/replay 与 compaction lifecycle；本项目没有复制上游代码。Project Memory、Skill loader/tool/plugin 和远程同步不属于 M1。
+
+回滚策略：设置 `sessionMemoryEnabled=false` 或停止 API 默认注入即可回到 adapter-unavailable/legacy compact；已存在的 host-owned memory 文件保留，不删除，旧 M06/M11 metadata 事件继续按兼容扩展回放。
+
 ## 参考代码入口
 
 - DSH Agent Loop：`D:/Develop/deepseek-harness-fork/packages/core/agent-loop/src/agent.ts`

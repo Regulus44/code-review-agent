@@ -161,6 +161,36 @@ ID:
 
 适配方式：所有文案和实现均为本项目自有内容；不复制 Claude Code 代码、账户、遥测或商业服务。
 
+### CC-018
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`src/services/SessionMemory/sessionMemoryUtils.ts`、`src/services/SessionMemory/sessionMemory.ts`、`src/services/SessionMemory/prompts.ts`、`src/utils/permissions/filesystem.ts`。
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；本次未复制实现。
+
+本项目路径：`packages/context/src/session-memory-file.ts`、`packages/runtime/src/index.ts`、`apps/api/src/server.ts`。
+
+范围：Session Memory 的 token/tool/natural-break 门控、host-owned Markdown 边界、exact-path writer、后台隔离 extractor 和失败 fail-closed 语义；本项目使用自有 frontmatter/etag/atomic rename 实现。
+
+新增测试：`packages/context/src/session-memory-file.test.ts`、`packages/context/src/session-memory.test.ts`、`apps/api/src/server.test.ts` 覆盖 bound、原子写、重复写、symlink/path traversal、取消和默认 API 装配。
+
+### DSH-014
+
+来源仓库：`D:/Develop/deepseek-harness-fork`
+
+来源路径：`packages/core/session`、`packages/compaction/compaction-basic`、Session event/projection/replay tests。
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：`D:/Develop/deepseek-harness-fork/LICENSE` 为 MIT；本次未复制 DSH 运行时代码。
+
+本项目路径：`packages/runtime/src/index.ts`、`packages/context/src/session-memory-file.ts`、`packages/storage/src/index.ts`。
+
+范围：append-only metadata receipt、session-scoped recovery、compaction lifecycle 与原始 transcript/Memory 正文分离；实现继续使用本项目 EventStore、projection 和统一权限边界。
+
 ### DSH-007
 
 来源仓库：`D:/Develop/deepseek-harness-fork`

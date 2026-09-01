@@ -39,4 +39,25 @@ describe("session memory extraction gates", () => {
     await Promise.all([first, second]);
     expect(order).toEqual(["first-start", "first-end", "second"]);
   });
+
+  it("cancels all queued work for one session without affecting another", async () => {
+    const scheduler = new SessionMemoryExtractionScheduler();
+    const started: string[] = [];
+    const first = scheduler.enqueue("cancel-me", async (signal) => {
+      started.push("first");
+      if (signal.aborted) throw signal.reason;
+      await new Promise<void>((resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    }).catch(() => undefined);
+    const second = scheduler.enqueue("cancel-me", async (signal) => {
+      started.push(signal.aborted ? "second-aborted" : "second");
+    }).catch(() => undefined);
+    const other = scheduler.enqueue("keep-me", async () => { started.push("other"); });
+    expect(scheduler.cancel("cancel-me")).toBe(true);
+    await Promise.all([first, second, other]);
+    expect(started).toContain("first");
+    expect(started).toContain("other");
+    expect(started).toContain("second-aborted");
+  });
 });

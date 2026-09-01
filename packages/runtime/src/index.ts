@@ -3352,6 +3352,13 @@ export class AgentHost {
 }
 
 export { createInProcessSubagentProvider, type InProcessProviderOptions } from "./subagent-provider.js";
+export {
+  FileSessionMemoryStore,
+  createDefaultSessionMemoryExtractor,
+  DEFAULT_SESSION_MEMORY_FILE_MAX_BYTES,
+  DEFAULT_SESSION_MEMORY_FILE_MAX_CHARS,
+  SESSION_MEMORY_FILE_VERSION,
+} from "@coding-agent/context";
 export { RepeatToolReminder, type RepeatToolNotice, type RepeatToolReminderConfig } from "./repeat-tool-reminder.js";
 export {
   DEFAULT_MAX_PARALLEL_TOOL_CALLS,

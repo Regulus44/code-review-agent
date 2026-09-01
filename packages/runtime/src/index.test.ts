@@ -1781,6 +1781,69 @@ describe("AgentHost", () => {
     expect(events.some((event) => event.type === "agent/error")).toBe(false);
   });
 
+  it("cancels a running memory extraction without cancelling the completed turn", async () => {
+    const store = new InMemoryEventStore();
+    const host = new AgentHost({
+      store,
+      sessionMemory: { get: async () => undefined, save: async () => undefined },
+      sessionMemoryExtraction: { minimumMessageTokensToInit: 1, minimumTokensBetweenUpdate: 1 },
+      sessionMemoryExtractor: {
+        async extract(request) {
+          if (request.signal.aborted) throw request.signal.reason;
+          await new Promise<void>((resolve, reject) => {
+            request.signal.addEventListener("abort", () => reject(request.signal.reason), { once: true });
+          });
+          return { snapshot: { content: "unreachable" } };
+        },
+      },
+    });
+    const session = await host.createSession("D:/m11-cancel-fixture");
+    const turn = await host.sendMessage(session.id, "finish before cancelling memory");
+    await host.waitForTurn(turn);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await host.getSession(session.id))?.contextSessionMemory?.status === "running") break;
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    }
+    expect(host.cancelSessionMemoryExtraction(session.id)).toBe(true);
+    await host.waitForSessionMemoryExtraction(session.id);
+    const events = await host.events(session.id);
+    expect(events.find((event) => event.type === "turn/ended")?.payload["status"]).toBe("completed");
+    expect(events.some((event) => event.type === "context/session_memory_extraction_cancelled")).toBe(true);
+    expect((await host.getSession(session.id))?.contextSessionMemory?.status).toBe("cancelled");
+  });
+
+  it("replays a saved memory receipt after restart without invoking the extractor twice", async () => {
+    const store = new InMemoryEventStore();
+    const memory = { content: "durable receipt", lastSummarizedMessageId: "source-message", updatedAt: "2026-09-01T00:00:00.000Z" };
+    let extractorCalls = 0;
+    const adapter = { get: async () => memory, save: async () => undefined, memoryPath: async () => "D:/memory/restart.md" };
+    const first = new AgentHost({ store, sessionMemory: adapter, sessionMemoryExtractor: { async extract() { extractorCalls += 1; return { snapshot: memory }; } } });
+    const session = await first.createSession("D:/m11-restart-fixture");
+    await store.append({ sessionId: session.id, type: "user/message", payload: { content: "already summarized" } });
+    await store.append({
+      sessionId: session.id,
+      type: "context/session_memory_extraction_started",
+      payload: {
+        initialized: true,
+        sourceSequence: 2,
+        sourceMessageId: "source-message",
+        trigger: "threshold",
+        estimatedTokens: 10,
+        lastExtractedTokens: 0,
+        toolCallsSinceLastExtraction: 0,
+        extractorSessionId: "memory_restart",
+        startedAt: "2026-09-01T00:00:00.000Z",
+      },
+    });
+    const restarted = new AgentHost({ store, sessionMemory: adapter, sessionMemoryExtractor: { async extract() { extractorCalls += 1; return { snapshot: memory }; } } });
+    await restarted.getSession(session.id);
+    await restarted.waitForSessionMemoryExtraction(session.id);
+    const events = await restarted.events(session.id);
+    expect(extractorCalls).toBe(0);
+    expect(events.filter((event) => event.type === "context/session_memory_extraction_completed")).toHaveLength(1);
+    expect(events.find((event) => event.type === "context/session_memory_extraction_completed")?.payload["idempotentRecovery"]).toBe(true);
+  });
+
   it("loads bounded Project Memory, recalls relevant topics, and records metadata without正文", async () => {
     const store = new InMemoryEventStore();
     const requests: string[] = [];

@@ -13,6 +13,34 @@ import { SubagentRuntime } from "@coding-agent/subagent";
 import { createDelegationFixtureProvider, seedDelegationFixture } from "./fixtures/delegation.js";
 
 describe("Phase 2 API", () => {
+  it("wires the default SQLite-backed Session Memory adapter and extractor", async () => {
+    const root = mkdtempSync(join(tmpdir(), "coding-agent-m1-api-"));
+    const databasePath = join(root, "events.sqlite");
+    const memoryRoot = join(root, "memory");
+    const server = createApiServer({ databasePath, sessionMemoryRootDir: memoryRoot, sessionMemoryExtraction: { minimumMessageTokensToInit: 1, minimumTokensBetweenUpdate: 1, toolCallsBetweenUpdates: 1 } });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("M1 API did not bind");
+      const base = `http://127.0.0.1:${address.port}`;
+      const capability = await (await fetch(`${base}/v1/capabilities`)).json() as { context: { memory: { session: { status: string } } } };
+      expect(capability.context.memory.session.status).toBe("available");
+      const created = await fetch(`${base}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: "D:/m1-api" }) });
+      const session = await created.json() as { id: string };
+      await fetch(`${base}/v1/sessions/${session.id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: "remember this M1 goal" }) });
+      let projection: { contextSessionMemory?: { status: string } } | undefined;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        projection = await (await fetch(`${base}/v1/sessions/${session.id}`)).json() as typeof projection;
+        if (projection?.contextSessionMemory?.status === "completed") break;
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      }
+      expect(projection?.contextSessionMemory?.status).toBe("completed");
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("forwards Memory adapters and exposes explicit unavailable/available capability states", async () => {
     const unavailable = createApiServer({ store: new InMemoryEventStore() });
     await new Promise<void>((resolve) => unavailable.listen(0, "127.0.0.1", resolve));

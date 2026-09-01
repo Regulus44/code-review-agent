@@ -44,6 +44,13 @@ export {
   SessionMemoryExtractionScheduler,
   DEFAULT_SESSION_MEMORY_EXTRACTION_CONFIG,
 } from "./session-memory.js";
+export {
+  FileSessionMemoryStore,
+  createDefaultSessionMemoryExtractor,
+  DEFAULT_SESSION_MEMORY_FILE_MAX_BYTES,
+  DEFAULT_SESSION_MEMORY_FILE_MAX_CHARS,
+  SESSION_MEMORY_FILE_VERSION,
+} from "./session-memory-file.js";
 export { buildSummaryInput, ensureSummaryStartsWithUser } from "./summary-input.js";
 export { compactWithSummaryModel, truncateHeadForPtlRetry, DEFAULT_SUMMARY_COMPACT_CONFIG } from "./summary-compact.js";
 export {
