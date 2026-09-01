@@ -781,6 +781,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const projection = await host.getSession(targetSessionId);
         if (projection === undefined) throw new HttpError(404, "session not found");
         if (identity !== undefined && projection.ownership?.tenantId !== identity.tenantId) throw new HttpError(404, "session not found");
+      } else if (identity !== undefined) {
+        throw new HttpError(400, "session_id is required for tenant-scoped skill catalog");
       }
       const rawPaths = url.searchParams.get("paths");
       const paths = rawPaths === null ? undefined : rawPaths.split(",").map((item) => item.trim()).filter(Boolean).slice(0, 64);

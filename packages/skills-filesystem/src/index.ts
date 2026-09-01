@@ -183,13 +183,15 @@ function parseSkillMarkdown(text: string, maxDescriptionBytes: number): Parsed |
   if (name === undefined || description === undefined || name === "" || description === "" || Buffer.byteLength(description, "utf8") > maxDescriptionBytes) return undefined;
   const bool = (a: string, b: string, fallback: boolean): boolean => { const raw = values.get(a) ?? values.get(b); return raw === undefined ? fallback : raw !== "false"; };
   const toolsRaw = values.get("allowed-tools") ?? values.get("allowedTools");
-  const allowedTools = toolsRaw === undefined ? undefined : toolsRaw.split(/[,\s]+/u).map((v) => v.trim()).filter(Boolean);
+  const allowedTools = toolsRaw === undefined ? undefined : parseList(toolsRaw);
   const whenToUse = values.get("when_to_use") ?? values.get("whenToUse");
   const pathsRaw = values.get("paths");
-  const paths = pathsRaw === undefined ? undefined : pathsRaw.split(/[;,\s]+/u).map((value) => value.trim()).filter(Boolean);
+  const paths = pathsRaw === undefined ? undefined : parseList(pathsRaw);
   const disableModelInvocation = values.get("disable-model-invocation");
   return { name, description, ...(whenToUse === undefined ? {} : { whenToUse }), modelInvocable: disableModelInvocation === undefined ? bool("model_invocable", "modelInvocable", true) : disableModelInvocation === "false", userInvocable: values.get("user-invocable") === undefined ? bool("user_invocable", "userInvocable", true) : values.get("user-invocable") !== "false", ...(allowedTools === undefined ? {} : { allowedTools }), ...(paths === undefined ? {} : { paths }), unknown, body: text.slice(match[0].length) };
 }
+
+function parseList(value: string): readonly string[] { return value.replace(/^\[/u, "").replace(/\]$/u, "").split(/[;,\s]+/u).map((item) => stripYaml(item.trim())).filter(Boolean); }
 
 function isConditionallyActive(candidate: SkillCandidate, paths: readonly string[] | undefined): boolean {
   const rules = Array.isArray(candidate.metadata?.paths) ? candidate.metadata.paths.filter((item): item is string => typeof item === "string" && item.trim() !== "") : [];

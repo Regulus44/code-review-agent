@@ -368,8 +368,11 @@ export class AgentHost {
       return relative === "" || relative.startsWith("..") || path.isAbsolute(relative) ? "" : relative.slice(0, 512);
     }).filter(Boolean))].sort().slice(0, 32);
     if (bounded.length === 0) return;
-    const key = `${String(context.sessionId)}:${bounded.join("|")}`;
     const now = Date.now();
+    for (const [seenKey, seenAt] of this.skillInvalidationSeen) {
+      if (now - seenAt >= 30_000) this.skillInvalidationSeen.delete(seenKey);
+    }
+    const key = `${String(context.sessionId)}:${root}:${bounded.join("|")}`;
     const previous = this.skillInvalidationSeen.get(key);
     if (previous !== undefined && now - previous < 250) return;
     this.skillInvalidationSeen.set(key, now);
@@ -3621,16 +3624,6 @@ function sessionIdFrom(value: string): SessionId {
 
 function turnIdFrom(value: string): TurnId {
   return brand<string, "TurnId">(value);
-}
-
-function recentSkillChangedPaths(history: readonly AgentEvent[]): readonly string[] {
-  const paths: string[] = [];
-  for (const event of history) {
-    if (event.type !== "skills/change" || typeof event.payload !== "object" || event.payload === null) continue;
-    const raw = (event.payload as Record<string, unknown>).paths;
-    if (Array.isArray(raw)) for (const value of raw) if (typeof value === "string") paths.push(value);
-  }
-  return [...new Set(paths)].slice(-64);
 }
 
 function recentSkillChangedPathsFromProjection(projection: SessionProjection): readonly string[] {
