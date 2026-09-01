@@ -298,11 +298,15 @@ M1 实际结果：`packages/context/src/session-memory-file.ts` 提供 frontmatt
 
 ### M2：Project Memory filesystem 与 writer policy
 
+状态：`implemented`（2026-09-01，checkpoint 待提交）
+
 - **范围**：scope → memory directory、`MEMORY.md`/topic 文件、frontmatter taxonomy、safe link、atomic write、stale validator。
 - **入口**：`packages/context/src/project-memory.ts`（必要时拆分 `project-memory-fs.ts`）、`packages/runtime/src/index.ts:projectMemoryContext()`、`apps/api/src/server.ts`。
 - **参照**：CC `memdir/paths.ts`、`memoryScan.ts`、`findRelevantMemories.ts`；DSH `skill-filesystem` 的 git-root/cwd/provider 解析。
 - **验收**：不同 tenant/workspace/worktree 隔离；200 行/25KB bound；超限 warning；broken link/stale topic；无权限或读取失败 fail closed；旧 adapter 数据可迁移且可回滚。
 - **禁用/回滚**：配置 `projectMemory.enabled=false` 时不读写文件；scope key 迁移失败时继续使用旧 adapter，不清理原数据。
+
+M2 实际结果：新增 `FileProjectMemoryStore` 与 `ProjectMemoryWriterPolicy`。SQLite API Host 默认将其装配到数据库同级 `project-memory/<db-hash>/`（可通过 `projectMemoryRootDir` 覆盖），每个 Host 派生的 scopeKey 独立目录；`MEMORY.md` 与 `topics/<id>.md` 使用受限 frontmatter、四类 taxonomy、bounded 内容和 references。扫描对 malformed/incomplete、symlink、路径穿越和超限文件 fail closed/跳过；写入使用受限临时文件、`fsync` 和 rename，并在 Windows 已存在目标时受控替换。Project Memory 正文仍只存在 host-owned filesystem，EventStore/SSE/projection 仅保留既有 bounded metadata。`projectMemoryEnabled=false` 可关闭默认装配并保留文件；旧自定义 adapter 仍可显式注入。
 
 ### M3：Memory 召回、观测和 Web
 

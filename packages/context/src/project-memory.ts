@@ -45,6 +45,18 @@ export interface ProjectMemoryStore {
   readonly getEntrypoint: (scope: ProjectMemoryScope) => Promise<ProjectMemoryEntrypoint | undefined>;
   readonly listTopics: (scope: ProjectMemoryScope) => Promise<readonly ProjectMemoryTopicHeader[]>;
   readonly readTopic: (scope: ProjectMemoryScope, topicId: string) => Promise<ProjectMemoryTopic | undefined>;
+  /** Optional host-owned writer. Memory正文 remains outside EventStore. */
+  readonly writeEntrypoint?: (scope: ProjectMemoryScope, content: string) => Promise<void>;
+  readonly writeTopic?: (scope: ProjectMemoryScope, topic: ProjectMemoryTopicInput) => Promise<ProjectMemoryTopic>;
+}
+
+export interface ProjectMemoryTopicInput {
+  readonly id?: string;
+  readonly title: string;
+  readonly description?: string;
+  readonly type?: ProjectMemoryType;
+  readonly content: string;
+  readonly references?: readonly ProjectMemoryReference[];
 }
 
 export interface ProjectMemoryEntrypointResult {

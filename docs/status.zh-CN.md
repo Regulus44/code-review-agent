@@ -28,7 +28,7 @@
 - 工具与权限：文件、搜索、Patch、Git 只读、命令、Terminal、Job、Plan/Todo、AskUser，以及统一审批、审计和输出预算。
 - MCP：stdio、SSE/HTTP、Streamable HTTP、tools/resources/prompts discovery、重连和权限桥接。
 - 内部 Multi-Agent：parent/child Task 与 Session、one-shot/continuable child、report、artifact、取消、恢复、scoped replay 和权限/工具/MCP scope。
-- 上下文与可靠性：tool-result artifact、microcompact、summary compact、session/project memory 契约与 compact/replay 基础、context recovery、worktree、LSP 基础能力和后台 Job；Memory adapter readiness 已通过 M0 接入 Host/API 能力投影，M1 已为默认 SQLite API Host 装配 bounded `FileSessionMemoryStore` 与无模型受限 fallback extractor。
+- 上下文与可靠性：tool-result artifact、microcompact、summary compact、session/project memory 契约与 compact/replay 基础、context recovery、worktree、LSP 基础能力和后台 Job；Memory adapter readiness 已通过 M0 接入 Host/API 能力投影，M1 已为默认 SQLite API Host 装配 bounded `FileSessionMemoryStore` 与无模型受限 fallback extractor，M2 已增加默认 `FileProjectMemoryStore`、topic frontmatter、writer policy、stale references 和原子写。
 - Web：三栏工作台、Conversation、Trajectory、Permission、Interaction、Task/Subagent、MCP、Settings 和恢复回放。
 - 部分产品化：JWT/principal、tenant session、provider/model routing、credential metadata、SQLite backup/restore 和诊断指标。
 
@@ -42,7 +42,7 @@
 4. 仓库尚无独立的 Code Review findings、baseline、inline comment、SARIF 导出和 Git provider review contract。
 5. Git 当前以 status/diff/log/show 和 worktree 为主，branch/commit/PR 的结构化交付闭环尚未完成。
 6. RBAC、资源级 ACL、细粒度 quota、跨进程 Subagent、A2A 和完整插件运行时尚未落地。
-7. M1 的默认 Session Memory 使用 host-owned Markdown 文件，默认位于 SQLite 数据库同级、按数据库绝对路径哈希隔离的 `session-memory/<db-hash>/` 目录（可通过 `sessionMemoryRootDir` 覆盖）；文件内容有 frontmatter、etag、大小上限和原子写保护，正文仍不进入 EventStore/SSE。`sessionMemoryEnabled=false` 可关闭自动读写并保留文件，恢复/损坏/写入失败均 fail closed。Project Memory 默认 adapter、Skill loader/tool/plugin runtime 仍未落地。
+7. M1 的默认 Session Memory 使用 host-owned Markdown 文件，默认位于 SQLite 数据库同级、按数据库绝对路径哈希隔离的 `session-memory/<db-hash>/` 目录（可通过 `sessionMemoryRootDir` 覆盖）；M2 的默认 Project Memory 使用同级 `project-memory/<db-hash>/<scopeKey>/`，支持 bounded `MEMORY.md`、topic frontmatter/references、显式 writer policy、原子写和 stale 校验。两类正文均不进入 EventStore/SSE；`sessionMemoryEnabled=false` 或 `projectMemoryEnabled=false` 可关闭并保留文件，恢复/损坏/写入失败均 fail closed。Memory API/Web 管理面、Skill loader/tool/plugin runtime 仍未落地。
 
 ## 推荐优先级
 

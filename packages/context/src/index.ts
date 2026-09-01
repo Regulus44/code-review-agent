@@ -83,6 +83,7 @@ export {
   PROJECT_MEMORY_MAX_RECALLED_TOPICS,
   PROJECT_MEMORY_TYPES,
 } from "./project-memory.js";
+export { FileProjectMemoryStore, ProjectMemoryWriterPolicy, DEFAULT_PROJECT_MEMORY_MAX_TOPIC_BYTES, DEFAULT_PROJECT_MEMORY_MAX_TOPICS, PROJECT_MEMORY_FILE_VERSION } from "./project-memory-fs.js";
 export {
   classifyProviderContextError,
   fingerprintModelRequest,
@@ -202,6 +203,7 @@ export type {
   ProjectMemoryTopic,
   ProjectMemoryTopicHeader,
   ProjectMemoryType,
+  ProjectMemoryTopicInput,
   ProjectMemoryValidation,
 } from "./project-memory.js";
 

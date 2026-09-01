@@ -3358,6 +3358,11 @@ export {
   DEFAULT_SESSION_MEMORY_FILE_MAX_BYTES,
   DEFAULT_SESSION_MEMORY_FILE_MAX_CHARS,
   SESSION_MEMORY_FILE_VERSION,
+  FileProjectMemoryStore,
+  ProjectMemoryWriterPolicy,
+  DEFAULT_PROJECT_MEMORY_MAX_TOPIC_BYTES,
+  DEFAULT_PROJECT_MEMORY_MAX_TOPICS,
+  PROJECT_MEMORY_FILE_VERSION,
 } from "@coding-agent/context";
 export { RepeatToolReminder, type RepeatToolNotice, type RepeatToolReminderConfig } from "./repeat-tool-reminder.js";
 export {

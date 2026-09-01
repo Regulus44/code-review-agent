@@ -332,6 +332,18 @@ M1 在不改变 EventStore 事实源的前提下，为 SQLite API Host 默认装
 
 回滚策略：设置 `sessionMemoryEnabled=false` 或停止 API 默认注入即可回到 adapter-unavailable/legacy compact；已存在的 host-owned memory 文件保留，不删除，旧 M06/M11 metadata 事件继续按兼容扩展回放。
 
+## ADR-028：M2 Project Memory 使用 scope 隔离的 filesystem adapter 与显式 writer policy
+
+状态：accepted（2026-09-01，M2）
+
+M2 为 SQLite API Host 默认装配 `FileProjectMemoryStore`，目录位于数据库同级 `project-memory/<db-path-hash>/<scopeKey>/`；显式 `projectMemoryRootDir` 可覆盖部署路径。scope key 只能由 Host 派生，必须满足受限字符集并作为目录边界，tenant、workspace 和 worktree 的隔离责任仍由 scope 派生策略承担。adapter 不跟随 root、scope、MEMORY.md 或 topic 的 symlink，路径穿越、常规文件类型错误、读取权限错误和损坏 frontmatter 均 fail closed。
+
+入口 `MEMORY.md` 继续使用 200 行/25,000 UTF-8 bytes bounded 规则；topic 文件位于 `topics/<id>.md`，采用 version/name/description/type/references/updatedAt frontmatter，taxonomy 固定为 user、feedback、project、reference。扫描只计入有效 topic，malformed/incomplete 文件跳过并保留 last-good 结果；引用在读取时恢复并交给 host stale validator。写入必须经过 `ProjectMemoryWriterPolicy`，限制内容大小、类型和入口写入开关；使用受限临时文件、`fsync` 和同目录 rename，Windows 已存在目标时执行受控替换。正文只存在 host-owned filesystem，不写入 EventStore、SSE 或 projection。
+
+该决策参考 Claude Code `memdir/paths.ts`、`memoryScan.ts`、`findRelevantMemories.ts` 的目录、bounded scan、topic taxonomy 和 stale 行为，以及 DSH `skill-filesystem` 的 cwd/git-root/provider 边界；本项目仅复现行为并重新实现，不复制上游代码。
+
+回滚策略：设置 `projectMemoryEnabled=false` 或停止 API 默认装配即可回到 adapter-unavailable/旧自定义 adapter；已有 Project Memory 文件保留，不清理、不迁移覆盖。
+
 ## 参考代码入口
 
 - DSH Agent Loop：`D:/Develop/deepseek-harness-fork/packages/core/agent-loop/src/agent.ts`

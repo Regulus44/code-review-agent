@@ -556,3 +556,31 @@ ID:
 改写部分：artifact 使用 workspace-relative 路径和 WorkspaceResolver；完整结果继续保留在 EventStore；凭据脱敏、tenant/session 边界、permission 和事件 projection 使用本项目实现；provider-specific cached microcompact 仍 deferred。
 
 新增测试：`packages/context/src/tool-result-storage.test.ts`、`tool-result-budget.test.ts`、`packages/runtime/src/index.test.ts` 和 `apps/api/src/artifacts.test.ts` 的阈值、聚合、时间触发、replacement、恢复和安全场景。
+
+### CC-019
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`src/memdir/paths.ts`、`src/memdir/memoryScan.ts`、`src/memdir/findRelevantMemories.ts`、`src/memdir/memoryTypes.ts`
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；没有复制 Claude Code 源码，仅重新实现 Project Memory 目录、bounded scan、topic taxonomy 和 stale 引用行为。
+
+本项目路径：`packages/context/src/project-memory-fs.ts`、`packages/context/src/project-memory.ts`、`packages/runtime/src/index.ts`、`apps/api/src/server.ts`。
+
+范围：scopeKey 目录隔离、`MEMORY.md`/`topics/*.md`、200 行/25KB 入口 bound、frontmatter taxonomy、safe links、writer policy、atomic write 和 fail-closed scan。
+
+### DSH-015
+
+来源仓库：`D:/Develop/deepseek-harness-fork`
+
+来源路径：`packages/skill/skill-filesystem/src/index.ts` 及 cwd/git-root/provider 解析相关测试。
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：`D:/Develop/deepseek-harness-fork/LICENSE` 为 MIT；本项目未复制 DSH provider 或 loader 类型。
+
+本项目路径：`packages/context/src/project-memory-fs.ts`、`apps/api/src/server.ts`。
+
+范围：host-owned root、workspace/tenant scope 边界、只读扫描失败保留 last-good、显式 writer policy；不引入 DSH Skill registry 或 Cordis runtime。

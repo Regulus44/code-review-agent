@@ -17,14 +17,16 @@ describe("Phase 2 API", () => {
     const root = mkdtempSync(join(tmpdir(), "coding-agent-m1-api-"));
     const databasePath = join(root, "events.sqlite");
     const memoryRoot = join(root, "memory");
-    const server = createApiServer({ databasePath, sessionMemoryRootDir: memoryRoot, sessionMemoryExtraction: { minimumMessageTokensToInit: 1, minimumTokensBetweenUpdate: 1, toolCallsBetweenUpdates: 1 } });
+    const projectMemoryRoot = join(root, "project-memory");
+    const server = createApiServer({ databasePath, sessionMemoryRootDir: memoryRoot, projectMemoryRootDir: projectMemoryRoot, sessionMemoryExtraction: { minimumMessageTokensToInit: 1, minimumTokensBetweenUpdate: 1, toolCallsBetweenUpdates: 1 } });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     try {
       const address = server.address();
       if (address === null || typeof address === "string") throw new Error("M1 API did not bind");
       const base = `http://127.0.0.1:${address.port}`;
-      const capability = await (await fetch(`${base}/v1/capabilities`)).json() as { context: { memory: { session: { status: string } } } };
+      const capability = await (await fetch(`${base}/v1/capabilities`)).json() as { context: { memory: { session: { status: string }; project: { status: string } } } };
       expect(capability.context.memory.session.status).toBe("available");
+      expect(capability.context.memory.project.status).toBe("available");
       const created = await fetch(`${base}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: "D:/m1-api" }) });
       const session = await created.json() as { id: string };
       await fetch(`${base}/v1/sessions/${session.id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: "remember this M1 goal" }) });
