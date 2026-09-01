@@ -30,7 +30,7 @@ export function renderSkillCatalog(snapshot: SkillCatalogSnapshot, budget: Skill
 }
 
 export function skillCatalogDigest(snapshot: Pick<SkillCatalogSnapshot, "revision" | "complete" | "skills">): string {
-  const value = JSON.stringify({ revision: snapshot.revision, complete: snapshot.complete, skills: [...snapshot.skills].sort((a, b) => a.name.localeCompare(b.name)) });
+  const value = JSON.stringify({ revision: snapshot.revision, complete: snapshot.complete, skills: snapshot.skills.filter((skill) => skill.invocation.modelInvocable).sort((a, b) => a.name.localeCompare(b.name)) });
   let hash = 2166136261;
   for (let i = 0; i < value.length; i += 1) { hash ^= value.charCodeAt(i); hash = Math.imul(hash, 16777619); }
   return `skillcat_${(hash >>> 0).toString(16).padStart(8, "0")}`;
