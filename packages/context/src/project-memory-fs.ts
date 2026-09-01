@@ -6,6 +6,7 @@ import type {
   ProjectMemoryScope,
   ProjectMemoryStore,
   ProjectMemoryTopic,
+  ProjectMemoryTopicHeader,
   ProjectMemoryTopicInput,
   ProjectMemoryType,
 } from "./project-memory.js";
