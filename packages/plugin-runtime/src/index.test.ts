@@ -43,6 +43,9 @@ describe("plugin runtime", () => {
     await updater.installBundle(root);
     await updater.installBundle(updatedRoot);
     expect(changes).toContain("updated");
+    const failingRoot = await bundle({ schemaVersion: 1, name: "demo-plugin", version: "2.0.0", entry: "./index.mjs" }, "export function activate() { throw new Error('broken update') }");
+    const rollback = await updater.installBundle(failingRoot);
+    expect(rollback).toMatchObject({ version: "1.1.0", status: "active" });
   });
 
   it("keeps failed activation bounded and rejects pin mismatch", async () => {

@@ -141,7 +141,14 @@ export class PluginRuntime {
     if (previous !== undefined) await this.deactivate(previous);
     const record: InstalledRecord = { manifest, sourcePath: source, installPath: target, enabled, status: enabled && this.options.enabled ? "installed" : "disabled", errorCode: undefined, dispose: undefined, ownedTools: [], ownedPrompts: [], unregisterSkills: [] };
     this.records.set(manifest.name, record);
-    if (record.enabled && this.options.enabled) await this.activate(record);
+    if (record.enabled && this.options.enabled) {
+      const activated = await this.activate(record);
+      if (!activated && previous !== undefined && previous.enabled) {
+        this.records.set(manifest.name, previous);
+        await this.activate(previous);
+        return publicEntry(previous, this.pins);
+      }
+    }
     return publicEntry(record, this.pins);
   }
 
@@ -185,8 +192,8 @@ export class PluginRuntime {
     return publicEntry(record, this.pins);
   }
 
-  private async activate(record: InstalledRecord): Promise<void> {
-    if (record.status === "active") return;
+  private async activate(record: InstalledRecord): Promise<boolean> {
+    if (record.status === "active") return true;
     try {
       const modulePath = record.manifest.entry === undefined ? undefined : safeRelative(record.installPath, record.manifest.entry);
       const loaded = modulePath === undefined ? undefined : await import(pathToFileURL(modulePath).href + "?pluginVersion=" + encodeURIComponent(record.manifest.version));
@@ -229,11 +236,13 @@ export class PluginRuntime {
       record.status = "active";
       record.errorCode = undefined;
       this.emit({ type: "activated", name: record.manifest.name, version: record.manifest.version, revision: ++this.revision });
+      return true;
     } catch (error) {
       await this.deactivate(record);
       record.status = "failed";
       record.errorCode = codeOf(error);
       this.emit({ type: "failed", name: record.manifest.name, version: record.manifest.version, errorCode: record.errorCode, revision: ++this.revision });
+      return false;
     }
   }
 
