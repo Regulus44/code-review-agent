@@ -26,6 +26,7 @@ import { presentTodoPanel } from "./presentation/todo-presenter.js";
 import { presentQuestionBatch } from "./presentation/question-presenter.js";
 import { presentContextDiagnostics, presentContextMeter } from "./presentation/context-presenter.js";
 import { presentMemoryInspector } from "./presentation/memory-presenter.js";
+import { presentSkillCatalog } from "./presentation/skill-presenter.js";
 import { presentWorktrees } from "./presentation/worktree-presenter.js";
 import { presentLspTool } from "./presentation/lsp-presenter.js";
 import { presentComposerSubmit } from "./presentation/composer-presenter.js";
@@ -92,6 +93,7 @@ export interface BrowserWebRuntime {
   readonly presentContextMeter: typeof presentContextMeter;
   readonly presentContextDiagnostics: typeof presentContextDiagnostics;
   readonly presentMemoryInspector: typeof presentMemoryInspector;
+  readonly presentSkillCatalog: typeof presentSkillCatalog;
   readonly presentWorktrees: typeof presentWorktrees;
   readonly presentLspTool: typeof presentLspTool;
   readonly presentComposerSubmit: typeof presentComposerSubmit;
@@ -175,6 +177,7 @@ const runtime: BrowserWebRuntime = {
   presentContextMeter,
   presentContextDiagnostics,
   presentMemoryInspector,
+  presentSkillCatalog,
   presentWorktrees,
   presentLspTool,
   presentComposerSubmit,

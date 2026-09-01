@@ -27,6 +27,7 @@ import type {
   ProviderProfileRecord,
   MemoryCapability,
   MemoryInspectionResponse,
+  SkillCatalogSnapshot,
 } from "@coding-agent/contracts";
 
 export interface ToolCatalogEntry {
@@ -548,6 +549,14 @@ export class WebApiClient {
   /** Read bounded Memory readiness/projection metadata; the response never contains Memory正文. */
   inspectMemory(sessionId: SessionId): Promise<MemoryInspectionResponse> {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/memory`);
+  }
+
+  listSkills(sessionId?: SessionId, paths?: readonly string[]): Promise<SkillCatalogSnapshot> {
+    const query = new URLSearchParams();
+    if (sessionId !== undefined) query.set("session_id", sessionId);
+    if (paths !== undefined && paths.length > 0) query.set("paths", paths.join(","));
+    const suffix = query.toString() === "" ? "" : `?${query.toString()}`;
+    return this.request(`/v1/skills${suffix}`);
   }
 
   uploadAttachment(sessionId: SessionId, input: { readonly fileName: string; readonly mediaType: string; readonly data: string }, commandId?: string): Promise<AttachmentReceipt> {

@@ -42,4 +42,11 @@ describe("SkillRegistry", () => {
     expect(assessSkillPermission({ trust: "remote", allowedTools: ["run_command"] })).toMatchObject({ decision: "ask", reason: "untrusted-source" });
     expect(assessSkillPermission({ trust: "local", unknownProperties: ["shell"] })).toMatchObject({ decision: "ask", reason: "unknown-properties" });
   });
+
+  it("supports explicit invalidation without exposing provider errors", () => {
+    const registry = new SkillRegistry(); const events: unknown[] = [];
+    registry.subscribe((event) => events.push(event));
+    registry.invalidate("filesystem", "project");
+    expect(events).toEqual([{ version: 1, revision: 1, reason: "provider-invalidated", provider: "filesystem", scope: "project" }]);
+  });
 });

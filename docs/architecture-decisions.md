@@ -397,3 +397,11 @@ API Host 默认装配 filesystem provider，但 `modelToolExposed` 仍为 false�
 S2 增加确定性 bounded Skill catalog（digest/预算/摘要优先）与按需正文加载；正文通过 canonical renderer 生成仅当前 ToolResult model view 可见的内容，`tool/result` 与专用 skill 事件只保存名称、模式和字节数等元数据。SkillTool 支持 inline 与 fork 标记、用户 `/name` 显式入口，并复用 ToolRuntime 的 workspace、取消、交互和事件管线。remote/unknown source 或未知 frontmatter 属性进入用户交互审批，capability disabled 时不注册工具；`allowedTools` 不扩大宿主权限。
 
 回滚策略：关闭 `skillToolEnabled` 或 skill capability 即停止模型 catalog/tool；保留已写事件并由通用 reducer 忽略正文缺失，用户可继续使用 S1 只读 catalog。
+
+## ADR-033：S3 Skill 动态失效与只读目录观察面
+
+状态：accepted（2026-09-01，S3）
+
+S3 将文件工具成功变更映射为 registry invalidation 与 bounded `skills/change` 事件；事件仅保存去重后的 workspace-relative 路径元数据，不保存 Skill 正文、绝对路径或异常文本。filesystem provider 支持 `paths` frontmatter 的最小 glob 条件激活，并保留手动/turn-boundary refresh 与 last-good/incomplete 行为。API `GET /v1/skills` 与 Web presenter 只读 catalog 摘要、完成度、revision 和有限 suggestions，必须沿用 session tenant/workspace 访问边界。
+
+动态 watcher 默认关闭；关闭 S3 hook 或 `skillFilesystem.enabled=false` 即可回滚到 S2。模型 SkillTool gate、权限、workspace、取消和审计管线保持不变。

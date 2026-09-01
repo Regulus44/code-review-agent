@@ -42,7 +42,7 @@
 4. 仓库尚无独立的 Code Review findings、baseline、inline comment、SARIF 导出和 Git provider review contract。
 5. Git 当前以 status/diff/log/show 和 worktree 为主，branch/commit/PR 的结构化交付闭环尚未完成。
 6. RBAC、资源级 ACL、细粒度 quota、跨进程 Subagent、A2A 和完整插件运行时尚未落地。
-7. M1 的默认 Session Memory 使用 host-owned Markdown 文件，默认位于 SQLite 数据库同级、按数据库绝对路径哈希隔离的 `session-memory/<db-hash>/` 目录（可通过 `sessionMemoryRootDir` 覆盖）；M2/M3 的默认 Project Memory 使用同级 `project-memory/<db-hash>/<scopeKey>/`，支持 bounded `MEMORY.md`、topic frontmatter/references、显式 writer policy、原子写、stale 校验、manifest/词法召回和 last-good/incomplete scan；新增只读 `GET /v1/sessions/:id/memory` 与 Web Memory inspector。两类正文均不进入 EventStore/SSE；`sessionMemoryEnabled=false` 或 `projectMemoryEnabled=false` 可关闭并保留文件，恢复/损坏/写入失败均 fail closed。Memory 正文编辑 API、model-backed extractor、SkillTool、catalog 和 plugin runtime 仍未落地。S0 的 Skill contract/registry 与 S1 的本地 SKILL.md loader/provider 已落地；S1 可通过 `skillFilesystem.enabled=false` 回滚，watcher 默认关闭。
+7. M1 的默认 Session Memory 使用 host-owned Markdown 文件，默认位于 SQLite 数据库同级、按数据库绝对路径哈希隔离的 `session-memory/<db-hash>/` 目录（可通过 `sessionMemoryRootDir` 覆盖）；M2/M3 的默认 Project Memory 使用同级 `project-memory/<db-hash>/<scopeKey>/`，支持 bounded `MEMORY.md`、topic frontmatter/references、显式 writer policy、原子写、stale 校验、manifest/词法召回和 last-good/incomplete scan；新增只读 `GET /v1/sessions/:id/memory` 与 Web Memory inspector。两类正文均不进入 EventStore/SSE；`sessionMemoryEnabled=false` 或 `projectMemoryEnabled=false` 可关闭并保留文件，恢复/损坏/写入失败均 fail closed。Memory 正文编辑 API、model-backed extractor 和 plugin runtime 仍未落地。S0–S3 的 Skill contract/registry、SKILL.md loader、catalog/SkillTool、动态失效、paths 条件激活与 `/v1/skills` 只读面已落地；S3 watcher 默认关闭，`skillFilesystem.enabled=false` 可回滚。
 
 ## 推荐优先级
 

@@ -774,6 +774,22 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       sendJson(response, 200, { tools: host.listTools(undefined, tenantIdentity?.tenantId) });
       return;
     }
+    if (request.method === "GET" && url.pathname === "/v1/skills") {
+      const rawSessionId = url.searchParams.get("session_id");
+      const targetSessionId = rawSessionId === null || rawSessionId.trim() === "" ? undefined : sessionId(rawSessionId);
+      if (targetSessionId !== undefined) {
+        const projection = await host.getSession(targetSessionId);
+        if (projection === undefined) throw new HttpError(404, "session not found");
+        if (identity !== undefined && projection.ownership?.tenantId !== identity.tenantId) throw new HttpError(404, "session not found");
+      }
+      const rawPaths = url.searchParams.get("paths");
+      const paths = rawPaths === null ? undefined : rawPaths.split(",").map((item) => item.trim()).filter(Boolean).slice(0, 64);
+      const catalog = await host.skillCatalog(targetSessionId, paths);
+      const query = (url.searchParams.get("q") ?? "").trim().toLocaleLowerCase();
+      const suggestions = query === "" ? catalog.skills.slice(0, 8) : catalog.skills.filter((skill) => `${skill.name} ${skill.description}`.toLocaleLowerCase().includes(query)).slice(0, 8);
+      sendJson(response, 200, { ...catalog, suggestions });
+      return;
+    }
     if (request.method === "GET" && url.pathname === "/v1/capabilities") {
         sendJson(response, 200, { attachments: currentAttachmentCapability(attachmentPolicy, modelRuntime, tenantIdentity?.tenantId), context: host.contextSettings(tenantIdentity?.tenantId), toolExecution: host.toolExecutionSettings(), codeMode: host.codeModeSettings(), lsp: host.lspSettings(), skills: host.skillSettings(), plugins: host.pluginsSettings(), productization: productizationCapability(host.productizationSettings(tenantIdentity?.tenantId), productization, principals, credentials) });
       return;

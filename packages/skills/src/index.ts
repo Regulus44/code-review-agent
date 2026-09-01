@@ -112,6 +112,12 @@ export class SkillRegistry {
     return () => this.listeners.delete(listener);
   }
 
+  /** Explicitly invalidate provider-backed catalogs after an external workspace mutation. */
+  invalidate(provider?: string, scope?: SkillScope): number {
+    this.change("provider-invalidated", provider, scope);
+    return this.revision;
+  }
+
   providerCount(scope?: SkillScope): number {
     return this.layers.get(scopeKey(scope))?.providers.size ?? 0;
   }

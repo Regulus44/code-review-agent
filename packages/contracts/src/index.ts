@@ -1423,6 +1423,8 @@ export type SkillRegistration = Omit<SkillDefinition, "provider" | "invocation" 
 /** Cwd and cancellation are passed through without making provider state durable. */
 export interface SkillLookupOptions {
   readonly cwd?: string;
+  /** Optional workspace-relative paths used for conditional `paths` activation. */
+  readonly paths?: readonly string[];
   readonly signal?: AbortSignal;
   readonly scope?: SkillScope;
   readonly scopeChain?: readonly SkillScope[];

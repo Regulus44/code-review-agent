@@ -320,7 +320,7 @@ export class TerminalManager {
   }
 }
 
-export function createBuiltinTools(options: { readonly terminalManager?: TerminalManager; readonly jobManager?: JobManager; readonly eventStore?: Pick<EventStore, "list" | "project">; readonly visionEnabled?: boolean; readonly lspServers?: Readonly<Record<string, LspServerConfig>>; readonly lspManager?: LspManager; readonly codeMode?: CodeModeSandbox; readonly capabilities?: CapabilityRegistry; readonly platform?: NodeJS.Platform; readonly modelOutputChars?: number; readonly fileObservationPolicy?: FileObservationPolicy } = {}): readonly ToolDefinition[] {
+export function createBuiltinTools(options: { readonly terminalManager?: TerminalManager; readonly jobManager?: JobManager; readonly eventStore?: Pick<EventStore, "list" | "project">; readonly visionEnabled?: boolean; readonly lspServers?: Readonly<Record<string, LspServerConfig>>; readonly lspManager?: LspManager; readonly codeMode?: CodeModeSandbox; readonly capabilities?: CapabilityRegistry; readonly platform?: NodeJS.Platform; readonly modelOutputChars?: number; readonly fileObservationPolicy?: FileObservationPolicy; readonly onWorkspaceMutation?: (context: ToolContext, paths: readonly string[]) => Promise<void> | void } = {}): readonly ToolDefinition[] {
   const modelOutputChars = normalizeModelOutputChars(options.modelOutputChars);
   const platform = options.platform ?? process.platform;
   const terminals = options.terminalManager ?? new TerminalManager({ modelOutputChars, platform });
@@ -344,7 +344,7 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
     },
     {
       name: "edit_file", description: "Apply one or more unique exact replacements with stale detection and a unified diff. Read the current file first; if a replacement is not found or is not unique, reread the file and use fresh unique context instead of repeating the same call.", inputSchema: object({ path: string, oldText: string, newText: string, expectedHash: string, edits: { type: "array" as const, maxItems: 50, items: object({ oldText: string, newText: string }, ["oldText", "newText"]) } }, ["path"]), executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "cancel",
-      execute: async (input, context) => editFile(context.sessionId, context.workspaceRoot, input as { path: string; oldText?: string; newText?: string; expectedHash?: string; edits?: readonly { oldText: string; newText: string }[] }, fileObservationPolicy),
+      execute: async (input, context) => { const result = await editFile(context.sessionId, context.workspaceRoot, input as { path: string; oldText?: string; newText?: string; expectedHash?: string; edits?: readonly { oldText: string; newText: string }[] }, fileObservationPolicy); if (result.ok) await options.onWorkspaceMutation?.(context, [(input as { path: string }).path]); return result; },
     },
     {
       name: "apply_patch", description: "Parse, preview, and apply a workspace-bound multi-file unified patch with stale-base and conflict checks.", inputSchema: object({ patch: string, dryRun: boolean, expectedHashes: { type: "object" as const, additionalProperties: true } }, ["patch"]), executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "cancel",
@@ -359,6 +359,7 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
           if (record.dryRun) { const artifactPath = await persistPatchRecord(context.workspaceRoot, record); const persisted = { ...record, artifactPath: path.relative(path.resolve(context.workspaceRoot), artifactPath).replaceAll("\\", "/") }; patches.set(patchId, persisted); return patchResult(persisted, "Patch preview"); }
           await applyPreview(context.workspaceRoot, inspected);
           await context.appendEvent("patch/applied", { patchId, files: inspected.files });
+          await options.onWorkspaceMutation?.(context, inspected.files.map((file) => file.path));
           const artifactPath = await persistPatchRecord(context.workspaceRoot, record); const persisted = { ...record, artifactPath: path.relative(path.resolve(context.workspaceRoot), artifactPath).replaceAll("\\", "/") }; patches.set(patchId, persisted); return patchResult(persisted, "Patch applied");
         } catch (error) {
           const code = error instanceof PatchConflictError ? error.code : error instanceof PatchParseError ? error.code : "PATCH_APPLY_FAILED";
@@ -389,6 +390,7 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
         try {
           await applyPreview(context.workspaceRoot, { files: record.files, before: record.after, after: record.before });
           await context.appendEvent("patch/rolled_back", { patchId, files: record.files });
+          await options.onWorkspaceMutation?.(context, record.files.map((file) => file.path));
           patches.delete(patchId);
           await removePatchRecord(context.workspaceRoot, patchId);
           return ok({ patchId, status: "rolled_back", files: record.files });
@@ -400,7 +402,7 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
     },
     {
       name: "write_file", description: "Create, overwrite, or append a UTF-8 workspace file with stale detection and a unified diff.", inputSchema: object({ path: string, content: string, overwrite: boolean, mode: { type: "string" as const, enum: ["create", "overwrite", "append"] }, expectedHash: string }, ["path", "content"]), executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "cancel",
-      execute: async (input, context) => writeWorkspaceFile(context.workspaceRoot, input as { path: string; content: string; overwrite?: boolean; mode?: "create" | "overwrite" | "append"; expectedHash?: string }),
+      execute: async (input, context) => { const result = await writeWorkspaceFile(context.workspaceRoot, input as { path: string; content: string; overwrite?: boolean; mode?: "create" | "overwrite" | "append"; expectedHash?: string }); if (result.ok) await options.onWorkspaceMutation?.(context, [(input as { path: string }).path]); return result; },
     },
     {
       name: "git_status", description: "Read git status for the workspace.", inputSchema: object({}), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",
@@ -461,7 +463,7 @@ export function createBuiltinTools(options: { readonly terminalManager?: Termina
     },
     {
       name: "delete_file", description: "Move a workspace file or directory to a recoverable agent trash area; permanent deletion requires explicit opt-in.", inputSchema: object({ path: string, recursive: boolean, permanent: boolean }, ["path"]), executionMode: "exclusive", riskLevel: "write", approvalMode: "ask", interruptBehavior: "cancel",
-      execute: async (input, context) => deleteWorkspacePath(context.workspaceRoot, input as { path: string; recursive?: boolean; permanent?: boolean }),
+      execute: async (input, context) => { const result = await deleteWorkspacePath(context.workspaceRoot, input as { path: string; recursive?: boolean; permanent?: boolean }); if (result.ok) await options.onWorkspaceMutation?.(context, [(input as { path: string }).path]); return result; },
     },
     {
       name: "git_log", description: "Read bounded commit history for the workspace.", inputSchema: object({ maxCount: integer(1, 100), path: string }), executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel",

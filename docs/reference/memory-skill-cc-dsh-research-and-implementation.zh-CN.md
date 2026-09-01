@@ -364,6 +364,8 @@ S2 实际结果：新增 `packages/context/src/skill-catalog.ts`，提供稳定 
 - **验收**：文件变更后下一步 catalog 正确替换；不完整扫描保留 last-good；UI 只读 durable slice；浏览器 e2e 覆盖 list、user-only marker、tool row、replay。
 - **禁用/回滚**：先使用手动/turn-boundary refresh；UI 独立 feature gate。
 
+S3 实际结果：文件工具 `edit_file`、`write_file`、`delete_file`、patch apply/rollback 成功后触发 registry invalidation，并追加 bounded `skills/change`（去重路径、仅 workspace-relative 元数据）；filesystem provider 解析 `paths` frontmatter 并按 `SkillLookupOptions.paths` 条件激活。新增 Runtime `skillCatalog()`、API `GET /v1/skills`（可选 session/path/query suggestions，沿用 tenant/session 访问校验）和 Web `listSkills()`/Skill row presenter。watcher 仍默认关闭，catalog 采用手动/turn-boundary refresh 与 last-good/incomplete；Skill 正文不进入事件、SSE 或 API 响应。
+
 ### S4：本地 Bundle/Plugin 最小运行时
 
 - **范围**：manifest schema、bundle 安装缓存、版本 pin、enable/disable、reconcile、inventory；插件贡献 Skill provider/tool/prompt，但不允许绕过权限和 workspace。

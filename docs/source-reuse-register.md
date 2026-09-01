@@ -696,3 +696,31 @@ ID:
 本项目路径：`packages/context/src/skill-catalog.ts`、`packages/tools/src/skill.ts`、`apps/api/src/server.ts`。
 
 范围：用户 `/name` ingress、canonical renderer、交互审批与正文脱敏事件。
+
+### CC-024
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`src/skills/discoverSkillDirsForPaths.ts`、`src/skills/activateConditionalSkillsForPaths.ts`、`src/hooks/useSkillsChange.ts`
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；本项目未复制上游代码。
+
+本项目路径：`packages/skills-filesystem/src/index.ts`、`packages/skills/src/index.ts`、`packages/runtime/src/index.ts`。
+
+范围：paths 条件激活、文件变更后的 registry invalidation、手动/turn-boundary refresh。
+
+### DSH-020
+
+来源仓库：`D:/Develop/deepseek-harness-fork`
+
+来源路径：`skills/change` 事件、`skill.list` RPC、Web `SkillRow.tsx`
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：`D:/Develop/deepseek-harness-fork/LICENSE` 为 MIT；本项目未复制 DSH 代码。
+
+本项目路径：`apps/api/src/server.ts`、`apps/web/src/client/api.ts`、`apps/web/src/presentation/skill-presenter.ts`、`apps/web/src/presentation/tool-presenter.ts`。
+
+范围：bounded skills/change、只读 `/v1/skills` catalog/suggestions 和 dedicated Skill row presenter。

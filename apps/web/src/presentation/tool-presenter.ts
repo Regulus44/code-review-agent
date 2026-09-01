@@ -2,7 +2,7 @@ import type { ToolCallView } from "../projection/conversation.js";
 import { presentBoundedValue } from "./safe-value.js";
 
 export type ToolPresentationKind = "builtin" | "mcp" | "subagent" | "diff" | "terminal" | "generic";
-export type ToolRowVariant = "search" | "read" | "bash" | "write" | "edit" | "code" | "others";
+export type ToolRowVariant = "search" | "read" | "bash" | "write" | "edit" | "code" | "skill" | "others";
 export type ToolRowState = "running" | "ok" | "error" | "stopped";
 
 export interface ToolRenderIntent {
@@ -134,6 +134,7 @@ function rowState(status: ToolCallView["status"]): ToolRowState {
 
 function classifyRowVariant(name: string): ToolRowVariant {
   const value = name.toLowerCase();
+  if (value === "skill" || value.endsWith("__skill")) return "skill";
   if (/grep|glob|search|find/.test(value)) return "search";
   if (/read|cat|fetch|inspect/.test(value)) return "read";
   if (/bash|pwsh|shell|terminal|command|job|exec/.test(value)) return "bash";
@@ -151,6 +152,7 @@ function variantTitle(variant: ToolRowVariant): string {
     case "write": return "写入";
     case "edit": return "编辑";
     case "code": return "代码";
+    case "skill": return "Skill";
     default: return "工具调用";
   }
 }

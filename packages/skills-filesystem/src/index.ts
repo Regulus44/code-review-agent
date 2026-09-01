@@ -23,7 +23,7 @@ const DEFAULT_LIMITS: Required<SkillFilesystemLimits> = { maxFileBytes: 256 * 10
 const DEFAULT_RANK: Record<SkillFilesystemRootKind, number> = { project: 100, custom: 150, user: 200, bundled: 300 };
 const FRONTMATTER_KEYS = new Set(["name", "description", "when_to_use", "whenToUse", "model_invocable", "modelInvocable", "disable-model-invocation", "user_invocable", "userInvocable", "user-invocable", "allowed-tools", "allowedTools", "context", "version", "agent", "paths"]);
 
-type Parsed = { readonly name: string; readonly description: string; readonly whenToUse?: string; readonly modelInvocable: boolean; readonly userInvocable: boolean; readonly allowedTools?: readonly string[]; readonly unknown: readonly string[]; readonly body: string };
+type Parsed = { readonly name: string; readonly description: string; readonly whenToUse?: string; readonly modelInvocable: boolean; readonly userInvocable: boolean; readonly allowedTools?: readonly string[]; readonly paths?: readonly string[]; readonly unknown: readonly string[]; readonly body: string };
 type Entry = { readonly candidate: SkillCandidate; readonly filePath: string; readonly root: SkillFilesystemRoot; };
 
 /** Read-only local SKILL.md provider. Discovery is bounded; bodies are loaded only by get(). */
@@ -65,7 +65,7 @@ export class FileSystemSkillProvider implements SkillProvider {
       if (Buffer.byteLength(text, "utf8") > this.limits.maxFileBytes) return undefined;
       const parsed = parseSkillMarkdown(text, this.limits.maxDescriptionBytes);
       if (parsed === undefined || parsed.name !== candidate.name) return undefined;
-      return { name: parsed.name, description: parsed.description, ...(parsed.whenToUse === undefined ? {} : { whenToUse: parsed.whenToUse }), invocation: { modelInvocable: parsed.modelInvocable, userInvocable: parsed.userInvocable }, source: entry.root.kind, provider: this.name, trust: entry.root.kind === "bundled" ? "bundled" : "local", content: parsed.body, path: entry.filePath, metadata: { ...(parsed.allowedTools === undefined ? {} : { allowedTools: parsed.allowedTools }), ...(parsed.unknown.length === 0 ? {} : { unknownProperties: parsed.unknown }) } };
+      return { name: parsed.name, description: parsed.description, ...(parsed.whenToUse === undefined ? {} : { whenToUse: parsed.whenToUse }), invocation: { modelInvocable: parsed.modelInvocable, userInvocable: parsed.userInvocable }, source: entry.root.kind, provider: this.name, trust: entry.root.kind === "bundled" ? "bundled" : "local", content: parsed.body, path: entry.filePath, metadata: { ...(parsed.allowedTools === undefined ? {} : { allowedTools: parsed.allowedTools }), ...(parsed.paths === undefined ? {} : { paths: parsed.paths }), ...(parsed.unknown.length === 0 ? {} : { unknownProperties: parsed.unknown }) } };
     } catch (error) {
       if (options.signal?.aborted) throw error;
       return undefined;
@@ -90,8 +90,9 @@ export class FileSystemSkillProvider implements SkillProvider {
       if (seen >= this.limits.maxSkills) { complete = false; break; }
     }
     if (complete) this.lastGoodByContext.set(contextKey, next);
+    if (force) this.control?.invalidate();
     const entries = [...(complete ? next : previous ?? new Map<string, Entry>()).values()].slice(0, this.limits.maxSkills);
-    return { candidates: entries.map((entry) => entry.candidate), complete };
+    return { candidates: entries.filter((entry) => isConditionallyActive(entry.candidate, options.paths)).map((entry) => entry.candidate), complete };
   }
 
   private async scanRoot(root: SkillFilesystemRoot, options: SkillLookupOptions, out: Map<string, Entry>, offset: number): Promise<{ complete: boolean; count: number }> {
@@ -131,7 +132,7 @@ export class FileSystemSkillProvider implements SkillProvider {
           const parsed = parseSkillMarkdown(await readFile(full, "utf8"), this.limits.maxDescriptionBytes);
           if (parsed === undefined || !isSkillName(parsed.name)) { complete = false; continue; }
           found.add(canonicalKey);
-          const candidate: SkillCandidate = { name: parsed.name, description: parsed.description, ...(parsed.whenToUse === undefined ? {} : { whenToUse: parsed.whenToUse }), invocation: { modelInvocable: parsed.modelInvocable, userInvocable: parsed.userInvocable }, source: root.kind, provider: this.name, trust: root.kind === "bundled" ? "bundled" : "local", rank: root.rank ?? DEFAULT_RANK[root.kind], locator: canonical, path: canonical, metadata: { ...(parsed.allowedTools === undefined ? {} : { allowedTools: parsed.allowedTools }), ...(parsed.unknown.length === 0 ? {} : { unknownProperties: parsed.unknown }) } };
+          const candidate: SkillCandidate = { name: parsed.name, description: parsed.description, ...(parsed.whenToUse === undefined ? {} : { whenToUse: parsed.whenToUse }), invocation: { modelInvocable: parsed.modelInvocable, userInvocable: parsed.userInvocable }, source: root.kind, provider: this.name, trust: root.kind === "bundled" ? "bundled" : "local", rank: root.rank ?? DEFAULT_RANK[root.kind], locator: canonical, path: canonical, metadata: { ...(parsed.allowedTools === undefined ? {} : { allowedTools: parsed.allowedTools }), ...(parsed.paths === undefined ? {} : { paths: parsed.paths }), ...(parsed.unknown.length === 0 ? {} : { unknownProperties: parsed.unknown }) } };
           const previous = out.get(parsed.name);
           if (previous === undefined || candidate.rank < previous.candidate.rank) out.set(parsed.name, { candidate, filePath: canonical, root });
         } catch { complete = false; }
@@ -184,8 +185,25 @@ function parseSkillMarkdown(text: string, maxDescriptionBytes: number): Parsed |
   const toolsRaw = values.get("allowed-tools") ?? values.get("allowedTools");
   const allowedTools = toolsRaw === undefined ? undefined : toolsRaw.split(/[,\s]+/u).map((v) => v.trim()).filter(Boolean);
   const whenToUse = values.get("when_to_use") ?? values.get("whenToUse");
+  const pathsRaw = values.get("paths");
+  const paths = pathsRaw === undefined ? undefined : pathsRaw.split(/[;,\s]+/u).map((value) => value.trim()).filter(Boolean);
   const disableModelInvocation = values.get("disable-model-invocation");
-  return { name, description, ...(whenToUse === undefined ? {} : { whenToUse }), modelInvocable: disableModelInvocation === undefined ? bool("model_invocable", "modelInvocable", true) : disableModelInvocation === "false", userInvocable: values.get("user-invocable") === undefined ? bool("user_invocable", "userInvocable", true) : values.get("user-invocable") !== "false", ...(allowedTools === undefined ? {} : { allowedTools }), unknown, body: text.slice(match[0].length) };
+  return { name, description, ...(whenToUse === undefined ? {} : { whenToUse }), modelInvocable: disableModelInvocation === undefined ? bool("model_invocable", "modelInvocable", true) : disableModelInvocation === "false", userInvocable: values.get("user-invocable") === undefined ? bool("user_invocable", "userInvocable", true) : values.get("user-invocable") !== "false", ...(allowedTools === undefined ? {} : { allowedTools }), ...(paths === undefined ? {} : { paths }), unknown, body: text.slice(match[0].length) };
+}
+
+function isConditionallyActive(candidate: SkillCandidate, paths: readonly string[] | undefined): boolean {
+  const rules = Array.isArray(candidate.metadata?.paths) ? candidate.metadata.paths.filter((item): item is string => typeof item === "string" && item.trim() !== "") : [];
+  if (rules.length === 0 || paths === undefined || paths.length === 0) return true;
+  return paths.some((value) => rules.some((rule) => matchesPathRule(value, rule)));
+}
+
+function matchesPathRule(value: string, rule: string): boolean {
+  const normalizedValue = value.replaceAll("\\", "/").replace(/^\.\//u, "");
+  const normalizedRule = rule.replaceAll("\\", "/").replace(/^\.\//u, "");
+  const marker = "__DOUBLE_STAR_SLASH__";
+  const prepared = normalizedRule.replaceAll("**/", marker).replaceAll("**", "__DOUBLE_STAR__");
+  const escaped = prepared.split(/(__DOUBLE_STAR_SLASH__|__DOUBLE_STAR__)/u).map((part) => part === marker ? "(?:.*/)?" : part === "__DOUBLE_STAR__" ? ".*" : part.split("*").map(escapeRegExp).join("[^/]*")).join("");
+  return new RegExp(`^${escaped}$`, "u").test(normalizedValue) || new RegExp(`(?:^|/)${escaped}$`, "u").test(normalizedValue);
 }
 
 function stripYaml(value: string): string { const trimmed = value.trim(); return (trimmed.startsWith("\"") && trimmed.endsWith("\"")) || (trimmed.startsWith("'") && trimmed.endsWith("'")) ? trimmed.slice(1, -1) : trimmed; }

@@ -304,6 +304,7 @@ export class AgentHost {
   private readonly tenantModels = new Map<string, ChatModel>();
   private readonly tenantModelRoutes = new Map<string, TenantModelRoute>();
   private readonly sessionModels = new Map<SessionId, SessionModelBinding>();
+  private readonly skillInvalidationSeen = new Map<string, number>();
 
   constructor(private readonly options: AgentHostOptions) {
     this.model = options.model ?? new EchoChatModel();
@@ -346,7 +347,7 @@ export class AgentHost {
       this.jobManager = new JobManager({ eventStore: options.store });
       if (options.toolRegistry === undefined) {
         this.fileObservationPolicy = new FileObservationPolicy();
-        registry.registerMany(createBuiltinTools({ terminalManager: this.terminalManager, jobManager: this.jobManager, eventStore: options.store, fileObservationPolicy: this.fileObservationPolicy, ...(options.visionEnabled === undefined ? {} : { visionEnabled: options.visionEnabled }), ...(options.lspServers === undefined ? {} : { lspServers: options.lspServers }), ...(options.codeMode === undefined ? {} : { codeMode: options.codeMode }), ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }) }));
+        registry.registerMany(createBuiltinTools({ terminalManager: this.terminalManager, jobManager: this.jobManager, eventStore: options.store, fileObservationPolicy: this.fileObservationPolicy, onWorkspaceMutation: async (context, paths) => this.notifySkillWorkspaceMutation(context, paths), ...(options.visionEnabled === undefined ? {} : { visionEnabled: options.visionEnabled }), ...(options.lspServers === undefined ? {} : { lspServers: options.lspServers }), ...(options.codeMode === undefined ? {} : { codeMode: options.codeMode }), ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }) }));
       }
       this.permissionPreset = options.permissionPreset ?? "ask-on-write";
     } else {
@@ -356,6 +357,24 @@ export class AgentHost {
     if (options.skills !== undefined && options.skillToolEnabled === true && (options.capabilities === undefined || options.capabilities.isEnabled("skill")) && !registry.has("skill")) registry.register(createSkillTool(options.skills));
     this.toolRuntime = options.toolRuntime ?? new ToolRuntime({ store: options.store, registry, ...(this.terminalManager === undefined ? {} : { terminalManager: this.terminalManager }), ...(options.permissionPreset === undefined ? {} : { policy: new DefaultPermissionPolicy({ preset: options.permissionPreset }) }) });
     this.ready = this.restoreQueuedTurns();
+  }
+
+  private async notifySkillWorkspaceMutation(context: { readonly sessionId: SessionId; readonly turnId?: TurnId; readonly workspaceRoot: string; readonly appendEvent: (type: AgentEvent["type"], payload: Readonly<Record<string, unknown>>) => Promise<void> }, paths: readonly string[]): Promise<void> {
+    if (this.skills === undefined || paths.length === 0) return;
+    const root = path.resolve(context.workspaceRoot);
+    const bounded = [...new Set(paths.map((item) => {
+      const absolute = path.resolve(root, item);
+      const relative = path.relative(root, absolute).replaceAll("\\", "/");
+      return relative === "" || relative.startsWith("..") || path.isAbsolute(relative) ? "" : relative.slice(0, 512);
+    }).filter(Boolean))].sort().slice(0, 32);
+    if (bounded.length === 0) return;
+    const key = `${String(context.sessionId)}:${bounded.join("|")}`;
+    const now = Date.now();
+    const previous = this.skillInvalidationSeen.get(key);
+    if (previous !== undefined && now - previous < 250) return;
+    this.skillInvalidationSeen.set(key, now);
+    const revision = this.skills.invalidate("filesystem");
+    await context.appendEvent("skills/change", { version: 1, revision, reason: "workspace-mutation", pathCount: bounded.length, paths: bounded });
   }
 
   /** Replaces the model used for turns that have not started yet. */
@@ -564,6 +583,13 @@ export class AgentHost {
     const capability = this.options.capabilities?.skillCapability(this.skills?.providerCount() ?? 0);
     if (capability !== undefined) return capability;
     return { version: 1, configured: this.skills !== undefined, enabled: this.skills !== undefined, status: this.skills === undefined ? "deferred" : "available", reason: this.skills === undefined ? "Skill registry is not configured; model-facing SkillTool is deferred until S2." : "Skill registry is configured; model-facing SkillTool remains disabled until S2.", modelToolExposed: false, providerCount: this.skills?.providerCount() ?? 0 };
+  }
+
+  async skillCatalog(sessionId?: SessionId, paths?: readonly string[]): Promise<import("@coding-agent/contracts").SkillCatalogSnapshot> {
+    if (this.skills === undefined) return { version: 1, revision: 0, complete: true, skills: [] };
+    const projection = sessionId === undefined ? undefined : await this.options.store.project(sessionId);
+    const cwd = projection === undefined ? undefined : effectiveWorkspaceRoot(projection);
+    return this.skills.snapshot({ ...(cwd === undefined ? {} : { cwd }), ...(paths === undefined ? {} : { paths }) });
   }
 
   /**
@@ -2064,7 +2090,7 @@ export class AgentHost {
     const projectMemory = await this.projectMemoryContext(sessionId, history, projection, turnId);
     const skillCatalog = this.skills === undefined || this.options.skillToolEnabled !== true
       ? undefined
-      : renderSkillCatalog(await this.skills.snapshot(projection === undefined ? {} : { cwd: effectiveWorkspaceRoot(projection) }), { maxChars: 8_000 }).rendered;
+      : renderSkillCatalog(await this.skills.snapshot(projection === undefined ? {} : { cwd: effectiveWorkspaceRoot(projection), paths: recentSkillChangedPathsFromProjection(projection) }), { maxChars: 8_000 }).rendered;
     return assembleContext({
       systemSections: buildAgentSystemPromptSections({
         workspaceRoot: projection === undefined ? "." : effectiveWorkspaceRoot(projection),
@@ -3595,6 +3621,37 @@ function sessionIdFrom(value: string): SessionId {
 
 function turnIdFrom(value: string): TurnId {
   return brand<string, "TurnId">(value);
+}
+
+function recentSkillChangedPaths(history: readonly AgentEvent[]): readonly string[] {
+  const paths: string[] = [];
+  for (const event of history) {
+    if (event.type !== "skills/change" || typeof event.payload !== "object" || event.payload === null) continue;
+    const raw = (event.payload as Record<string, unknown>).paths;
+    if (Array.isArray(raw)) for (const value of raw) if (typeof value === "string") paths.push(value);
+  }
+  return [...new Set(paths)].slice(-64);
+}
+
+function recentSkillChangedPathsFromProjection(projection: SessionProjection): readonly string[] {
+  const root = path.resolve(effectiveWorkspaceRoot(projection));
+  const paths: string[] = [];
+  const add = (value: string): void => {
+    const absolute = path.resolve(root, value);
+    const relative = path.relative(root, absolute).replaceAll("\\", "/");
+    if (relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative)) paths.push(relative);
+  };
+  for (const call of projection.toolCalls) {
+    if (call.status !== "completed" || !["write_file", "edit_file", "delete_file", "apply_patch", "rollback_patch"].includes(call.name)) continue;
+    const input = typeof call.input === "object" && call.input !== null ? call.input as Record<string, unknown> : undefined;
+    if (typeof input?.path === "string") add(input.path);
+    const files = typeof input?.files === "object" && Array.isArray(input.files) ? input.files : undefined;
+    if (files !== undefined) for (const item of files) if (typeof item === "object" && item !== null && typeof (item as Record<string, unknown>).path === "string") add((item as Record<string, unknown>).path as string);
+    const result = typeof call.result?.output === "object" && call.result.output !== null ? call.result.output as Record<string, unknown> : undefined;
+    const resultFiles = Array.isArray(result?.files) ? result.files : undefined;
+    if (resultFiles !== undefined) for (const item of resultFiles) if (typeof item === "object" && item !== null && typeof (item as Record<string, unknown>).path === "string") add((item as Record<string, unknown>).path as string);
+  }
+  return [...new Set(paths)].slice(-64);
 }
 
 function normalizeReasoningEffort(value: string | undefined): string | undefined {

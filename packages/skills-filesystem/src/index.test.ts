@@ -60,4 +60,12 @@ describe("FileSystemSkillProvider", () => {
     const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }] }); const listed = await provider.list();
     expect(listed.candidates[0]?.invocation).toEqual({ modelInvocable: false, userInvocable: false });
   });
+
+  it("activates conditional paths only when a changed workspace path matches", async () => {
+    const root = await fixture(); const dir = path.join(root, "conditional"); await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, "SKILL.md"), "---\nname: conditional\ndescription: conditional\npaths: src/**/*.ts\n---\nbody\n", "utf8");
+    const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }] });
+    const listed = await provider.list({ paths: ["docs/readme.md"] }); expect(listed.candidates).toHaveLength(0);
+    const active = await provider.list({ paths: ["src/index.ts"] }); expect(active.candidates.map((item) => item.name)).toEqual(["conditional"]);
+  });
 });
