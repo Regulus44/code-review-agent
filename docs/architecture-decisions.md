@@ -377,3 +377,15 @@ M3 在 M12 的 host-owned Project Memory adapter 之上增加确定性的 manife
 为 Skill 建立 provider-neutral `SkillSummary`、`SkillCandidate`、`SkillDefinition`、`SkillInvocationPolicy`、`SkillProvider` 和 `SkillRegistry`；支持 cwd、显式 scope chain 和 AbortSignal。全局层与调用方 scope chain 按最近层 shadow；同层按 rank、provider registration order、local order 稳定排序。provider 错误/不完整返回 bounded `complete=false` 与 provider/code，不泄露正文、路径或异常文本；registry 变更只发 `skills/change` 生命周期通知，S0 不把它伪装成 Skill invocation/tool result。
 
 source trust 仅能降低权限；remote/unknown 来源、未知 frontmatter 属性必须 `ask`；`allowedTools` 只能与宿主 allowlist 求交，不能绕过 workspace、approval、audit、cancel。默认 capability 为 deferred，model-facing SkillTool 延后至 S2。移除 registry 注册和 API `skills` capability 即可回退；保留 `attachment.kind=skill` 原语义。参照 DSH `packages/skill/skill/src/index.ts` registry/provider/scope/rank 和 Claude Code `SkillTool.ts` `checkPermissions()` 的正向安全白名单，仅参考行为结构，不复制上游代码。
+
+## ADR-031：S1 本地 SKILL.md filesystem provider
+
+状态：accepted（2026-09-01，S1）
+
+S1 新增 `@coding-agent/skills-filesystem`，将 project、user、custom、bundled roots 作为只读 provider 注册到 S0 `SkillRegistry`。扫描仅接受目录下的 `SKILL.md`，解析受限 frontmatter（name、description、whenToUse、invocation、allowedTools 等），正文只在 `get()` 时读取。provider 对 realpath、symlink、路径越界、`.gitignore`、最大文件字节数、递归深度和候选数量执行 fail-closed/bounded 策略；重复 realpath 只保留一个候选，同名技能继续交由 registry rank/scope 规则处理。
+
+扫描失败返回 `complete=false`，并在已有成功快照时继续提供 last-good candidates；没有快照时返回空候选，不能阻塞普通 Agent turn。watcher 仅保留可选生命周期 seam，默认关闭，调用方可在 turn 边界显式 `refresh()`。`get()` 会重新校验文件类型、realpath、大小和 frontmatter，避免扫描与加载之间的替换攻击。
+
+API Host 默认装配 filesystem provider，但 `modelToolExposed` 仍为 false；`skillFilesystem.enabled=false` 可禁用。正文、绝对路径和 provider 异常文本不进入 catalog/SSE/EventStore。该阶段参考 Claude Code `loadSkillsDir.ts` 的来源/去重/延迟正文行为和 DSH `skill-filesystem` 的 rank、watcher、incomplete 观察，仅重新实现，不复制上游代码。
+
+回滚策略：设置 `skillFilesystem.enabled=false` 或不向 `AgentHost` 注入 registry；保留本地 Skill 文件和 S0 registry/attachment 语义，普通 turn 不受影响。

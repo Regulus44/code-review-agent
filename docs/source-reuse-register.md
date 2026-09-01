@@ -640,3 +640,31 @@ ID:
 本项目路径：`packages/skills/src/index.ts`、`packages/contracts/src/index.ts`、`packages/runtime/src/index.ts`、`apps/api/src/server.ts`。
 
 范围：分层 registry、最近 scope shadow、同层稳定 rank 排序、provider incomplete/failure bounded metadata、AbortSignal 和可回放 `skills/change` 生命周期；不引入 DSH 插件平台。
+
+### CC-022
+
+来源仓库：`D:/Develop/claude-code`
+
+来源路径：`src/skills/loadSkillsDir.ts`、`src/skills/skillChangeDetector.ts`
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：本地快照未发现根 `LICENSE`；本项目未复制 Claude Code loader 或 watcher 实现。
+
+本项目路径：`packages/skills-filesystem/src/index.ts`、`apps/api/src/server.ts`。
+
+范围：`<name>/SKILL.md` 发现、project/user/custom/bundled roots、延迟正文读取、realpath 去重、来源 rank、手动 refresh；动态 watcher 默认关闭。
+
+### DSH-018
+
+来源仓库：`D:/Develop/deepseek-harness-fork`
+
+来源路径：`packages/skill/skill-filesystem/src/index.ts` 及 provider watcher/incomplete 测试
+
+复用方式：`behavior-reference`
+
+许可证/来源证据：`D:/Develop/deepseek-harness-fork/LICENSE` 为 MIT；本项目重新实现 filesystem provider，未复制 DSH 代码。
+
+本项目路径：`packages/skills-filesystem/src/index.ts`、`packages/skills/src/index.ts`、`apps/api/src/server.ts`。
+
+范围：cwd/project root 解析、rank/provider composition、bounded depth/size/count、symlink/gitignore fail-closed、last-good incomplete observation 和可选 watcher 生命周期。

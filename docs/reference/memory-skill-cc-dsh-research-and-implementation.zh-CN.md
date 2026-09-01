@@ -344,6 +344,8 @@ S0 实际结果：新增 `packages/skills`（`@coding-agent/skills`）提供 pro
 - **验收**：hermetic workspace、symlink/duplicate roots、gitignore、malformed frontmatter、跨平台路径、watcher 失败 last-good；`SKILL.md` 正文按需读。
 - **禁用/回滚**：只读扫描模式；watcher 关闭后在 turn 边界重新 list；loader 失败不阻塞普通 Agent turn。
 
+S1 实际结果：新增 `@coding-agent/skills-filesystem` 的 `FileSystemSkillProvider`。provider 支持 project/user/custom/bundled roots，project root 会根据每次 `SkillLookupOptions.cwd` 解析为 `<cwd>/.claude/skills`；候选按来源 rank 交给 S0 registry 合并。扫描只接受受限 `SKILL.md` frontmatter，catalog 仅暴露 bounded summary，正文在 `get()` 中按需读取并二次校验。realpath、symlink、路径越界、`.gitignore`、最大文件/描述字节、递归深度和候选数量均 fail closed；重复 realpath 去重。扫描不完整时保留最近成功候选，没有 last-good 时返回空结果；watcher 仅提供可选 `start` seam，默认由 API 关闭并使用手动/turn-boundary refresh。`apps/api` 默认注册 provider，可通过 `skillFilesystem.enabled=false` 禁用；`modelToolExposed` 继续为 false，普通 Agent turn 不因 loader 失败而阻塞。测试覆盖 hermetic discovery、延迟正文、duplicate roots、symlink/incomplete、gitignore、malformed frontmatter 和 bounds。
+
 ### S2：Skill catalog + SkillTool + 用户 `/name`
 
 - **范围**：catalog budget/digest、摘要→正文二次校验、canonical renderer、inline/fork、用户-only injection、ToolRuntime/approval/event。

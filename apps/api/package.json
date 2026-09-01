@@ -16,6 +16,8 @@
     "@coding-agent/llm": "workspace:*",
     "@coding-agent/mcp-client": "workspace:*",
     "@coding-agent/runtime": "workspace:*",
+    "@coding-agent/skills": "workspace:*",
+    "@coding-agent/skills-filesystem": "workspace:*",
     "@coding-agent/subagent": "workspace:*",
     "@coding-agent/storage": "workspace:*",
     "@coding-agent/tools": "workspace:*",
