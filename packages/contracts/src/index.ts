@@ -1327,6 +1327,33 @@ export interface ContextCollapseCapability {
   };
 }
 
+/**
+ * Host-owned readiness metadata for the optional Session/Project Memory
+ * adapters. The capability describes adapter availability only; Memory
+ * content remains outside EventStore, SSE and public projections.
+ */
+export type MemoryAdapterStatus = "available" | "disabled" | "unavailable";
+
+export interface MemoryAdapterCapability {
+  readonly version: 1;
+  readonly configured: boolean;
+  readonly enabled: boolean;
+  readonly status: MemoryAdapterStatus;
+  readonly reason?: string;
+}
+
+/** Bounded capability metadata shared by Runtime and API/Web consumers. */
+export interface MemoryCapability {
+  readonly version: 1;
+  readonly session: MemoryAdapterCapability;
+  readonly project: MemoryAdapterCapability;
+  readonly scope: {
+    readonly strategy: "workspace-tenant-sha256";
+    readonly keyPrefix: "pm_";
+    readonly digestHexLength: 24;
+  };
+}
+
 /** Host policy knobs for Claude Code-style context budgeting. */
 export interface ContextBudgetConfig {
   /** Fallback input window when the adapter does not expose capability metadata. */

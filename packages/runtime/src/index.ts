@@ -41,6 +41,8 @@ import {
   type ContextBoundaryKind,
   type ContextRecoveryErrorClass,
   type ToolResultReplacementRecord,
+  type MemoryCapability,
+  type MemoryAdapterCapability,
 } from "@coding-agent/contracts";
 import { EchoChatModel, modelFailureMetadata, sanitizeFailureMessage } from "@coding-agent/llm";
 import { compactMessages, DEFAULT_CONTEXT_BUDGET, type ContextBudget } from "@coding-agent/compaction";
@@ -93,12 +95,16 @@ export interface AgentHostOptions {
   readonly toolResultStorage?: ToolResultStorage;
   /** Host-owned session memory used by M06 and M11. */
   readonly sessionMemory?: SessionMemoryStore;
+  /** Explicitly disables Session Memory while retaining the adapter wiring. */
+  readonly sessionMemoryEnabled?: boolean;
   readonly sessionMemoryCompact?: Partial<SessionMemoryCompactConfig>;
   /** Optional isolated adapter used by the M11 background extractor. */
   readonly sessionMemoryExtractor?: SessionMemoryExtractor;
   readonly sessionMemoryExtraction?: Partial<SessionMemoryExtractionConfig>;
   /** Claude Code-style workspace/tenant Project Memory adapter (M12). */
   readonly projectMemory?: ProjectMemoryStore;
+  /** Explicitly disables Project Memory while retaining the adapter wiring. */
+  readonly projectMemoryEnabled?: boolean;
   /** Host-owned fact validators used before a recalled memory enters model view. */
   readonly projectMemoryValidation?: {
     readonly pathExists?: (path: string, scope: ProjectMemoryScope) => Promise<boolean | undefined>;
@@ -138,6 +144,8 @@ export interface ContextSettings {
   readonly budget?: Partial<ContextBudget>;
   readonly capability?: ModelContextCapability;
   readonly budgetSnapshot?: ContextBudgetSnapshot;
+  /** Host-owned Session/Project Memory adapter readiness metadata. */
+  readonly memory: MemoryCapability;
   /** M14 capability boundary; disabled until a real collapse implementation is accepted. */
   readonly collapse: ContextCollapseCapability;
 }
@@ -266,10 +274,14 @@ export class AgentHost {
   private readonly toolResultBudget: ToolResultBudgetPolicy | undefined;
   private readonly toolResultStorage: ToolResultStorage;
   private readonly sessionMemory: SessionMemoryStore | undefined;
+  private readonly sessionMemoryConfigured: boolean;
+  private readonly sessionMemoryEnabled: boolean;
   private readonly sessionMemoryCompact: Partial<SessionMemoryCompactConfig> | undefined;
   private readonly sessionMemoryExtractor: SessionMemoryExtractor | undefined;
   private readonly sessionMemoryExtraction: Partial<SessionMemoryExtractionConfig> | undefined;
   private readonly projectMemory: ProjectMemoryStore | undefined;
+  private readonly projectMemoryConfigured: boolean;
+  private readonly projectMemoryEnabled: boolean;
   private readonly projectMemoryValidation: AgentHostOptions["projectMemoryValidation"];
   private readonly projectMemoryScopeKey: AgentHostOptions["projectMemoryScopeKey"];
   private readonly projectMemoryTurnStates = new Map<string, { readonly loaded: boolean; readonly surfacedIds: Set<string>; readonly staleIds: Set<string>; readonly cachedTopics: Map<string, ProjectMemoryTopic>; readonly disabled: boolean }>();
@@ -300,11 +312,15 @@ export class AgentHost {
     this.toolResultStorage = options.toolResultStorage ?? createToolResultStorage({
       write: async ({ workspaceRoot, relativePath, content }) => writeToolResultArtifact(workspaceRoot, relativePath, content),
     });
-    this.sessionMemory = options.sessionMemory;
+    this.sessionMemoryConfigured = options.sessionMemory !== undefined;
+    this.sessionMemoryEnabled = options.sessionMemoryEnabled !== false;
+    this.sessionMemory = this.sessionMemoryEnabled ? options.sessionMemory : undefined;
     this.sessionMemoryCompact = options.sessionMemoryCompact;
     this.sessionMemoryExtractor = options.sessionMemoryExtractor;
     this.sessionMemoryExtraction = options.sessionMemoryExtraction;
-    this.projectMemory = options.projectMemory;
+    this.projectMemoryConfigured = options.projectMemory !== undefined;
+    this.projectMemoryEnabled = options.projectMemoryEnabled !== false;
+    this.projectMemory = this.projectMemoryEnabled ? options.projectMemory : undefined;
     this.projectMemoryValidation = options.projectMemoryValidation;
     this.projectMemoryScopeKey = options.projectMemoryScopeKey;
     this.summaryCompact = options.summaryCompact;
@@ -417,6 +433,7 @@ export class AgentHost {
       ...(this.contextBudget === undefined ? {} : { budget: { ...this.contextBudget } }),
       capability: snapshot.capability,
       budgetSnapshot: snapshot,
+      memory: this.memorySettings(),
       collapse: {
         version: 1,
         enabled: false,
@@ -428,6 +445,25 @@ export class AgentHost {
           overflowDrain: false,
           snip: false,
         },
+      },
+    };
+  }
+
+  /**
+   * Returns bounded readiness metadata for the optional Memory adapters.
+   * Adapter absence is reported as `unavailable`; an explicit `*MemoryEnabled:
+   * false` is reported as `disabled`. This method never reads or exposes
+   * Memory content and is safe to include in the public capabilities response.
+   */
+  memorySettings(): MemoryCapability {
+    return {
+      version: 1,
+      session: memoryAdapterCapability(this.sessionMemoryConfigured, this.sessionMemoryEnabled, "Session Memory adapter is not configured."),
+      project: memoryAdapterCapability(this.projectMemoryConfigured, this.projectMemoryEnabled, "Project Memory adapter is not configured."),
+      scope: {
+        strategy: "workspace-tenant-sha256",
+        keyPrefix: "pm_",
+        digestHexLength: 24,
       },
     };
   }
@@ -3704,6 +3740,12 @@ function projectMemoryScope(projection: SessionProjection, keyFactory: AgentHost
 
 function projectMemoryScopeKey(workspaceRoot: string, tenantId?: string): string {
   return `pm_${createHash("sha256").update(`${tenantId ?? "local"}\n${workspaceRoot}`).digest("hex").slice(0, 24)}`;
+}
+
+function memoryAdapterCapability(configured: boolean, enabled: boolean, unavailableReason: string): MemoryAdapterCapability {
+  if (!enabled) return { version: 1, configured, enabled: false, status: "disabled", reason: "Memory adapter disabled by host configuration." };
+  if (!configured) return { version: 1, configured: false, enabled: false, status: "unavailable", reason: unavailableReason };
+  return { version: 1, configured: true, enabled: true, status: "available" };
 }
 
 function latestProjectMemoryQuery(history: readonly ChatMessage[]): string {

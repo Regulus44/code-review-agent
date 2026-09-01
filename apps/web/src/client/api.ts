@@ -25,6 +25,7 @@ import type {
   ModelSelection,
   ProviderCatalogGroup,
   ProviderProfileRecord,
+  MemoryCapability,
 } from "@coding-agent/contracts";
 
 export interface ToolCatalogEntry {
@@ -157,6 +158,7 @@ export interface ContextCapability {
       readonly snip: boolean;
     };
   };
+  readonly memory?: MemoryCapability;
 }
 
 export interface CodeModeCapability {

@@ -13,6 +13,34 @@ import { SubagentRuntime } from "@coding-agent/subagent";
 import { createDelegationFixtureProvider, seedDelegationFixture } from "./fixtures/delegation.js";
 
 describe("Phase 2 API", () => {
+  it("forwards Memory adapters and exposes explicit unavailable/available capability states", async () => {
+    const unavailable = createApiServer({ store: new InMemoryEventStore() });
+    await new Promise<void>((resolve) => unavailable.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = unavailable.address();
+      if (address === null || typeof address === "string") throw new Error("Memory capability API did not bind");
+      const response = await fetch(`http://127.0.0.1:${address.port}/v1/capabilities`);
+      expect((await response.json() as { context: { memory: { session: { status: string }; project: { status: string } } } }).context.memory).toMatchObject({ session: { status: "unavailable" }, project: { status: "unavailable" } });
+    } finally {
+      await new Promise<void>((resolve, reject) => unavailable.close((error) => error ? reject(error) : resolve()));
+    }
+
+    const available = createApiServer({
+      store: new InMemoryEventStore(),
+      sessionMemory: { get: async () => undefined },
+      projectMemory: { getEntrypoint: async () => undefined, listTopics: async () => [], readTopic: async () => undefined },
+    });
+    await new Promise<void>((resolve) => available.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = available.address();
+      if (address === null || typeof address === "string") throw new Error("Configured Memory capability API did not bind");
+      const response = await fetch(`http://127.0.0.1:${address.port}/v1/capabilities`);
+      expect((await response.json() as { context: { memory: { session: { status: string }; project: { status: string } } } }).context.memory).toMatchObject({ session: { status: "available" }, project: { status: "available" } });
+    } finally {
+      await new Promise<void>((resolve, reject) => available.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
   it("accepts the legacy maxSteps option without imposing a turn limit", () => {
     expect(() => createApiServer({ store: new InMemoryEventStore(), maxSteps: 512 })).not.toThrow();
     expect(() => createApiServer({ store: new InMemoryEventStore(), maxSteps: 513 })).not.toThrow();

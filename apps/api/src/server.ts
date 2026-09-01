@@ -4,7 +4,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
-import { createInProcessSubagentProvider, sessionId, AgentHost, turnId, type TenantModelRoute } from "@coding-agent/runtime";
+import { createInProcessSubagentProvider, sessionId, AgentHost, turnId, type AgentHostOptions, type TenantModelRoute } from "@coding-agent/runtime";
 import { resolveDefaultSqliteDatabasePath, SqliteEventStore } from "@coding-agent/storage";
 import { brand, type AgentEvent, type ChatModel, type ContextBudgetConfig, type GoalStatus, type InteractionId, type PermissionId, type PlanStatus, type SessionEventStore, type TodoItem, type ProductizationCapability, type SessionOwnership, type ModelRouteBackend, type ModelRouteRecord, type CredentialBackend, type McpCredentialReference, type PrincipalBackend, type ModelSelection as ContractModelSelection, type ModelCatalogEntry, type ProviderCatalogGroup, type ProviderProfileRecord } from "@coding-agent/contracts";
 import { SubagentRuntime } from "@coding-agent/subagent";
@@ -80,6 +80,17 @@ export interface ApiServerOptions {
   readonly permissionPreset?: PermissionPreset;
   readonly mcp?: McpConnectionManager;
   readonly subagentRuntime?: SubagentRuntime;
+  /** Optional host-owned Session Memory store and background extractor. */
+  readonly sessionMemory?: AgentHostOptions["sessionMemory"];
+  readonly sessionMemoryEnabled?: AgentHostOptions["sessionMemoryEnabled"];
+  readonly sessionMemoryCompact?: AgentHostOptions["sessionMemoryCompact"];
+  readonly sessionMemoryExtractor?: AgentHostOptions["sessionMemoryExtractor"];
+  readonly sessionMemoryExtraction?: AgentHostOptions["sessionMemoryExtraction"];
+  /** Optional host-owned workspace/tenant Project Memory store. */
+  readonly projectMemory?: AgentHostOptions["projectMemory"];
+  readonly projectMemoryEnabled?: AgentHostOptions["projectMemoryEnabled"];
+  readonly projectMemoryValidation?: AgentHostOptions["projectMemoryValidation"];
+  readonly projectMemoryScopeKey?: AgentHostOptions["projectMemoryScopeKey"];
   readonly attachmentPolicy?: AttachmentPolicy;
   readonly contextBudget?: {
     readonly maxTokens?: number;
@@ -104,7 +115,7 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
   const providerProfileStore = store instanceof SqliteEventStore ? new LocalProviderProfileStore(options.providerProfilesPath ?? defaultProviderProfilesPath()) : undefined;
   const principals = options.principalBackend ?? principalBackendFrom(store);
   const subagentRuntime = options.subagentRuntime ?? new SubagentRuntime({ store: store as SessionEventStore });
-  const host = options.host ?? new AgentHost({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), ...(options.fallbackModels === undefined ? {} : { fallbackModels: options.fallbackModels }), ...(options.maxSteps === undefined ? {} : { maxSteps: options.maxSteps }), ...(options.maxParallelToolCalls === undefined ? {} : { maxParallelToolCalls: options.maxParallelToolCalls }), ...(options.permissionPreset === undefined ? {} : { permissionPreset: options.permissionPreset }), ...(options.contextBudget === undefined ? {} : { contextBudget: options.contextBudget }), ...(options.contextPolicy === undefined ? {} : { contextPolicy: options.contextPolicy }), ...(options.codeMode === undefined ? {} : { codeMode: options.codeMode }), ...(options.productization?.quota === undefined ? {} : { quota: options.productization.quota }), ...(store instanceof SqliteEventStore ? { operations: { backup: "available", migration: "available", upgrade: "deferred" } } : {}), subagentRuntime });
+  const host = options.host ?? new AgentHost({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), ...(options.fallbackModels === undefined ? {} : { fallbackModels: options.fallbackModels }), ...(options.maxSteps === undefined ? {} : { maxSteps: options.maxSteps }), ...(options.maxParallelToolCalls === undefined ? {} : { maxParallelToolCalls: options.maxParallelToolCalls }), ...(options.permissionPreset === undefined ? {} : { permissionPreset: options.permissionPreset }), ...(options.contextBudget === undefined ? {} : { contextBudget: options.contextBudget }), ...(options.contextPolicy === undefined ? {} : { contextPolicy: options.contextPolicy }), ...(options.codeMode === undefined ? {} : { codeMode: options.codeMode }), ...(options.sessionMemory === undefined ? {} : { sessionMemory: options.sessionMemory }), ...(options.sessionMemoryEnabled === undefined ? {} : { sessionMemoryEnabled: options.sessionMemoryEnabled }), ...(options.sessionMemoryCompact === undefined ? {} : { sessionMemoryCompact: options.sessionMemoryCompact }), ...(options.sessionMemoryExtractor === undefined ? {} : { sessionMemoryExtractor: options.sessionMemoryExtractor }), ...(options.sessionMemoryExtraction === undefined ? {} : { sessionMemoryExtraction: options.sessionMemoryExtraction }), ...(options.projectMemory === undefined ? {} : { projectMemory: options.projectMemory }), ...(options.projectMemoryEnabled === undefined ? {} : { projectMemoryEnabled: options.projectMemoryEnabled }), ...(options.projectMemoryValidation === undefined ? {} : { projectMemoryValidation: options.projectMemoryValidation }), ...(options.projectMemoryScopeKey === undefined ? {} : { projectMemoryScopeKey: options.projectMemoryScopeKey }), ...(options.productization?.quota === undefined ? {} : { quota: options.productization.quota }), ...(store instanceof SqliteEventStore ? { operations: { backup: "available", migration: "available", upgrade: "deferred" } } : {}), subagentRuntime });
   if (!subagentRuntime.providerCatalog().some((provider) => provider.name === "in-process")) subagentRuntime.registerProvider(createInProcessSubagentProvider({ store: store as SessionEventStore, ...(options.model === undefined ? {} : { model: options.model }), baseToolDefinitions: host.toolRegistry().listAll(), subagentRuntime }));
   const modelRuntime: ModelRuntimeState = {
     availableModels: options.availableModels ?? [],

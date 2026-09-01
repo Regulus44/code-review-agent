@@ -581,6 +581,38 @@ describe("AgentHost", () => {
     });
   });
 
+  it("reports Memory adapter readiness and the stable Project Memory scope strategy", () => {
+    const unavailable = new AgentHost({ store: new InMemoryEventStore() });
+    expect(unavailable.memorySettings()).toEqual({
+      version: 1,
+      session: { version: 1, configured: false, enabled: false, status: "unavailable", reason: "Session Memory adapter is not configured." },
+      project: { version: 1, configured: false, enabled: false, status: "unavailable", reason: "Project Memory adapter is not configured." },
+      scope: { strategy: "workspace-tenant-sha256", keyPrefix: "pm_", digestHexLength: 24 },
+    });
+
+    const disabled = new AgentHost({
+      store: new InMemoryEventStore(),
+      sessionMemory: { get: async () => undefined },
+      projectMemory: { getEntrypoint: async () => undefined, listTopics: async () => [], readTopic: async () => undefined },
+      sessionMemoryEnabled: false,
+      projectMemoryEnabled: false,
+    });
+    expect(disabled.memorySettings()).toMatchObject({
+      session: { configured: true, enabled: false, status: "disabled" },
+      project: { configured: true, enabled: false, status: "disabled" },
+    });
+
+    const available = new AgentHost({
+      store: new InMemoryEventStore(),
+      sessionMemory: { get: async () => undefined },
+      projectMemory: { getEntrypoint: async () => undefined, listTopics: async () => [], readTopic: async () => undefined },
+    });
+    expect(available.memorySettings()).toMatchObject({
+      session: { configured: true, enabled: true, status: "available" },
+      project: { configured: true, enabled: true, status: "available" },
+    });
+  });
+
   it("builds the prompt from the permission-filtered tool set and preserves custom instructions", async () => {
     const requests: ModelRequest[] = [];
     const store = new InMemoryEventStore();
