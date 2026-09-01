@@ -185,8 +185,24 @@ export interface LspCapability {
 export interface PluginsCapability {
   readonly configured: boolean;
   readonly enabled: boolean;
-  readonly status: "available" | "deferred" | "unavailable";
+  readonly status: "available" | "deferred" | "unavailable" | "disabled";
   readonly reason: string;
+  readonly inventory?: PluginInventorySnapshot;
+}
+
+export interface PluginInventoryEntry {
+  readonly name: string;
+  readonly version?: string;
+  readonly pinnedVersion?: string;
+  readonly enabled: boolean;
+  readonly status: "disabled" | "installed" | "active" | "failed" | "missing";
+  readonly errorCode?: string;
+}
+
+export interface PluginInventorySnapshot {
+  readonly version: 1;
+  readonly revision: number;
+  readonly entries: readonly PluginInventoryEntry[];
 }
 
 export type ProductizationCapabilityResponse = ProductizationCapability;
@@ -557,6 +573,10 @@ export class WebApiClient {
     if (paths !== undefined && paths.length > 0) query.set("paths", paths.join(","));
     const suffix = query.toString() === "" ? "" : `?${query.toString()}`;
     return this.request(`/v1/skills${suffix}`);
+  }
+
+  listPlugins(): Promise<PluginInventorySnapshot> {
+    return this.request("/v1/plugins");
   }
 
   uploadAttachment(sessionId: SessionId, input: { readonly fileName: string; readonly mediaType: string; readonly data: string }, commandId?: string): Promise<AttachmentReceipt> {

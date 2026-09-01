@@ -1,11 +1,11 @@
 import type { PermissionPreset, SessionProjection, MemoryCapability } from "@coding-agent/contracts";
-import type { AttachmentCapability, CodeModeCapability, ContextCapability, LspCapability, ModelCatalogResponse, McpServerView, PluginsCapability, ProductizationCapabilityResponse, ToolCatalogEntry } from "../client/api.js";
+import type { AttachmentCapability, CodeModeCapability, ContextCapability, LspCapability, ModelCatalogResponse, McpServerView, PluginsCapability, ProductizationCapabilityResponse, ToolCatalogEntry, PluginInventorySnapshot } from "../client/api.js";
 import type { ProviderCatalogGroup } from "@coding-agent/contracts";
 
 export interface SettingsCapability {
   readonly key: string;
   readonly label: string;
-  readonly status: "available" | "configured" | "deferred" | "unavailable";
+  readonly status: "available" | "configured" | "deferred" | "unavailable" | "disabled";
   readonly detail: string;
 }
 
@@ -37,6 +37,8 @@ export interface SettingsRenderIntent {
     readonly connected: number;
     readonly attention: number;
   };
+  /** Read-only plugin loader inventory; absent when the host has no plugin runtime. */
+  readonly pluginsInventory?: PluginInventorySnapshot;
   readonly capabilities: readonly SettingsCapability[];
 }
 
@@ -137,6 +139,7 @@ export function presentSettings(
     },
     tools: { total: tools.length, builtin, mcp, riskCounts },
     mcp: { configured: mcpServers.length, connected, attention },
+    ...(plugins?.inventory === undefined ? {} : { pluginsInventory: plugins.inventory }),
     capabilities,
   };
 }

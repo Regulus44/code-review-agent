@@ -724,3 +724,31 @@ ID:
 本项目路径：`apps/api/src/server.ts`、`apps/web/src/client/api.ts`、`apps/web/src/presentation/skill-presenter.ts`、`apps/web/src/presentation/tool-presenter.ts`。
 
 范围：bounded skills/change、只读 `/v1/skills` catalog/suggestions 和 dedicated Skill row presenter。
+
+### CC-025
+
+来源仓库：D:/Develop/claude-code
+
+来源路径：src/utils/plugins/schemas.ts、src/utils/plugins/validatePlugin.ts、src/utils/plugins/pluginLoader.ts、src/utils/plugins/reconciler.ts
+
+复用方式：behavior-reference
+
+许可证/来源证据：本地快照未发现根 LICENSE；本项目未复制 Claude Code 实现代码。
+
+本项目路径：packages/plugin-runtime/src/index.ts、packages/runtime/src/index.ts、apps/api/src/server.ts。
+
+范围：本地 plugin.json manifest 校验、路径穿越防护、版本 pin、原子安装缓存、enable/disable、reconcile、加载失败隔离和可回滚 inventory；不实现 marketplace、账户或远程服务。
+
+### DSH-021
+
+来源仓库：D:/Develop/deepseek-harness-fork
+
+来源路径：vendor/cordis Loader 生命周期、packages/host/plugin-inventory/src/index.ts、packages/client/ui-settings-plugin-inventory
+
+复用方式：behavior-reference
+
+许可证/来源证据：D:/Develop/deepseek-harness-fork/LICENSE 为 MIT；本项目未复制 Cordis 或 DSH inventory 代码。
+
+本项目路径：packages/plugin-runtime/src/index.ts、packages/skills-plugin/src/index.ts、apps/api/src/server.ts、apps/web/src/client/api.ts。
+
+范围：显式 bind/dispose 生命周期、直接从 runtime 记录生成只读 inventory、插件贡献 Skill provider/tool/prompt；贡献仍经过本项目 registry、permission、workspace、cancel 和事件管线。

@@ -19,6 +19,7 @@
     "@coding-agent/subagent": "workspace:*",
     "@coding-agent/storage": "workspace:*",
     "@coding-agent/skills": "workspace:*",
+    "@coding-agent/plugin-runtime": "workspace:*",
     "@coding-agent/tools": "workspace:*",
     "@coding-agent/workspace": "workspace:*"
   },

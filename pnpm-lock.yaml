@@ -35,6 +35,9 @@ importers:
       '@coding-agent/mcp-client':
         specifier: workspace:*
         version: link:../../packages/mcp-client
+      '@coding-agent/plugin-runtime':
+        specifier: workspace:*
+        version: link:../../packages/plugin-runtime
       '@coding-agent/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
@@ -101,6 +104,21 @@ importers:
         specifier: ^1.30.0
         version: 1.30.0(zod@4.4.3)
 
+  packages/plugin-runtime:
+    dependencies:
+      '@coding-agent/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@coding-agent/skills':
+        specifier: workspace:*
+        version: link:../skills
+      '@coding-agent/skills-plugin':
+        specifier: workspace:*
+        version: link:../skills-plugin
+      '@coding-agent/tools':
+        specifier: workspace:*
+        version: link:../tools
+
   packages/runtime:
     dependencies:
       '@coding-agent/compaction':
@@ -115,6 +133,9 @@ importers:
       '@coding-agent/llm':
         specifier: workspace:*
         version: link:../llm
+      '@coding-agent/plugin-runtime':
+        specifier: workspace:*
+        version: link:../plugin-runtime
       '@coding-agent/skills':
         specifier: workspace:*
         version: link:../skills
@@ -145,6 +166,18 @@ importers:
       '@coding-agent/skills':
         specifier: workspace:*
         version: link:../skills
+
+  packages/skills-plugin:
+    dependencies:
+      '@coding-agent/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@coding-agent/skills':
+        specifier: workspace:*
+        version: link:../skills
+      '@coding-agent/skills-filesystem':
+        specifier: workspace:*
+        version: link:../skills-filesystem
 
   packages/storage:
     dependencies:

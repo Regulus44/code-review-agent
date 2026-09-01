@@ -4,6 +4,8 @@
     { "path": "packages/contracts" },
     { "path": "packages/skills" },
     { "path": "packages/skills-filesystem" },
+    { "path": "packages/skills-plugin" },
+    { "path": "packages/plugin-runtime" },
     { "path": "packages/context" },
     { "path": "packages/compaction" },
     { "path": "packages/llm" },

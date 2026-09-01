@@ -405,3 +405,13 @@ S2 增加确定性 bounded Skill catalog（digest/预算/摘要优先）与按�
 S3 将文件工具成功变更映射为 registry invalidation 与 bounded `skills/change` 事件；事件仅保存去重后的 workspace-relative 路径元数据，不保存 Skill 正文、绝对路径或异常文本。filesystem provider 支持 `paths` frontmatter 的最小 glob 条件激活，并保留手动/turn-boundary refresh 与 last-good/incomplete 行为。API `GET /v1/skills` 与 Web presenter 只读 catalog 摘要、完成度、revision 和有限 suggestions，必须沿用 session tenant/workspace 访问边界。
 
 动态 watcher 默认关闭；关闭 S3 hook 或 `skillFilesystem.enabled=false` 即可回滚到 S2。模型 SkillTool gate、权限、workspace、取消和审计管线保持不变。
+
+## ADR-034：S4 本地 Bundle/Plugin 最小运行时
+
+状态：accepted（2026-09-01，S4）
+
+S4 只支持宿主显式提供的本地目录 bundle。`plugin.json` 使用版本化 manifest，名称、semver、入口和贡献路径在安装前校验；bundle 复制到 host-owned 的 `<cache>/<name>/<version>` 目录，临时目录完成后原子 rename，保留旧版本用于回滚。pin 是精确版本，不执行网络解析或 marketplace 解析。
+
+插件 enable/disable 和 reconcile 状态写入 cache 目录的 bounded state 文件；激活失败不会替换已有 active 记录，inventory 从 Runtime 当前记录直接投影，避免第二套生命周期缓存。插件模块只能通过 `PluginActivationContext` 注册 Skill provider、Tool 和 ToolPrompt；Tool 仍进入 ToolRegistry/ToolRuntime，Skill 仍进入 SkillRegistry，不能绕过 permission、workspace、cancel 或事件审计。插件来源和绝对路径不进入 Web inventory。
+
+默认不启用插件能力。移除 `plugins` 注入、设置 runtime disabled 或删除 cache 均可回滚；重建 cache 时从显式 bundle 重新 reconcile。该阶段参考 Claude Code `schemas.ts`、`validatePlugin.ts`、`pluginLoader.ts`、`reconciler.ts` 的校验/安装/缓存/状态拆分，以及 DSH Cordis Loader 的显式生命周期和 plugin-inventory 的直接状态投影；没有复制上游实现。

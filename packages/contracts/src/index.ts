@@ -910,6 +910,7 @@ export type ToolCallStatus = "pending" | "awaiting_permission" | "running" | "co
 export type PermissionStatus = "pending" | "approved" | "denied" | "cancelled" | "expired";
 export type ToolSource =
   | { readonly kind: "builtin" }
+  | { readonly kind: "plugin"; readonly pluginName: string }
   | { readonly kind: "mcp"; readonly serverName: string; readonly rawName: string; readonly tenantId?: TenantId };
 
 export type McpServerScope = "user" | "project" | "session";

@@ -368,11 +368,15 @@ S3 实际结果：文件工具 `edit_file`、`write_file`、`delete_file`、patc
 
 ### S4：本地 Bundle/Plugin 最小运行时
 
+状态：`implemented`（2026-09-01，S4）
+
 - **范围**：manifest schema、bundle 安装缓存、版本 pin、enable/disable、reconcile、inventory；插件贡献 Skill provider/tool/prompt，但不允许绕过权限和 workspace。
 - **入口**：替换 `packages/runtime/src/index.ts:pluginsSettings()` deferred；新增 `packages/plugin-runtime`、`packages/skills-plugin`；API/Web settings 只读 inventory。
 - **参照**：CC `schemas.ts`、`validatePlugin.ts`、`pluginLoader.ts`、`reconciler.ts`；DSH Cordis Loader、`plugin-inventory`、settings UI。
 - **验收**：恶意 manifest/path traversal、失败安装、半更新、回滚到上个版本、dispose 清理、inventory 与实际 Loader 状态一致；安装缓存可重建。
 - **禁用/回滚**：默认关闭 plugin capability；保留 `deferred` 返回；仅允许本地显式 bundle，暂不接 marketplace。
+
+S4 实际结果：新增 `@coding-agent/plugin-runtime` 与 `@coding-agent/skills-plugin`。本地 bundle 仅接受绝对目录路径和受限 `plugin.json`，校验 schemaVersion、kebab-case 名称、semver、相对 entry/skills 路径、大小、文件数及 symlink；安装使用 `<cache>/<name>/<version>` 和临时目录 rename，版本 pin 必须精确匹配。runtime 提供 enable/disable、reconcile、dispose 和直接投影的只读 inventory；激活模块只能注册 Skill provider、Tool 和 ToolPrompt，Tool 仍进入 ToolRuntime 的 policy/workspace/approval/cancel/event 管线。`AgentHost.pluginsSettings()`、`GET /v1/plugins` 和 Web API client 提供只读观察；默认没有注入 plugin runtime 时仍报告 deferred，注入但未显式 enabled 时报告 disabled。S4 不包含 marketplace、远程下载、热更新、插件数据目录、跨进程隔离或自动安装。
 
 ### S5：MCP/远程 Skill 与可选搜索
 

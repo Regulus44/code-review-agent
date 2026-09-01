@@ -45,6 +45,7 @@ import {
   type MemoryAdapterCapability,
 } from "@coding-agent/contracts";
 import type { SkillRegistry } from "@coding-agent/skills";
+import type { PluginRuntime, PluginInventorySnapshot } from "@coding-agent/plugin-runtime";
 import { EchoChatModel, modelFailureMetadata, sanitizeFailureMessage } from "@coding-agent/llm";
 import { compactMessages, DEFAULT_CONTEXT_BUDGET, type ContextBudget } from "@coding-agent/compaction";
 import { applyToolResultBudgetAsync, assembleContext, buildPostCompactMessages, buildProjectMemoryPrompt, buildToolResultModelView, calculateContextWarningState, classifyProviderContextError, compactWithSessionMemory, compactWithSummaryModel, ContextRecoveryGuard, countContextTokens, createSessionMemoryFileWriteGuard, createTokenCounter, createToolResultBudgetState, createToolResultStorage, ensureToolResultPairing, estimateContextTokens, extractContextAttachmentIds, fallbackModelContextCapability, fingerprintModelRequest, groupMessagesByApiRound, hydrateToolResultBudgetState, isReactiveContextError, normalizeMessagesForAPI, normalizeExtractionConfig, recallRelevantProjectMemory, renderSkillCatalog, resolveContextBudget, restoreModelViewFromTranscript, selectPostCompactAttachments, SessionMemoryExtractionScheduler, sessionMemoryStats, shouldCompactBeforeRequest, shouldExtractSessionMemory, shouldUseExactTokenCount, truncateProjectMemoryEntrypoint, validateProjectMemoryTopic, type ApiRound, type ContextAssembly, type ContextAttachment, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type PostCompactAttachmentConfig, type PostCompactAttachmentProvider, type ProjectMemoryScope, type ProjectMemoryStore, type ProjectMemoryTopic, type SessionMemoryCompactConfig, type SessionMemoryExtractionConfig, type SessionMemoryExtractionState, type SessionMemoryExtractor, type SessionMemoryStore, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport, type ToolResultBudgetState, type ToolResultStorage } from "@coding-agent/context";
@@ -84,6 +85,8 @@ export interface AgentHostOptions {
   readonly codeMode?: CodeModeSandbox;
   readonly capabilities?: CapabilityRegistry;
   readonly skills?: SkillRegistry;
+  /** Optional local bundle/plugin runtime. Disabled unless explicitly enabled by its options. */
+  readonly plugins?: PluginRuntime;
   /** Enables model-facing SkillTool; user invocation remains available through executeTool. */
   readonly skillToolEnabled?: boolean;
   readonly subagentRuntime?: SubagentRuntime;
@@ -172,8 +175,9 @@ export interface LspSettings {
 export interface PluginsSettings {
   readonly configured: boolean;
   readonly enabled: boolean;
-  readonly status: "available" | "deferred" | "unavailable";
+  readonly status: "available" | "deferred" | "unavailable" | "disabled";
   readonly reason: string;
+  readonly inventory?: PluginInventorySnapshot;
 }
 
 export type ProductizationSettings = ProductizationCapability;
@@ -290,6 +294,7 @@ export class AgentHost {
   private readonly projectMemoryScopeKey: AgentHostOptions["projectMemoryScopeKey"];
   private readonly projectMemoryTurnStates = new Map<string, { readonly loaded: boolean; readonly surfacedIds: Set<string>; readonly staleIds: Set<string>; readonly cachedTopics: Map<string, ProjectMemoryTopic>; readonly disabled: boolean; readonly incompleteRecorded?: boolean }>();
   private readonly skills: SkillRegistry | undefined;
+  private readonly plugins: PluginRuntime | undefined;
   private readonly sessionMemoryScheduler = new SessionMemoryExtractionScheduler();
   private readonly sessionMemoryScheduleTails = new Map<SessionId, Promise<void>>();
   private readonly summaryCompact: Partial<SummaryCompactConfig> | undefined;
@@ -336,6 +341,7 @@ export class AgentHost {
     this.quota = options.quota;
     this.operations = options.operations ?? { backup: "deferred", migration: "deferred", upgrade: "deferred" };
     this.skills = options.skills;
+    this.plugins = options.plugins;
     this.customSystemPrompt = options.systemPrompt;
     this.maxParallelToolCallsLimit = resolveMaxParallelToolCalls(options.maxParallelToolCalls);
     this.repeatToolReminder = new RepeatToolReminder(options.repeatToolReminder);
@@ -355,6 +361,7 @@ export class AgentHost {
     }
     if (options.subagentRuntime !== undefined) registry.registerMany(createSubagentTools({ runtime: options.subagentRuntime }).filter((tool) => !registry.has(tool.name)));
     if (options.skills !== undefined && options.skillToolEnabled === true && (options.capabilities === undefined || options.capabilities.isEnabled("skill")) && !registry.has("skill")) registry.register(createSkillTool(options.skills));
+    this.plugins?.bind({ ...(this.skills === undefined ? {} : { skills: this.skills }), tools: registry, prompts: this.toolPromptRegistry });
     this.toolRuntime = options.toolRuntime ?? new ToolRuntime({ store: options.store, registry, ...(this.terminalManager === undefined ? {} : { terminalManager: this.terminalManager }), ...(options.permissionPreset === undefined ? {} : { policy: new DefaultPermissionPolicy({ preset: options.permissionPreset }) }) });
     this.ready = this.restoreQueuedTurns();
   }
@@ -574,12 +581,20 @@ export class AgentHost {
   }
 
   pluginsSettings(): PluginsSettings {
+    if (this.plugins !== undefined) {
+      const settings = this.plugins.settings();
+      return settings;
+    }
     return {
       configured: false,
       enabled: false,
       status: "deferred",
       reason: "Plugin runtime is deferred until a Phase 8.5 productization requirement is accepted.",
     };
+  }
+
+  pluginsInventory(): PluginInventorySnapshot {
+    return this.plugins?.inventory() ?? { version: 1, revision: 0, entries: [] };
   }
 
   skillSettings(): import("@coding-agent/contracts").SkillCapability {
