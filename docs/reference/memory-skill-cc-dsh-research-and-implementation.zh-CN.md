@@ -1,6 +1,6 @@
 # Memory 与 Skill：Claude Code / DSH 对照调研与分阶段实施方案
 
-状态：`research`（调研与实施建议，不直接改变已接受的架构决策）  
+状态：`research + implementation-audit`（调研、已落地阶段回填与后续实施建议；不直接改变已接受的架构决策）
 日期：2026-09-01  
 范围：
 
@@ -24,14 +24,15 @@
 
 ### 1.1 当前产品状态
 
-当前状态页把上下文与可靠性列为已实现能力，其中包含 tool-result artifact、microcompact、summary compact、session/project memory、context recovery 和 token diagnostics；同时把完整插件运行时列为尚未落地能力：[docs/status.zh-CN.md](../status.zh-CN.md)。
+当前状态页把上下文与可靠性列为已实现能力，其中包含 tool-result artifact、microcompact、summary compact、session/project memory、context recovery 和 token diagnostics；完整 marketplace/远程插件生态仍未落地，但本地 bundle/plugin 最小运行时已在 S4 完成：[docs/status.zh-CN.md](../status.zh-CN.md)。
 
-需要区分“包内实现”与“默认 Host 可用”：
+需要区分“包内实现”“默认 API Host 装配”和“模型/用户实际可调用”：
 
 - EventStore transcript、compact、summary、compact boundary、replay 和 diagnostics 已进入默认 Runtime 主路径；
-- Session Memory 和 Project Memory 已有 Context/Runtime/Storage 契约与测试；M0 已冻结 adapter readiness，M1 已为 SQLite API Host 默认装配 bounded 文件 adapter 与受限 fallback extractor。裸 `AgentHost`/InMemory 仍需显式注入 host-owned adapter，避免低层 Runtime 擅自决定持久化目录；
-- Skill 目前只有 capability guard、`skill` attachment 类型和 `capability_status` 只读观察入口；没有 `SKILL.md` loader、discovery、install、version 或 Web 管理面；
-- `/v1/capabilities.plugins` 由 Runtime 明确返回 `deferred`，不能把 prompt catalog 或 attachment support 当作完整 Skill runtime。
+- Session Memory 和 Project Memory 已有 Context/Runtime/Storage 契约与测试。默认 SQLite API Host 会装配 bounded 文件 adapter；裸 `AgentHost`、自定义 `host` 或 `InMemoryEventStore` 仍需显式注入 host-owned adapter；
+- Skill 已完成 S0–S5：contract/registry、filesystem loader、catalog、SkillTool、`/name` ingress、动态失效、path 条件、本地 plugin bundle 和 gated MCP provider；默认 API Host 会注册本地 filesystem provider，但 `skillToolEnabled` 仍需显式设为 `true` 才向模型暴露 SkillTool 和 catalog；
+- `GET /v1/skills`、`GET /v1/sessions/:id/memory` 和 Web client/presenter 已存在，但 legacy composer 尚未接入真实 suggestions 下拉，Memory 正文也没有 user-facing 编辑 API；
+- MCP Skill、Plugin runtime、SkillTool、Memory extraction 都可禁用或不装配，失败时保持 last-good 或 fail closed，不改变 EventStore 事实源。
 
 ### 1.2 本仓库与本次主题直接相关的入口
 
@@ -41,9 +42,9 @@
 | Context | `packages/context/src` | `session-memory.ts`、`session-memory-compact.ts`、`project-memory.ts`、`summary-compact.ts`、`post-compact.ts` | Memory、compact、附件预算和重建的纯函数/接口 |
 | 契约 | `packages/contracts/src/index.ts` | `AgentEventType`、`SessionProjection`、`ContextSessionMemoryProjection`、`ContextProjectMemoryProjection` | 事件、投影和回放边界 |
 | 存储 | `packages/storage/src/index.ts` | `applyEvent()`、`replayProjection()` | InMemory/SQLite 共用 reducer，保存 bounded metadata |
-| 工具与能力 | `packages/tools/src/capabilities.ts`、`builtin.ts` | `CapabilityRegistry`、`authorizeSkill()`、`capability_status` | 可选扩展的开关和安全上限 |
-| API | `apps/api/src/server.ts` | `createApiServer()`、`GET /v1/capabilities` | Host 装配、能力投影和 Web API |
-| Web | `apps/web/src/client/store.ts`、`src/presentation` | context diagnostics/replay presenters | 消费 projection；暂无 Memory/Skill 专用管理面 |
+| 工具与能力 | `packages/tools/src/capabilities.ts`、`skill.ts`、`builtin.ts` | `CapabilityRegistry`、`createSkillTool()`、`capability_status` | Skill 开关、调用审批和统一 ToolRuntime 管线；部分 policy 仍需收紧 |
+| API | `apps/api/src/server.ts` | `createApiServer()`、`GET /v1/capabilities`、`GET /v1/skills`、`GET /v1/sessions/:id/memory` | Host 装配、Memory/Skill 能力投影、catalog 和只读 inspector |
+| Web | `apps/web/src/client/api.ts`、`src/client/store.ts`、`src/presentation` | `listSkills()`、`inspectMemory()`、Skill/Memory presenter、replay reducer | 已有只读 client/presenter 和工具行分类；legacy composer 尚未接入 suggestions UI |
 
 ### 1.3 已有记忆机制的实现切片
 
@@ -68,31 +69,32 @@
 
 ### 1.4 已有 Skill 机制的实现切片
 
-- `CapabilityRegistry` 默认关闭 `web/skill/subagent/workflow`，Skill 可配置 `maxBytes`；
-- `authorizeSkill()` 只返回低优先级、不可覆盖安全基线的文本授权结果；
-- post-compact attachment 支持 `kind: "skill"`，并对 Skill 设独立 token cap；
-- `capability_status` 可读取能力开关和上限；
-- 当前没有真实 Skill 内容来源、解析器、安装器、版本选择器、激活生命周期、持久化事件或 Web 管理面。
+- `packages/skills` 提供 DSH 风格 provider-neutral registry：global/scope chain、rank、shadow、cwd、AbortSignal、incomplete observation 和 `skills/change`；
+- `packages/skills-filesystem` 提供本地 `SKILL.md` 发现与按需正文加载，默认根为 `<cwd>/.claude/skills`、`~/.claude/skills`，并支持 custom/bundled roots；
+- `packages/context/src/skill-catalog.ts` 提供 bounded summary catalog/digest；`packages/tools/src/skill.ts` 提供统一 ToolRuntime SkillTool；`AgentHost.invokeSkill()` 与 API session ingress 提供严格 `/name` 用户入口；
+- `packages/plugin-runtime`/`packages/skills-plugin` 提供可选本地 bundle provider；`packages/skills-mcp` 提供默认关闭、server allowlist 限定的 `skill://` provider；
+- `skills/change`、`skill/invocation`、`skill/result` 仅保存 bounded 元数据，Skill 正文和绝对路径不进入 EventStore/SSE；
+- `CapabilityRegistry` 仍保留正向 trust/permission 评估，但当前 SkillTool 主路径使用 `packages/skills` 的 `assessSkillPermission()`；Skill 的 `allowed-tools` 尚未真正缩小当前 ToolRuntime 的工具集合；
+- 当前剩余差距主要是：SkillTool 默认关闭、user-invocable 负向约束未在用户入口强制、fork 仅为模式标记、Web composer 未接 suggestions、无 marketplace/语义搜索，以及 Memory/Skill 正文管理 API 尚未建立。
 
 ### 1.5 当前验证基线
 
-本次调研开始前已验证：
+本次复核已验证：
 
 - `pnpm typecheck`：通过；
-- `pnpm test`：通过；
-- Context memory、Runtime M06/M11/M12、Storage replay、CapabilityRegistry 相关定向测试：通过。
+- `pnpm test`：通过（当前 workspace 全量测试通过）；
+- `git diff --check`：通过；
+- Context memory、Runtime M06/M11/M12、Storage replay、Skill registry/filesystem/SkillTool/MCP/plugin、API/Web 相关定向测试：通过。
 
-## 2. 调研方法与后续章节结构
+## 2. 调研方法与文档维护方式
 
-后续章节按以下顺序增量补齐：
+本文档已经完成 Claude Code、DSH 与本仓库 Memory/Skill 的基线调研、模块矩阵和 S0–S5 实施回填。后续每次改造仍按同一顺序更新：
 
-1. Claude Code Memory：Session Memory、Project Memory/memdir、transcript/restore、compact/recovery；
-2. Claude Code Skill：Skill discovery、loader、prompt composition、权限/生命周期和 UI/CLI 入口；
-3. DSH Memory：如有对应实现则映射其 store、session/context 和持久化边界；
-4. DSH Skill/Plugin：`packages/skill/tool-skill` 及相关 registry、tool、prompt、Web 设置入口；
-5. 三方能力矩阵与差距分级；
-6. 本仓库按模块的改造点、文件级变更、契约影响和分阶段实施计划；
-7. 测试、迁移、禁用、回滚和“不应实现”的边界。
+1. 先记录上游具体程序、文件和代码入口；
+2. 再记录本仓库对应入口、实际行为和默认装配边界；
+3. 明确行为参考、不可复制内容、许可证/来源登记和契约影响；
+4. 将差距拆成可回滚的模块、阶段、测试门禁和禁用方式；
+5. 以代码、测试和 `docs/status.zh-CN.md` 为事实来源，及时删除过时的“未实现”描述。
 
 ## 3. Claude Code 参考实现
 
@@ -102,17 +104,17 @@ Claude Code 将“会话内可持续摘要”和“项目级长期事实”分�
 
 | 模块 | Claude Code 程序/文件/入口 | 行为与边界 | 本仓库对应入口/差距 |
 |---|---|---|---|
-| Session Memory 配置与门控 | `D:/Develop/claude-code/src/services/SessionMemory/sessionMemoryUtils.ts`：`DEFAULT_SESSION_MEMORY_CONFIG`、`shouldExtractMemory()` | 首次约 10k token 才初始化；后续需增长约 5k token；还需满足 3 次 tool call 或自然 assistant break；token 阈值始终必需 | `D:/Develop/code-review-agent/packages/context/src/session-memory.ts` 已有同类阈值、natural break、tool-call 门控；需要把 adapter 接到默认 Host |
-| Session Memory 文件创建 | `src/services/SessionMemory/sessionMemory.ts`：`setupSessionMemoryFile()` | 创建目录/文件、读取模板；文件是 extractor 与 compact 的持久边界 | `packages/context/src/session-memory.ts` 定义 `SessionMemoryStore`/抽取契约，`packages/storage/src/index.ts` 只保留 bounded metadata；默认 `createApiServer()` 尚未注入 store |
-| 自动抽取调度 | `sessionMemory.ts`、`src/context.ts`：post-sampling hook、`sequential()`、`createSubagentContext()`、`runForkedAgent()` | 仅 `querySource === 'repl_main_thread'` 主线程触发；每个 session 串行化，后台 extractor 不阻塞主 turn；支持手工 `/summary` | `packages/runtime/src/index.ts`：`scheduleSessionMemoryExtraction()` / `executeSessionMemoryExtraction()` 已有 seam；需实现 Host 默认 scheduler、重启恢复和可观察状态 |
-| 精确写入权限 | `src/utils/permissions/filesystem.ts`：`createMemoryFileCanUseTool(memoryPath)` | extractor 仅可对精确 memory path 使用 Edit；其它工具、其它路径全部拒绝 | 本仓库已有 `authorizeSkill()` 和 memory write guard，但需要把 Session Memory writer 作为独立 capability 接入统一 `discover → validate → policy → approval → execute → event` 管线 |
-| 边界幂等与 streaming 保护 | `sessionMemory.ts`：`updateLastSummarizedMessageIdIfSafe()` | 最后 assistant 仍有 tool call 时不推进边界，避免摘要落在未闭合 tool pair；提取结果有幂等边界 | `packages/context/src/session-memory-compact.ts` 已有 tool pair / response stream 保护；应增加 durable receipt 的重放和重复批准测试 |
-| 无模型 compact | `src/services/compact/sessionMemoryCompact.ts`：`truncateSessionMemoryForCompact()` | compact 时按 section 截断，`MAX_SECTION_LENGTH = 2000`，总上限 `MAX_TOTAL_SESSION_MEMORY_TOKENS = 12000`；保留固定 section header/description | `packages/context/src/session-memory-compact.ts` 已实现 bounded compact；需把压缩结果与 Runtime compact boundary、token diagnostics 联动 |
+| Session Memory 配置与门控 | `D:/Develop/claude-code/src/services/SessionMemory/sessionMemoryUtils.ts`：`DEFAULT_SESSION_MEMORY_CONFIG`、`shouldExtractMemory()` | 首次约 10k token 才初始化；后续需增长约 5k token；还需满足 3 次 tool call 或自然 assistant break；token 阈值始终必需 | `D:/Develop/code-review-agent/packages/context/src/session-memory.ts` 与 `packages/runtime/src/index.ts` 已实现同类阈值、natural break、tool-call 门控和默认 Host 装配；默认 extractor 仍是无模型 fallback |
+| Session Memory 文件创建 | `src/services/SessionMemory/sessionMemory.ts`：`setupSessionMemoryFile()` | 创建目录/文件、读取模板；文件是 extractor 与 compact 的持久边界 | `packages/context/src/session-memory-file.ts` 已实现 frontmatter/etag、大小限制、symlink/path 校验和 atomic rename；默认 SQLite `createApiServer()` 已按数据库 hash 装配 store |
+| 自动抽取调度 | `sessionMemory.ts`、`src/context.ts`：post-sampling hook、`sequential()`、`createSubagentContext()`、`runForkedAgent()` | 仅主线程触发；每个 session 串行化，后台 extractor 不阻塞主 turn；支持手工摘要入口 | `packages/runtime/src/index.ts` 的 `scheduleSessionMemoryExtraction()` / `executeSessionMemoryExtraction()` 已落地；支持阈值、取消、重启恢复和 metadata receipt，但默认 extractor 仍是无模型 fallback |
+| 精确写入权限 | `src/utils/permissions/filesystem.ts`：`createMemoryFileCanUseTool(memoryPath)` | extractor 仅可对精确 memory path 使用 Edit；其它工具、其它路径全部拒绝 | 本仓库已有 `createSessionMemoryFileWriteGuard()` 与 `ProjectMemoryWriterPolicy`；尚未把 Memory writer 暴露为独立 Tool/API capability 并接入统一 approval/audit 管线 |
+| 边界幂等与 streaming 保护 | `sessionMemory.ts`：`updateLastSummarizedMessageIdIfSafe()` | 最后 assistant 仍有 tool call 时不推进边界，避免摘要落在未闭合 tool pair；提取结果有幂等边界 | `packages/context/src/session-memory-compact.ts`、Runtime receipt/restart 已落地并有测试；仍需补更严格的未闭合 streaming 场景 |
+| 无模型 compact | `src/services/compact/sessionMemoryCompact.ts`：`truncateSessionMemoryForCompact()` | compact 时按 section 截断，`MAX_SECTION_LENGTH = 2000`，总上限 `MAX_TOTAL_SESSION_MEMORY_TOKENS = 12000`；保留固定 section header/description | `packages/context/src/session-memory-compact.ts` 与 Runtime `compactTurnContext()` 已联动 `context/session_memory_compacted` 和 boundary；差距主要是 CC section 级摘要格式和更细 token 预算 |
 | 多 store 扩展 | `src/services/SessionMemory/multiStore.ts` | `~/.claude/local-memory/<store>/<key>.md`；store/key 路径校验、单值 1MB、atomic temp-file + rename、bounded list/read、archive store | 本仓库暂无通用多 store；只在有明确产品场景时复用其“原子文件 + bounded 读取”行为，不直接引入 CC 的目录约定 |
-| Project Memory 路径 | `src/memdir/paths.ts`、`memdir.ts`、`teamMemPaths.ts` | 默认 `~/.claude/projects/<sanitized-git-root>/memory/`；支持 worktree 共享 canonical Git root；可用 `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` 覆盖 | `packages/context/src/project-memory.ts` 已用 workspace/tenant 派生 scope key；需要 filesystem adapter、路径策略和迁移脚本 |
-| Project Memory index | `src/memdir/memdir.ts`、`memoryTypes.ts` | `MEMORY.md` 约 200 行/25,000 bytes；超限截断并附 warning；topic frontmatter 含 `name/description/type` | `packages/context/src/project-memory.ts` 已有 bounded index、4 类 taxonomy（user/feedback/project/reference）、最多 5 topic、safe link parser；缺默认持久化和写入 UI |
-| 相关性召回 | `src/memdir/findRelevantMemories.ts` | 扫描 frontmatter manifest，再用轻量 `sideQuery()` + JSON schema 选择最多 5 条；支持 `recentTools` 去噪和 `alreadySurfaced` 去重 | `project-memory.ts` 已有 relevance、stale validator；需要确定本项目是否允许模型辅助召回，先提供 deterministic lexical/metadata fallback |
-| Memory prompt 组装 | `src/context.ts`、`src/memdir/memdir.ts` | 自动 memory、team memory、KAIROS daily log 以 system section + user context 注入；memory 是历史 claim，不是新指令 | `packages/runtime/src/index.ts` 的 `assembleTurnContext()` 已有 project/session context 入口；必须显式标注 provenance，并要求路径/符号/flag 重新验证 |
+| Project Memory 路径 | `src/memdir/paths.ts`、`memdir.ts`、`teamMemPaths.ts` | 默认 `~/.claude/projects/<sanitized-git-root>/memory/`；支持 worktree 共享 canonical Git root；可用 `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` 覆盖 | `packages/context/src/project-memory-fs.ts` 已实现 host-data 下的 workspace/tenant `scopeKey` 目录；未实现 CC canonical Git-root 共享和迁移脚本 |
+| Project Memory index | `src/memdir/memdir.ts`、`memoryTypes.ts` | `MEMORY.md` 约 200 行/25,000 bytes；超限截断并附 warning；topic frontmatter 含 `name/description/type` | `packages/context/src/project-memory.ts` + `project-memory-fs.ts` 已实现同量级 bound、4 类 taxonomy、safe link parser、默认持久化和 atomic writer；缺用户-facing 写入 API |
+| 相关性召回 | `src/memdir/findRelevantMemories.ts` | 扫描 frontmatter manifest，再用轻量 `sideQuery()` + JSON schema 选择最多 5 条；支持 `recentTools` 去噪和 `alreadySurfaced` 去重 | `project-memory.ts` 已实现 manifest 交集、deterministic lexical recall、最多 5 条和 turn 内 `alreadySurfaced`；默认不调用模型，缺少语义召回和跨 turn 去重 |
+| Memory prompt 组装 | `src/context.ts`、`src/memdir/memdir.ts` | 自动 memory、team memory、KAIROS daily log 以 system section + user context 注入；memory 是历史 claim，不是新指令 | `packages/runtime/src/index.ts:assembleTurnContext()` 已把 Project Memory 作为 system section、topic 作为 bounded attachment；Session Memory 只在 compact 时注入；仍需补更细 provenance 和默认 validator |
 | Team/KAIROS 扩展 | `src/services/teamMemorySync/`、`src/services/autoDream/`、`src/skills/bundled/dream.ts` | 团队同步、secret scanner、watcher；daily log 由 `/dream` 蒸馏 topic 和 `MEMORY.md` | 本仓库没有对应产品边界；建议作为后续可选模块，禁止在核心 Memory MVP 中引入远程同步或夜间自动写入 |
 
 Claude Code 的 Memory 关键经验是“正文文件与会话事件分离”：文件适合长期事实和摘要，事件日志适合恢复、审计和 replay。Memory 文件不能改变事件事实源，也不能携带越权指令。
@@ -125,13 +127,13 @@ Claude Code 的主 loader 是 `D:/Develop/claude-code/src/skills/loadSkillsDir.t
 
 | 能力 | Claude Code 参考入口 | 关键实现 | 对本仓库的启示 |
 |---|---|---|---|
-| 本地发现 | `src/skills/loadSkillsDir.ts`：`loadSkillsFromSkillsDir()`、`getSkillDirCommands()` | 目录格式仅识别 `<name>/SKILL.md`；legacy `/commands` 兼容单 `.md`；并行扫描 managed/user/project/additional roots | 新建 `packages/skills` loader，优先支持 `<name>/SKILL.md`；legacy 只做显式迁移，不让旧格式污染核心 contract |
+| 本地发现 | `src/skills/loadSkillsDir.ts`：`loadSkillsFromSkillsDir()`、`getSkillDirCommands()` | 目录格式仅识别 `<name>/SKILL.md`；legacy `/commands` 兼容单 `.md`；并行扫描 managed/user/project/additional roots | `packages/skills-filesystem` 已支持 project/user/custom/bundled roots 下递归发现 `SKILL.md`；未兼容 legacy `/commands`、`.agents/skills` 或 `.dsh/skills` 默认根 |
 | 去重与优先级 | `getFileIdentity()`、`realpath()`、`seenFileIds` | 解析符号链接后的规范路径去重；先到先得，加载顺序由 managed → user → project 等来源决定 | 采用 DSH 的 rank/provider 合并模型，避免只靠路径字符串；所有 symlink、重复 root 和跨平台大小写行为写安全测试 |
-| frontmatter | `parseSkillFrontmatterFields()`、`createSkillCommand()` | 解析 `name`、`description`、`when_to_use`、`allowed-tools`、`argument-hint`、`arguments`、`model`、`effort`、`context`、`agent`、`hooks`、`paths`、`version`、`user-invocable`、`disable-model-invocation`、`shell` 等 | 本仓库先定义最小稳定字段：`name/description/whenToUse/modelInvocable/userInvocable/allowedTools/context/version`；扩展字段必须经 schema、权限和 ADR 审核 |
-| prompt 延迟加载 | `createSkillCommand().getPromptForCommand()` | 列表只含摘要；调用时才读正文，替换 `$ARGUMENTS`、`${CLAUDE_SKILL_DIR}`、`${CLAUDE_SESSION_ID}`；本地 Skill 可执行 prompt shell | 本仓库应保持“摘要进入 catalog，正文按需加载”；默认禁止 prompt 内联 shell，脚本必须走受管工具和 workspace policy |
+| frontmatter | `parseSkillFrontmatterFields()`、`createSkillCommand()` | 解析 `name`、`description`、`when_to_use`、`allowed-tools`、`argument-hint`、`arguments`、`model`、`effort`、`context`、`agent`、`hooks`、`paths`、`version`、`user-invocable`、`disable-model-invocation`、`shell` 等 | 本仓库已落地最小字段和 `paths`，未知字段被记录并在调用时触发 ask；尚未实现 argument-hint/model/effort/agent/hooks/shell 等 CC 扩展 |
+| prompt 延迟加载 | `createSkillCommand().getPromptForCommand()` | 列表只含摘要；调用时才读正文，替换 `$ARGUMENTS`、`${CLAUDE_SKILL_DIR}`、`${CLAUDE_SESSION_ID}`；本地 Skill 可执行 prompt shell | 本仓库 catalog 只含摘要，SkillTool 调用时按需加载正文；本地仅替换 `$ARGUMENTS`，不实现目录/session 变量和 prompt shell |
 | MCP Skill 安全 | `createSkillCommand()` 中 `loadedFrom !== 'mcp'` 守卫；`src/skills/mcpSkills.ts` | 远程/MCP Markdown 不执行 `!` shell，不做本地目录替换；MCP 资源变化触发缓存失效 | MCP Skill 必须作为不可信来源，禁止把远程正文直接提升为 allowed tool；统一经过 schema、来源信任和 approval |
-| 动态路径发现 | `discoverSkillDirsForPaths()`、`addSkillDirectories()`、`activateConditionalSkillsForPaths()` | 文件操作后从目标路径向上找 `.claude/skills`；`paths` frontmatter 用 gitignore 规则匹配；深层目录优先；gitignored 目录跳过 | 可在 `ToolRuntime` 的 file read/write/edit 成功后发 `skills/change`/invalidate；不得在 Web 侧自行猜测当前 skill 目录 |
-| Prompt catalog 预算 | `packages/builtin-tools/src/tools/SkillTool/prompt.ts`：`formatCommandsWithinBudget()` | 约 context window 的 1% 预算；单描述 250 字符；bundled 描述不截断；预算不足先截断描述，最后只保留名称 | 本仓库应在 `packages/context` 建 `skill-catalog` projector，预算、排序、digest 可回放；catalog 不含正文/绝对路径 |
+| 动态路径发现 | `discoverSkillDirsForPaths()`、`addSkillDirectories()`、`activateConditionalSkillsForPaths()` | 文件操作后从目标路径向上找 `.claude/skills`；`paths` frontmatter 用 gitignore 规则匹配；深层目录优先；gitignored 目录跳过 | 已在文件变更成功后发 `skills/change`，并实现 `paths` 条件匹配；当前没有 watcher 和向上扩展目录发现，主要依赖 turn-boundary/manual refresh |
+| Prompt catalog 预算 | `packages/builtin-tools/src/tools/SkillTool/prompt.ts`：`formatCommandsWithinBudget()` | 约 context window 的 1% 预算；单描述 250 字符；bundled 描述不截断；预算不足先截断描述，最后只保留名称 | `packages/context/src/skill-catalog.ts` 已实现固定 8,000 字符预算、描述截断、名称降级、排序和 digest；尚未按实际 context window 动态计算预算 |
 
 #### 3.2.2 SkillTool 执行与权限
 
@@ -143,6 +145,13 @@ Claude Code 的主 loader 是 `D:/Develop/claude-code/src/skills/loadSkillsDir.t
 4. `executeRemoteSkill()` 对远程 canonical skill 重新取 URL、缓存加载、限制协议和正文替换；远程 Skill 不走 `$ARGUMENTS`/`!command` 展开，并在 compact 后保留 invoked-skill 状态。
 
 该实现将“Skill 是 prompt/工作流声明”与“Tool 是执行原语”分开，但 Skill 仍必须进入统一权限、workspace、取消和事件管线。`allowed-tools` 不能绕过 deny、workspace 或审批。
+
+本仓库当前对应实现需要特别区分已实现行为与尚未对齐的行为：
+
+- `packages/tools/src/skill.ts:createSkillTool()` 已接入 ToolRuntime，但只在 `AgentHostOptions.skillToolEnabled === true` 且 capability 允许时注册；默认 API Host 的 filesystem provider 存在，SkillTool 仍关闭；
+- `AgentHost.invokeSkill()` 和 `POST /v1/sessions/:id` 的 slash 分支提供用户入口，但 `userInvocable: false` 当前只在 agent caller 路径被检查，用户 caller 尚未拒绝；
+- `context: "fork"` 当前只作为 result/event 的 mode 标记，没有调用内部 Subagent/新 Session；
+- `allowed-tools` 与 `CapabilityRegistry.authorizeSkillInvocation()` 已有 contract/test，但 SkillTool 主路径没有把 `effectiveAllowedTools` 绑定到后续 ToolRuntime 工具集合；这应列为下一阶段安全收紧项，而不能标记为 CC 等价实现。
 
 #### 3.2.3 Plugin 与 Skill 的装配
 
@@ -211,6 +220,8 @@ provider 解析目录包 `<name>/SKILL.md` 与扁平 `<name>.md`，校验 kebab-
 
 这是一种比 Claude Code 更偏“事件可回放”的实现：目录消息本身是 session history 的 durable source metadata，工具输出和用户注入都使用同一 canonical renderer。
 
+本仓库没有复制 DSH 的 durable `skill-catalog` user message。当前 catalog 在每次 `assembleTurnContext()` 时由 registry snapshot 重新生成，digest 只用于 bounded projection/缓存判断；因此刷新、compact 和 replay 不会把 Skill catalog 当成 transcript 消息。这样保持了正文和路径不落 EventStore 的安全边界，但也意味着当前没有 DSH 那种“目录消息本身可回放、可在压缩后精确替换”的持久 catalog 语义。
+
 #### 4.2.4 Host API、Web UI 与测试
 
 - `packages/host/apiproxy/src/api/skills.ts`、`skills.schema.ts`、`apiproxy.ts` 暴露 `skill.list`，按 session header 的 cwd 和 agent scope 返回用户可调用目录；调用仍走 `session.prompt`，没有第二套 invocation wire。
@@ -224,23 +235,26 @@ DSH 通过 Cordis Loader 将插件作为 service definition/provider/consumer �
 
 ## 5. 三方能力矩阵与本仓库差距
 
-| 模块 | 本仓库现状 | Claude Code | DSH | 差距判定 |
+| 模块 | 本仓库现状 | Claude Code | DSH | 当前差距与改进优先级 |
 |---|---|---|---|---|
-| Session Memory 存储 | adapter 契约、bounded compact、metadata projection；M1 已由 SQLite API Host 默认装配 `FileSessionMemoryStore` | Markdown 文件 + post-sampling forked extractor + exact-path write guard | 无语义 Memory；以 Session Event/compaction 为基础 | M1 已完成；后续补 model-backed extractor、读写/观测 API |
-| Project Memory | bounded `MEMORY.md`/topic taxonomy、relevance/stale 纯函数；无默认 filesystem adapter | memdir 文件树、topic frontmatter、最多 5 条轻量召回、team/KAIROS 扩展 | 无等价实现 | P1：filesystem adapter、trust、recall API |
-| Transcript/Replay | EventStore + replay + compact boundary 已进入主路径 | transcript 与 Memory 分离，compact 时保护 tool pair | append-only event + `deriveMessages()` + lifecycle event | 已具备；以 DSH 作为恢复验收基线 |
-| Skill discovery | 无 `SKILL.md` loader；仅 attachment/capability | managed/user/project/add-dir/plugin/bundled/MCP；dynamic path activation | provider registry、scope、rank、watcher、incomplete snapshot | P0：定义 contract + loader/provider |
-| Skill catalog | 无独立 catalog projection | prompt budget 约 1%，描述截断/降级 | durable `skill-catalog` message + digest replacement | P1：事件化 catalog，预算可配置 |
-| Skill invocation | 无 SkillTool；`authorizeSkill()` 只是 guard | SkillTool validate/permission/call，inline/fork | `skill` tool + user `/name` pre-step injection | P0：统一 ToolRuntime 管线和两种入口 |
-| Skill policy | optional capability 默认关闭；不可覆盖 safety | deny/allow + safe properties 正向白名单 | model/user 双布尔 policy，边界重复校验 | P0：将 model/user policy 设为显式 contract |
-| MCP/远程 Skill | 未实现完整 runtime | MCP skill feature gate；远程 canonical skill 实验能力 | provider 可扩展 URL/opaque resourceBase，但无 CC marketplace | S5 已实施最小 MCP provider；任意 URL/marketplace/语义搜索仍 deferred |
-| Plugin install/version | `plugins` capability 明确 deferred | manifest、marketplace、cache、reconcile、install/update | Cordis Loader/package plugins、只读 inventory | P2：最小本地 bundle/registry，暂不做商业 marketplace |
-| Web/API | 无 Memory/Skill 专用面 | CLI/TUI 菜单、权限请求、技能变化 hook | `skill.list` RPC、SkillRow、settings inventory、e2e | P1：catalog API + tool row + settings 只读面 |
-| 观测/恢复 | Memory metadata、token diagnostics 已有；Skill 无事件 | telemetry/usage ranking/feature gates | `skills/change`、session source metadata、完整 replay | P1：事件、digest、incomplete、恢复和审计 |
+| Session Memory 存储 | `FileSessionMemoryStore`、bounded Markdown、etag、atomic write、metadata projection；默认 SQLite API Host 自动装配 | `SessionMemory` Markdown + forked extractor + exact-path writer | 无语义 Memory，依赖 Session Event/compaction | P1：接入可替换 model-backed extractor、手工摘要入口、正文管理 API |
+| Session Memory 调度 | token/tool/natural-break 门控、每 session 串行、取消、重启恢复、幂等 receipt | post-sampling 主线程 hook、隔离 extractor、边界安全更新 | compaction lifecycle 和 replay 是主要参考 | 已具备核心闭环；需补“未闭合 tool call 不推进摘要边界”的更严格验收和 extractor 质量评估 |
+| Project Memory | `MEMORY.md` + `topics/*.md`、scopeKey、manifest/词法召回、最多 5 条、last-good/incomplete | memdir、最多 5 条召回、team/KAIROS 扩展 | 无等价语义 Memory | P1：canonical Git root/worktree 共享、写入 API、默认 stale validator、可观测 provenance |
+| Transcript/Replay | EventStore + projection + compact boundary + replay；Memory 正文外置 | transcript 与 Memory 分离 | append-only event + `deriveMessages()` + lifecycle event | 基础已对齐；Skill catalog 尚未采用 DSH durable user-message 方案 |
+| Skill discovery | S0–S1 filesystem provider，project/user/custom/bundled roots，frontmatter、realpath、symlink、gitignore、bounds | managed/user/project/add-dir/plugin/bundled/MCP，dynamic path activation | provider registry、scope、rank、watcher、incomplete snapshot | P1：支持 `.agents/.dsh` 兼容根、watcher/向上发现、legacy 迁移；保持默认关闭 watcher |
+| Skill catalog | bounded 8,000 字符 catalog、digest、摘要优先；每次 assemble 重建 | context-window 比例预算、动态刷新 | durable `skill-catalog` user message + digest replacement | P1：按实际 context window 动态预算；P2：评估 durable catalog 是否值得引入 |
+| Skill invocation | SkillTool、`/name`、ToolRuntime 事件和脱敏 result；fork 仅标记 | SkillTool validate/permission/call，真正 inline/fork | skill tool + user gesture/pre-step injection | P0：真正实现 fork→内部 Subagent/Session；严格执行 userInvocable 和 modelInvocable |
+| Skill policy | remote/unknown/unknown-property ask；本地默认 allow；CapabilityRegistry 有独立评估 | deny/allow + safe properties 正向白名单 | model/user 双布尔 policy，重复校验 | P0：将 `authorizeSkillInvocation()` 接入 SkillTool；让 allowed-tools 真正缩小 ToolRuntime 工具集 |
+| MCP/远程 Skill | S5：显式 server allowlist、`skill://`、TTL、超时、取消、变化失效、remote trust | MCP feature gate、远程 canonical skill、无 shell/参数展开 | provider 可扩展 URL/opaque resourceBase | P1：补 server/tenant 隔离和重连验收；继续禁止任意 URL/marketplace/语义搜索 |
+| Plugin install/version | S4：本地 bundle、manifest 校验、版本 pin、原子 cache、enable/disable/reconcile/inventory | marketplace、install/update、policy/blocklist | Cordis Loader/package plugins、inventory | P2：补插件贡献 Skill 的端到端安装/回滚 e2e；不引入商业 marketplace |
+| Web/API | `/v1/skills`、`/v1/sessions/:id/memory`、API client、presenter、replay reducer、Skill tool row | SkillsMenu、permission UI、change hook、CLI/TUI | `skill.list` RPC、SkillRow、settings inventory、e2e | P0：接入真实 composer suggestions 和 Memory inspector；P1：补 skill invocation/permission e2e |
+| 观测/恢复 | `skills/change`、`skill/invocation/result`、Memory bounded projection、last-good/incomplete | 更丰富的 usage/feature gate/telemetry | source metadata、session replay、loader state | P1：补 provider/tenant 隔离、catalog revision replay、跨进程恢复；禁止把正文写入公共 projection |
 
 ## 6. 本仓库模块化改造点
 
 以下改造遵循本仓库事件唯一事实源和统一工具管线。每一项都说明了本仓库入口、上游参照、契约影响和验收方式。
+
+说明：6.1/6.2 保留最初的模块化设计记录；已落地状态以第 7 节为准，落地后的剩余改造与代码级差距以第 6.3 节为准。
 
 ### 6.1 Memory 改造模块
 
@@ -268,6 +282,22 @@ DSH 通过 Cordis Loader 将插件作为 service definition/provider/consumer �
 | S-I MCP Skill provider | 新增 `packages/skills-mcp`，接入现有 MCP seam（当前仓库尚无完整 MCP runtime） | CC `mcpSkills.ts`、`mcpSkillBuilders.ts`、`docs/features/mcp-skills.md`；DSH provider URL/opaque `resourceBase` | 仅在显式 feature gate 开启；资源 schema、URL allowlist、大小/超时/缓存；远程正文禁止 shell expansion；失败返回 incomplete | MCP contract、取消、缓存失效、远程内容注入安全；默认不装配，stub 不标成功 |
 | S-J Skill Web/API | 新增 `/v1/skills` 或扩展 capabilities；`apps/web/src/client/store.ts`、presentation、composer、tool row | DSH `skills.ts`/schema、`SkillRow.tsx`、`ui-skill` e2e；CC `SkillsMenu.tsx`、permission UI | 目录列表、来源/策略状态、加载工具行、用户-only marker、变化刷新；渲染只读 durable call/result slice | Wire schema、SSE/replay、浏览器 e2e；后端能力缺失显示 unavailable；UI 可独立禁用 |
 
+### 6.3 S0–S5 落地后的剩余改造点
+
+下表是基于当前源码复核后的“下一步改进清单”，优先处理实际行为与已声明 contract 不一致的部分。
+
+| 优先级 | 当前仓库入口 | Claude Code / DSH 参照入口 | 具体改进 | 验收与回滚 |
+|---|---|---|---|---|
+| P0 | `packages/tools/src/skill.ts:createSkillTool()`、`packages/runtime/src/index.ts:invokeSkill()` | CC `SkillTool.validateInput()`/`checkPermissions()`；DSH `tool-skill/src/index.ts` 的四象限 policy | 强制 `userInvocable` 和 `modelInvocable` 双向约束；把 `CapabilityRegistry.authorizeSkillInvocation()` 作为唯一权限入口；将 `allowed-tools` 映射到受限 ToolRuntime/子 Agent 工具集 | policy 单测、用户/模型四象限、approval replay；失败时仅禁用 SkillTool，不影响普通 turn |
+| P0 | `packages/tools/src/skill.ts`、`packages/subagent`、`packages/runtime` | CC `prepareForkedCommandContext()`/`runAgent()`；DSH child Session/Task 与 `tool-skill` fork | 将 `context: "fork"` 从模式标记升级为真实内部 Subagent/Session，隔离 prompt、工具、权限、取消和结果回传 | child Session replay、取消、权限隔离、父 turn 恢复；feature flag 保留 inline fallback |
+| P0 | `apps/web` composer、`apps/web/src/client/api.ts:listSkills()` | CC `SkillsMenu.tsx`/`useSkillsChange.ts`；DSH `ui-skill`、`skill.list` RPC | 把 `/v1/skills` suggestions 接入实际 composer 下拉和键盘选择；用户-only marker 与 unavailable/incomplete 状态必须可见 | 浏览器 e2e 覆盖刷新、输入、选择、重连；后端无能力时显示空态，不伪造成功 |
+| P1 | `packages/context/src/session-memory-file.ts`、`packages/runtime/src/index.ts:executeSessionMemoryExtraction()` | CC `createSubagentContext()`、`updateLastSummarizedMessageIdIfSafe()` | 增加可替换 model-backed extractor；严格阻止摘要边界落在未闭合 tool call/streaming response；增加手工 summary/refresh 命令 | extractor contract、tool-pair/restart/idempotency；默认 fallback extractor 保留可回滚 |
+| P1 | `packages/context/src/project-memory-fs.ts`、`packages/runtime/src/projectMemoryContext()` | CC `memdir/paths.ts`、`findRelevantMemories.ts`；DSH workspace/cwd provider 解析 | 支持 canonical Git root/worktree 共享策略；默认接入只读 stale validator；补 provenance（来源文件、更新时间、验证状态） | 多 worktree/tenant 隔离、stale 回放；scope key 迁移失败时继续旧目录 |
+| P1 | `packages/context/src/project-memory.ts`、`apps/api/src/server.ts` | CC `memdir` 写入与 memory commands；DSH Event/permission 管线 | 建立受权限保护的 Memory 写入 API/Tool，支持 topic/entrypoint 的审计事件和 optimistic 禁止；保持正文不进公共 projection | path/symbol/flag 安全、重复写、审批恢复；可独立关闭 writer |
+| P1 | `packages/skills-filesystem`、`packages/runtime` | CC `discoverSkillDirsForPaths()`/watch hook；DSH `SkillWatchManager` | 增加 watcher 或向上目录发现，并把失败分类为 incomplete；继续以 turn-boundary refresh 作为 fallback | watcher 失败 last-good、并发文件变更、资源释放；watcher 默认关闭 |
+| P1 | `packages/skills-mcp`、`packages/mcp-client` | CC `mcpSkills.ts`/`mcpSkillBuilders.ts`；DSH provider tenant/scope | 补 MCP server/tenant 隔离、重连后缓存 revision 和跨 session replay 测试；禁止把 remote `resourceBase` 解析成任意 URL | SSRF/跨 tenant/取消/重连合同；关闭 `mcpSkills` 即回滚 |
+| P2 | `packages/context/src/skill-catalog.ts`、`packages/contracts`、`packages/runtime` | CC `formatCommandsWithinBudget()`；DSH durable `skill-catalog` replacement | 评估按实际 context window 动态预算；只有出现 replay/compact 后目录一致性需求时，才引入 durable catalog event/message | digest/replay/compact e2e；当前 ephemeral catalog 保持默认 |
+
 ## 7. 分阶段实施路线
 
 阶段顺序按“先契约和默认装配，再本地文件能力，再远程/插件扩展”安排。每阶段都应创建可回滚 Git checkpoint，并同步 `docs/status.zh-CN.md`；若改变公共 Event/Tool/Permission/Workspace contract，先更新 ADR 和契约文档。
@@ -294,7 +324,7 @@ M0 实际结果：`MemoryCapability`/adapter readiness 已进入 Runtime/API cap
 - **验收**：首次/后续阈值、自然断点、tool pair 未闭合保护、重复 extraction 幂等、崩溃后 receipt 恢复、取消不污染主 turn；安全测试覆盖路径穿越/symlink/并发写。
 - **禁用/回滚**：feature flag 关闭 scheduler，保留已写文件只读；发生 schema 迁移问题可回退到 adapter-only 模式。
 
-M1 实际结果：`packages/context/src/session-memory-file.ts` 提供 frontmatter + etag、字符/UTF-8 bytes bound、临时文件 `fsync` + 同目录 rename、session id/path/symlink fail-closed 和单 session 串行写；`apps/api/src/server.ts:createApiServer()` 对 SQLite 默认按数据库绝对路径 hash 隔离目录，并支持 `sessionMemoryRootDir` 覆盖。无模型 fallback extractor 只读取 user/assistant transcript，固定 restricted capabilities；runtime 已覆盖取消、主 turn 隔离、保存后幂等 receipt 和重启恢复。M1 不提供 Project Memory 默认 adapter、Memory 读写/召回 API 或 Web 管理面。
+M1 实际结果：`packages/context/src/session-memory-file.ts` 提供 frontmatter + etag、字符/UTF-8 bytes bound、临时文件 `fsync` + 同目录 rename、session id/path/symlink fail-closed 和单 session 串行写；`apps/api/src/server.ts:createApiServer()` 对 SQLite 默认按数据库绝对路径 hash 隔离目录，并支持 `sessionMemoryRootDir` 覆盖。无模型 fallback extractor 只读取 user/assistant transcript，固定 restricted capabilities；runtime 已覆盖取消、主 turn 隔离、保存后幂等 receipt 和重启恢复。Project Memory、Memory 读写/召回 API 和 Web 管理面属于后续 M2/M3，现已分别落地为独立阶段能力。
 
 ### M2：Project Memory filesystem 与 writer policy
 
@@ -324,7 +354,7 @@ API 新增 `GET /v1/sessions/:id/memory`，仅返回 capability 与 Session/Proj
 
 ### S0：Skill contract、registry 和安全模型
 
-状态：`implemented`（2026-09-01，S0 checkpoint 待本阶段提交）
+状态：`implemented`（2026-09-01，checkpoint `d96bf73`）
 
 - **范围**：建立 `SkillSummary/Candidate/Definition/InvocationPolicy/Provider`、rank/scope/cwd/signal、`skills/change`、source trust 和正向 permission。
 - **入口**：新增 `packages/skills` 与 `packages/contracts` 类型；扩展 `packages/tools/src/capabilities.ts`、`apps/api/src/server.ts:/v1/capabilities`。
@@ -338,6 +368,8 @@ S0 实际结果：新增 `packages/skills`（`@coding-agent/skills`）提供 pro
 
 ### S1：本地 SKILL.md loader/provider
 
+状态：`implemented`（2026-09-01，checkpoint `8acd743`）
+
 - **范围**：项目/用户/自定义/bundled 根、frontmatter schema、realpath 去重、大小和深度限制、手动 refresh；watcher 作为可选项。
 - **入口**：新增 `packages/skills-filesystem/src/index.ts`；在 Runtime composition/`apps/api/src/server.ts` 注册 provider。
 - **参照**：CC `loadSkillsDir.ts` 的来源与动态目录；DSH `skill-filesystem/src/index.ts` 的 rank、watcher、incomplete observation。
@@ -347,6 +379,8 @@ S0 实际结果：新增 `packages/skills`（`@coding-agent/skills`）提供 pro
 S1 实际结果：新增 `@coding-agent/skills-filesystem` 的 `FileSystemSkillProvider`。provider 支持 project/user/custom/bundled roots，project root 会根据每次 `SkillLookupOptions.cwd` 解析为 `<cwd>/.claude/skills`；候选按来源 rank 交给 S0 registry 合并。扫描只接受受限 `SKILL.md` frontmatter，catalog 仅暴露 bounded summary，正文在 `get()` 中按需读取并二次校验。realpath、symlink、路径越界、`.gitignore`、最大文件/描述字节、递归深度和候选数量均 fail closed；重复 realpath 去重。扫描不完整时保留最近成功候选，没有 last-good 时返回空结果；watcher 仅提供可选 `start` seam，默认由 API 关闭并使用手动/turn-boundary refresh。`apps/api` 默认注册 provider，可通过 `skillFilesystem.enabled=false` 禁用；`modelToolExposed` 继续为 false，普通 Agent turn 不因 loader 失败而阻塞。测试覆盖 hermetic discovery、延迟正文、duplicate roots、symlink/incomplete、gitignore、malformed frontmatter 和 bounds。
 
 ### S2：Skill catalog + SkillTool + 用户 `/name`
+
+状态：`implemented`（2026-09-01，checkpoint `cde7402`）
 
 - **范围**：catalog budget/digest、摘要→正文二次校验、canonical renderer、inline/fork、用户-only injection、ToolRuntime/approval/event。
 - **入口**：`packages/runtime/src/index.ts:assembleTurnContext()`、新增 `packages/tools/src/skill.ts`、`packages/contracts/src/index.ts`、`apps/api/src/server.ts` turn ingress、`apps/web/src/client/store.ts`。
@@ -358,13 +392,15 @@ S2 实际结果：新增 `packages/context/src/skill-catalog.ts`，提供稳定 
 
 ### S3：动态 invalidation、path 条件和 Web presenter
 
-- **范围**：文件工具变更触发 registry invalidation；`paths` 条件激活；`/v1/skills` 列表、composer suggestions、dedicated Skill tool row。
+状态：`implemented`（2026-09-01，checkpoint `c7c498a`）
+
+- **范围**：文件工具变更触发 registry invalidation；`paths` 条件激活；`/v1/skills` 列表、Web presenter 和 dedicated Skill tool row；composer suggestions 仅完成 API/client seam，实际 UI 仍 deferred。
 - **入口**：`packages/tools/src/builtin.ts` 文件工具成功分支、`packages/runtime` cache、`apps/api/src/server.ts`、`apps/web/src/client/store.ts`/presentation。
 - **参照**：CC `discoverSkillDirsForPaths()`/`activateConditionalSkillsForPaths()`/`useSkillsChange.ts`；DSH `skills/change`、`SkillRow.tsx`、`skill.list` RPC。
 - **验收**：文件变更后下一步 catalog 正确替换；不完整扫描保留 last-good；UI 只读 durable slice；浏览器 e2e 覆盖 list、user-only marker、tool row、replay。
 - **禁用/回滚**：先使用手动/turn-boundary refresh；UI 独立 feature gate。
 
-S3 实际结果：文件工具 `edit_file`、`write_file`、`delete_file`、patch apply/rollback 成功后触发 registry invalidation，并追加 bounded `skills/change`（去重路径、仅 workspace-relative 元数据）；filesystem provider 解析 `paths` frontmatter 并按 `SkillLookupOptions.paths` 条件激活。新增 Runtime `skillCatalog()`、API `GET /v1/skills`（可选 session/path/query suggestions，沿用 tenant/session 访问校验）和 Web `listSkills()`/Skill row presenter。watcher 仍默认关闭，catalog 采用手动/turn-boundary refresh 与 last-good/incomplete；Skill 正文不进入事件、SSE 或 API 响应。
+S3 实际结果：文件工具 `edit_file`、`write_file`、`delete_file`、patch apply/rollback 成功后触发 registry invalidation，并追加 bounded `skills/change`（去重路径、仅 workspace-relative 元数据）；filesystem provider 解析 `paths` frontmatter 并按 `SkillLookupOptions.paths` 条件激活。新增 Runtime `skillCatalog()`、API `GET /v1/skills`（可选 session/path/query suggestions，沿用 tenant/session 访问校验）和 Web `listSkills()`/Skill row presenter/Skill tool row 分类。watcher 仍默认关闭，catalog 采用手动/turn-boundary refresh 与 last-good/incomplete；Skill 正文不进入事件、SSE 或 API 响应。legacy composer 尚未把 API suggestions 接入真实下拉交互。
 
 ### S4：本地 Bundle/Plugin 最小运行时
 
@@ -417,8 +453,37 @@ S5 实际实施：新增 `@coding-agent/skills-mcp`，通过 `McpConnectionManag
 - 不在没有真实验收场景时实现实验性 Skill Search、团队 Memory 同步、KAIROS/auto-dream 或 A2A Skill 远程互操作。
 - 不把 DSH Agent Note 当作用户 Memory；不让 Web 自己成为 Skill/Memory 事实源。
 
+### 8.4 当前代码事实审计
+
+当前仓库在本次复核中通过：
+
+- `pnpm typecheck`；
+- `pnpm test`（包含 Context Memory、Runtime Memory、Skill registry、filesystem provider、SkillTool、MCP provider、plugin runtime、API 和 Web presenter 测试）；
+- `git diff --check`。
+
+测试覆盖证明了契约、边界、取消、last-good、replay 和 API 投影等基础行为，但尚未证明以下产品级路径：
+
+- 默认 API Host 中启用 `skillToolEnabled` 后的真实模型调用；
+- Web composer 的 suggestions 下拉和键盘交互；
+- Skill `context: "fork"` 的真实子 Session；
+- Memory 正文写入 API、model-backed extractor 和跨 worktree canonical scope；
+- MCP Skill 跨 tenant/server 隔离和远程重连后的完整 replay。
+
 ## 9. 当前结论与下一步
 
-M0–M3 已完成 Memory readiness、默认 Session/Project Memory 持久化、bounded recall 和只读观察面；S0 已完成 Skill contract、分层 registry、provider failure/incomplete 观察、`skills/change` 生命周期和正向 trust/permission 模型。当前缺口集中在可替换的 model-backed Session extractor、Memory 正文编辑 API（仍需独立权限/审计契约），以及 Skill 的本地 loader、catalog、SkillTool、用户 `/name`、动态 path 激活和 plugin runtime。
+截至 2026-09-01，Memory 的 M0–M3 和 Skill 的 S0–S5 已完成。当前代码已经形成以下可运行闭环：
 
-下一阶段应进入 **S1：本地 SKILL.md loader/provider**，同时保留 S0 registry 与 M2/M3 Memory 回滚路径。这样可以继续复用本项目 EventStore、projection、permission 和 workspace 安全边界，不引入第二套事实来源。
+1. 默认 SQLite API Host 自动装配 Session/Project 文件 Memory；Runtime 在 turn 后台抽取 Session Memory，在上下文超限时优先使用已有摘要 compact；Project Memory 在每轮组装时读取 `MEMORY.md`、做 manifest/词法召回并注入 bounded model context。
+2. Skill 通过 registry/provider 发现本地、plugin 和可选 MCP 来源；catalog 只暴露摘要，SkillTool 按需读取正文，统一经过 ToolRuntime、审批、取消和事件脱敏；文件变更通过 `skills/change` 触发失效。
+3. EventStore 仍是唯一事实源。Memory/Skill 正文位于 host-owned filesystem 或 MCP provider，不进入公共 projection/SSE；失败时使用 last-good 或 fail closed。
+
+“已完成”不代表与 Claude Code/DSH 完全等价，当前最重要的差距按优先级为：
+
+- **P0 安全与语义一致性**：将 `CapabilityRegistry.authorizeSkillInvocation()` 接入 SkillTool 主路径；严格执行 `userInvocable`；让 `allowed-tools` 真正缩小 Skill/子 Agent 可见工具集合；修正 `skillSettings.modelToolExposed` 与实际注册状态不一致的问题。
+- **P0 调用模型**：将 `context: "fork"` 实现为真实内部 Subagent/Session，隔离上下文、工具、权限、取消和结果回传；补齐模型调用与用户调用的四象限 e2e。
+- **P0 Web 交互**：把 `/v1/skills` suggestions 接入 composer 下拉、键盘选择、用户-only/remote/incomplete 状态和 replay；Memory inspector 保持只读并增加来源/验证状态。
+- **P1 Memory 质量**：增加可替换的 model-backed Session extractor、手工 summary/refresh、严格的 tool-pair 边界保护；Project Memory 增加 canonical Git root/worktree 共享、默认 stale validator 和受权限保护的写入 API。
+- **P1 动态与远程**：补齐 filesystem watcher/向上发现、MCP server/tenant 隔离、重连后的 revision/replay 测试；继续保持远程 Skill 默认关闭和 `skill://` 限制。
+- **P2 体验与持久化**：评估按真实 context window 动态计算 Skill catalog 预算；只有在 replay/compact 需要时再引入 DSH 风格 durable catalog message；暂不实现 marketplace、任意 HTTP 抓取、语义搜索和团队 Memory 同步。
+
+后续每个改进切片都应继续登记 Claude Code/DSH 的具体入口、契约影响、测试门禁、禁用方式和可回滚 checkpoint。当前阶段不应重新引入第二套事实源，也不应把研究文档中的历史计划表述当作已实现状态。
