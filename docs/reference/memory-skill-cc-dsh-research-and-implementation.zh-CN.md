@@ -298,7 +298,7 @@ M1 实际结果：`packages/context/src/session-memory-file.ts` 提供 frontmatt
 
 ### M2：Project Memory filesystem 与 writer policy
 
-状态：`implemented`（2026-09-01，checkpoint 待提交）
+状态：`implemented`（2026-09-01，checkpoint `736efea`）
 
 - **范围**：scope → memory directory、`MEMORY.md`/topic 文件、frontmatter taxonomy、safe link、atomic write、stale validator。
 - **入口**：`packages/context/src/project-memory.ts`（必要时拆分 `project-memory-fs.ts`）、`packages/runtime/src/index.ts:projectMemoryContext()`、`apps/api/src/server.ts`。
@@ -397,4 +397,4 @@ M2 实际结果：新增 `FileProjectMemoryStore` 与 `ProjectMemoryWriterPolicy
 
 M0/M1 已完成 Memory readiness、默认 Session Memory 持久化和后台 extraction 的第一条可回放链路。当前缺口集中在 Project Memory 默认 filesystem adapter、Memory 读写/召回 API、Web 观察面，以及可替换的 model-backed extractor。Skill 仍处于 capability/attachment seam 阶段，尚未形成 loader、registry、catalog、SkillTool、permission 生命周期或 plugin runtime。
 
-下一阶段应进入 **M2：Project Memory filesystem 与 writer policy**，同时保留 M1 的 adapter-only 回滚路径；随后再实施 S0 Skill contract/registry。这样可以继续复用本项目 EventStore、projection、permission 和 workspace 安全边界，不引入第二套事实来源。
+下一阶段应进入 **M3：Memory 召回、观测和 Web**，同时保留 M2 的 filesystem adapter 与 writer policy 回滚路径；随后再实施 S0 Skill contract/registry。这样可以继续复用本项目 EventStore、projection、permission 和 workspace 安全边界，不引入第二套事实来源。

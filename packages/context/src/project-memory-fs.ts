@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readdir, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import type {
@@ -6,7 +6,6 @@ import type {
   ProjectMemoryScope,
   ProjectMemoryStore,
   ProjectMemoryTopic,
-  ProjectMemoryTopicHeader,
   ProjectMemoryTopicInput,
   ProjectMemoryType,
 } from "./project-memory.js";
