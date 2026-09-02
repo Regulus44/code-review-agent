@@ -11,7 +11,8 @@ import { createConfiguredApiServer } from "../../apps/api/src/server.ts";
 // own node_modules junction. Importing the source file here makes
 // `store instanceof SqliteEventStore` false inside the API and disables local
 // provider profiles.
-import { SqliteEventStore } from "../../apps/api/node_modules/@coding-agent/storage/dist/index.js";
+import { InMemoryEventStore, SqliteEventStore } from "../../apps/api/node_modules/@coding-agent/storage/dist/index.js";
+import { readCredentialMetadata } from "../../packages/storage/src/index.ts";
 import { buildEvaluationPrompt } from "./evaluation-prompt.ts";
 import { validateTrace, type TraceGateResult } from "./trace-gate.ts";
 
@@ -95,19 +96,8 @@ async function main(): Promise<void> {
   await assertCleanGit(workspace);
 
   const store = new SqliteEventStore(databasePath);
-  // Task events stay isolated in `store`. Credential records are durable host
-  // configuration, however, and must be read from the normal API metadata DB
-  // so a profile credentialRef can be resolved against credentials.secrets.json.
-  const credentialMetadataStore = new SqliteEventStore(credentialMetadataPath);
-  // Use the same host-side `.env` model selection as the production API entrypoint.
-  // `createConfiguredApiServer()` selects DeepSeek when MODEL_PROVIDER=auto and a
-  // non-empty DEEPSEEK_API_KEY is available; tests can still force Echo by setting
-  // MODEL_PROVIDER=echo explicitly.
-  const server = createConfiguredApiServer({
-    store,
-    credentialBackend: credentialMetadataStore,
-    permissionPreset: "workspace-full-access",
-  });
+  const credentialBackend = new InMemoryEventStore();
+  let server: Server | undefined;
   let sessionId: string | undefined;
   const startedAt = new Date();
   let turnStatus = "failed";
@@ -120,6 +110,18 @@ async function main(): Promise<void> {
   const autoApprovedPermissionIds: string[] = [];
 
   try {
+    // Read host credential metadata once through a read-only connection. The
+    // benchmark task store remains isolated and owns all session events.
+    for (const record of readCredentialMetadata(credentialMetadataPath)) credentialBackend.upsertCredential(record);
+    // Use the same host-side `.env` model selection as the production API entrypoint.
+    // `createConfiguredApiServer()` selects DeepSeek when MODEL_PROVIDER=auto and a
+    // non-empty DEEPSEEK_API_KEY is available; tests can still force Echo by setting
+    // MODEL_PROVIDER=echo explicitly.
+    server = createConfiguredApiServer({
+      store,
+      credentialBackend,
+      permissionPreset: "workspace-full-access",
+    });
     await listen(server);
     const address = server.address();
     if (address === null || typeof address === "string") throw new Error("Agent API did not bind to a TCP port");
@@ -175,7 +177,6 @@ async function main(): Promise<void> {
       }
       await delay(25);
     }
-    if (turnStatus === "failed") failureClass = "agent_failed";
     if (turnStatus === "stopped" || turnStatus === "interrupted") failureClass = "interrupted";
 
     agentDiff = (await execFileAsync("git", ["-C", workspace, "-c", "core.longpaths=true", "-c", "core.fileMode=false", "diff", "--binary"], { cwd: repoRoot, windowsHide: true })).stdout;
@@ -184,7 +185,6 @@ async function main(): Promise<void> {
     await writeFile(diffPath, agentDiff, "utf8");
     await writeFile(statusPath, JSON.stringify({ workspace, changedFiles: gitStatus, porcelain: statusPorcelain }, null, 2) + "\n", "utf8");
   } catch (error) {
-    failureClass ??= "agent_failed";
     await writeFile(path.join(runDirectory, "error.txt"), error instanceof Error ? error.stack ?? error.message : String(error), "utf8");
     throw error;
   } finally {
@@ -204,6 +204,8 @@ async function main(): Promise<void> {
       turnStatus,
       ...(traceExportError === undefined ? {} : { exportError: traceExportError }),
     });
+    if (turnStatus === "failed") failureClass ??= trace.turnStarted ? "agent_failed" : "initialization_failed";
+    else if (failureClass === null && sessionId === undefined) failureClass = "initialization_failed";
     try {
       await writeFile(tracePath, JSON.stringify(trace, null, 2) + "\n", "utf8");
     } catch (error) {
@@ -250,9 +252,8 @@ async function main(): Promise<void> {
       failureClass,
     };
     await writeFile(resultPath, JSON.stringify(result, null, 2) + "\n", "utf8");
-    await closeServer(server);
+    if (server !== undefined) await closeServer(server);
     store.close();
-    credentialMetadataStore.close();
   }
 
   console.log(`Agent run completed: task=${taskId} provider=${modelInfo?.provider ?? "unknown"} model=${modelInfo?.model ?? "unknown"} turn=${turnStatus}`);

@@ -3,7 +3,8 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { InMemoryEventStore, replayProjection, resolveDefaultSqliteDatabasePath, restoreSqliteDatabase, rollbackSqliteRestore, SqliteEventStore } from "./index.js";
+import { createHash } from "node:crypto";
+import { InMemoryEventStore, readCredentialMetadata, replayProjection, resolveDefaultSqliteDatabasePath, restoreSqliteDatabase, rollbackSqliteRestore, SqliteEventStore } from "./index.js";
 import { brand } from "@coding-agent/contracts";
 
 describe("InMemoryEventStore", () => {
@@ -566,5 +567,37 @@ describe("InMemoryEventStore", () => {
     expect((await rolledStore.project(activeSession))?.messages.at(-1)?.content).toBe("preserve this active database");
     rolledStore.close();
     rmSync(directory, { recursive: true, force: true });
+  });
+});
+
+describe("readCredentialMetadata", () => {
+  it("reads metadata without mutating the host database and supports concurrent readers", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "coding-agent-credential-reader-"));
+    const databasePath = join(directory, "host.sqlite");
+    try {
+      const store = new SqliteEventStore({ databasePath });
+      const record = store.upsertCredential({ id: "cred-reader", tenantId: "tenant-reader", kind: "header", label: "Reader", status: "active", version: 1, createdAt: "2026-09-02T00:00:00.000Z", updatedAt: "2026-09-02T00:00:00.000Z" });
+      store.close();
+      const before = createHash("sha256").update(readFileSync(databasePath)).digest("hex");
+      const values = await Promise.all(Array.from({ length: 11 }, () => Promise.resolve(readCredentialMetadata(databasePath))));
+      expect(values[0]).toEqual([record]);
+      expect(values.every((items) => items.length === 1 && items[0]?.id === record.id)).toBe(true);
+      expect(createHash("sha256").update(readFileSync(databasePath)).digest("hex")).toBe(before);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a database without the migration ledger", () => {
+    const directory = mkdtempSync(join(tmpdir(), "coding-agent-credential-reader-invalid-"));
+    const databasePath = join(directory, "invalid.sqlite");
+    try {
+      const db = new DatabaseSync(databasePath);
+      db.exec("CREATE TABLE arbitrary (id TEXT)");
+      db.close();
+      expect(() => readCredentialMetadata(databasePath)).toThrow(/SQLITE_SCHEMA_UNSUPPORTED/);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

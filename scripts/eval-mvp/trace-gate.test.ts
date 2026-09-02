@@ -19,7 +19,34 @@ describe("evaluation trace gate", () => {
         event(4, "tool/result", { toolCallId: "tool_1", status: "completed", result: { ok: true } }, "turn_1"),
         event(5, "turn/ended", { status: "completed" }, "turn_1"),
       ];
-      await expect(validateTrace({ events, workspaceRoot: root, turnId: "turn_1", turnStatus: "completed" })).resolves.toMatchObject({ status: "complete", boundaryStatus: "clean", sequenceContinuous: true, toolCallCount: 1, toolResultCount: 1, issues: [] });
+      await expect(validateTrace({ events, workspaceRoot: root, turnId: "turn_1", turnStatus: "completed" })).resolves.toMatchObject({ status: "complete", boundaryStatus: "clean", sequenceContinuous: true, turnStarted: true, toolCallCount: 1, toolResultCount: 1, issues: [] });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("marks a terminal trace without the target turn start as partial", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-trace-gate-"));
+    try {
+      const events = [
+        event(1, "session/created", { workspaceRoot: root }),
+        event(2, "turn/ended", { status: "failed" }, "turn_1"),
+      ];
+      const result = await validateTrace({ events, workspaceRoot: root, turnId: "turn_1", turnStatus: "failed" });
+      expect(result).toMatchObject({ status: "partial", turnStarted: false });
+      expect(result.issues).toContain("turn_started_missing");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("marks a failed target turn as started", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "cra-trace-gate-"));
+    try {
+      const events = [
+        event(1, "session/created", { workspaceRoot: root }),
+        event(2, "turn/started", {}, "turn_1"),
+        event(3, "turn/ended", { status: "failed", error: "model unavailable" }, "turn_1"),
+      ];
+      const result = await validateTrace({ events, workspaceRoot: root, turnId: "turn_1", turnStatus: "failed" });
+      expect(result).toMatchObject({ status: "complete", turnStarted: true });
+      expect(result.issues).toEqual([]);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 

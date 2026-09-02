@@ -1484,6 +1484,34 @@ export const SQLITE_UPGRADE_POLICY: SqliteUpgradePolicy = {
   rollback: "retained-displaced-database",
 };
 
+/**
+ * Reads credential metadata without opening the EventStore write lifecycle.
+ * The read-only connection never runs migrations, projection rebuilds, or
+ * interrupted-session recovery, so concurrent evaluation workers do not
+ * contend on BEGIN IMMEDIATE during startup.
+ */
+export function readCredentialMetadata(databasePath: string): readonly CredentialRecord[] {
+  const normalized = databaseFilePath(databasePath, "database");
+  if (!existsSync(normalized)) throw operationError("SQLITE_DATABASE_MISSING", `SQLite database does not exist: ${normalized}`);
+  const db = new DatabaseSync(normalized, { readOnly: true, timeout: 5_000 });
+  try {
+    const integrity = String((db.prepare("PRAGMA integrity_check").get() as SqliteRow | undefined)?.["integrity_check"] ?? "");
+    if (integrity !== "ok") throw operationError("SQLITE_INTEGRITY_FAILED", `SQLite integrity check failed for ${normalized}: ${integrity}`);
+    const migrationTable = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'").get();
+    if (migrationTable === undefined) throw operationError("SQLITE_SCHEMA_UNSUPPORTED", `SQLite database has no schema migration ledger: ${normalized}`);
+    const migrationRow = db.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as SqliteRow;
+    const userVersionRow = db.prepare("PRAGMA user_version").get() as SqliteRow;
+    const schemaVersion = Math.max(Number(migrationRow["version"] ?? 0), Number(userVersionRow["user_version"] ?? 0));
+    if (schemaVersion > SQLITE_SCHEMA_VERSION) throw operationError("SQLITE_SCHEMA_UNSUPPORTED", `Database schema ${schemaVersion} is newer than the supported schema ${SQLITE_SCHEMA_VERSION}.`);
+    const credentialsTable = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'credentials'").get();
+    if (credentialsTable === undefined) return [];
+    const rows = db.prepare("SELECT id, tenant_id, kind, label, status, version, created_at, updated_at, revoked_at FROM credentials ORDER BY tenant_id ASC, id ASC").all() as SqliteRow[];
+    return rows.map(readCredential);
+  } finally {
+    db.close();
+  }
+}
+
 export function assessSqliteUpgrade(databasePath: string): SqliteUpgradeAssessment {
   const inspection = inspectSqliteDatabase(databasePath);
   const allowed = inspection.schemaVersion >= SQLITE_UPGRADE_POLICY.minimumSupportedSchema && inspection.schemaVersion <= SQLITE_UPGRADE_POLICY.targetSchema;

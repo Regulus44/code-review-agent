@@ -27,6 +27,7 @@ export interface TraceGateResult {
   readonly eventCount: number;
   readonly firstSequence: number;
   readonly lastSequence: number;
+  readonly turnStarted: boolean;
   readonly sequenceContinuous: boolean;
   readonly toolCallCount: number;
   readonly toolResultCount: number;
@@ -99,6 +100,10 @@ export async function validateTrace(input: TraceGateInput): Promise<TraceGateRes
       break;
     }
   }
+  const turnStarted = input.turnId === undefined
+    ? events.some((event) => event.type === "turn/started")
+    : events.some((event) => event.type === "turn/started" && event.turnId === input.turnId);
+  if (input.turnId !== undefined && !turnStarted) issues.push("turn_started_missing");
   if (input.turnId !== undefined && terminalTurn(input.turnStatus) && !events.some((event) => event.type === "turn/ended" && event.turnId === input.turnId)) issues.push("terminal_turn_event_missing");
 
   const guardDenials: { toolCallId: string; reason: string }[] = [];
@@ -139,6 +144,7 @@ export async function validateTrace(input: TraceGateInput): Promise<TraceGateRes
     eventCount: events.length,
     firstSequence,
     lastSequence,
+    turnStarted,
     sequenceContinuous,
     toolCallCount: [...calls.values()].reduce((count, value) => count + value.length, 0),
     toolResultCount: [...results.values()].reduce((count, value) => count + value.length, 0),
@@ -175,7 +181,7 @@ function guardDenial(event: TraceEvent): string | undefined {
 }
 
 function emptyResult(issues: readonly string[]): TraceGateResult {
-  return { status: "missing", boundaryStatus: "unknown", eventCount: 0, firstSequence: 0, lastSequence: 0, sequenceContinuous: false, toolCallCount: 0, toolResultCount: 0, unmatchedToolCallIds: [], orphanToolResultIds: [], guardDenials: [], blockedBoundaryReferences: [], unblockedBoundaryReferences: [], issues };
+  return { status: "missing", boundaryStatus: "unknown", eventCount: 0, firstSequence: 0, lastSequence: 0, turnStarted: false, sequenceContinuous: false, toolCallCount: 0, toolResultCount: 0, unmatchedToolCallIds: [], orphanToolResultIds: [], guardDenials: [], blockedBoundaryReferences: [], unblockedBoundaryReferences: [], issues };
 }
 
 function terminalTurn(value: string | undefined): boolean {
