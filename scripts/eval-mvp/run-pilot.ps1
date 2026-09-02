@@ -1,23 +1,56 @@
 [CmdletBinding()]
-param([string]$DatasetRoot = "D:\Develop\coding-agent-test\datasets\swebench-lite\pilot-01")
+param(
+  [string]$DatasetRoot = "D:\Develop\coding-agent-test\datasets\swebench-lite\pilot-01",
+  [ValidateRange(1, 512)]
+  [int]$MaxConcurrency = 1
+)
 
 $ErrorActionPreference = "Stop"
 
-function Invoke-Process {
-  param([string]$FilePath, [string[]]$Arguments, [string]$WorkingDirectory, [hashtable]$Environment = @{})
+function Start-AgentProcess {
+  param([string]$TaskId, [string]$TaskDirectory)
   $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-  $startInfo.FileName = $FilePath; $startInfo.WorkingDirectory = $WorkingDirectory
+  $startInfo.FileName = $nodePath; $startInfo.WorkingDirectory = $repoRoot
   $startInfo.UseShellExecute = $false; $startInfo.CreateNoWindow = $true
   $startInfo.RedirectStandardOutput = $true; $startInfo.RedirectStandardError = $true
-  foreach ($argument in $Arguments) { [void]$startInfo.ArgumentList.Add($argument) }
-  foreach ($entry in $Environment.GetEnumerator()) { $startInfo.Environment[$entry.Key] = [string]$entry.Value }
+  foreach ($argument in @("--env-file-if-exists=.env", "--import", "tsx", "scripts/eval-mvp/run-agent-task.ts", $TaskId)) { [void]$startInfo.ArgumentList.Add($argument) }
+  $startInfo.Environment["CODING_AGENT_DATASET_ROOT"] = $DatasetRoot
+  $startInfo.Environment["CODING_AGENT_RUN_GROUP"] = $batchRunId
+  $startInfo.Environment["CODING_AGENT_RUN_ID_PREFIX"] = "run"
   $process = [System.Diagnostics.Process]::new(); $process.StartInfo = $startInfo
   try {
-    if (-not $process.Start()) { throw "Could not start process: $FilePath" }
-    $stdout = $process.StandardOutput.ReadToEndAsync(); $stderr = $process.StandardError.ReadToEndAsync()
-    $process.WaitForExit()
-    [pscustomobject]@{ exitCode = $process.ExitCode; stdout = $stdout.Result; stderr = $stderr.Result }
-  } finally { $process.Dispose() }
+    if (-not $process.Start()) { throw "Could not start process: $nodePath" }
+    return [pscustomobject]@{
+      taskId = $TaskId
+      taskDirectory = $TaskDirectory
+      process = $process
+      stdout = $process.StandardOutput.ReadToEndAsync()
+      stderr = $process.StandardError.ReadToEndAsync()
+    }
+  } catch {
+    $process.Dispose()
+    throw
+  }
+}
+
+function Complete-AgentProcess {
+  param([pscustomobject]$Invocation)
+  $process = $Invocation.process
+  $process.WaitForExit()
+  $stdout = $Invocation.stdout.Result
+  $stderr = $Invocation.stderr.Result
+  $output = $stdout + $stderr
+  $logPath = Join-Path $Invocation.taskDirectory "agent-run.log"
+  $output | Set-Content -LiteralPath $logPath -Encoding utf8
+  $resultPath = Find-ResultPath -Output $output -ResultsRoot $agentResultsRoot -TaskId $Invocation.taskId
+  $result = if ($null -eq $resultPath) { $null } else { Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json }
+  $traceStatus = if ($null -eq $result -or [string]::IsNullOrWhiteSpace([string]$result.traceStatus)) { "missing" } else { [string]$result.traceStatus }
+  $boundaryStatus = if ($null -eq $result -or [string]::IsNullOrWhiteSpace([string]$result.boundaryStatus)) { "unknown" } else { [string]$result.boundaryStatus }
+  $evaluationStatus = if ($null -eq $result -or $traceStatus -ne "complete") { "invalid_trace" } elseif ($boundaryStatus -eq "contaminated") { "contaminated" } elseif ([string]::IsNullOrWhiteSpace([string]$result.evaluationStatus)) { [string]$result.status } else { [string]$result.evaluationStatus }
+  $guardDenialCount = if ($null -eq $result -or $null -eq $result.trace) { 0 } else { @($result.trace.guardDenials).Count }
+  $entry = [ordered]@{ taskId = $Invocation.taskId; exitCode = $process.ExitCode; resultPath = $resultPath; logPath = $logPath; evaluationStatus = $evaluationStatus; traceStatus = $traceStatus; boundaryStatus = $boundaryStatus; guardDenialCount = $guardDenialCount; result = $result }
+  $process.Dispose()
+  return [pscustomobject]$entry
 }
 
 function Find-ResultPath {
@@ -43,23 +76,32 @@ $agentResultsRoot = Join-Path $DatasetRoot "results\$batchRunId"
 New-Item -ItemType Directory -Force -Path $batchDirectory | Out-Null
 $nodePath = (Get-Command node -ErrorAction Stop).Source
 $entries = @(); $startedAt = (Get-Date).ToUniversalTime()
+$pending = [System.Collections.Queue]::new()
+foreach ($taskId in $taskIds) { [void]$pending.Enqueue([string]$taskId) }
+$active = [System.Collections.Generic.List[object]]::new()
 
-foreach ($taskId in $taskIds) {
-  Write-Host "RUN $taskId"
-  $taskDirectory = Join-Path $batchDirectory $taskId
-  New-Item -ItemType Directory -Force -Path $taskDirectory | Out-Null
-  $environment = @{ CODING_AGENT_DATASET_ROOT = $DatasetRoot; CODING_AGENT_RUN_GROUP = $batchRunId; CODING_AGENT_RUN_ID_PREFIX = "run" }
-  $process = Invoke-Process -FilePath $nodePath -Arguments @("--env-file-if-exists=.env", "--import", "tsx", "scripts/eval-mvp/run-agent-task.ts", $taskId) -WorkingDirectory $repoRoot -Environment $environment
-  $logPath = Join-Path $taskDirectory "agent-run.log"
-  ($process.stdout + $process.stderr) | Set-Content -LiteralPath $logPath -Encoding utf8
-  $resultPath = Find-ResultPath -Output ($process.stdout + $process.stderr) -ResultsRoot $agentResultsRoot -TaskId $taskId
-  $result = if ($null -eq $resultPath) { $null } else { Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json }
-  $traceStatus = if ($null -eq $result -or [string]::IsNullOrWhiteSpace([string]$result.traceStatus)) { "missing" } else { [string]$result.traceStatus }
-  $boundaryStatus = if ($null -eq $result -or [string]::IsNullOrWhiteSpace([string]$result.boundaryStatus)) { "unknown" } else { [string]$result.boundaryStatus }
-  $evaluationStatus = if ($null -eq $result -or $traceStatus -ne "complete") { "invalid_trace" } elseif ($boundaryStatus -eq "contaminated") { "contaminated" } elseif ([string]::IsNullOrWhiteSpace([string]$result.evaluationStatus)) { [string]$result.status } else { [string]$result.evaluationStatus }
-  $guardDenialCount = if ($null -eq $result -or $null -eq $result.trace) { 0 } else { @($result.trace.guardDenials).Count }
-  $entries += [ordered]@{ taskId = $taskId; exitCode = $process.exitCode; resultPath = $resultPath; logPath = $logPath; evaluationStatus = $evaluationStatus; traceStatus = $traceStatus; boundaryStatus = $boundaryStatus; guardDenialCount = $guardDenialCount; result = $result }
-  if ($null -eq $result) { Write-Host "INVALID_TRACE $taskId (no result.json, exit=$($process.exitCode))" } else { Write-Host "DONE $taskId agent=$($result.status) evaluation=$evaluationStatus trace=$traceStatus boundary=$boundaryStatus" }
+while ($pending.Count -gt 0 -or $active.Count -gt 0) {
+  while ($pending.Count -gt 0 -and $active.Count -lt $MaxConcurrency) {
+    $taskId = [string]$pending.Dequeue()
+    Write-Host "RUN $taskId (active=$($active.Count + 1)/$MaxConcurrency)"
+    $taskDirectory = Join-Path $batchDirectory $taskId
+    New-Item -ItemType Directory -Force -Path $taskDirectory | Out-Null
+    [void]$active.Add((Start-AgentProcess -TaskId $taskId -TaskDirectory $taskDirectory))
+  }
+
+  if ($active.Count -eq 0) { continue }
+  $completedIndex = -1
+  for ($index = 0; $index -lt $active.Count; $index++) {
+    if ($active[$index].process.HasExited) { $completedIndex = $index; break }
+  }
+  if ($completedIndex -lt 0) {
+    Start-Sleep -Milliseconds 100
+    continue
+  }
+  $entry = Complete-AgentProcess -Invocation $active[$completedIndex]
+  $active.RemoveAt($completedIndex)
+  $entries += $entry
+  if ($null -eq $entry.result) { Write-Host "INVALID_TRACE $($entry.taskId) (no result.json, exit=$($entry.exitCode))" } else { Write-Host "DONE $($entry.taskId) agent=$($entry.result.status) evaluation=$($entry.evaluationStatus) trace=$($entry.traceStatus) boundary=$($entry.boundaryStatus)" }
 }
 
 $endedAt = (Get-Date).ToUniversalTime()
@@ -68,13 +110,14 @@ $invalidTraceCount = @($entries | Where-Object { $_.evaluationStatus -eq "invali
 $contaminatedCount = @($entries | Where-Object { $_.evaluationStatus -eq "contaminated" }).Count
 $blockedBoundaryCount = [int](($entries | Measure-Object -Property guardDenialCount -Sum).Sum)
 $validTaskCount = $taskIds.Count - $invalidTraceCount - $contaminatedCount
-$summary = [ordered]@{ schemaVersion = 3; mode = "simple-agent-observation"; batchRunId = $batchRunId; datasetRoot = $DatasetRoot; taskCount = $taskIds.Count; validTaskCount = $validTaskCount; completedCount = $completed; invalidTraceCount = $invalidTraceCount; contaminatedCount = $contaminatedCount; blockedBoundaryAttemptCount = $blockedBoundaryCount; completionRate = if ($validTaskCount -eq 0) { $null } else { [math]::Round($completed / $validTaskCount, 4) }; startedAt = $startedAt.ToString("o"); endedAt = $endedAt.ToString("o"); durationMs = [int]($endedAt - $startedAt).TotalMilliseconds; tasks = $entries }
+$summary = [ordered]@{ schemaVersion = 3; mode = "simple-agent-observation"; batchRunId = $batchRunId; datasetRoot = $DatasetRoot; maxConcurrency = $MaxConcurrency; taskCount = $taskIds.Count; validTaskCount = $validTaskCount; completedCount = $completed; invalidTraceCount = $invalidTraceCount; contaminatedCount = $contaminatedCount; blockedBoundaryAttemptCount = $blockedBoundaryCount; completionRate = if ($validTaskCount -eq 0) { $null } else { [math]::Round($completed / $validTaskCount, 4) }; startedAt = $startedAt.ToString("o"); endedAt = $endedAt.ToString("o"); durationMs = [int]($endedAt - $startedAt).TotalMilliseconds; tasks = $entries }
 $summaryPath = Join-Path $batchDirectory "summary.json"
 $summary | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $summaryPath -Encoding utf8
 $markdown = @(
   "# Coding Agent 简化评测批次",
   "",
   "- 批次：$batchRunId",
+  "- 最大并发：$MaxConcurrency",
   "- 任务数：$($taskIds.Count)；有效轨迹：$validTaskCount",
   "- Agent 完成数：$completed；完成率：$($summary.completionRate)",
   "- 无效轨迹：$invalidTraceCount；污染运行：$contaminatedCount；已拦截越界：$blockedBoundaryCount",
