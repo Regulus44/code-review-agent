@@ -494,3 +494,29 @@ Session Memory、summary 和 boundary helper 重新实现。
 
 回滚时关闭 `compactionEnabled` 或将 microcompact trigger 设为 `legacy-count`/`disabled`，
 即可恢复 Slice C 的单步行为；已写 receipt、checkpoint 和 recovery 事件继续作为兼容历史保留。
+
+## ADR-039：M6 Skill 资源读取的安全边界与租户作用域
+
+状态：accepted（2026-09-04，M6）
+
+`read_skill_resource` 固定为 `read` 风险和 `auto` 审批；Skill frontmatter 的
+`allowedTools`、未知属性和 source trust 只能收缩能力或触发既有交互，不能把该工具升级为
+任意 filesystem read、shell 或脚本执行。资源读取始终先由 SkillRegistry 解析 winning
+provider，再由 provider 在自身 resource root 内执行 lexical path、canonical realpath、
+regular-file、大小/窗口和取消检查。
+
+Skill lookup 通过可选 `tenantId` 传递宿主会话租户；声明了 tenant 的 provider 只对同一租户
+可见，未声明 tenant 的本地 provider 维持 legacy host-local 行为。ToolRuntime 将 session
+ownership 的 tenant 注入 `ToolContext`，Skill resource tool 不接受调用方提供的 tenant 或
+host path，避免跨租户参数注入。MCP provider 继续使用自身 manager 的 tenant/URI allowlist。
+
+filesystem provider 默认拒绝资源 symlink 和 special file；若宿主显式开启 contained symlink，
+仍需 canonical target 位于 Skill 目录内并通过 regular-file gate。单次读取受最大 path、
+bytes、line/window 限制，provider 错误只返回稳定 code，不泄露绝对路径、底层异常或其它租户
+信息。脚本目录只作为普通 UTF-8 文本读取，M6 不执行 `scripts/`。
+
+该决策仅新增本项目 contracts 字段与安全检查，不复制上游源码。参考 Claude Code
+`SkillTool.ts` 的 deny/allow 顺序以及 DSH `read-target.ts`、`fs-sandbox` 的 containment、
+symlink 和 regular-file 测试场景。关闭 `skillResourceToolEnabled`、移除 tenant-aware
+provider 或回退到旧 provider 即可禁用新增能力；fail-closed 检查始终保留，不能通过
+`full access` preset 绕过 Skill root containment。
