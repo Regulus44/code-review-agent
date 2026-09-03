@@ -86,3 +86,7 @@ Pressure-V2 microcompact 已完成 Slice E 诊断与评测收尾：`step/started
 提供 bounded strategy、pressure threshold、pre/post usage、checkpoint status 与 coverage；Storage、API/SSE
 和 Web replay 统一投影并保留 checkpoint/failure metadata，不展示完整工具输出，也不由客户端推断 compact
 成功。等价长检索 fixture 与验证矩阵见 [Slice E 评测收尾](evaluation/microcompact-slice-e-2026-09-04.zh-CN.md)。
+
+## Skill 资源包 M4（2026-09-04）
+
+`read_skill_resource` 的实时结果会进入下一模型步骤；持久事件只保留 bounded metadata 与 artifact receipt。启用 `skillResourceArtifactReplay` 并提供 host-owned immutable artifact store 后，重启、replay 与 compact 可恢复原始正文；artifact 缺失或校验失败时返回 `unavailable`，不会重新读取当前 Skill 目录。详情见 [M4 开发日志](development-log/skill-resource-m4-2026-09-04.zh-CN.md)。
