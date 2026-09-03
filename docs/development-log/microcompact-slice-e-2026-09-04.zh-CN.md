@@ -82,3 +82,23 @@
   Runtime 的 model view 或 event replay。
 
 本次测试提交 hash 在 Git 提交后由后续 fixture/日志提交补录。
+
+### Commit `c771803` — Replay tests and Web presenter
+
+- 新增 Storage/Web/Runtime 合同测试与 `context-presenter` bounded diagnostics 展示；验证结果为
+  Storage 34/34、Web 20/20、Runtime 80/80。
+- Presenter 只显示 projection 中的 strategy、usage、checkpoint status 和覆盖计数，不读取工具正文。
+
+### Commit `（本次 fixture 提交）` — 等价长检索评测证据
+
+- 文件：`packages/context/src/microcompact-slice-e-fixture.ts`、对应 Vitest、
+  `docs/evaluation/microcompact-slice-e-2026-09-04.zh-CN.md`，并在 `docs/status.zh-CN.md` 与评测 README
+  增加入口说明。
+- 固定 fixture 覆盖低 pressure 不清理、接近阈值 pressure handoff、重复 replay replacement 稳定和
+  checkpoint `testsRun` 证据保留；真实 Pylint 任务因依赖/外部 workspace 不具备稳定 CI 前提，已明确采用
+  deterministic equivalent，并保留后续真实复测要求。
+- 验证：`pnpm --filter @coding-agent/context test -- --run src/microcompact-slice-e-fixture.test.ts`
+  3/3 通过；`pnpm typecheck` 通过。
+- 回滚：删除 fixture/test 和新增评测入口即可；Slice E diagnostics contract/实现仍可独立保留或回滚。
+
+本次 fixture/文档提交 hash 在 Git 提交后由最终交付记录确认。
