@@ -75,6 +75,13 @@ summary/legacy fallback 与连续失败保护，以及 DSH Agent Loop 的 step-l
   `skill-catalog*`、`packages/tools/*`、`pnpm-lock.yaml`）；这些文件不属于 Slice D，已在本日志中明确标注，
   便于主线程后续按并行任务归档或拆分。
 
+### Commit `e055608` — 开发日志落盘（并行工作树混入说明）
+
+- 新增本开发日志文件；该提交同时带入当时已 staged 的并行 Skill renderer 变更
+  （`packages/runtime/src/index.ts`、`packages/runtime/src/index.test.ts`）。这些 runtime/test hunk
+  不属于 Slice D，主线程应按并行 Skill 任务归档；Slice D 的日志正文与核心实现仍可按上方独立
+  commit 追溯。
+
 ### Commit `e055608` — Runtime 测试/日志收尾（并行工作树混入说明）
 
 - Slice D 相关内容：补充 Runtime reduction recovery 测试与本日志的执行记录。
