@@ -809,6 +809,7 @@ describe("AgentHost", () => {
     expect(budgetIndex).toBeGreaterThan(checkpointIndex);
     expect(compactIndex).toBeGreaterThan(budgetIndex);
     expect(events[compactIndex]?.payload).toMatchObject({ checkpointId: expect.any(String), preCompactTokens: expect.any(Number), postCompactTokens: expect.any(Number), coverage: expect.any(Array) });
+    expect(events[compactIndex]?.payload["reductionFingerprint"]).toMatch(/^turn_[^:]+:1:ctxreq_[0-9a-f]{16}$/u);
     const step = events.find((event) => event.type === "step/started" && (event.payload["toolResultBudget"] as { readonly clearedCount?: unknown } | undefined)?.clearedCount === 4);
     expect(step?.payload["toolResultBudget"]).toMatchObject({ trigger: "count", clearedCount: 4, tokensSaved: expect.any(Number) });
     const durable = events.filter((event) => event.type === "tool/result");
@@ -908,6 +909,44 @@ describe("AgentHost", () => {
     expect(replayEvents.filter((event) => event.type === "context/microcompacted")).toHaveLength(1);
     const replayToolViews = restartedRequests[0]?.messages.filter((message) => message.role === "tool").slice(-6).map((message) => message.content) ?? [];
     expect(replayToolViews).toEqual(firstToolViews);
+  });
+
+  it("recounts after microcompact and enters the full compact ladder when pressure remains", async () => {
+    const store = new InMemoryEventStore();
+    const requests: ModelRequest[] = [];
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        requests.push(request);
+        if (request.purpose === "context_summary") {
+          yield { type: "text_delta", text: "Checkpoint facts preserve the review goal." };
+        } else {
+          yield { type: "text_delta", text: "reduction ladder complete" };
+        }
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({
+      store,
+      model,
+      contextPolicy: { contextWindowTokens: 120, maxOutputTokens: 0, autoCompactBufferTokens: 10 },
+      toolResultBudget: { microcompactTriggerMode: "legacy-count", microcompactTriggerToolCount: 1, keepRecentResults: 1, retainRecentResultsRatio: 0.1 },
+      summaryCompact: { recentMessageTokens: 1, maxSummaryChars: 200 },
+    });
+    const session = await host.createSession("D:/slice-d-recount-fixture");
+    for (let index = 0; index < 6; index += 1) {
+      const toolCallId = `slice-d-call-${index}`;
+      await store.append({ sessionId: session.id, type: "assistant/message", payload: { content: "", toolCalls: [{ id: toolCallId, name: "read_file", arguments: "{}" }] } });
+      await store.append({ sessionId: session.id, type: "tool/result", payload: { toolCallId, status: "completed", result: { content: `slice-d-${index}-${"x".repeat(800)}` } } });
+    }
+    const turn = await host.sendMessage(session.id, "continue after tool pressure");
+    await host.waitForTurn(turn);
+    const events = await host.events(session.id);
+    const microIndex = events.findIndex((event) => event.type === "context/microcompacted");
+    const summaryIndex = events.findIndex((event) => event.type === "context/summary_compacted");
+    expect(microIndex).toBeGreaterThanOrEqual(0);
+    expect(summaryIndex).toBeGreaterThan(microIndex);
+    expect(requests.some((request) => request.purpose === "context_summary" && request.messages.some((message) => message.content.includes("<microcompact-checkpoint>")))).toBe(true);
+    expect(events.find((event) => event.type === "step/started")?.payload["tokenCount"]).toMatchObject({ value: expect.any(Number) });
   });
 
   it("enforces the message-level aggregate budget for parallel fresh results", async () => {
@@ -1836,6 +1875,15 @@ describe("AgentHost", () => {
     expect(second.beginReactive()).toBe(1);
     expect(first.snapshot().reactiveAttempts).toBe(1);
     expect(second.snapshot().reactiveAttempts).toBe(1);
+  });
+
+  it("opens the recovery circuit after consecutive microcompact and summary failures", () => {
+    const guard = new ContextRecoveryGuard(1, 3);
+    expect(guard.recordCompactionFailure("microcompact_checkpoint")).toBe(false);
+    expect(guard.recordCompactionFailure("summary_compact")).toBe(false);
+    expect(guard.recordCompactionFailure("legacy_compact")).toBe(true);
+    expect(guard.isCircuitOpen()).toBe(true);
+    expect(guard.snapshot().attemptedModules).toEqual(["legacy_compact", "microcompact_checkpoint", "summary_compact"]);
   });
 
   it("serializes concurrent creates and never projects duplicate paths", async () => {
