@@ -75,6 +75,19 @@ summary/legacy fallback 与连续失败保护，以及 DSH Agent Loop 的 step-l
   `skill-catalog*`、`packages/tools/*`、`pnpm-lock.yaml`）；这些文件不属于 Slice D，已在本日志中明确标注，
   便于主线程后续按并行任务归档或拆分。
 
+### Commit `e055608` — Runtime 测试/日志收尾（并行工作树混入说明）
+
+- Slice D 相关内容：补充 Runtime reduction recovery 测试与本日志的执行记录。
+- 该提交同时包含并行 Skill renderer 的 `packages/runtime/src/index.ts` 与
+  `packages/runtime/src/index.test.ts` 改动；这些内容不属于 Slice D，已保留并单独标注。
+
+### Commit `85b6e1e` — 测试类型修复
+
+- 文件：`packages/context/src/summary-compact.test.ts`。
+- 将 checkpoint summary runner 捕获数组改为保存只读消息数组，修复 `pnpm typecheck` 的
+  `readonly ChatMessage[]` 类型错误，不改变运行时行为。
+- 验证：`pnpm typecheck`、summary compact 定向测试通过。
+
 ## 验证
 
 - `pnpm --filter @coding-agent/context test -- --run src/summary-compact.test.ts`（7/7）
