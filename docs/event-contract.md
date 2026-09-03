@@ -144,6 +144,16 @@ microcompact receipt；重复执行复用既有事件结果。连续 checkpoint�
 失败统一计入 ContextRecoveryGuard circuit breaker，失败路径保留当前 model view，且不得
 改变主 turn 的终态分类。
 
+Slice E 的 `step/started.payload.toolResultBudget` 可附带统一命名的 bounded
+`microcompact` diagnostics。该对象只允许包含 `strategy`、`pressureThreshold`、
+`targetTokens`、`preCompactTokens`、`postCompactTokens`、`checkpoint` 和 `coverage`：
+`checkpoint.status` 为 `not_needed`、`persisted` 或 `failed`，成功时可附带 checkpointId，
+失败时只附带稳定 errorCode；`coverage` 只保存 source sequence 范围、covered/cleared
+结果数量及最多 64 个 tool call ID。diagnostics 不得包含完整工具输出、prompt、provider
+body、credential 或 workspace 绝对路径；缺少该对象的旧事件按 legacy projection 兼容处理。
+Storage、API/SSE 和 Web replay 必须投影同一 bounded 对象，客户端不得依据消息内容推断
+compact 是否成功。
+
 M13 事件和 projection 不得保存完整 prompt、transcript、工具原文、provider response body、credential、header 或 secret。旧事件缺少 diagnostics 时，客户端可以使用明确标记为 estimate 的兼容 ContextMeter；不能把本地估算冒充 provider usage。
 
 M14 当前只暴露 `ContextCollapseCapability` 元数据，不追加 `context/collapse_*` 事件。capability 包含 version、enabled、`deferred/unavailable` status、bounded reason，以及 read-time projection、background collapse、overflow drain、snip 四项布尔 feature；不包含 prompt、transcript、工具结果、provider body、凭据或 workspace 内容。`deferred` 表示 Claude Code 集成点已识别但本地快照核心仍为 stub，`unavailable` 表示 host 没有暴露 capability。完整 collapse 事件只有在独立 ADR 接受算法和 replay contract 后才允许新增。
