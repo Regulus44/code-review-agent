@@ -173,4 +173,14 @@ describe("FileSystemSkillProvider", () => {
     expect(result.complete).toBe(false);
     provider.dispose();
   });
+
+  it("watches cwd-derived project Skill roots used by turn-scoped lookups", async () => {
+    const configured = await fixture(); const workspace = await fixture();
+    const workspaceSkills = path.join(workspace, ".claude", "skills"); await mkdir(workspaceSkills, { recursive: true }); await skill(workspaceSkills, "cwd-watched");
+    const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: path.join(configured, ".claude", "skills") }], watch: true });
+    const invalidations = vi.fn(); const controller = new AbortController(); provider.start({ signal: controller.signal, invalidate: invalidations });
+    const listed = await provider.list({ cwd: workspace }); expect(listed.candidates.map((item) => item.name)).toEqual(["cwd-watched"]); await waitForWatch();
+    await writeFile(path.join(workspaceSkills, "cwd-watched", "SKILL.md"), "---\nname: cwd-watched\ndescription: changed\n---\nbody\n", "utf8"); await waitForWatch();
+    expect(invalidations).toHaveBeenCalledTimes(1); controller.abort();
+  });
 });

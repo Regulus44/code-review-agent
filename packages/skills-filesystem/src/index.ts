@@ -39,6 +39,7 @@ export class FileSystemSkillProvider implements SkillProvider {
   private readonly roots: readonly SkillFilesystemRoot[];
   private readonly lastGoodByContext = new Map<string, Map<string, Entry>>();
   private readonly watchEnabled: boolean;
+  private readonly watchTargets = new Map<string, SkillFilesystemRoot>();
   private readonly watchers = new Map<string, FSWatcher>();
   private readonly watchRoles = new Map<string, "tree" | "skill">();
   private watchSyncPromise: Promise<void> | undefined;
@@ -53,6 +54,7 @@ export class FileSystemSkillProvider implements SkillProvider {
     this.limits = { ...DEFAULT_LIMITS, ...(options.limits ?? {}) };
     this.roots = options.roots.map((root) => ({ ...root, path: path.resolve(root.path) }));
     this.watchEnabled = options.watch === true;
+    for (const root of this.roots) this.watchTargets.set(pathKey(root.path), root);
   }
 
   /** Explicitly rescan roots; callers may use this at turn boundaries. */
@@ -162,7 +164,7 @@ export class FileSystemSkillProvider implements SkillProvider {
     this.watchSyncPromise = (async () => {
       const desired = new Map<string, "tree" | "skill">();
       let complete = true;
-      for (const root of this.roots) complete = await this.collectWatchDirectories(root.path, 0, desired) && complete;
+      for (const root of this.watchTargets.values()) complete = await this.collectWatchDirectories(root.path, 0, desired) && complete;
       for (const [key, watcher] of this.watchers) {
         if (desired.has(key)) continue;
         watcher.close();
@@ -260,6 +262,7 @@ export class FileSystemSkillProvider implements SkillProvider {
       if (options.signal?.aborted) throw options.signal.reason ?? new DOMException("aborted", "AbortError");
       const isDefaultProjectRoot = root.kind === "project" && path.basename(root.path).toLowerCase() === "skills" && path.basename(path.dirname(root.path)).toLowerCase() === ".claude";
       const effectiveRoot = isDefaultProjectRoot && options.cwd !== undefined ? { ...root, path: path.join(path.resolve(options.cwd), ".claude", "skills") } : root;
+      if (this.watchEnabled) this.watchTargets.set(pathKey(effectiveRoot.path), effectiveRoot);
       const result = await this.scanRoot(effectiveRoot, options, next, seen);
       complete = complete && result.complete;
       seen += result.count;

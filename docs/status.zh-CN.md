@@ -90,3 +90,7 @@ Pressure-V2 microcompact 已完成 Slice E 诊断与评测收尾：`step/started
 ## Skill 资源包 M4（2026-09-04）
 
 `read_skill_resource` 的实时结果会进入下一模型步骤；持久事件只保留 bounded metadata 与 artifact receipt。启用 `skillResourceArtifactReplay` 并提供 host-owned immutable artifact store 后，重启、replay 与 compact 可恢复原始正文；artifact 缺失或校验失败时返回 `unavailable`，不会重新读取当前 Skill 目录。详情见 [M4 开发日志](development-log/skill-resource-m4-2026-09-04.zh-CN.md)。
+
+## Skill 资源包 M5（2026-09-04）
+
+filesystem Skill provider 已支持默认关闭的 bounded `fs.watch`：`SKILL.md` 和 Skill 目录变化经 debounce 推进 registry invalidation，`references/`、`scripts/`、`assets/` 等深层资源变化不刷新 catalog；watcher 失败保留 last-good 并标记下一次 observation incomplete，支持 retry、dispose 和 `maxWatchDirectories` 限制。workspace mutation 事件仅覆盖 `.claude/skills` catalog 路径。详情见 [M5 开发日志](development-log/skill-resource-m5-2026-09-04.zh-CN.md)。
