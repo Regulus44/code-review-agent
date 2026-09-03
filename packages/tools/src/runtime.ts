@@ -534,7 +534,9 @@ export class ToolRuntime {
       artifact: receipt,
       artifactAvailable: available,
     };
-    const modelView = available ? buildSkillResourceModelView(receipt, resource.content) : buildSkillResourceModelView(receipt);
+    // Durable event payloads are metadata-only even when the host snapshot is
+    // available; replay reads the receipt through the host ACL instead.
+    const modelView = buildSkillResourceModelView(receipt);
     return {
       ...result,
       output: metadata,
