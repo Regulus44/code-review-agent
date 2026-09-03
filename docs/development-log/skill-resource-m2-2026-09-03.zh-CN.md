@@ -27,9 +27,10 @@
 ## 提交
 
 - `1be4f7b feat(skills): add model skill resource tool`：工具实现、工具导出、定向工具测试和 Host 注册测试。
-- 文档与本开发日志将在独立提交中提交，便于回滚和审查。
+- `0289ef0 docs(skills): log M2 resource tool contract`：工具契约与本开发日志。
+- AgentHost 的 `skillResourceToolEnabled` 选项和注册行实际随并行上下文提交 `f824e68 feat(runtime): persist microcompact checkpoints before clearing` 进入当前历史；本次未重写该提交。
+- `ad33447 chore(skills): fix resource tool whitespace`：修复工具源码 EOF 空白。
 
 ## 已知边界
 
 M2 不自动预加载 Skill 目录，不执行 `scripts/`，不新增资源专用事件类型，也不承诺资源正文的 compact/replay/artifact 持久化；这些能力属于后续阶段。provider 仍负责最终的 realpath、symlink、文件类型和资源大小安全检查。
-
