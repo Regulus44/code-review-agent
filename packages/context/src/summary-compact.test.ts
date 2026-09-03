@@ -81,4 +81,26 @@ describe("summary compact", () => {
     expect(truncated).toBeDefined();
     expect(truncated?.at(-1)?.content).toBe("current request");
   });
+
+  it("injects bounded microcompact checkpoint facts and omits covered tool evidence", async () => {
+    const requests: readonly ChatMessage[][] = [];
+    const input: ChatMessage[] = [
+      { role: "user", content: "inspect the repository", messageId: "u1" },
+      { role: "assistant", content: "", toolCalls: [{ id: "call-old", name: "read_file", arguments: "{}" }], messageId: "a1" },
+      { role: "tool", toolCallId: "call-old", content: "[Old tool result content cleared]", messageId: "t1" },
+      { role: "user", content: "continue", messageId: "u2" },
+    ];
+    const result = await compactWithSummaryModel(input, {
+      config: { recentMessageTokens: 1 },
+      historicalContext: '{"verifiedFindings":["tests pass"],"nextStep":"run lint"}',
+      historicalToolCallIds: new Set(["call-old"]),
+      runner: async (request) => {
+        requests.push(request.messages);
+        return { text: "checkpoint-aware summary" };
+      },
+    });
+    expect(result.didCompact).toBe(true);
+    expect(requests[0]?.some((message) => message.content.includes("<microcompact-checkpoint>"))).toBe(true);
+    expect(requests[0]?.some((message) => message.role === "tool" && message.toolCallId === "call-old")).toBe(false);
+  });
 });
