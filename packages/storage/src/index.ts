@@ -58,6 +58,7 @@ import {
   type ContextProjectMemoryProjection,
   type ContextDiagnosticsProjection,
   type ContextToolResultBudgetProjection,
+  type ContextMicrocompactDiagnosticsProjection,
   type ContextMicrocompactCheckpointProjection,
   type ContextMicrocompactCheckpointFailureProjection,
   type ContextDiagnosticRecovery,
@@ -486,6 +487,8 @@ function contextDiagnosticsProjection(value: unknown, event: AgentEvent, previou
     ...(typeof payload["modelRequestId"] === "string" ? { lastRequestId: payload["modelRequestId"].slice(0, 128) } : previous?.lastRequestId === undefined ? {} : { lastRequestId: previous.lastRequestId }),
     ...(normalizedBreakdown === undefined ? {} : { breakdown: normalizedBreakdown }),
     ...(toolResultBudget === undefined ? previous?.lastToolResultBudget === undefined ? {} : { lastToolResultBudget: previous.lastToolResultBudget } : { lastToolResultBudget: toolResultBudget }),
+    ...(previous?.lastMicrocompactCheckpoint === undefined ? {} : { lastMicrocompactCheckpoint: previous.lastMicrocompactCheckpoint }),
+    ...(previous?.lastMicrocompactCheckpointFailure === undefined ? {} : { lastMicrocompactCheckpointFailure: previous.lastMicrocompactCheckpointFailure }),
     ...(previous?.lastCompaction === undefined ? {} : { lastCompaction: previous.lastCompaction }),
     recoveryChain,
     updatedAt: event.createdAt,
@@ -505,6 +508,7 @@ function contextToolResultBudgetProjection(value: unknown, event: AgentEvent, pr
   const ids = Array.isArray(record["messageBudgetReplacedToolCallIds"])
     ? record["messageBudgetReplacedToolCallIds"].filter((item): item is string => typeof item === "string").slice(0, 256)
     : previous?.messageBudgetReplacedToolCallIds ?? [];
+  const microcompact = contextMicrocompactDiagnosticsProjection(record["microcompact"], previous?.microcompact);
   return {
     enabled: typeof record["enabled"] === "boolean" ? record["enabled"] : previous?.enabled ?? true,
     changed: typeof record["changed"] === "boolean" ? record["changed"] : previous?.changed ?? false,
@@ -516,9 +520,44 @@ function contextToolResultBudgetProjection(value: unknown, event: AgentEvent, pr
     clearedCount: numberValue(record["clearedCount"], previous?.clearedCount ?? 0),
     tokensSaved: numberValue(record["tokensSaved"], previous?.tokensSaved ?? 0),
     microcompactTrigger,
+    ...(microcompact === undefined ? {} : { microcompact }),
     timeBasedMicrocompactEnabled: typeof record["timeBasedMicrocompactEnabled"] === "boolean" ? record["timeBasedMicrocompactEnabled"] : previous?.timeBasedMicrocompactEnabled ?? false,
     timeBasedGapMs: numberValue(record["timeBasedGapMs"], previous?.timeBasedGapMs ?? 60 * 60_000),
     lastSequence: event.sequence,
+  };
+}
+
+function contextMicrocompactDiagnosticsProjection(value: unknown, previous?: ContextMicrocompactDiagnosticsProjection): ContextMicrocompactDiagnosticsProjection | undefined {
+  const record = asRecord(value);
+  if (record === undefined) return previous;
+  const strategy = record["strategy"] === "pressure" || record["strategy"] === "time" || record["strategy"] === "legacy-count" || record["strategy"] === "none"
+    ? record["strategy"] : previous?.strategy;
+  if (strategy === undefined) return previous;
+  const checkpointRecord = asRecord(record["checkpoint"]);
+  const checkpointStatus = checkpointRecord?.["status"] === "not_needed" || checkpointRecord?.["status"] === "persisted" || checkpointRecord?.["status"] === "failed"
+    ? checkpointRecord["status"] : previous?.checkpoint.status ?? "not_needed";
+  const coverageRecord = asRecord(record["coverage"]);
+  const ids = Array.isArray(coverageRecord?.["toolCallIds"])
+    ? coverageRecord["toolCallIds"].filter((item): item is string => typeof item === "string").map((item) => item.slice(0, 128)).slice(0, 64)
+    : previous?.coverage.toolCallIds ?? [];
+  return {
+    strategy,
+    pressureThreshold: numberValue(record["pressureThreshold"], previous?.pressureThreshold ?? 0),
+    targetTokens: numberValue(record["targetTokens"], previous?.targetTokens ?? 0),
+    preCompactTokens: numberValue(record["preCompactTokens"], previous?.preCompactTokens ?? 0),
+    postCompactTokens: numberValue(record["postCompactTokens"], previous?.postCompactTokens ?? 0),
+    checkpoint: {
+      status: checkpointStatus,
+      ...(typeof checkpointRecord?.["checkpointId"] === "string" ? { checkpointId: checkpointRecord["checkpointId"].slice(0, 128) } : previous?.checkpoint.checkpointId === undefined ? {} : { checkpointId: previous.checkpoint.checkpointId }),
+      ...(typeof checkpointRecord?.["errorCode"] === "string" ? { errorCode: checkpointRecord["errorCode"].slice(0, 96) } : previous?.checkpoint.errorCode === undefined ? {} : { errorCode: previous.checkpoint.errorCode }),
+    },
+    coverage: {
+      ...(typeof coverageRecord?.["sourceSequenceStart"] === "number" ? { sourceSequenceStart: numberValue(coverageRecord["sourceSequenceStart"], 0) } : previous?.coverage.sourceSequenceStart === undefined ? {} : { sourceSequenceStart: previous.coverage.sourceSequenceStart }),
+      ...(typeof coverageRecord?.["sourceSequenceEnd"] === "number" ? { sourceSequenceEnd: numberValue(coverageRecord["sourceSequenceEnd"], 0) } : previous?.coverage.sourceSequenceEnd === undefined ? {} : { sourceSequenceEnd: previous.coverage.sourceSequenceEnd }),
+      coveredResultCount: numberValue(coverageRecord?.["coveredResultCount"], previous?.coverage.coveredResultCount ?? 0),
+      clearedResultCount: numberValue(coverageRecord?.["clearedResultCount"], previous?.coverage.clearedResultCount ?? 0),
+      toolCallIds: ids,
+    },
   };
 }
 
@@ -959,6 +998,12 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
     const failure = microcompactCheckpointFailureProjection(event);
     const diagnostics = next.contextDiagnostics ?? emptyContextDiagnostics(event);
     next = { ...next, contextDiagnostics: { ...diagnostics, lastMicrocompactCheckpointFailure: failure, updatedAt: event.createdAt, lastSequence: event.sequence } };
+  }
+
+  if (event.type === "context/tool_results_budgeted" || event.type === "context/microcompacted") {
+    const diagnostics = next.contextDiagnostics ?? emptyContextDiagnostics(event);
+    const budget = contextToolResultBudgetProjection({ enabled: true, changed: true, ...event.payload }, event, diagnostics.lastToolResultBudget);
+    if (budget !== undefined) next = { ...next, contextDiagnostics: { ...diagnostics, lastToolResultBudget: budget, updatedAt: event.createdAt, lastSequence: event.sequence } };
   }
 
   if (event.type === "step/started") {

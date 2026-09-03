@@ -42,3 +42,21 @@
 
 后续每个实现/测试/文档提交都在本日志追加文件范围、验证、风险、回滚和 commit hash；最终收尾提交的 hash
 以交付时 `git log` 为准。
+
+### Contracts/Runtime/Storage/Web diagnostics 实现（本次）
+
+- `packages/contracts/src/index.ts` 新增 `ContextMicrocompactDiagnosticsProjection`、checkpoint 状态和
+  coverage bounded 类型；`ContextToolResultBudgetProjection.microcompact` 作为兼容可选字段，统一
+  `strategy`、threshold、pre/post usage、checkpoint、coverage 命名。
+- `packages/runtime/src/index.ts` 在每个 `step/started` 生成 bounded microcompact diagnostics；成功
+  checkpoint 记录 `persisted`、有限 checkpointId、token 变化与最多 64 个 tool call ID；失败/低压路径分别
+  记录 `failed`/`not_needed`，不暴露工具正文。`context/tool_results_budgeted` 和 `context/microcompacted`
+  也携带相同 bounded 对象，便于 SSE/replay。
+- `packages/storage/src/index.ts` 统一解析并限制 diagnostics，保留 checkpoint/failure metadata，且从
+  budget/microcompact 事件重建最新 tool-result budget；后续 `step/started` 不再丢失 checkpoint 投影。
+- `apps/web/src/client/store.ts` 增加同一 parser 与 checkpoint/failure/budget 事件 fold，Web 只消费事件
+  投影，不依据消息正文推断 compact 成功。
+- 回滚：停止写入 `microcompact` 对象即可兼容旧客户端；删除本提交新增 parser/fold 不影响已有
+  `context/microcompacted`/checkpoint 事件历史。
+
+本次实现提交 hash 在 Git 提交后由后续测试/日志提交补录。

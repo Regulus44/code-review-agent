@@ -1,6 +1,9 @@
 import type {
   AgentEvent,
   ContextDiagnosticRecovery,
+  ContextMicrocompactCheckpointProjection,
+  ContextMicrocompactCheckpointFailureProjection,
+  ContextMicrocompactDiagnosticsProjection,
   ContextToolResultBudgetProjection,
   ContextProjectMemoryProjection,
   SessionId,
@@ -458,8 +461,67 @@ function foldProjectionCore(session: SessionProjection, event: AgentEvent): Sess
       };
     }
     default:
-      return foldContextDiagnostics(session, event) ?? foldProjectMemory(session, event) ?? { ...session, updatedAt: event.createdAt, lastSequence: Math.max(session.lastSequence, event.sequence) };
+      return foldContextDiagnostics(session, event) ?? foldMicrocompactArtifacts(session, event) ?? foldProjectMemory(session, event) ?? { ...session, updatedAt: event.createdAt, lastSequence: Math.max(session.lastSequence, event.sequence) };
   }
+}
+
+function foldMicrocompactArtifacts(session: SessionProjection, event: AgentEvent): SessionProjection | undefined {
+  if (event.type !== "context/microcompact_checkpoint" && event.type !== "context/microcompact_checkpoint_failed" && event.type !== "context/tool_results_budgeted" && event.type !== "context/microcompacted") return undefined;
+  const baseline = session.contextDiagnostics ?? emptyContextDiagnostics(event);
+  if (event.type === "context/microcompact_checkpoint") {
+    const checkpoint = parseMicrocompactCheckpoint(event);
+    if (checkpoint === undefined) return { ...session, updatedAt: event.createdAt, lastSequence: event.sequence };
+    return {
+      ...session,
+      contextMicrocompactCheckpoint: checkpoint,
+      contextDiagnostics: { ...baseline, lastMicrocompactCheckpoint: checkpoint, updatedAt: event.createdAt, lastSequence: event.sequence },
+      updatedAt: event.createdAt,
+      lastSequence: event.sequence,
+    };
+  }
+  if (event.type === "context/microcompact_checkpoint_failed") {
+    const failure: ContextMicrocompactCheckpointFailureProjection = {
+      stage: event.payload["stage"] === "validate" || event.payload["stage"] === "persist" ? event.payload["stage"] : "extract",
+      errorCode: typeof event.payload["errorCode"] === "string" ? event.payload["errorCode"].slice(0, 96) : "CHECKPOINT_FAILED",
+      preservedModelView: true,
+      sourceSequence: event.sequence,
+    };
+    return { ...session, contextDiagnostics: { ...baseline, lastMicrocompactCheckpointFailure: failure, updatedAt: event.createdAt, lastSequence: event.sequence }, updatedAt: event.createdAt, lastSequence: event.sequence };
+  }
+  const budget = parseToolResultBudgetProjection({ enabled: true, changed: true, ...event.payload }, event.sequence, baseline.lastToolResultBudget);
+  if (budget === undefined) return undefined;
+  return {
+    ...session,
+    contextDiagnostics: { ...baseline, lastToolResultBudget: budget, updatedAt: event.createdAt, lastSequence: event.sequence },
+    updatedAt: event.createdAt,
+    lastSequence: event.sequence,
+  };
+}
+
+function parseMicrocompactCheckpoint(event: AgentEvent): ContextMicrocompactCheckpointProjection | undefined {
+  const p = event.payload;
+  if (p["version"] !== 1 || typeof p["checkpointId"] !== "string" || p["algorithmVersion"] !== "pressure-v2.m1") return undefined;
+  const arrays = (key: string, limit: number): readonly string[] => Array.isArray(p[key]) ? p[key].filter((item): item is string => typeof item === "string").map((item) => item.slice(0, 512)).slice(0, limit) : [];
+  const generatedBy = p["generatedBy"] === "summary-model" ? "summary-model" : p["generatedBy"] === "deterministic" ? "deterministic" : undefined;
+  if (generatedBy === undefined) return undefined;
+  return {
+    version: 1,
+    checkpointId: p["checkpointId"].slice(0, 128),
+    sourceSequenceStart: numberValue(p["sourceSequenceStart"], 0),
+    sourceSequenceEnd: numberValue(p["sourceSequenceEnd"], 0),
+    coveredToolCallIds: arrays("coveredToolCallIds", 256),
+    generatedBy,
+    algorithmVersion: "pressure-v2.m1",
+    primaryRequest: typeof p["primaryRequest"] === "string" ? p["primaryRequest"].slice(0, 2048) : "(unknown)",
+    filesRead: arrays("filesRead", 128),
+    filesChanged: arrays("filesChanged", 128),
+    verifiedFindings: arrays("verifiedFindings", 64),
+    testsRun: arrays("testsRun", 64),
+    pendingWork: arrays("pendingWork", 32),
+    nextStep: typeof p["nextStep"] === "string" ? p["nextStep"].slice(0, 512) : "(unknown)",
+    maxChars: numberValue(p["maxChars"], 8_192),
+    sourceSequence: event.sequence,
+  };
 }
 
 function foldProjectMemory(session: SessionProjection, event: AgentEvent): SessionProjection | undefined {
@@ -588,6 +650,8 @@ function foldContextDiagnostics(session: SessionProjection, event: AgentEvent): 
         ...(typeof event.payload["modelRequestId"] === "string" ? { lastRequestId: (event.payload["modelRequestId"] as string).slice(0, 128) } : {}),
         ...(normalizedBreakdown === undefined ? {} : { breakdown: normalizedBreakdown }),
         ...(toolResultBudget === undefined ? previous?.lastToolResultBudget === undefined ? {} : { lastToolResultBudget: previous.lastToolResultBudget } : { lastToolResultBudget: toolResultBudget }),
+        ...(previous?.lastMicrocompactCheckpoint === undefined ? {} : { lastMicrocompactCheckpoint: previous.lastMicrocompactCheckpoint }),
+        ...(previous?.lastMicrocompactCheckpointFailure === undefined ? {} : { lastMicrocompactCheckpointFailure: previous.lastMicrocompactCheckpointFailure }),
         ...(previous?.lastCompaction === undefined ? {} : { lastCompaction: previous.lastCompaction }),
         recoveryChain: previous?.recoveryChain ?? [],
         updatedAt: event.createdAt,
@@ -653,6 +717,7 @@ function parseToolResultBudgetProjection(value: unknown, sequence: number, previ
   const ids = Array.isArray(record["messageBudgetReplacedToolCallIds"])
     ? record["messageBudgetReplacedToolCallIds"].filter((item): item is string => typeof item === "string").slice(0, 256)
     : previous?.messageBudgetReplacedToolCallIds ?? [];
+  const microcompact = parseMicrocompactDiagnosticsProjection(record["microcompact"], previous?.microcompact);
   return {
     enabled: typeof record["enabled"] === "boolean" ? record["enabled"] : previous?.enabled ?? true,
     changed: typeof record["changed"] === "boolean" ? record["changed"] : previous?.changed ?? false,
@@ -664,9 +729,44 @@ function parseToolResultBudgetProjection(value: unknown, sequence: number, previ
     clearedCount: numberValue(record["clearedCount"], previous?.clearedCount ?? 0),
     tokensSaved: numberValue(record["tokensSaved"], previous?.tokensSaved ?? 0),
     microcompactTrigger,
+    ...(microcompact === undefined ? {} : { microcompact }),
     timeBasedMicrocompactEnabled: typeof record["timeBasedMicrocompactEnabled"] === "boolean" ? record["timeBasedMicrocompactEnabled"] : previous?.timeBasedMicrocompactEnabled ?? false,
     timeBasedGapMs: numberValue(record["timeBasedGapMs"], previous?.timeBasedGapMs ?? 60 * 60_000),
     lastSequence: sequence,
+  };
+}
+
+function parseMicrocompactDiagnosticsProjection(value: unknown, previous?: ContextMicrocompactDiagnosticsProjection): ContextMicrocompactDiagnosticsProjection | undefined {
+  const record = recordValue(value);
+  if (record === undefined) return previous;
+  const strategy = record["strategy"] === "pressure" || record["strategy"] === "time" || record["strategy"] === "legacy-count" || record["strategy"] === "none"
+    ? record["strategy"] : previous?.strategy;
+  if (strategy === undefined) return previous;
+  const checkpointRecord = recordValue(record["checkpoint"]);
+  const checkpointStatus = checkpointRecord?.["status"] === "not_needed" || checkpointRecord?.["status"] === "persisted" || checkpointRecord?.["status"] === "failed"
+    ? checkpointRecord["status"] : previous?.checkpoint.status ?? "not_needed";
+  const coverageRecord = recordValue(record["coverage"]);
+  const ids = Array.isArray(coverageRecord?.["toolCallIds"])
+    ? coverageRecord["toolCallIds"].filter((item): item is string => typeof item === "string").map((item) => item.slice(0, 128)).slice(0, 64)
+    : previous?.coverage.toolCallIds ?? [];
+  return {
+    strategy,
+    pressureThreshold: numberValue(record["pressureThreshold"], previous?.pressureThreshold ?? 0),
+    targetTokens: numberValue(record["targetTokens"], previous?.targetTokens ?? 0),
+    preCompactTokens: numberValue(record["preCompactTokens"], previous?.preCompactTokens ?? 0),
+    postCompactTokens: numberValue(record["postCompactTokens"], previous?.postCompactTokens ?? 0),
+    checkpoint: {
+      status: checkpointStatus,
+      ...(typeof checkpointRecord?.["checkpointId"] === "string" ? { checkpointId: checkpointRecord["checkpointId"].slice(0, 128) } : previous?.checkpoint.checkpointId === undefined ? {} : { checkpointId: previous.checkpoint.checkpointId }),
+      ...(typeof checkpointRecord?.["errorCode"] === "string" ? { errorCode: checkpointRecord["errorCode"].slice(0, 96) } : previous?.checkpoint.errorCode === undefined ? {} : { errorCode: previous.checkpoint.errorCode }),
+    },
+    coverage: {
+      ...(typeof coverageRecord?.["sourceSequenceStart"] === "number" ? { sourceSequenceStart: numberValue(coverageRecord["sourceSequenceStart"], 0) } : previous?.coverage.sourceSequenceStart === undefined ? {} : { sourceSequenceStart: previous.coverage.sourceSequenceStart }),
+      ...(typeof coverageRecord?.["sourceSequenceEnd"] === "number" ? { sourceSequenceEnd: numberValue(coverageRecord["sourceSequenceEnd"], 0) } : previous?.coverage.sourceSequenceEnd === undefined ? {} : { sourceSequenceEnd: previous.coverage.sourceSequenceEnd }),
+      coveredResultCount: numberValue(coverageRecord?.["coveredResultCount"], previous?.coverage.coveredResultCount ?? 0),
+      clearedResultCount: numberValue(coverageRecord?.["clearedResultCount"], previous?.coverage.clearedResultCount ?? 0),
+      toolCallIds: ids,
+    },
   };
 }
 

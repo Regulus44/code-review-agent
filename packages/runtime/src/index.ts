@@ -40,6 +40,7 @@ import {
   type ContextCollapseCapability,
   type ContextBoundaryKind,
   type ContextRecoveryErrorClass,
+  type ContextMicrocompactDiagnosticsProjection,
   type ToolResultReplacementRecord,
   type MemoryCapability,
   type MemoryAdapterCapability,
@@ -2583,6 +2584,19 @@ export class AgentHost {
           eligibleToolResultCount: microcompactEvaluation.eligibleToolResultCount,
         },
       };
+      let stepMicrocompactDiagnostics: ContextMicrocompactDiagnosticsProjection = {
+        strategy: microcompactEvaluation.strategy,
+        pressureThreshold: microcompactEvaluation.pressureThreshold,
+        targetTokens: microcompactEvaluation.targetUsageTokens,
+        preCompactTokens: beforeUsage,
+        postCompactTokens: beforeUsage,
+        checkpoint: { status: "not_needed" },
+        coverage: {
+          coveredResultCount: microcompactEvaluation.eligibleToolResultCount,
+          clearedResultCount: 0,
+          toolCallIds: [],
+        },
+      };
       if (microcompactEvaluation.strategy !== "none") {
         const modelViewFingerprint = fingerprintModelRequest({ messages: beforeView.messages, tools: beforeView.tools });
         const reductionFingerprint = `${turnId}:${step}:${modelViewFingerprint}`;
@@ -2615,6 +2629,10 @@ export class AgentHost {
             // and let proactive/full compaction handle pressure in this step.
             beforeUsage = tokenCount.value;
             recoveryGuard.recordCompactionFailure("microcompact_checkpoint");
+            stepMicrocompactDiagnostics = {
+              ...stepMicrocompactDiagnostics,
+              checkpoint: { status: "failed", errorCode: "CHECKPOINT_FAILED" },
+            };
           } else {
           latestMicrocompactCheckpoint = checkpoint;
           recoveryGuard.recordCompactionSuccess("microcompact_checkpoint");
@@ -2635,6 +2653,18 @@ export class AgentHost {
             strategy: microcompactEvaluation.strategy,
             reductionFingerprint,
           });
+          stepMicrocompactDiagnostics = {
+            ...stepMicrocompactDiagnostics,
+            postCompactTokens: candidateCount.value,
+            checkpoint: { status: "persisted", checkpointId: checkpoint.checkpointId },
+            coverage: {
+              sourceSequenceStart: checkpoint.sourceSequenceStart,
+              sourceSequenceEnd: checkpoint.sourceSequenceEnd,
+              coveredResultCount: checkpoint.coveredToolCallIds.length,
+              clearedResultCount: microcompact.report.newlyClearedToolCallIds.length,
+              toolCallIds: checkpoint.coveredToolCallIds.slice(0, 64),
+            },
+          };
           estimate = tokenCounter.estimate(beforeView);
           tokenCount = await countContextTokens(tokenCounter, beforeView, {
             preferExact: shouldUseExactTokenCount(estimate, budgetSnapshot, this.contextPolicyWithLegacyFallback()),
@@ -2743,7 +2773,7 @@ export class AgentHost {
           tokenCount: publicTokenCount(finalCount),
           contextAssembly: publicContextAssembly(assembly),
           messageValidation: publicMessageValidation(prepared),
-          toolResultBudget: publicToolResultBudget(prepared.toolResultBudget, this.toolResultBudgetWithLegacyFallback()),
+          toolResultBudget: publicToolResultBudget(prepared.toolResultBudget, this.toolResultBudgetWithLegacyFallback(), stepMicrocompactDiagnostics),
           modelRequestId,
           ...(autoCompactRecommended ? { autoCompactRecommended: true } : {}),
         },
@@ -3002,6 +3032,19 @@ export class AgentHost {
     for (const toolCallId of newlyClearedToolCallIds) reportedMicrocompactToolCallIds.add(toolCallId);
     for (const toolCallId of newlyClearedToolCallIds) alreadyClearedToolCallIds.add(toolCallId);
     if (newlyBoundedToolCallIds.length === 0 && newlyMessageBudgetReplacedToolCallIds.length === 0 && newlyClearedToolCallIds.length === 0) return;
+    const microcompact = checkpoint === undefined ? undefined : {
+      strategy: checkpoint.strategy === "time" || checkpoint.strategy === "legacy-count" || checkpoint.strategy === "pressure" ? checkpoint.strategy : "pressure",
+      pressureThreshold: checkpoint.pressureThreshold ?? 0,
+      targetTokens: checkpoint.targetTokens ?? 0,
+      preCompactTokens: checkpoint.preCompactTokens,
+      postCompactTokens: checkpoint.postCompactTokens,
+      checkpoint: { status: "persisted" as const, checkpointId: checkpoint.checkpointId },
+      coverage: {
+        coveredResultCount: checkpoint.coverage.length,
+        clearedResultCount: newlyClearedToolCallIds.length,
+        toolCallIds: checkpoint.coverage.slice(0, 64),
+      },
+    } satisfies ContextMicrocompactDiagnosticsProjection;
     await this.options.store.append({
       sessionId,
       turnId,
@@ -3020,6 +3063,7 @@ export class AgentHost {
         microcompactTrigger: report.microcompactTrigger,
         timeBasedMicrocompactEnabled: report.timeBasedMicrocompactEnabled,
         timeBasedGapMs: report.timeBasedGapMs,
+        ...(microcompact === undefined ? {} : { microcompact }),
         ...(checkpoint === undefined ? {} : {
           checkpointId: checkpoint.checkpointId,
           preCompactTokens: checkpoint.preCompactTokens,
@@ -3050,6 +3094,7 @@ export class AgentHost {
         microcompactTrigger: report.microcompactTrigger,
         timeBasedMicrocompactEnabled: report.timeBasedMicrocompactEnabled,
         timeBasedGapMs: report.timeBasedGapMs,
+        ...(microcompact === undefined ? {} : { microcompact }),
         ...(checkpoint === undefined ? {} : {
           checkpointId: checkpoint.checkpointId,
           preCompactTokens: checkpoint.preCompactTokens,
@@ -3944,7 +3989,9 @@ function publicMessageValidation(prepared: PreparedModelContext): Readonly<Recor
 function publicToolResultBudget(
   report: ToolResultBudgetReport,
   policy: ToolResultBudgetPolicy,
+  microcompact?: ContextMicrocompactDiagnosticsProjection,
 ): Readonly<Record<string, unknown>> {
+  const boundedIds = (ids: readonly string[], limit = 256): readonly string[] => ids.slice(0, limit);
   return {
     enabled: report.enabled,
     changed: report.changed,
@@ -3952,13 +3999,13 @@ function publicToolResultBudget(
     boundedCount: report.boundedCount,
     clearedCount: report.clearedCount,
     tokensSaved: report.tokensSaved,
-    boundedToolCallIds: report.boundedToolCallIds,
-    clearedToolCallIds: report.clearedToolCallIds,
-    newlyClearedToolCallIds: report.newlyClearedToolCallIds,
-    protectedToolCallIds: report.protectedToolCallIds,
+    boundedToolCallIds: boundedIds(report.boundedToolCallIds),
+    clearedToolCallIds: boundedIds(report.clearedToolCallIds),
+    newlyClearedToolCallIds: boundedIds(report.newlyClearedToolCallIds),
+    protectedToolCallIds: boundedIds(report.protectedToolCallIds),
     messageBudgetChars: report.messageBudgetChars,
     messageBudgetMessagesOverBudget: report.messageBudgetMessagesOverBudget,
-    messageBudgetReplacedToolCallIds: report.messageBudgetReplacedToolCallIds,
+    messageBudgetReplacedToolCallIds: boundedIds(report.messageBudgetReplacedToolCallIds),
     microcompactTrigger: report.microcompactTrigger,
     ...(report.microcompactStrategy === undefined ? {} : { microcompactStrategy: report.microcompactStrategy }),
     ...(report.pressureThreshold === undefined ? {} : { pressureThreshold: report.pressureThreshold }),
@@ -3966,6 +4013,27 @@ function publicToolResultBudget(
     ...(report.pressureUsageTokens === undefined ? {} : { pressureUsageTokens: report.pressureUsageTokens }),
     ...(report.requiredTokensToFree === undefined ? {} : { requiredTokensToFree: report.requiredTokensToFree }),
     ...(report.eligibleToolResultCount === undefined ? {} : { eligibleToolResultCount: report.eligibleToolResultCount }),
+    ...(microcompact === undefined ? {} : {
+      microcompact: {
+        strategy: microcompact.strategy,
+        pressureThreshold: microcompact.pressureThreshold,
+        targetTokens: microcompact.targetTokens,
+        preCompactTokens: microcompact.preCompactTokens,
+        postCompactTokens: microcompact.postCompactTokens,
+        checkpoint: {
+          status: microcompact.checkpoint.status,
+          ...(microcompact.checkpoint.checkpointId === undefined ? {} : { checkpointId: microcompact.checkpoint.checkpointId }),
+          ...(microcompact.checkpoint.errorCode === undefined ? {} : { errorCode: microcompact.checkpoint.errorCode.slice(0, 96) }),
+        },
+        coverage: {
+          ...(microcompact.coverage.sourceSequenceStart === undefined ? {} : { sourceSequenceStart: microcompact.coverage.sourceSequenceStart }),
+          ...(microcompact.coverage.sourceSequenceEnd === undefined ? {} : { sourceSequenceEnd: microcompact.coverage.sourceSequenceEnd }),
+          coveredResultCount: microcompact.coverage.coveredResultCount,
+          clearedResultCount: microcompact.coverage.clearedResultCount,
+          toolCallIds: boundedIds(microcompact.coverage.toolCallIds, 64),
+        },
+      },
+    }),
     timeBasedMicrocompactEnabled: report.timeBasedMicrocompactEnabled,
     timeBasedGapMs: report.timeBasedGapMs,
     policy: {

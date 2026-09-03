@@ -776,6 +776,32 @@ export type ContextDiagnosticTokenSource = "provider" | "estimate" | "stale_usag
 export type ContextDiagnosticTokenConfidence = "exact" | "high" | "medium" | "low";
 export type ContextToolResultBudgetTrigger = "none" | "per-result" | "message" | "count" | "tokens" | "time";
 export type ContextMicrocompactTrigger = "none" | "count" | "tokens" | "time";
+export type ContextMicrocompactStrategy = "none" | "pressure" | "time" | "legacy-count";
+export type ContextMicrocompactCheckpointStatus = "not_needed" | "persisted" | "failed";
+
+/** Bounded coverage metadata for one microcompact decision. */
+export interface ContextMicrocompactCoverageProjection {
+  readonly sourceSequenceStart?: number;
+  readonly sourceSequenceEnd?: number;
+  readonly coveredResultCount: number;
+  readonly clearedResultCount: number;
+  readonly toolCallIds: readonly string[];
+}
+
+/** Bounded, model-view-only diagnostics for one microcompact decision. */
+export interface ContextMicrocompactDiagnosticsProjection {
+  readonly strategy: ContextMicrocompactStrategy;
+  readonly pressureThreshold: number;
+  readonly targetTokens: number;
+  readonly preCompactTokens: number;
+  readonly postCompactTokens: number;
+  readonly checkpoint: {
+    readonly status: ContextMicrocompactCheckpointStatus;
+    readonly checkpointId?: string;
+    readonly errorCode?: string;
+  };
+  readonly coverage: ContextMicrocompactCoverageProjection;
+}
 
 /** Bounded projection of the latest tool-result aggregate/microcompact decision. */
 export interface ContextToolResultBudgetProjection {
@@ -789,6 +815,7 @@ export interface ContextToolResultBudgetProjection {
   readonly clearedCount: number;
   readonly tokensSaved: number;
   readonly microcompactTrigger: ContextMicrocompactTrigger;
+  readonly microcompact?: ContextMicrocompactDiagnosticsProjection;
   readonly timeBasedMicrocompactEnabled: boolean;
   readonly timeBasedGapMs: number;
   readonly lastSequence: number;
