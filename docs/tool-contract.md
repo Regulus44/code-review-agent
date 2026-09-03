@@ -44,6 +44,8 @@ M2 新增模型侧 `read_skill_resource`（默认由 `AgentHostOptions.skillReso
 
 M4 为 `read_skill_resource` 增加可选的 `skillResourceArtifactReplay`。实时 ToolResult 仍把 bounded 资源正文放入下一模型步骤；deferred `tool/result`、SSE 和 projection 只保留 Skill 名称、相对路径、offset/limit、size/digest/truncated/provider 与 opaque artifact receipt。启用 replay 时，host-owned `SkillResourceArtifactStore` 以 session/tenant ACL 写入不可变快照；重启/回放按 receipt 恢复正文，快照缺失则返回 `<skill_resource status="unavailable">`，禁止静默读取当前磁盘。重复 deferred commit 以 `toolCallId` 幂等，`read_skill_resource` 也纳入 compactable tool 集合，compact/microcompact 只替换 model view，不删除唯一 receipt。默认关闭该 flag 时不得宣称资源正文具备 deterministic replay。
 
+M5 为本地 filesystem Skill provider 增加默认关闭的 best-effort watcher。开启 `SkillFilesystemProviderOptions.watch` 后，provider 在配置 root 与受限深度的非 Skill 目录注册 `fs.watch`，在发现 Skill 目录后只监听其直属 `SKILL.md`；目录新增/删除、`SKILL.md` 新增/修改/删除触发 250ms debounce 的 provider invalidation，`references/`、`scripts/`、`assets/` 等深层资源变化不会重建 catalog。watcher 受 `maxWatchDirectories` 数量、`maxDepth`、dispose/AbortSignal 和 1 秒重试约束；监听失败保留 last-good candidate，并让下一次 observation 标记 `complete=false`，恢复后再清除该状态。workspace 工具写入只有 `.claude/skills` 根、Skill 目录或 `SKILL.md` 才追加 `skills/change`，资源正文不会进入该事件。
+
 MCP 工具使用 `mcp__<server>__<tool>` 的稳定 namespace；原始 MCP 名称只用于 wire call，不从 public name 反解析。`source` 只用于 API/Web 展示，执行仍由本地 ToolRuntime 负责。
 
 ## 统一执行流程
