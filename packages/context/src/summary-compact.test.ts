@@ -83,7 +83,7 @@ describe("summary compact", () => {
   });
 
   it("injects bounded microcompact checkpoint facts and omits covered tool evidence", async () => {
-    const requests: ChatMessage[][] = [];
+    const requests: Array<readonly ChatMessage[]> = [];
     const input: ChatMessage[] = [
       { role: "user", content: "inspect the repository", messageId: "u1" },
       { role: "assistant", content: "", toolCalls: [{ id: "call-old", name: "read_file", arguments: "{}" }], messageId: "a1" },
