@@ -2055,7 +2055,7 @@ export class AgentHost {
         const rawResult = event.payload["result"];
         const result = rawResult !== undefined ? rawResult as ToolResult : undefined;
         const status = event.payload["status"] === "completed" ? "completed" : event.payload["status"] === "cancelled" ? "cancelled" : event.payload["status"] === "denied" ? "denied" : "failed";
-        const content = await this.modelToolResultFromEvent(sessionId, status, rawToolCallId, result);
+        const content = await this.modelToolResultFromEvent(sessionId, status, rawToolCallId, result, projection?.ownership?.tenantId);
         messages.push({ role: "tool", toolCallId: rawToolCallId, messageId: event.eventId, content });
       } else if (event.type === "context/tool_result_persisted") {
         const replacement = replacementFromPayload(event.payload);
@@ -2087,12 +2087,12 @@ export class AgentHost {
     }
   }
 
-  private async modelToolResultFromEvent(sessionId: SessionId, status: ExecuteToolOutput["status"], toolCallId: string, result: ToolResult | undefined): Promise<string> {
+  private async modelToolResultFromEvent(sessionId: SessionId, status: ExecuteToolOutput["status"], toolCallId: string, result: ToolResult | undefined, tenantId?: string): Promise<string> {
     const receipt = skillResourceReceipt(result?.output);
     if (receipt !== undefined) {
       if (this.skillResourceArtifactReplay && this.skillResourceArtifactStore !== undefined) {
         try {
-          const stored = await this.skillResourceArtifactStore.read({ artifactId: receipt.artifactId, sessionId: String(sessionId) });
+          const stored = await this.skillResourceArtifactStore.read({ artifactId: receipt.artifactId, sessionId: String(sessionId), ...(tenantId === undefined ? {} : { tenantId }) });
           if (stored !== undefined && stored.digest === receipt.digest) return buildSkillResourceModelView(receipt, stored.content);
         } catch {
           // Replay fails closed below; never reread the current Skill directory.
