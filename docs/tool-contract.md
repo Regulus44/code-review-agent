@@ -42,6 +42,8 @@ Skill Resource M0 在 provider contract 增加可选 `readResource(candidate, re
 
 M2 新增模型侧 `read_skill_resource`（默认由 `AgentHostOptions.skillResourceToolEnabled` 关闭）。输入为 `{ skill, path, offset?, limit? }`，先校验名称和 Skill-relative 路径，再按当前 cwd 解析 winning candidate，检查 `modelInvocable` 与 source trust，最后委派 provider `readResource()`。工具固定为 `read`/`auto`/`parallel`，输出包含受限 metadata、`modelView` 和 `<skill_resource skill="..." path="...">` presentation；模型视图只包含逻辑 Skill 名称与相对路径，不暴露绝对目录。关闭开关时不注册工具，也不能回退到通用绝对路径读取。资源正文暂沿用 ToolRuntime 的标准 `tool/result` 管线，专门 replay/artifact 语义留在后续阶段。
 
+M4 为 `read_skill_resource` 增加可选的 `skillResourceArtifactReplay`。实时 ToolResult 仍把 bounded 资源正文放入下一模型步骤；deferred `tool/result`、SSE 和 projection 只保留 Skill 名称、相对路径、offset/limit、size/digest/truncated/provider 与 opaque artifact receipt。启用 replay 时，host-owned `SkillResourceArtifactStore` 以 session/tenant ACL 写入不可变快照；重启/回放按 receipt 恢复正文，快照缺失则返回 `<skill_resource status="unavailable">`，禁止静默读取当前磁盘。重复 deferred commit 以 `toolCallId` 幂等，`read_skill_resource` 也纳入 compactable tool 集合，compact/microcompact 只替换 model view，不删除唯一 receipt。默认关闭该 flag 时不得宣称资源正文具备 deterministic replay。
+
 MCP 工具使用 `mcp__<server>__<tool>` 的稳定 namespace；原始 MCP 名称只用于 wire call，不从 public name 反解析。`source` 只用于 API/Web 展示，执行仍由本地 ToolRuntime 负责。
 
 ## 统一执行流程
