@@ -28,7 +28,7 @@
 - `1ff287d fix(tools): redact skill bodies from durable model view`
 - `d5c0a77 feat(runtime): replay skill resources from host artifacts`
 
-定向验证：Context 101 tests、Tools 108 tests、Runtime 81 tests（含 M4 新增用例）通过；`pnpm typecheck` 通过；`git diff --check` 通过。完整 workspace `pnpm test` 由主代理在合并所有并行切片后执行。
+定向验证：Context 101 tests、Tools 108 tests、Runtime 81 tests（含 M4 新增用例）通过；M4 代码切片提交时 `pnpm typecheck` 通过；`git diff --check` 通过。随后并行 Slice E 的未提交 fixture 触发当前工作树 `pnpm typecheck` 失败（`toolName` 不属于 ChatMessage tool shape），该错误不来自 M4。完整 workspace `pnpm test` 由主代理在合并所有并行切片后执行。
 
 ## 剩余风险
 
