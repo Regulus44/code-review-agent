@@ -30,3 +30,12 @@
 - 验证：待 Runtime/storage 接线完成后统一执行 `pnpm typecheck`、相关 package tests 与 `pnpm test`。
 - 风险：生成器仅提取受限元数据；路径字段剥离盘符并拒绝 `..`，不读取或保存完整工具输出。若 schema 预算过小会触发 validator failure，按失败语义保留原 model view。
 - 回滚：回滚 `a50dde2`，或将 `microcompactTriggerMode` 设为 `legacy-count`/`disabled`；原有 replacement receipt 行为保持。
+
+### Commit `a4f1e71`
+
+- 变更文件：`packages/storage/src/index.ts`。
+- 内容：EventStore projection 解析 checkpoint 成功/失败事件，向 SessionProjection 与 ContextDiagnostics 写入 bounded metadata。
+- 事件顺序：成功 checkpoint 以事件 sequence 作为 source，失败事件仅记录稳定 stage/code 并标记 `preservedModelView=true`。
+- 验证：待 Runtime 接线后执行 storage/context/runtime 定向测试与全 workspace 检查。
+- 风险：projection 对未知/不完整 payload fail closed，不会把原始工具输出带入 API/Web；旧事件继续兼容。
+- 回滚：回滚 `a4f1e71`，EventStore 仍保留新增事件，旧 projection 忽略未知类型。
