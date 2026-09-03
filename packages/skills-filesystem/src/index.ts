@@ -93,11 +93,11 @@ export class FileSystemSkillProvider implements SkillProvider {
       const target = path.resolve(canonicalDirectory, ...request.path.replaceAll("\\", "/").split("/"));
       if (!isWithin(canonicalDirectory, target)) return { ok: false, error: { code: "SKILL_RESOURCE_INVALID_PATH" } };
       const info = await lstat(target);
-      if (!info.isFile() && !info.isSymbolicLink()) return { ok: false, error: { code: "SKILL_RESOURCE_NOT_FOUND" } };
+      if (!info.isFile() && !info.isSymbolicLink()) return { ok: false, error: { code: info.isDirectory() ? "SKILL_RESOURCE_NOT_FOUND" : "SKILL_RESOURCE_FAILED" } };
       const canonicalTarget = await realpath(target);
       if (!isWithin(canonicalDirectory, canonicalTarget)) return { ok: false, error: { code: "SKILL_RESOURCE_INVALID_PATH" } };
       const canonicalInfo = await lstat(canonicalTarget);
-      if (!canonicalInfo.isFile() || canonicalInfo.isSymbolicLink()) return { ok: false, error: { code: "SKILL_RESOURCE_NOT_FOUND" } };
+      if (!canonicalInfo.isFile() || canonicalInfo.isSymbolicLink()) return { ok: false, error: { code: canonicalInfo.isDirectory() ? "SKILL_RESOURCE_NOT_FOUND" : "SKILL_RESOURCE_FAILED" } };
       const sizeBytes = canonicalInfo.size;
       if (sizeBytes > maxBytes && request.limit === undefined) return { ok: false, error: { code: "SKILL_RESOURCE_TOO_LARGE" } };
       const length = Math.min(requestedLimit, Math.max(0, sizeBytes - offset));
