@@ -39,6 +39,8 @@ export interface ToolResultBudgetPolicy {
   readonly microcompactTargetHysteresisTokens?: number;
   /** Number of newest compactable results always retained. */
   readonly keepRecentResults?: number;
+  /** Fraction of the pressure threshold allocated to the newest token tail. */
+  readonly retainRecentResultsRatio?: number;
   /** Enables Claude Code-style age-based microcompact. Defaults to false. */
   readonly timeBasedMicrocompactEnabled?: boolean;
   /** Age of the oldest eligible result that activates time-based microcompact. */
@@ -89,6 +91,10 @@ export interface ToolResultBudgetReport {
   readonly pressureUsageTokens?: number;
   readonly requiredTokensToFree?: number;
   readonly eligibleToolResultCount?: number;
+  /** Maximum token tail budget used by pressure microcompact. */
+  readonly tailBudgetTokens?: number;
+  /** Token estimate retained in eligible results after microcompact. */
+  readonly retainedTailTokens?: number;
 }
 
 export interface ToolResultBudgetResult {
@@ -111,6 +117,8 @@ export interface ApplyToolResultBudgetOptions {
     readonly toolName?: string;
     readonly content: string;
   }) => Promise<ToolResultStorageOutcome>;
+  /** Internal pressure-pass floor for the newest token tail. */
+  readonly microcompactTailBudgetTokens?: number;
 }
 
 export interface MicrocompactPressureEvaluation {
@@ -120,6 +128,7 @@ export interface MicrocompactPressureEvaluation {
   readonly targetUsageTokens: number;
   readonly requiredTokensToFree: number;
   readonly eligibleToolResultCount: number;
+  readonly tailBudgetTokens: number;
 }
 
 export interface ApplyMicrocompactOptions extends ApplyToolResultBudgetOptions {
@@ -136,6 +145,7 @@ interface NormalizedPolicy {
   readonly microcompactTriggerRatio: number;
   readonly microcompactTargetHysteresisTokens: number;
   readonly keepRecentResults: number;
+  readonly retainRecentResultsRatio: number;
   readonly timeBasedMicrocompactEnabled: boolean;
   readonly timeBasedGapMs: number;
   readonly maxToolResultsPerMessageChars: number;
@@ -258,8 +268,10 @@ export function applyToolResultBudget(
       let remaining = eligible.reduce((sum, record) => sum + effectiveTokens(record, boundedContent), 0);
       for (const record of clearable) {
         if (remaining <= policy.microcompactTriggerTokens) break;
+        const nextRemaining = remaining - effectiveTokens(record, boundedContent);
+        if (options.microcompactTailBudgetTokens !== undefined && nextRemaining < options.microcompactTailBudgetTokens) break;
         clearIds.add(record.toolCallId);
-        remaining -= effectiveTokens(record, boundedContent);
+        remaining = nextRemaining;
       }
     } else {
       for (const record of clearable) clearIds.add(record.toolCallId);
@@ -412,16 +424,17 @@ export function evaluateMicrocompactPressure(
     Math.max(1, Math.floor(snapshot.effectiveWindowTokens * policy.microcompactTriggerRatio)),
   );
   const targetUsageTokens = Math.max(0, pressureThreshold - policy.microcompactTargetHysteresisTokens);
+  const tailBudgetTokens = Math.max(0, Math.floor(pressureThreshold * policy.retainRecentResultsRatio));
   const eligibleToolResultCount = eligibleToolResultRecords(messages, policy, options.protectedToolCallIds, options.alreadyClearedToolCallIds).length;
   if (!policy.enabled || triggerMode === "disabled") {
-    return { strategy: "none", pressureThreshold, currentUsageTokens: usage, targetUsageTokens, requiredTokensToFree: Math.max(0, usage - targetUsageTokens), eligibleToolResultCount };
+    return { strategy: "none", pressureThreshold, currentUsageTokens: usage, targetUsageTokens, requiredTokensToFree: Math.max(0, usage - targetUsageTokens), eligibleToolResultCount, tailBudgetTokens };
   }
   if (triggerMode === "legacy-count") {
     const legacy = microcompactTrigger(eligibleToolResultRecords(messages, policy, options.protectedToolCallIds, options.alreadyClearedToolCallIds), policy, options, new Map());
-    return { strategy: legacy === "time" ? "time" : legacy !== "none" ? "legacy-count" : "none", pressureThreshold, currentUsageTokens: usage, targetUsageTokens, requiredTokensToFree: Math.max(0, usage - targetUsageTokens), eligibleToolResultCount };
+    return { strategy: legacy === "time" ? "time" : legacy !== "none" ? "legacy-count" : "none", pressureThreshold, currentUsageTokens: usage, targetUsageTokens, requiredTokensToFree: Math.max(0, usage - targetUsageTokens), eligibleToolResultCount, tailBudgetTokens };
   }
   if (usage >= pressureThreshold && eligibleToolResultCount > policy.keepRecentResults) {
-    return { strategy: "pressure", pressureThreshold, currentUsageTokens: usage, targetUsageTokens, requiredTokensToFree: Math.max(0, usage - targetUsageTokens), eligibleToolResultCount };
+    return { strategy: "pressure", pressureThreshold, currentUsageTokens: usage, targetUsageTokens, requiredTokensToFree: Math.max(0, usage - targetUsageTokens), eligibleToolResultCount, tailBudgetTokens };
   }
   if (policy.timeBasedMicrocompactEnabled) {
     const timeRecords = eligibleToolResultRecords(messages, policy, options.protectedToolCallIds, options.alreadyClearedToolCallIds);
@@ -431,10 +444,10 @@ export function evaluateMicrocompactPressure(
       microcompactTriggerTokens: Number.MAX_SAFE_INTEGER,
     };
     if (microcompactTrigger(timeRecords, timePolicy, options, new Map()) === "time") {
-      return { strategy: "time", pressureThreshold, currentUsageTokens: usage, targetUsageTokens, requiredTokensToFree: 0, eligibleToolResultCount };
+      return { strategy: "time", pressureThreshold, currentUsageTokens: usage, targetUsageTokens, requiredTokensToFree: 0, eligibleToolResultCount, tailBudgetTokens };
     }
   }
-  return { strategy: "none", pressureThreshold, currentUsageTokens: usage, targetUsageTokens, requiredTokensToFree: Math.max(0, usage - targetUsageTokens), eligibleToolResultCount };
+  return { strategy: "none", pressureThreshold, currentUsageTokens: usage, targetUsageTokens, requiredTokensToFree: Math.max(0, usage - targetUsageTokens), eligibleToolResultCount, tailBudgetTokens };
 }
 
 /** Applies only the microcompact pass using a previously evaluated strategy. */
@@ -448,6 +461,25 @@ export function applyMicrocompactPass(
   }
   const eligibleTokens = eligibleToolResultRecords(messages, policy, options.protectedToolCallIds, options.alreadyClearedToolCallIds)
     .reduce((sum, record) => sum + record.tokens, 0);
+  // Once the current eligible tail is within its deterministic retention
+  // budget, a repeated prepare/replay must not continue clearing one result
+  // at a time merely because the minimum-count guard still allows it.
+  if (options.evaluation.strategy === "pressure" && eligibleTokens <= options.evaluation.tailBudgetTokens) {
+    return {
+      ...unchangedResult(messages, policy, options.protectedToolCallIds ?? new Set<string>()),
+      report: {
+        ...unchangedResult(messages, policy, options.protectedToolCallIds ?? new Set<string>()).report,
+        microcompactStrategy: options.evaluation.strategy,
+        pressureThreshold: options.evaluation.pressureThreshold,
+        pressureTargetTokens: options.evaluation.targetUsageTokens,
+        pressureUsageTokens: options.evaluation.currentUsageTokens,
+        requiredTokensToFree: options.evaluation.requiredTokensToFree,
+        eligibleToolResultCount: options.evaluation.eligibleToolResultCount,
+        tailBudgetTokens: options.evaluation.tailBudgetTokens,
+        retainedTailTokens: eligibleTokens,
+      },
+    };
+  }
   const triggerTokens = options.evaluation.strategy === "pressure"
     ? Math.max(0, eligibleTokens - options.evaluation.requiredTokensToFree)
     : options.evaluation.strategy === "legacy-count" ? policy.microcompactTriggerTokens : Number.MAX_SAFE_INTEGER;
@@ -462,6 +494,7 @@ export function applyMicrocompactPass(
       microcompactTriggerTokens: triggerTokens,
       timeBasedMicrocompactEnabled: options.evaluation.strategy === "time",
     },
+    ...(options.evaluation.strategy === "pressure" ? { microcompactTailBudgetTokens: options.evaluation.tailBudgetTokens } : {}),
   });
   return {
     ...result,
@@ -473,6 +506,13 @@ export function applyMicrocompactPass(
       pressureUsageTokens: options.evaluation.currentUsageTokens,
       requiredTokensToFree: options.evaluation.requiredTokensToFree,
       eligibleToolResultCount: options.evaluation.eligibleToolResultCount,
+      tailBudgetTokens: options.evaluation.tailBudgetTokens,
+      retainedTailTokens: eligibleToolResultRecords(
+        result.messages,
+        policy,
+        options.protectedToolCallIds,
+        options.alreadyClearedToolCallIds,
+      ).reduce((sum, record) => sum + record.tokens, 0),
     },
   };
 }
@@ -601,6 +641,7 @@ function withoutMicrocompact(policy: NormalizedPolicy): ToolResultBudgetPolicy {
     microcompactTriggerToolCount: Number.MAX_SAFE_INTEGER,
     microcompactTriggerTokens: Number.MAX_SAFE_INTEGER,
     keepRecentResults: Number.MAX_SAFE_INTEGER,
+    retainRecentResultsRatio: policy.retainRecentResultsRatio,
     timeBasedMicrocompactEnabled: false,
     timeBasedGapMs: policy.timeBasedGapMs,
     maxToolResultsPerMessageChars: policy.maxToolResultsPerMessageChars,
@@ -619,6 +660,7 @@ function normalizePolicy(policy: ToolResultBudgetPolicy | undefined): Normalized
     microcompactTriggerRatio: ratio(policy?.microcompactTriggerRatio, 0.8),
     microcompactTargetHysteresisTokens: nonNegative(policy?.microcompactTargetHysteresisTokens, 8_000),
     keepRecentResults: nonNegative(policy?.keepRecentResults, 5),
+    retainRecentResultsRatio: ratio(policy?.retainRecentResultsRatio, 0.16),
     timeBasedMicrocompactEnabled: policy?.timeBasedMicrocompactEnabled === true,
     timeBasedGapMs: positive(policy?.timeBasedGapMs, 60 * 60_000),
     maxToolResultsPerMessageChars: positive(policy?.maxToolResultsPerMessageChars, DEFAULT_MAX_TOOL_RESULTS_PER_MESSAGE_CHARS),

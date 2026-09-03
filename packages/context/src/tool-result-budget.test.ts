@@ -68,6 +68,39 @@ describe("applyToolResultBudget", () => {
     expect(toolContents(result.messages).slice(-2).every((content) => content !== DEFAULT_MICROCOMPACT_MESSAGE)).toBe(true);
   });
 
+  it("retains a token tail in addition to the minimum recent-result count", () => {
+    const messages = resultMessages(6, "x".repeat(800));
+    const evaluation = evaluateMicrocompactPressure(messages, 1_000, pressureSnapshot, {
+      policy: { keepRecentResults: 2, retainRecentResultsRatio: 0.8, microcompactTargetHysteresisTokens: 900 },
+    });
+    expect(evaluation.strategy).toBe("pressure");
+    expect(evaluation.tailBudgetTokens).toBe(640);
+
+    const result = applyMicrocompactPass(messages, {
+      policy: { keepRecentResults: 2, retainRecentResultsRatio: 0.8 },
+      evaluation,
+    });
+    const contents = toolContents(result.messages);
+    expect(contents.slice(-2).every((content) => content.startsWith("x"))).toBe(true);
+    expect(contents.filter((content) => content === DEFAULT_MICROCOMPACT_MESSAGE)).toHaveLength(2);
+    expect(result.report.retainedTailTokens).toBeGreaterThanOrEqual(evaluation.tailBudgetTokens);
+  });
+
+  it("keeps pressure clearing decisions stable when preparation is repeated", () => {
+    const messages = resultMessages(6, "x".repeat(800));
+    const policy = { keepRecentResults: 2, retainRecentResultsRatio: 0.8, microcompactTargetHysteresisTokens: 900 };
+    const evaluation = evaluateMicrocompactPressure(messages, 1_000, pressureSnapshot, { policy });
+    const first = applyMicrocompactPass(messages, { policy, evaluation });
+    const second = applyMicrocompactPass(first.messages, {
+      policy,
+      alreadyClearedToolCallIds: new Set(first.report.newlyClearedToolCallIds),
+      evaluation,
+    });
+    expect(second.messages).toEqual(first.messages);
+    expect(second.report.newlyClearedToolCallIds).toEqual([]);
+    expect(second.report.clearedToolCallIds).toEqual(first.report.newlyClearedToolCallIds);
+  });
+
   it("preserves the opt-in time fallback when pressure is below threshold", () => {
     const messages = resultMessages(3, "aged");
     const timestamps = Object.fromEntries(messages.filter((message) => message.role === "tool").map((message) => [message.toolCallId, new Date(0).toISOString()]));
