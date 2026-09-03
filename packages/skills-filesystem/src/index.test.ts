@@ -50,7 +50,7 @@ describe("FileSystemSkillProvider", () => {
     await mkdir(path.join(root, "ignored"), { recursive: true }); await writeFile(path.join(root, ".gitignore"), "ignored\n", "utf8"); await skill(path.join(root, "ignored"), "hidden");
     await mkdir(path.join(root, "bad"), { recursive: true }); await writeFile(path.join(root, "bad", "SKILL.md"), "no frontmatter", "utf8");
     await skill(root, "huge", "x".repeat(300));
-    const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }], limits: { maxFileBytes: 128 } });
+    const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }], limits: { maxFileBytes: 128, maxResourceBytes: 128 } });
     const result = await provider.list(); expect(result.complete).toBe(false); expect(result.candidates.map((c) => c.name)).not.toContain("hidden"); expect(result.candidates.map((c) => c.name)).not.toContain("huge");
   });
 
@@ -115,7 +115,7 @@ describe("FileSystemSkillProvider", () => {
     const root = await fixture(); await skill(root, "bounded");
     const dir = path.join(root, "bounded"); await mkdir(path.join(dir, "assets"), { recursive: true });
     await writeFile(path.join(dir, "assets", "large.txt"), "0".repeat(200), "utf8");
-    const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }], limits: { maxFileBytes: 128 } });
+    const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }], limits: { maxFileBytes: 128, maxResourceBytes: 128 } });
     const candidate = (await provider.list()).candidates[0]!;
     expect(await provider.readResource!(candidate, { path: "assets/large.txt" })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_TOO_LARGE" } });
     expect(await provider.readResource!(candidate, { path: "assets/large.txt", offset: 4, limit: 4 })).toMatchObject({ ok: true, resource: { content: "0000", sizeBytes: 200, truncated: true } });
@@ -123,5 +123,16 @@ describe("FileSystemSkillProvider", () => {
     await expect(provider.readResource!(candidate, { path: "assets/large.txt" }, { signal: controller.signal })).rejects.toBeDefined();
     await rm(path.join(dir, "assets", "large.txt"));
     expect(await provider.readResource!(candidate, { path: "assets/large.txt", limit: 2 })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_NOT_FOUND" } });
+  });
+
+  it("keeps SKILL.md and resource budgets independent", async () => {
+    const root = await fixture(); await skill(root, "independent");
+    const dir = path.join(root, "independent"); await mkdir(path.join(dir, "references"), { recursive: true });
+    await writeFile(path.join(dir, "references", "note.txt"), "1234567890", "utf8");
+    const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }], limits: { maxFileBytes: 256, maxResourceBytes: 4, maxResourcePathBytes: 8 } });
+    const listed = await provider.list();
+    expect(listed.candidates).toHaveLength(1);
+    expect(await provider.readResource!(listed.candidates[0]!, { path: "references/note.txt", limit: 4 })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_INVALID_PATH" } });
+    expect(await provider.readResource!(listed.candidates[0]!, { path: "x.txt", limit: 5 })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_TOO_LARGE" } });
   });
 });

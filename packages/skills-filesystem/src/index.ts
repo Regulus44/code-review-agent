@@ -8,6 +8,8 @@ export type SkillFilesystemRootKind = "project" | "user" | "custom" | "bundled";
 export interface SkillFilesystemRoot { readonly kind: SkillFilesystemRootKind; readonly path: string; readonly rank?: number; }
 export interface SkillFilesystemLimits {
   readonly maxFileBytes?: number;
+  readonly maxResourceBytes?: number;
+  readonly maxResourcePathBytes?: number;
   readonly maxDepth?: number;
   readonly maxSkills?: number;
   readonly maxDescriptionBytes?: number;
@@ -19,8 +21,7 @@ export interface SkillFilesystemProviderOptions {
   readonly sourceName?: string;
 }
 
-const DEFAULT_LIMITS: Required<SkillFilesystemLimits> = { maxFileBytes: 256 * 1024, maxDepth: 6, maxSkills: 256, maxDescriptionBytes: 2048 };
-const MAX_RESOURCE_PATH_BYTES = 4 * 1024;
+const DEFAULT_LIMITS: Required<SkillFilesystemLimits> = { maxFileBytes: 256 * 1024, maxResourceBytes: 256 * 1024, maxResourcePathBytes: 4 * 1024, maxDepth: 6, maxSkills: 256, maxDescriptionBytes: 2048 };
 const DEFAULT_RANK: Record<SkillFilesystemRootKind, number> = { project: 100, custom: 150, user: 200, bundled: 300 };
 const FRONTMATTER_KEYS = new Set(["name", "description", "when_to_use", "whenToUse", "model_invocable", "modelInvocable", "disable-model-invocation", "user_invocable", "userInvocable", "user-invocable", "allowed-tools", "allowedTools", "context", "version", "agent", "paths"]);
 
@@ -79,9 +80,9 @@ export class FileSystemSkillProvider implements SkillProvider {
     if (candidate.provider !== this.name) return { ok: false, error: { code: "SKILL_RESOURCE_FAILED" } };
     const locator = parseFileSkillLocator(candidate.locator);
     if (locator === undefined || !samePath(locator.skillFilePath, candidate.path ?? locator.skillFilePath)) return { ok: false, error: { code: "SKILL_RESOURCE_FAILED" } };
-    const invalid = validateResourcePath(request.path);
+    const invalid = validateResourcePath(request.path, this.limits.maxResourcePathBytes);
     if (invalid) return { ok: false, error: { code: "SKILL_RESOURCE_INVALID_PATH" } };
-    const maxBytes = this.limits.maxFileBytes;
+    const maxBytes = this.limits.maxResourceBytes;
     if (request.limit !== undefined && request.limit > maxBytes) return { ok: false, error: { code: "SKILL_RESOURCE_TOO_LARGE" } };
     const offset = request.offset ?? 0;
     const requestedLimit = request.limit ?? maxBytes;
@@ -225,8 +226,8 @@ function parseFileSkillLocator(value: unknown): FileSkillLocator | undefined {
   return candidate as FileSkillLocator;
 }
 
-function validateResourcePath(value: unknown): boolean {
-  if (typeof value !== "string" || value.length === 0 || value.includes("\0") || Buffer.byteLength(value, "utf8") > MAX_RESOURCE_PATH_BYTES) return true;
+function validateResourcePath(value: unknown, maxBytes: number): boolean {
+  if (typeof value !== "string" || value.length === 0 || value.includes("\0") || Buffer.byteLength(value, "utf8") > maxBytes) return true;
   const normalized = value.replaceAll("\\", "/");
   if (normalized.startsWith("/") || /^[A-Za-z]:\//u.test(normalized)) return true;
   const segments = normalized.split("/");
