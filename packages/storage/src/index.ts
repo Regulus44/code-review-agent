@@ -58,6 +58,8 @@ import {
   type ContextProjectMemoryProjection,
   type ContextDiagnosticsProjection,
   type ContextToolResultBudgetProjection,
+  type ContextMicrocompactCheckpointProjection,
+  type ContextMicrocompactCheckpointFailureProjection,
   type ContextDiagnosticRecovery,
   type ContextBoundaryMetadata,
   type ContextAttachmentProjection,
@@ -520,6 +522,38 @@ function contextToolResultBudgetProjection(value: unknown, event: AgentEvent, pr
   };
 }
 
+function microcompactCheckpointProjection(event: AgentEvent): ContextMicrocompactCheckpointProjection | undefined {
+  const p = event.payload;
+  if (p["version"] !== 1 || typeof p["checkpointId"] !== "string" || typeof p["algorithmVersion"] !== "string") return undefined;
+  const arrays = (key: string, limit: number): readonly string[] => Array.isArray(p[key]) ? p[key].filter((item): item is string => typeof item === "string").map((item) => item.slice(0, 512)).slice(0, limit) : [];
+  const generatedBy = p["generatedBy"] === "summary-model" ? "summary-model" : p["generatedBy"] === "deterministic" ? "deterministic" : undefined;
+  if (generatedBy === undefined || p["algorithmVersion"] !== "pressure-v2.m1") return undefined;
+  return {
+    version: 1,
+    checkpointId: p["checkpointId"].slice(0, 128),
+    sourceSequenceStart: numberValue(p["sourceSequenceStart"], 0),
+    sourceSequenceEnd: numberValue(p["sourceSequenceEnd"], 0),
+    coveredToolCallIds: arrays("coveredToolCallIds", 256),
+    generatedBy,
+    algorithmVersion: "pressure-v2.m1",
+    primaryRequest: typeof p["primaryRequest"] === "string" ? p["primaryRequest"].slice(0, 2048) : "(unknown)",
+    filesRead: arrays("filesRead", 128),
+    filesChanged: arrays("filesChanged", 128),
+    verifiedFindings: arrays("verifiedFindings", 64),
+    testsRun: arrays("testsRun", 64),
+    pendingWork: arrays("pendingWork", 32),
+    nextStep: typeof p["nextStep"] === "string" ? p["nextStep"].slice(0, 512) : "(unknown)",
+    maxChars: numberValue(p["maxChars"], 8_192),
+    sourceSequence: event.sequence,
+  };
+}
+
+function microcompactCheckpointFailureProjection(event: AgentEvent): ContextMicrocompactCheckpointFailureProjection {
+  const p = event.payload;
+  const stage = p["stage"] === "validate" || p["stage"] === "persist" ? p["stage"] : "extract";
+  return { stage, errorCode: typeof p["errorCode"] === "string" ? p["errorCode"].slice(0, 96) : "CHECKPOINT_FAILED", preservedModelView: true, sourceSequence: event.sequence };
+}
+
 function appendContextDiagnosticRecovery(previous: ContextDiagnosticsProjection | undefined, event: AgentEvent): ContextDiagnosticsProjection | undefined {
   const baseline = previous ?? emptyContextDiagnostics(event);
   if (baseline === undefined) return undefined;
@@ -910,6 +944,21 @@ function applyEvent(projection: SessionProjection, event: AgentEvent): SessionPr
         : event.type === "context/project_memory_stale" ? "stale" : event.type === "context/project_memory_incomplete" ? "incomplete" : "disabled";
     const projected = contextProjectMemoryProjection({ ...event.payload, status }, event, next.contextProjectMemory);
     if (projected !== undefined) next = { ...next, contextProjectMemory: projected };
+  }
+
+  if (event.type === "context/microcompact_checkpoint") {
+    const checkpoint = microcompactCheckpointProjection(event);
+    if (checkpoint !== undefined) {
+      next = { ...next, contextMicrocompactCheckpoint: checkpoint };
+      const diagnostics = next.contextDiagnostics ?? emptyContextDiagnostics(event);
+      next = { ...next, contextDiagnostics: { ...diagnostics, lastMicrocompactCheckpoint: checkpoint, updatedAt: event.createdAt, lastSequence: event.sequence } };
+    }
+  }
+
+  if (event.type === "context/microcompact_checkpoint_failed") {
+    const failure = microcompactCheckpointFailureProjection(event);
+    const diagnostics = next.contextDiagnostics ?? emptyContextDiagnostics(event);
+    next = { ...next, contextDiagnostics: { ...diagnostics, lastMicrocompactCheckpointFailure: failure, updatedAt: event.createdAt, lastSequence: event.sequence } };
   }
 
   if (event.type === "step/started") {
