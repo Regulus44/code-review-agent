@@ -4305,7 +4305,9 @@ function boundedError(error: unknown): string {
 function isSkillCatalogPath(value: string): boolean {
   const normalized = value.replaceAll("\\", "/");
   const segments = normalized.split("/");
-  if (segments.length < 2 || segments[0] !== ".claude" || segments[1] !== "skills") return false;
+  const rootSegment = process.platform === "win32" ? segments[0]?.toLowerCase() : segments[0];
+  const skillsSegment = process.platform === "win32" ? segments[1]?.toLowerCase() : segments[1];
+  if (segments.length < 2 || rootSegment !== ".claude" || skillsSegment !== "skills") return false;
   if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) return false;
   if (segments.length === 2) return true;
   return segments.length === 3 || (segments.length === 4 && segments[3] === "SKILL.md");

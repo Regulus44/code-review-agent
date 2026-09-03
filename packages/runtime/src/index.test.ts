@@ -23,9 +23,10 @@ describe("AgentHost", () => {
     const context = { sessionId: brand<string, "SessionId">("ses-skill-watch"), workspaceRoot: "D:/workspace", appendEvent: async (type: string, payload: Readonly<Record<string, unknown>>) => { events.push({ type, payload }); } };
     await notify(context, ["src/index.ts", ".claude/skills/review/references/checklist.md"]);
     expect(events).toHaveLength(0);
-    await notify(context, ["src/index.ts", ".claude/skills/review/SKILL.md", ".claude/skills/new-skill"]);
+    await notify(context, ["src/index.ts", ".claude/skills/review/SKILL.md", ".claude/skills/new-skill", ...(process.platform === "win32" ? [".CLAUDE\\SKILLS\\caps\\SKILL.md"] : [])]);
     expect(events).toHaveLength(1);
-    expect(events[0]?.payload).toMatchObject({ reason: "workspace-mutation", pathCount: 2, paths: [".claude/skills/new-skill", ".claude/skills/review/SKILL.md"] });
+    expect(events[0]?.payload).toMatchObject({ reason: "workspace-mutation", pathCount: process.platform === "win32" ? 3 : 2 });
+    expect(events[0]?.payload.paths).toContain(".claude/skills/review/SKILL.md");
   });
 
   it("injects canonical Skill content into the next model step and advertises the resource reader", async () => {
