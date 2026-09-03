@@ -1,7 +1,7 @@
-import { lstat, readdir, readFile, realpath } from "node:fs/promises";
+import { lstat, open, readdir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import type { SkillCandidate, SkillDefinition, SkillLookupOptions, SkillProvider, SkillProviderControl, SkillProviderObservation } from "@coding-agent/contracts";
+import type { SkillCandidate, SkillDefinition, SkillLookupOptions, SkillProvider, SkillProviderControl, SkillProviderObservation, SkillResourceReadOutcome, SkillResourceRequest } from "@coding-agent/contracts";
 import { isSkillName } from "@coding-agent/skills";
 
 export type SkillFilesystemRootKind = "project" | "user" | "custom" | "bundled";
@@ -20,11 +20,13 @@ export interface SkillFilesystemProviderOptions {
 }
 
 const DEFAULT_LIMITS: Required<SkillFilesystemLimits> = { maxFileBytes: 256 * 1024, maxDepth: 6, maxSkills: 256, maxDescriptionBytes: 2048 };
+const MAX_RESOURCE_PATH_BYTES = 4 * 1024;
 const DEFAULT_RANK: Record<SkillFilesystemRootKind, number> = { project: 100, custom: 150, user: 200, bundled: 300 };
 const FRONTMATTER_KEYS = new Set(["name", "description", "when_to_use", "whenToUse", "model_invocable", "modelInvocable", "disable-model-invocation", "user_invocable", "userInvocable", "user-invocable", "allowed-tools", "allowedTools", "context", "version", "agent", "paths"]);
 
 type Parsed = { readonly name: string; readonly description: string; readonly whenToUse?: string; readonly modelInvocable: boolean; readonly userInvocable: boolean; readonly allowedTools?: readonly string[]; readonly paths?: readonly string[]; readonly unknown: readonly string[]; readonly body: string };
-type Entry = { readonly candidate: SkillCandidate; readonly filePath: string; readonly root: SkillFilesystemRoot; };
+interface FileSkillLocator { readonly kind: "filesystem"; readonly skillFilePath: string; readonly skillDirectory: string; }
+type Entry = { readonly candidate: SkillCandidate; readonly filePath: string; readonly skillDirectory: string; readonly root: SkillFilesystemRoot; };
 
 /** Read-only local SKILL.md provider. Discovery is bounded; bodies are loaded only by get(). */
 export class FileSystemSkillProvider implements SkillProvider {
@@ -65,10 +67,61 @@ export class FileSystemSkillProvider implements SkillProvider {
       if (Buffer.byteLength(text, "utf8") > this.limits.maxFileBytes) return undefined;
       const parsed = parseSkillMarkdown(text, this.limits.maxDescriptionBytes);
       if (parsed === undefined || parsed.name !== candidate.name) return undefined;
-      return { name: parsed.name, description: parsed.description, ...(parsed.whenToUse === undefined ? {} : { whenToUse: parsed.whenToUse }), invocation: { modelInvocable: parsed.modelInvocable, userInvocable: parsed.userInvocable }, source: entry.root.kind, provider: this.name, trust: entry.root.kind === "bundled" ? "bundled" : "local", content: parsed.body, path: entry.filePath, metadata: { ...(parsed.allowedTools === undefined ? {} : { allowedTools: parsed.allowedTools }), ...(parsed.paths === undefined ? {} : { paths: parsed.paths }), ...(parsed.unknown.length === 0 ? {} : { unknownProperties: parsed.unknown }) } };
+      return { name: parsed.name, description: parsed.description, ...(parsed.whenToUse === undefined ? {} : { whenToUse: parsed.whenToUse }), invocation: { modelInvocable: parsed.modelInvocable, userInvocable: parsed.userInvocable }, source: entry.root.kind, provider: this.name, trust: entry.root.kind === "bundled" ? "bundled" : "local", resourceBase: { kind: "directory", path: entry.skillDirectory }, content: parsed.body, path: entry.filePath, metadata: { ...(parsed.allowedTools === undefined ? {} : { allowedTools: parsed.allowedTools }), ...(parsed.paths === undefined ? {} : { paths: parsed.paths }), ...(parsed.unknown.length === 0 ? {} : { unknownProperties: parsed.unknown }) } };
     } catch (error) {
       if (options.signal?.aborted) throw error;
       return undefined;
+    }
+  }
+
+  async readResource(candidate: SkillCandidate, request: SkillResourceRequest, options: SkillLookupOptions = {}): Promise<SkillResourceReadOutcome> {
+    if (options.signal?.aborted) throw options.signal.reason ?? new DOMException("aborted", "AbortError");
+    if (candidate.provider !== this.name) return { ok: false, error: { code: "SKILL_RESOURCE_FAILED" } };
+    const locator = parseFileSkillLocator(candidate.locator);
+    if (locator === undefined || !samePath(locator.skillFilePath, candidate.path ?? locator.skillFilePath)) return { ok: false, error: { code: "SKILL_RESOURCE_FAILED" } };
+    const invalid = validateResourcePath(request.path);
+    if (invalid) return { ok: false, error: { code: "SKILL_RESOURCE_INVALID_PATH" } };
+    const maxBytes = this.limits.maxFileBytes;
+    if (request.limit !== undefined && request.limit > maxBytes) return { ok: false, error: { code: "SKILL_RESOURCE_TOO_LARGE" } };
+    const offset = request.offset ?? 0;
+    const requestedLimit = request.limit ?? maxBytes;
+    try {
+      const skillDirectoryInfo = await lstat(locator.skillDirectory);
+      if (!skillDirectoryInfo.isDirectory() || skillDirectoryInfo.isSymbolicLink()) return { ok: false, error: { code: "SKILL_RESOURCE_NOT_FOUND" } };
+      const canonicalDirectory = await realpath(locator.skillDirectory);
+      if (!samePath(canonicalDirectory, locator.skillDirectory)) return { ok: false, error: { code: "SKILL_RESOURCE_FAILED" } };
+      const target = path.resolve(canonicalDirectory, ...request.path.replaceAll("\\", "/").split("/"));
+      if (!isWithin(canonicalDirectory, target)) return { ok: false, error: { code: "SKILL_RESOURCE_INVALID_PATH" } };
+      const info = await lstat(target);
+      if (!info.isFile() && !info.isSymbolicLink()) return { ok: false, error: { code: "SKILL_RESOURCE_NOT_FOUND" } };
+      const canonicalTarget = await realpath(target);
+      if (!isWithin(canonicalDirectory, canonicalTarget)) return { ok: false, error: { code: "SKILL_RESOURCE_INVALID_PATH" } };
+      const canonicalInfo = await lstat(canonicalTarget);
+      if (!canonicalInfo.isFile() || canonicalInfo.isSymbolicLink()) return { ok: false, error: { code: "SKILL_RESOURCE_NOT_FOUND" } };
+      const sizeBytes = canonicalInfo.size;
+      if (sizeBytes > maxBytes && request.limit === undefined) return { ok: false, error: { code: "SKILL_RESOURCE_TOO_LARGE" } };
+      const length = Math.min(requestedLimit, Math.max(0, sizeBytes - offset));
+      const handle = await open(canonicalTarget, "r");
+      let bytes: Buffer;
+      try {
+        bytes = Buffer.alloc(length);
+        if (length > 0) {
+          const result = await handle.read(bytes, 0, length, offset);
+          bytes = bytes.subarray(0, result.bytesRead);
+        }
+      } finally {
+        await handle.close();
+      }
+      if (options.signal?.aborted) throw options.signal.reason ?? new DOMException("aborted", "AbortError");
+      if (bytes.includes(0)) return { ok: false, error: { code: "SKILL_RESOURCE_FAILED" } };
+      let content: string;
+      try { content = new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { return { ok: false, error: { code: "SKILL_RESOURCE_FAILED" } }; }
+      const truncated = offset + bytes.byteLength < sizeBytes;
+      return { ok: true, resource: { path: request.path, content, sizeBytes, ...(truncated ? { truncated: true } : {}), mediaType: mediaTypeForPath(request.path) } };
+    } catch (error) {
+      if (options.signal?.aborted) throw error;
+      const code = error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT" ? "SKILL_RESOURCE_NOT_FOUND" : "SKILL_RESOURCE_FAILED";
+      return { ok: false, error: { code } };
     }
   }
 
@@ -132,9 +185,11 @@ export class FileSystemSkillProvider implements SkillProvider {
           const parsed = parseSkillMarkdown(await readFile(full, "utf8"), this.limits.maxDescriptionBytes);
           if (parsed === undefined || !isSkillName(parsed.name)) { complete = false; continue; }
           found.add(canonicalKey);
-          const candidate: SkillCandidate = { name: parsed.name, description: parsed.description, ...(parsed.whenToUse === undefined ? {} : { whenToUse: parsed.whenToUse }), invocation: { modelInvocable: parsed.modelInvocable, userInvocable: parsed.userInvocable }, source: root.kind, provider: this.name, trust: root.kind === "bundled" ? "bundled" : "local", rank: root.rank ?? DEFAULT_RANK[root.kind], locator: canonical, path: canonical, metadata: { ...(parsed.allowedTools === undefined ? {} : { allowedTools: parsed.allowedTools }), ...(parsed.paths === undefined ? {} : { paths: parsed.paths }), ...(parsed.unknown.length === 0 ? {} : { unknownProperties: parsed.unknown }) } };
+          const skillDirectory = path.dirname(canonical);
+          const locator: FileSkillLocator = { kind: "filesystem", skillFilePath: canonical, skillDirectory };
+          const candidate: SkillCandidate = { name: parsed.name, description: parsed.description, ...(parsed.whenToUse === undefined ? {} : { whenToUse: parsed.whenToUse }), invocation: { modelInvocable: parsed.modelInvocable, userInvocable: parsed.userInvocable }, source: root.kind, provider: this.name, trust: root.kind === "bundled" ? "bundled" : "local", resourceBase: { kind: "directory", path: skillDirectory }, rank: root.rank ?? DEFAULT_RANK[root.kind], locator, path: canonical, metadata: { ...(parsed.allowedTools === undefined ? {} : { allowedTools: parsed.allowedTools }), ...(parsed.paths === undefined ? {} : { paths: parsed.paths }), ...(parsed.unknown.length === 0 ? {} : { unknownProperties: parsed.unknown }) } };
           const previous = out.get(parsed.name);
-          if (previous === undefined || candidate.rank < previous.candidate.rank) out.set(parsed.name, { candidate, filePath: canonical, root });
+          if (previous === undefined || candidate.rank < previous.candidate.rank) out.set(parsed.name, { candidate, filePath: canonical, skillDirectory, root });
         } catch { complete = false; }
       }
     };
@@ -162,6 +217,38 @@ export function createFileSystemSkillProvider(options: SkillFilesystemProviderOp
 
 function isWithin(root: string, target: string): boolean { const relative = path.relative(root, target); return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative)); }
 function samePath(left: string, right: string): boolean { return process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right; }
+
+function parseFileSkillLocator(value: unknown): FileSkillLocator | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const candidate = value as Partial<FileSkillLocator>;
+  if (candidate.kind !== "filesystem" || typeof candidate.skillFilePath !== "string" || typeof candidate.skillDirectory !== "string") return undefined;
+  return candidate as FileSkillLocator;
+}
+
+function validateResourcePath(value: unknown): boolean {
+  if (typeof value !== "string" || value.length === 0 || value.includes("\0") || Buffer.byteLength(value, "utf8") > MAX_RESOURCE_PATH_BYTES) return true;
+  const normalized = value.replaceAll("\\", "/");
+  if (normalized.startsWith("/") || /^[A-Za-z]:\//u.test(normalized)) return true;
+  const segments = normalized.split("/");
+  return segments.some((segment) => segment === "" || segment === "." || segment === "..");
+}
+
+function mediaTypeForPath(value: string): string {
+  const extension = path.extname(value).toLowerCase();
+  switch (extension) {
+    case ".md": case ".markdown": return "text/markdown; charset=utf-8";
+    case ".json": case ".jsonl": return "application/json; charset=utf-8";
+    case ".yaml": case ".yml": return "application/yaml; charset=utf-8";
+    case ".toml": return "application/toml; charset=utf-8";
+    case ".xml": return "application/xml; charset=utf-8";
+    case ".html": case ".htm": return "text/html; charset=utf-8";
+    case ".css": return "text/css; charset=utf-8";
+    case ".js": case ".mjs": case ".cjs": case ".ts": case ".tsx": case ".jsx": return "text/javascript; charset=utf-8";
+    case ".sh": case ".bash": case ".zsh": case ".ps1": case ".bat": case ".cmd": return "text/plain; charset=utf-8";
+    case ".txt": case ".log": case ".csv": return "text/plain; charset=utf-8";
+    default: return "text/plain; charset=utf-8";
+  }
+}
 
 function parseSkillMarkdown(text: string, maxDescriptionBytes: number): Parsed | undefined {
   const match = text.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?/u);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { FileSystemSkillProvider } from "./index.js";
@@ -67,5 +67,61 @@ describe("FileSystemSkillProvider", () => {
     const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }] });
     const listed = await provider.list({ paths: ["docs/readme.md"] }); expect(listed.candidates).toHaveLength(0);
     const active = await provider.list({ paths: ["src/index.ts"] }); expect(active.candidates.map((item) => item.name)).toEqual(["conditional"]);
+  });
+
+  it("reads package resources through the winning skill directory with bounded UTF-8 windows", async () => {
+    const root = await fixture(); await skill(root, "review-code");
+    const dir = path.join(root, "review-code");
+    await mkdir(path.join(dir, "references"), { recursive: true });
+    await mkdir(path.join(dir, "scripts"), { recursive: true });
+    await writeFile(path.join(dir, "references", "checklist.md"), "alpha\nβeta\ngamma", "utf8");
+    await writeFile(path.join(dir, "scripts", "check.ts"), "console.log('ok')", "utf8");
+    const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }] });
+    const listed = await provider.list();
+    expect(listed.candidates[0]?.resourceBase).toEqual({ kind: "directory", path: dir });
+    const result = await provider.readResource!(listed.candidates[0]!, { path: "references/checklist.md", offset: 0, limit: 6 });
+    expect(result).toEqual({ ok: true, resource: { path: "references/checklist.md", content: "alpha\n", sizeBytes: Buffer.byteLength("alpha\nβeta\ngamma"), truncated: true, mediaType: "text/markdown; charset=utf-8" } });
+  });
+
+  it("rejects traversal, absolute, empty, NUL and overlong resource paths", async () => {
+    const root = await fixture(); await skill(root, "safe");
+    const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }] });
+    const candidate = (await provider.list()).candidates[0]!;
+    for (const resourcePath of ["", "../secret", "a/../../secret", "/etc/passwd", "C:\\secret", "a\0b", "x".repeat(4097)]) {
+      const result = await provider.readResource!(candidate, { path: resourcePath });
+      expect(result).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_INVALID_PATH" } });
+    }
+  });
+
+  it("fails closed for missing, directory, binary and symlink escapes while allowing contained symlinks", async () => {
+    const root = await fixture(); const outside = await fixture(); await skill(root, "safe");
+    const dir = path.join(root, "safe");
+    await mkdir(path.join(dir, "references"), { recursive: true });
+    await writeFile(path.join(dir, "references", "ok.txt"), "inside", "utf8");
+    await writeFile(path.join(dir, "references", "binary.bin"), Buffer.from([0, 1, 2]));
+    await writeFile(path.join(outside, "secret.txt"), "secret", "utf8");
+    const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }] });
+    const candidate = (await provider.list()).candidates[0]!;
+    await symlink(path.join(dir, "references"), path.join(dir, "link-in"), "junction");
+    await symlink(path.join(outside), path.join(dir, "link-out"), "junction");
+    expect((await provider.readResource!(candidate, { path: "references/ok.txt" })).ok).toBe(true);
+    expect((await provider.readResource!(candidate, { path: "link-in/ok.txt" })).ok).toBe(true);
+    expect(await provider.readResource!(candidate, { path: "link-out/secret.txt" })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_INVALID_PATH" } });
+    expect(await provider.readResource!(candidate, { path: "references/binary.bin" })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_FAILED" } });
+    expect(await provider.readResource!(candidate, { path: "references" })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_NOT_FOUND" } });
+  });
+
+  it("enforces bounded reads and cancellation without exposing filesystem errors", async () => {
+    const root = await fixture(); await skill(root, "bounded");
+    const dir = path.join(root, "bounded"); await mkdir(path.join(dir, "assets"), { recursive: true });
+    await writeFile(path.join(dir, "assets", "large.txt"), "0".repeat(200), "utf8");
+    const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }], limits: { maxFileBytes: 128 } });
+    const candidate = (await provider.list()).candidates[0]!;
+    expect(await provider.readResource!(candidate, { path: "assets/large.txt" })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_TOO_LARGE" } });
+    expect(await provider.readResource!(candidate, { path: "assets/large.txt", offset: 4, limit: 4 })).toMatchObject({ ok: true, resource: { content: "0000", sizeBytes: 200, truncated: true } });
+    const controller = new AbortController(); controller.abort();
+    await expect(provider.readResource!(candidate, { path: "assets/large.txt" }, { signal: controller.signal })).rejects.toBeDefined();
+    await rm(path.join(dir, "assets", "large.txt"));
+    expect(await provider.readResource!(candidate, { path: "assets/large.txt", limit: 2 })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_NOT_FOUND" } });
   });
 });
