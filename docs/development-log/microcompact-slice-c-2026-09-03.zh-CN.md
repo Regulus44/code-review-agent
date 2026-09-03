@@ -64,3 +64,19 @@
 - 验证：文档变更通过 `git diff --check`；代码门禁沿用上一节命令并在最终交付重复。
 - 风险：契约要求旧 Runtime 忽略新增事件；若下游 presenter 未消费新 projection，仍可按旧 diagnostics 工作。
 - 回滚：回滚 `9ffdcbd` 仅恢复文档，已落盘事件保持追加兼容。
+
+### Commit `216686a`
+
+- 变更文件：`packages/runtime/src/index.test.ts`。
+- 内容：注入 checkpoint EventStore 持久化失败，验证 Runtime 追加 `context/microcompact_checkpoint_failed`、不追加 `context/microcompacted`，且首个模型请求继续看到完整工具结果。
+- 验证：Runtime checkpoint failure 定向测试 1/1；最终 `pnpm typecheck`、`pnpm test` 与 `git diff --check` 已通过。
+- 风险：测试使用 InMemory store 的受控失败注入；真实 SQLite/远程 store 故障仍依赖 append failure handling。
+- 回滚：回滚 `216686a` 仅移除测试，不改变失败语义实现。
+
+### Commit `1fe59ac`
+
+- 变更文件：`packages/context/src/microcompact-checkpoint.ts`。
+- 内容：显式保存并收窄最新 user message，满足 strict/noUncheckedIndexedAccess 编译约束，不改变 checkpoint 提取语义。
+- 验证：`pnpm typecheck` 与 checkpoint/context 定向测试通过。
+- 风险：无运行时行为变化。
+- 回滚：回滚 `1fe59ac` 可恢复原有循环写法。
