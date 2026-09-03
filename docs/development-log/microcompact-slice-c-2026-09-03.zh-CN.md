@@ -22,4 +22,11 @@
 
 ## 变更记录
 
-（后续每个独立提交完成后追加变更文件、事件顺序、验证命令、风险、回滚方式和 commit hash。）
+### Commit `a50dde2`
+
+- 变更文件：`packages/contracts/src/index.ts`、`packages/context/src/index.ts`、`packages/context/src/tool-result-budget.ts`、`packages/context/src/microcompact-checkpoint.ts`、`packages/runtime/src/index.ts`。
+- 内容：注册 checkpoint 成功/失败事件，增加 bounded projection 类型与 deterministic checkpoint builder/validator，并增加 `microcompactCheckpointMaxChars` policy 字段。
+- 事件顺序：本提交只建立契约和生成器；Runtime 的持久化顺序在后续提交实现。
+- 验证：待 Runtime/storage 接线完成后统一执行 `pnpm typecheck`、相关 package tests 与 `pnpm test`。
+- 风险：生成器仅提取受限元数据；路径字段剥离盘符并拒绝 `..`，不读取或保存完整工具输出。若 schema 预算过小会触发 validator failure，按失败语义保留原 model view。
+- 回滚：回滚 `a50dde2`，或将 `microcompactTriggerMode` 设为 `legacy-count`/`disabled`；原有 replacement receipt 行为保持。
