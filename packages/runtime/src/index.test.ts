@@ -771,6 +771,13 @@ describe("AgentHost", () => {
     expect(toolMessages.slice(4).every((message) => message.content.includes("durable-"))).toBe(true);
     expect(events.some((event) => event.type === "context/tool_results_budgeted")).toBe(true);
     expect(events.some((event) => event.type === "context/microcompacted")).toBe(true);
+    const checkpointIndex = events.findIndex((event) => event.type === "context/microcompact_checkpoint");
+    const budgetIndex = events.findIndex((event, index) => index > checkpointIndex && event.type === "context/tool_results_budgeted");
+    const compactIndex = events.findIndex((event) => event.type === "context/microcompacted");
+    expect(checkpointIndex).toBeGreaterThanOrEqual(0);
+    expect(budgetIndex).toBeGreaterThan(checkpointIndex);
+    expect(compactIndex).toBeGreaterThan(budgetIndex);
+    expect(events[compactIndex]?.payload).toMatchObject({ checkpointId: expect.any(String), preCompactTokens: expect.any(Number), postCompactTokens: expect.any(Number), coverage: expect.any(Array) });
     const step = events.find((event) => event.type === "step/started" && (event.payload["toolResultBudget"] as { readonly clearedCount?: unknown } | undefined)?.clearedCount === 4);
     expect(step?.payload["toolResultBudget"]).toMatchObject({ trigger: "count", clearedCount: 4, tokensSaved: expect.any(Number) });
     const durable = events.filter((event) => event.type === "tool/result");

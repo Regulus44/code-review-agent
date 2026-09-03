@@ -323,6 +323,20 @@ describe("InMemoryEventStore", () => {
     }
   });
 
+  it("projects bounded microcompact checkpoint success and failure receipts", async () => {
+    const store = new InMemoryEventStore();
+    const sessionId = await store.createSession("D:/microcompact-checkpoint-projection");
+    await store.append({ sessionId, type: "context/microcompact_checkpoint", payload: {
+      version: 1, checkpointId: "mc_projection", sourceSequenceStart: 4, sourceSequenceEnd: 8,
+      coveredToolCallIds: ["call_1"], generatedBy: "deterministic", algorithmVersion: "pressure-v2.m1",
+      primaryRequest: "fix parser", filesRead: ["src/parser.ts"], filesChanged: [], verifiedFindings: ["ok"],
+      testsRun: ["pnpm test"], pendingWork: [], nextStep: "review", maxChars: 8192,
+    } });
+    expect((await store.project(sessionId))?.contextMicrocompactCheckpoint).toMatchObject({ checkpointId: "mc_projection", filesRead: ["src/parser.ts"] });
+    await store.append({ sessionId, type: "context/microcompact_checkpoint_failed", payload: { stage: "persist", errorCode: "STORE_UNAVAILABLE", preservedModelView: true } });
+    expect((await store.project(sessionId))?.contextDiagnostics).toMatchObject({ lastMicrocompactCheckpointFailure: { stage: "persist", errorCode: "STORE_UNAVAILABLE", preservedModelView: true } });
+  });
+
   it("persists events, projections, commands, and schema across reopen", async () => {
     const directory = mkdtempSync(join(tmpdir(), "coding-agent-"));
     const databasePath = join(directory, "agent.sqlite");
