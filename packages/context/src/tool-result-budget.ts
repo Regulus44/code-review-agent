@@ -481,7 +481,9 @@ export function applyMicrocompactPass(
     };
   }
   const triggerTokens = options.evaluation.strategy === "pressure"
-    ? Math.max(0, eligibleTokens - options.evaluation.requiredTokensToFree)
+    // normalizePolicy treats non-positive trigger values as unset; use one
+    // token to represent a zero target and keep the token trigger active.
+    ? Math.max(1, eligibleTokens - options.evaluation.requiredTokensToFree)
     : options.evaluation.strategy === "legacy-count" ? policy.microcompactTriggerTokens : Number.MAX_SAFE_INTEGER;
   const result = applyToolResultBudget(messages, {
     ...options,
