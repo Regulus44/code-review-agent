@@ -437,3 +437,31 @@ Skill 附属资源沿用现有 scope/rank 决议。调用方先以 Skill 名称�
 `SkillCandidate.locator`、`path` 和 directory `resourceBase.path` 属于 provider-owned 内部身份。`SkillDefinition` 可以在进程内保留完整资源基址供后续受控读取，`SkillCatalogSnapshot` 对 directory base 只投影为 opaque “Skill resource directory”，不得进入 API、SSE 或事件。M0 不新增模型工具、filesystem 资源读取、watcher、脚本执行或资源正文持久化；这些能力必须继续经过 ToolRuntime、permission、workspace、tenant、事件和回放设计。
 
 该决策借鉴 DSH `SkillResourceBase` 与 candidate/provider 调用顺序并按本项目 contracts 改写；Claude Code 的 `skillRoot` 仅作行为参考。本次没有复制上游源码。回滚时移除 `SkillProvider.readResource` 和 `SkillRegistry.readResource`，旧 `get()` 与 catalog 行为仍保持可用。
+
+## ADR-037：Slice C Microcompact 使用可回放的语义 checkpoint 作为清理前置事实
+
+状态：accepted（2026-09-03，Microcompact Slice C）
+
+Pressure-V2 的 microcompact 在替换 model view 之前必须生成并持久化受限的
+`MicrocompactCheckpoint`。checkpoint 只包含从当前 session 事件和工具调用元数据提取的
+bounded facts（用户目标、已读/已改文件、已验证发现、测试、未完成工作和下一步），不保存
+完整工具输出、provider body、凭据、父 workspace 路径或跨 tenant 内容。checkpoint 使用固定
+`version`、`algorithmVersion` 和 `checkpointId`，覆盖的 source sequence 与 tool call IDs 必须可
+从 EventStore 重建。
+
+事件顺序是 append-only 的事实约束：checkpoint 成功时先追加
+`context/microcompact_checkpoint`，随后完成 aggregate/budget 诊断，最后仅在确实产生清理时
+追加带 checkpoint metadata 的 `context/microcompacted`。checkpoint 提取、schema 校验或
+EventStore 写入失败时追加 bounded `context/microcompact_checkpoint_failed`，保留完整 model
+view，不写入 cleared marker；失败事件必须记录稳定阶段/code 和 `preservedModelView=true`。
+旧 Runtime 可忽略新增事件并继续从 transcript/replacement receipt 工作，新 Runtime 在 replay/
+restart 时以 checkpoint 与 microcompact receipt 的序列顺序重建同一 model view。相同
+`turnId + step + modelViewFingerprint` 的 checkpoint/receipt 追加必须幂等。
+
+该决策参考 DSH `packages/compaction/compaction-basic` 的 checkpoint/失败恢复生命周期，
+以及 Claude Code `src/services/compact/microCompact.ts`、`cachedMicrocompact.ts` 的稳定替换
+和 transcript/model-view 分离行为；本项目仅按既有 EventStore、ToolRuntime、workspace 与
+tenant contract 重新实现，没有复制上游代码。
+
+回滚时将 `microcompactTriggerMode` 设为 `legacy-count` 或 `disabled`；新增 checkpoint 和
+failure 事件保留为可忽略扩展，旧 model view、原始 tool/result 与 replacement receipt 不删除。
