@@ -38,7 +38,9 @@ type ToolDefinition = {
 
 Skill 在 S0 只建立独立的 provider/registry contract，不暴露模型侧 Tool。Skill 的摘要（name、description、invocation、source trust）可用于未来 catalog；正文只能由 registry 按需读取。`allowedTools` 是正向收缩列表，未知 frontmatter 属性和 remote/unknown source 默认进入 `ask`，不能提升宿主 permission preset；provider failure/incomplete 仅返回 bounded metadata。Skill registry 的 cwd、scope 和 AbortSignal 必须由调用方传入，不能从全局隐式推断。
 
-Skill Resource M0 在 provider contract 增加可选 `readResource(candidate, request, options)`，registry 必须沿用名称、scope 和 rank 得到的 winning candidate 后转发读取。旧 provider 未实现该入口时返回 `SKILL_RESOURCE_UNSUPPORTED`；非法绝对路径、空段、`.`/`..` 和非法 byte window 在 registry 边界拒绝。directory `resourceBase.path`、candidate locator/path 和 provider 异常文本属于内部信息，公共 Skill catalog 只能输出脱敏的资源能力描述。M0 尚未注册 `read_skill_resource`，也不定义资源正文的 EventStore/compact/replay 语义。
+Skill Resource M0 在 provider contract 增加可选 `readResource(candidate, request, options)`，registry 必须沿用名称、scope 和 rank 得到的 winning candidate 后转发读取。旧 provider 未实现该入口时返回 `SKILL_RESOURCE_UNSUPPORTED`；非法绝对路径、空段、`.`/`..` 和非法 byte window 在 registry 边界拒绝。directory `resourceBase.path`、candidate locator/path 和 provider 异常文本属于内部信息，公共 Skill catalog 只能输出脱敏的资源能力描述。
+
+M2 新增模型侧 `read_skill_resource`（默认由 `AgentHostOptions.skillResourceToolEnabled` 关闭）。输入为 `{ skill, path, offset?, limit? }`，先校验名称和 Skill-relative 路径，再按当前 cwd 解析 winning candidate，检查 `modelInvocable` 与 source trust，最后委派 provider `readResource()`。工具固定为 `read`/`auto`/`parallel`，输出包含受限 metadata、`modelView` 和 `<skill_resource skill="..." path="...">` presentation；模型视图只包含逻辑 Skill 名称与相对路径，不暴露绝对目录。关闭开关时不注册工具，也不能回退到通用绝对路径读取。资源正文暂沿用 ToolRuntime 的标准 `tool/result` 管线，专门 replay/artifact 语义留在后续阶段。
 
 MCP 工具使用 `mcp__<server>__<tool>` 的稳定 namespace；原始 MCP 名称只用于 wire call，不从 public name 反解析。`source` 只用于 API/Web 展示，执行仍由本地 ToolRuntime 负责。
 
@@ -65,6 +67,7 @@ discover
 | 工具 | 风险 | 默认执行 | 关键安全规则 |
 |---|---|---|---|
 | `read_file` | read | auto | workspace 内 UTF-8 文本、1-based offset/limit、行号和继续读取提示 |
+| `read_skill_resource` | read | auto | 仅读取当前 winning Skill 包内的相对 UTF-8 文本；bounded offset/limit、trust/model-invocable 检查，禁止绝对路径和目录枚举；默认关闭 |
 | `glob` | read | auto | 只返回 workspace 内确定性排序的匹配结果，限制数量并标记截断 |
 | `grep` | read | auto | literal/regex、大小写、上下文行、路径、文件大小和输出限制 |
 | `edit_file` | write | ask | 兼容 old/new；支持多段唯一替换、expectedHash、stale/conflict 和 unified diff |
