@@ -24,6 +24,37 @@ describe("AgentHost", () => {
     expect(enabled.listTools().some((tool) => tool.name === "read_skill_resource")).toBe(true);
   });
 
+  it("places the Skill resource model view in the next model step", async () => {
+    const store = new InMemoryEventStore();
+    const skills = new SkillRegistry();
+    skills.registerProvider({
+      name: "fixture",
+      list: async () => [{ name: "review", description: "review", source: "local", provider: "fixture", trust: "local", invocation: { modelInvocable: true, userInvocable: true }, rank: 1, locator: "review", resourceBase: { kind: "opaque", description: "fixture" } }],
+      get: async (candidate) => ({ ...candidate, content: "instructions" }),
+      readResource: async (_candidate, request) => ({ ok: true, resource: { path: request.path, content: "checklist item", sizeBytes: 14, mediaType: "text/plain" } }),
+    });
+    const requests: ModelRequest[] = [];
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        requests.push(request);
+        if (request.messages.some((message) => message.role === "tool")) yield { type: "text_delta", text: "resource consumed" };
+        else {
+          yield { type: "tool_call_start", index: 0, id: "call_skill_resource", name: "read_skill_resource" };
+          yield { type: "tool_call_delta", index: 0, arguments: JSON.stringify({ skill: "review", path: "references/checklist.md" }) };
+          yield { type: "tool_call_end", index: 0 };
+        }
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store, model, skills, skillResourceToolEnabled: true });
+    const session = await host.createSession("D:/skill-resource-runtime");
+    const turn = await host.sendMessage(session.id, "read the checklist");
+    await host.waitForTurn(turn);
+    const toolMessage = requests[1]?.messages.find((message) => message.role === "tool");
+    expect(toolMessage?.content).toContain("<skill_resource skill=\"review\" path=\"references/checklist.md\">");
+    expect(toolMessage?.content).toContain("checklist item");
+  });
+
   it("keeps the legacy maxSteps option non-enforcing", () => {
     expect(() => new AgentHost({ store: new InMemoryEventStore() })).not.toThrow();
     expect(() => new AgentHost({ store: new InMemoryEventStore(), maxSteps: 512 })).not.toThrow();
@@ -809,6 +840,27 @@ describe("AgentHost", () => {
     const step = events.find((event) => event.type === "step/started");
     expect(step?.payload["toolResultBudget"]).toMatchObject({ microcompactStrategy: "none", eligibleToolResultCount: 6 });
     expect(requests[0]?.messages.filter((message) => message.role === "tool").every((message) => message.content !== "[Old tool result content cleared]")).toBe(true);
+  });
+
+  it("preserves the complete model view when checkpoint persistence fails", async () => {
+    const store = new InMemoryEventStore();
+    const originalAppend = store.append.bind(store);
+    const requests: ModelRequest[] = [];
+    const model: ChatModel = { async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> { requests.push(request); yield { type: "text_delta", text: "ok" }; yield { type: "done" }; } };
+    const host = new AgentHost({ store, model, compactionEnabled: false, toolResultBudget: { microcompactTriggerMode: "legacy-count", microcompactTriggerToolCount: 6, keepRecentResults: 2 } });
+    const session = await host.createSession("D:/microcompact-checkpoint-persist-failure");
+    store.append = async (input) => input.type === "context/microcompact_checkpoint" ? Promise.reject(new Error("CHECKPOINT_STORE_UNAVAILABLE")) : originalAppend(input);
+    for (let index = 0; index < 6; index += 1) {
+      const toolCallId = `checkpoint-persist-call-${index}`;
+      await originalAppend({ sessionId: session.id, type: "assistant/message", payload: { content: "", toolCalls: [{ id: toolCallId, name: "read_file", arguments: "{}" }] } });
+      await originalAppend({ sessionId: session.id, type: "tool/result", payload: { toolCallId, status: "completed", result: { content: `persist-result-${index}-${"x".repeat(80)}` } } });
+    }
+    const turn = await host.sendMessage(session.id, "checkpoint persistence failure");
+    await host.waitForTurn(turn);
+    const events = await host.events(session.id);
+    expect(events.some((event) => event.type === "context/microcompact_checkpoint_failed")).toBe(true);
+    expect(events.some((event) => event.type === "context/microcompacted")).toBe(false);
+    expect(requests[0]?.messages.filter((message) => message.role === "tool").every((message) => message.content.includes("persist-result-"))).toBe(true);
   });
 
   it("replays microcompact receipts across Runtime restart without duplicate clearing", async () => {
