@@ -746,7 +746,7 @@ describe("AgentHost", () => {
         yield { type: "done" };
       },
     };
-    const host = new AgentHost({ store, model, compactionEnabled: false, toolResultBudget: { maxResultChars: 8_000, microcompactTriggerToolCount: 6, keepRecentResults: 2 } });
+    const host = new AgentHost({ store, model, compactionEnabled: false, toolResultBudget: { maxResultChars: 8_000, microcompactTriggerMode: "legacy-count", microcompactTriggerToolCount: 6, keepRecentResults: 2 } });
     const session = await host.createSession("D:/m05-budget-fixture");
     for (let index = 0; index < 6; index += 1) {
       const toolCallId = `old-call-${index}`;
@@ -766,6 +766,32 @@ describe("AgentHost", () => {
     const durable = events.filter((event) => event.type === "tool/result");
     expect(durable).toHaveLength(6);
     expect(JSON.stringify(durable)).toContain("durable-0-");
+  });
+
+  it("does not microcompact solely because the legacy count is reached under low global pressure", async () => {
+    const store = new InMemoryEventStore();
+    const requests: ModelRequest[] = [];
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        requests.push(request);
+        yield { type: "text_delta", text: "ok" };
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store, model, compactionEnabled: false, toolResultBudget: { microcompactTriggerToolCount: 1, keepRecentResults: 1 } });
+    const session = await host.createSession("D:/m05-pressure-fixture");
+    for (let index = 0; index < 6; index += 1) {
+      const toolCallId = `small-call-${index}`;
+      await store.append({ sessionId: session.id, type: "assistant/message", payload: { content: "", toolCalls: [{ id: toolCallId, name: "read_file", arguments: "{}" }] } });
+      await store.append({ sessionId: session.id, type: "tool/result", payload: { toolCallId, status: "completed", result: { content: `small-${index}` } } });
+    }
+    const turn = await host.sendMessage(session.id, "inspect results");
+    await host.waitForTurn(turn);
+    const events = await host.events(session.id);
+    expect(events.some((event) => event.type === "context/microcompacted")).toBe(false);
+    const step = events.find((event) => event.type === "step/started");
+    expect(step?.payload["toolResultBudget"]).toMatchObject({ microcompactStrategy: "none", eligibleToolResultCount: 6 });
+    expect(requests[0]?.messages.filter((message) => message.role === "tool").every((message) => message.content !== "[Old tool result content cleared]")).toBe(true);
   });
 
   it("enforces the message-level aggregate budget for parallel fresh results", async () => {

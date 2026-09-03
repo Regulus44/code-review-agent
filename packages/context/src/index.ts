@@ -14,6 +14,9 @@ export { ensureToolResultPairing } from "./tool-pairing.js";
 export {
   applyToolResultBudget,
   applyToolResultBudgetAsync,
+  applyToolResultArtifactAggregateAsync,
+  applyMicrocompactPass,
+  evaluateMicrocompactPressure,
   createToolResultBudgetState,
   hydrateToolResultBudgetState,
   DEFAULT_COMPACTABLE_TOOLS,
@@ -142,6 +145,9 @@ export type {
   ToolResultBudgetTrigger,
   ToolResultBudgetState,
   ToolResultContextView,
+  MicrocompactPressureEvaluation,
+  MicrocompactStrategy,
+  ApplyMicrocompactOptions,
 } from "./tool-result-budget.js";
 export type {
   ToolResultStorage,

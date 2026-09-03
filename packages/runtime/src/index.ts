@@ -48,7 +48,7 @@ import type { SkillRegistry } from "@coding-agent/skills";
 import type { PluginRuntime, PluginInventorySnapshot } from "@coding-agent/plugin-runtime";
 import { EchoChatModel, modelFailureMetadata, sanitizeFailureMessage } from "@coding-agent/llm";
 import { compactMessages, DEFAULT_CONTEXT_BUDGET, type ContextBudget } from "@coding-agent/compaction";
-import { applyToolResultBudgetAsync, assembleContext, buildPostCompactMessages, buildProjectMemoryPrompt, buildToolResultModelView, calculateContextWarningState, classifyProviderContextError, compactWithSessionMemory, compactWithSummaryModel, ContextRecoveryGuard, countContextTokens, createSessionMemoryFileWriteGuard, createTokenCounter, createToolResultBudgetState, createToolResultStorage, ensureToolResultPairing, estimateContextTokens, extractContextAttachmentIds, fallbackModelContextCapability, fingerprintModelRequest, groupMessagesByApiRound, hydrateToolResultBudgetState, isReactiveContextError, normalizeMessagesForAPI, normalizeExtractionConfig, recallRelevantProjectMemory, renderSkillCatalog, resolveContextBudget, restoreModelViewFromTranscript, selectPostCompactAttachments, SessionMemoryExtractionScheduler, sessionMemoryStats, shouldCompactBeforeRequest, shouldExtractSessionMemory, shouldUseExactTokenCount, truncateProjectMemoryEntrypoint, validateProjectMemoryTopic, type ApiRound, type ContextAssembly, type ContextAttachment, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type PostCompactAttachmentConfig, type PostCompactAttachmentProvider, type ProjectMemoryScope, type ProjectMemoryStore, type ProjectMemoryTopic, type SessionMemoryCompactConfig, type SessionMemoryExtractionConfig, type SessionMemoryExtractionState, type SessionMemoryExtractor, type SessionMemoryStore, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport, type ToolResultBudgetState, type ToolResultStorage } from "@coding-agent/context";
+import { applyToolResultArtifactAggregateAsync, applyMicrocompactPass, assembleContext, buildPostCompactMessages, buildProjectMemoryPrompt, buildToolResultModelView, calculateContextWarningState, classifyProviderContextError, compactWithSessionMemory, compactWithSummaryModel, ContextRecoveryGuard, countContextTokens, createSessionMemoryFileWriteGuard, createTokenCounter, createToolResultBudgetState, createToolResultStorage, ensureToolResultPairing, estimateContextTokens, evaluateMicrocompactPressure, extractContextAttachmentIds, fallbackModelContextCapability, fingerprintModelRequest, groupMessagesByApiRound, hydrateToolResultBudgetState, isReactiveContextError, normalizeMessagesForAPI, normalizeExtractionConfig, recallRelevantProjectMemory, renderSkillCatalog, resolveContextBudget, restoreModelViewFromTranscript, selectPostCompactAttachments, SessionMemoryExtractionScheduler, sessionMemoryStats, shouldCompactBeforeRequest, shouldExtractSessionMemory, shouldUseExactTokenCount, truncateProjectMemoryEntrypoint, validateProjectMemoryTopic, type ApiRound, type ContextAssembly, type ContextAttachment, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type PostCompactAttachmentConfig, type PostCompactAttachmentProvider, type ProjectMemoryScope, type ProjectMemoryStore, type ProjectMemoryTopic, type SessionMemoryCompactConfig, type SessionMemoryExtractionConfig, type SessionMemoryExtractionState, type SessionMemoryExtractor, type SessionMemoryStore, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport, type ToolResultBudgetState, type ToolResultStorage } from "@coding-agent/context";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -2317,7 +2317,7 @@ export class AgentHost {
     }
     const persisted = await this.persistToolResultMessages(sessionId, turnId, paired.messages);
     if (replacementState !== undefined) hydrateToolResultBudgetState(replacementState, persisted);
-    const budgeted = await applyToolResultBudgetAsync(persisted, {
+    const budgeted = await applyToolResultArtifactAggregateAsync(persisted, {
       policy: this.toolResultBudgetWithLegacyFallback(),
       protectedToolCallIds,
       toolResultTimestamps,
@@ -2534,14 +2534,57 @@ export class AgentHost {
       let prepared = await this.prepareModelContext(sessionId, turnId, assembly, protectedToolCallIds, toolResultTimestamps, alreadyClearedToolCallIds, replacementState);
       await this.appendToolResultReplacementEvents(sessionId, turnId, prepared.newlyPersistedToolResultReplacements);
       await this.appendToolResultBudgetEvents(sessionId, turnId, prepared.toolResultBudget, this.toolResultBudgetWithLegacyFallback(), reportedBudgetToolCallIds, reportedMicrocompactToolCallIds, alreadyClearedToolCallIds);
-      const beforeView: ModelContextView = prepared.view;
+      let beforeView: ModelContextView = prepared.view;
       const tokenCounter = createTokenCounter(primaryModel);
-      const estimate = tokenCounter.estimate(beforeView);
-      const tokenCount = await countContextTokens(tokenCounter, beforeView, {
+      let estimate = tokenCounter.estimate(beforeView);
+      let tokenCount = await countContextTokens(tokenCounter, beforeView, {
         preferExact: shouldUseExactTokenCount(estimate, budgetSnapshot, this.contextPolicyWithLegacyFallback()),
         signal: controller.signal,
       });
-      const beforeUsage = tokenCount.value;
+      let beforeUsage = tokenCount.value;
+      const microcompactEvaluation = evaluateMicrocompactPressure(
+        beforeView.messages,
+        beforeUsage,
+        budgetSnapshot,
+        { policy: this.toolResultBudgetWithLegacyFallback(), protectedToolCallIds, alreadyClearedToolCallIds, toolResultTimestamps },
+      );
+      prepared = {
+        ...prepared,
+        toolResultBudget: {
+          ...prepared.toolResultBudget,
+          microcompactStrategy: microcompactEvaluation.strategy,
+          pressureThreshold: microcompactEvaluation.pressureThreshold,
+          pressureTargetTokens: microcompactEvaluation.targetUsageTokens,
+          pressureUsageTokens: microcompactEvaluation.currentUsageTokens,
+          requiredTokensToFree: microcompactEvaluation.requiredTokensToFree,
+          eligibleToolResultCount: microcompactEvaluation.eligibleToolResultCount,
+        },
+      };
+      if (microcompactEvaluation.strategy !== "none") {
+        const microcompact = applyMicrocompactPass(beforeView.messages, {
+          policy: this.toolResultBudgetWithLegacyFallback(),
+          protectedToolCallIds,
+          alreadyClearedToolCallIds,
+          toolResultTimestamps,
+          evaluation: microcompactEvaluation,
+        });
+        if (microcompact.report.newlyClearedToolCallIds.length > 0) {
+          beforeView = { messages: microcompact.messages, ...(prepared.view.tools === undefined ? {} : { tools: prepared.view.tools }) };
+          prepared = {
+            ...prepared,
+            view: beforeView,
+            rounds: groupMessagesByApiRound(microcompact.messages),
+            toolResultBudget: mergeToolResultBudgetReports(prepared.toolResultBudget, microcompact.report),
+          };
+          await this.appendToolResultBudgetEvents(sessionId, turnId, prepared.toolResultBudget, this.toolResultBudgetWithLegacyFallback(), reportedBudgetToolCallIds, reportedMicrocompactToolCallIds, alreadyClearedToolCallIds);
+          estimate = tokenCounter.estimate(beforeView);
+          tokenCount = await countContextTokens(tokenCounter, beforeView, {
+            preferExact: shouldUseExactTokenCount(estimate, budgetSnapshot, this.contextPolicyWithLegacyFallback()),
+            signal: controller.signal,
+          });
+          beforeUsage = tokenCount.value;
+        }
+      }
       const beforeState = calculateContextWarningState(beforeUsage, budgetSnapshot, this.contextPolicyWithLegacyFallback());
       const autoCompactRecommended = shouldCompactBeforeRequest(beforeState, this.contextPolicyWithLegacyFallback());
       if (this.compactionEnabled && autoCompactRecommended && !recoveryGuard.isCircuitOpen()) {
@@ -3760,6 +3803,12 @@ function publicToolResultBudget(
     messageBudgetMessagesOverBudget: report.messageBudgetMessagesOverBudget,
     messageBudgetReplacedToolCallIds: report.messageBudgetReplacedToolCallIds,
     microcompactTrigger: report.microcompactTrigger,
+    ...(report.microcompactStrategy === undefined ? {} : { microcompactStrategy: report.microcompactStrategy }),
+    ...(report.pressureThreshold === undefined ? {} : { pressureThreshold: report.pressureThreshold }),
+    ...(report.pressureTargetTokens === undefined ? {} : { pressureTargetTokens: report.pressureTargetTokens }),
+    ...(report.pressureUsageTokens === undefined ? {} : { pressureUsageTokens: report.pressureUsageTokens }),
+    ...(report.requiredTokensToFree === undefined ? {} : { requiredTokensToFree: report.requiredTokensToFree }),
+    ...(report.eligibleToolResultCount === undefined ? {} : { eligibleToolResultCount: report.eligibleToolResultCount }),
     timeBasedMicrocompactEnabled: report.timeBasedMicrocompactEnabled,
     timeBasedGapMs: report.timeBasedGapMs,
     policy: {
@@ -3767,11 +3816,39 @@ function publicToolResultBudget(
       ...(policy.maxResultChars === undefined ? {} : { maxResultChars: policy.maxResultChars }),
       ...(policy.microcompactTriggerToolCount === undefined ? {} : { microcompactTriggerToolCount: policy.microcompactTriggerToolCount }),
       ...(policy.microcompactTriggerTokens === undefined ? {} : { microcompactTriggerTokens: policy.microcompactTriggerTokens }),
+      microcompactTriggerMode: policy.microcompactTriggerMode ?? "pressure",
+      ...(policy.microcompactTriggerRatio === undefined ? {} : { microcompactTriggerRatio: policy.microcompactTriggerRatio }),
+      ...(policy.microcompactTargetHysteresisTokens === undefined ? {} : { microcompactTargetHysteresisTokens: policy.microcompactTargetHysteresisTokens }),
       ...(policy.keepRecentResults === undefined ? {} : { keepRecentResults: policy.keepRecentResults }),
       ...(policy.timeBasedMicrocompactEnabled === undefined ? {} : { timeBasedMicrocompactEnabled: policy.timeBasedMicrocompactEnabled }),
       ...(policy.timeBasedGapMs === undefined ? {} : { timeBasedGapMs: policy.timeBasedGapMs }),
       ...(policy.maxToolResultsPerMessageChars === undefined ? {} : { maxToolResultsPerMessageChars: policy.maxToolResultsPerMessageChars }),
     },
+  };
+}
+
+function mergeToolResultBudgetReports(
+  aggregate: ToolResultBudgetReport,
+  microcompact: ToolResultBudgetReport,
+): ToolResultBudgetReport {
+  return {
+    ...aggregate,
+    changed: aggregate.changed || microcompact.changed,
+    trigger: microcompact.newlyClearedToolCallIds.length > 0 ? microcompact.trigger : aggregate.trigger,
+    boundedCount: aggregate.boundedCount + microcompact.boundedCount,
+    clearedCount: microcompact.clearedCount,
+    tokensSaved: aggregate.tokensSaved + microcompact.tokensSaved,
+    boundedToolCallIds: [...aggregate.boundedToolCallIds, ...microcompact.boundedToolCallIds],
+    clearedToolCallIds: microcompact.clearedToolCallIds,
+    newlyClearedToolCallIds: microcompact.newlyClearedToolCallIds,
+    views: [...aggregate.views, ...microcompact.views],
+    microcompactTrigger: microcompact.microcompactTrigger,
+    ...(microcompact.microcompactStrategy === undefined ? {} : { microcompactStrategy: microcompact.microcompactStrategy }),
+    ...(microcompact.pressureThreshold === undefined ? {} : { pressureThreshold: microcompact.pressureThreshold }),
+    ...(microcompact.pressureTargetTokens === undefined ? {} : { pressureTargetTokens: microcompact.pressureTargetTokens }),
+    ...(microcompact.pressureUsageTokens === undefined ? {} : { pressureUsageTokens: microcompact.pressureUsageTokens }),
+    ...(microcompact.requiredTokensToFree === undefined ? {} : { requiredTokensToFree: microcompact.requiredTokensToFree }),
+    ...(microcompact.eligibleToolResultCount === undefined ? {} : { eligibleToolResultCount: microcompact.eligibleToolResultCount }),
   };
 }
 

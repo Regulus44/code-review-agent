@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { ChatMessage } from "@coding-agent/contracts";
+import type { ChatMessage, ContextBudgetSnapshot } from "@coding-agent/contracts";
 import {
   applyToolResultBudget,
   applyToolResultBudgetAsync,
+  applyMicrocompactPass,
   createToolResultBudgetState,
   DEFAULT_MICROCOMPACT_MESSAGE,
+  evaluateMicrocompactPressure,
 } from "./tool-result-budget.js";
 import { createToolResultStorage } from "./tool-result-storage.js";
 
@@ -34,7 +36,49 @@ function parallelResultMessages(count: number, size: number): ChatMessage[] {
   ];
 }
 
+const pressureSnapshot: ContextBudgetSnapshot = {
+  capability: { provider: "test", model: "test", maxInputTokens: 1_000, maxOutputTokens: 0, supportsExactCount: false, supportsPromptCache: false, source: "estimate" },
+  reservedOutputTokens: 0,
+  effectiveWindowTokens: 1_000,
+  autoCompactBufferTokens: 100,
+  warningThreshold: 700,
+  errorThreshold: 800,
+  autoCompactThreshold: 900,
+  blockingThreshold: 990,
+  source: "estimate",
+};
+
 describe("applyToolResultBudget", () => {
+  it("does not trigger microcompact from count while global pressure is low", () => {
+    const evaluation = evaluateMicrocompactPressure(resultMessages(10, "small"), 500, pressureSnapshot, {
+      policy: { microcompactTriggerToolCount: 1, keepRecentResults: 2 },
+    });
+    expect(evaluation.strategy).toBe("none");
+    expect(evaluation.eligibleToolResultCount).toBe(10);
+  });
+
+  it("uses global pressure deficit to select a microcompact target", () => {
+    const messages = resultMessages(6, "x".repeat(400));
+    const evaluation = evaluateMicrocompactPressure(messages, 950, pressureSnapshot, {
+      policy: { keepRecentResults: 2, microcompactTargetHysteresisTokens: 50 },
+    });
+    expect(evaluation.strategy).toBe("pressure");
+    const result = applyMicrocompactPass(messages, { policy: { keepRecentResults: 2 }, evaluation });
+    expect(result.report.newlyClearedToolCallIds.length).toBeGreaterThan(0);
+    expect(toolContents(result.messages).slice(-2).every((content) => content !== DEFAULT_MICROCOMPACT_MESSAGE)).toBe(true);
+  });
+
+  it("preserves the opt-in time fallback when pressure is below threshold", () => {
+    const messages = resultMessages(3, "aged");
+    const timestamps = Object.fromEntries(messages.filter((message) => message.role === "tool").map((message) => [message.toolCallId, new Date(0).toISOString()]));
+    const evaluation = evaluateMicrocompactPressure(messages, 100, pressureSnapshot, {
+      policy: { keepRecentResults: 1, timeBasedMicrocompactEnabled: true },
+      toolResultTimestamps: timestamps,
+      nowMs: 60 * 60_000,
+    });
+    expect(evaluation.strategy).toBe("time");
+  });
+
   it("keeps ordinary results full", () => {
     const messages = resultMessages(1);
     const result = applyToolResultBudget(messages, { policy: { maxResultChars: 100 } });

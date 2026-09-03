@@ -1,4 +1,4 @@
-import type { ChatMessage, ToolResultReplacementRecord } from "@coding-agent/contracts";
+import type { ChatMessage, ContextBudgetSnapshot, ToolResultReplacementRecord } from "@coding-agent/contracts";
 import { containsNonTextContent, type ToolResultStorageOutcome } from "./tool-result-storage.js";
 
 export const DEFAULT_MICROCOMPACT_MESSAGE = "[Old tool result content cleared]";
@@ -18,6 +18,8 @@ export const DEFAULT_COMPACTABLE_TOOLS: readonly string[] = [
 
 export type ToolResultBudgetTrigger = "none" | "per-result" | "message" | "count" | "tokens" | "time";
 export type MicrocompactTrigger = "none" | "count" | "tokens" | "time";
+/** Pressure strategy used by the decoupled microcompact pass. */
+export type MicrocompactStrategy = "none" | "pressure" | "time" | "legacy-count";
 
 export interface ToolResultBudgetPolicy {
   readonly enabled?: boolean;
@@ -29,6 +31,12 @@ export interface ToolResultBudgetPolicy {
   readonly microcompactTriggerToolCount?: number;
   /** Approximate model-visible token budget for compactable tool results. */
   readonly microcompactTriggerTokens?: number;
+  /** Selects the decoupled microcompact trigger. Defaults to pressure for the new pass. */
+  readonly microcompactTriggerMode?: "pressure" | "legacy-count" | "disabled";
+  /** Fraction of the effective context window at which pressure microcompact starts. */
+  readonly microcompactTriggerRatio?: number;
+  /** Hysteresis retained below the pressure threshold after clearing. */
+  readonly microcompactTargetHysteresisTokens?: number;
   /** Number of newest compactable results always retained. */
   readonly keepRecentResults?: number;
   /** Enables Claude Code-style age-based microcompact. Defaults to false. */
@@ -75,6 +83,12 @@ export interface ToolResultBudgetReport {
   readonly microcompactTrigger: MicrocompactTrigger;
   readonly timeBasedMicrocompactEnabled: boolean;
   readonly timeBasedGapMs: number;
+  readonly microcompactStrategy?: MicrocompactStrategy;
+  readonly pressureThreshold?: number;
+  readonly pressureTargetTokens?: number;
+  readonly pressureUsageTokens?: number;
+  readonly requiredTokensToFree?: number;
+  readonly eligibleToolResultCount?: number;
 }
 
 export interface ToolResultBudgetResult {
@@ -99,12 +113,28 @@ export interface ApplyToolResultBudgetOptions {
   }) => Promise<ToolResultStorageOutcome>;
 }
 
+export interface MicrocompactPressureEvaluation {
+  readonly strategy: MicrocompactStrategy;
+  readonly pressureThreshold: number;
+  readonly currentUsageTokens: number;
+  readonly targetUsageTokens: number;
+  readonly requiredTokensToFree: number;
+  readonly eligibleToolResultCount: number;
+}
+
+export interface ApplyMicrocompactOptions extends ApplyToolResultBudgetOptions {
+  readonly evaluation: MicrocompactPressureEvaluation;
+}
+
 interface NormalizedPolicy {
   readonly enabled: boolean;
   readonly maxResultChars?: number;
   readonly perToolResultChars?: Readonly<Record<string, number>>;
   readonly microcompactTriggerToolCount: number;
   readonly microcompactTriggerTokens: number;
+  readonly microcompactTriggerMode: "pressure" | "legacy-count" | "disabled";
+  readonly microcompactTriggerRatio: number;
+  readonly microcompactTargetHysteresisTokens: number;
   readonly keepRecentResults: number;
   readonly timeBasedMicrocompactEnabled: boolean;
   readonly timeBasedGapMs: number;
@@ -330,6 +360,123 @@ export async function applyToolResultBudgetAsync(
   };
 }
 
+/**
+ * Runs only the deterministic artifact/per-result and per-message aggregate passes.
+ * No cleared marker is written. Runtime calls this before measuring the complete
+ * request-scoped model view so microcompact cannot fire on local result counts.
+ */
+export async function applyToolResultArtifactAggregateAsync(
+  messages: readonly ChatMessage[],
+  options: ApplyToolResultBudgetOptions = {},
+): Promise<ToolResultBudgetResult> {
+  const policy = normalizePolicy(options.policy);
+  if (!policy.enabled) return unchangedResult(messages, policy, options.protectedToolCallIds ?? new Set<string>());
+  const preAggregate = applyToolResultBudget(messages, {
+    ...options,
+    policy: withoutMicrocompact(policy),
+  });
+  const state = options.replacementState ?? createToolResultBudgetState();
+  hydrateToolResultBudgetState(state, preAggregate.messages);
+  const aggregate = await enforceAggregateBudget(preAggregate.messages, state, policy, options);
+  const changed = preAggregate.report.changed || aggregate.replacedToolCallIds.length > 0;
+  return {
+    messages: aggregate.messages,
+    report: {
+      ...preAggregate.report,
+      changed,
+      trigger: aggregate.replacedToolCallIds.length > 0 ? "message" : preAggregate.report.trigger,
+      tokensSaved: preAggregate.report.tokensSaved + aggregate.tokensSaved,
+      views: [...preAggregate.report.views, ...aggregate.views],
+      messageBudgetChars: policy.maxToolResultsPerMessageChars,
+      messageBudgetMessagesOverBudget: aggregate.overBudgetMessageCount,
+      messageBudgetReplacedToolCallIds: aggregate.replacedToolCallIds,
+      microcompactTrigger: "none",
+      microcompactStrategy: "none",
+    },
+    newlyPersistedReplacements: aggregate.newlyPersistedReplacements,
+  };
+}
+
+/** Evaluates pressure against the complete model-view token usage for one request. */
+export function evaluateMicrocompactPressure(
+  messages: readonly ChatMessage[],
+  tokenUsageTokens: number,
+  snapshot: ContextBudgetSnapshot,
+  options: { readonly policy?: ToolResultBudgetPolicy; readonly protectedToolCallIds?: ReadonlySet<string>; readonly alreadyClearedToolCallIds?: ReadonlySet<string>; readonly toolResultTimestamps?: Readonly<Record<string, string>>; readonly nowMs?: number } = {},
+): MicrocompactPressureEvaluation {
+  const policy = normalizePolicy(options.policy);
+  const triggerMode = options.policy?.microcompactTriggerMode ?? "pressure";
+  const usage = Math.max(0, Number.isFinite(tokenUsageTokens) ? Math.floor(tokenUsageTokens) : 0);
+  const pressureThreshold = Math.min(
+    snapshot.autoCompactThreshold,
+    Math.max(1, Math.floor(snapshot.effectiveWindowTokens * policy.microcompactTriggerRatio)),
+  );
+  const targetUsageTokens = Math.max(0, pressureThreshold - policy.microcompactTargetHysteresisTokens);
+  const eligibleToolResultCount = eligibleToolResultRecords(messages, policy, options.protectedToolCallIds, options.alreadyClearedToolCallIds).length;
+  if (!policy.enabled || triggerMode === "disabled") {
+    return { strategy: "none", pressureThreshold, currentUsageTokens: usage, targetUsageTokens, requiredTokensToFree: Math.max(0, usage - targetUsageTokens), eligibleToolResultCount };
+  }
+  if (triggerMode === "legacy-count") {
+    const legacy = microcompactTrigger(eligibleToolResultRecords(messages, policy, options.protectedToolCallIds, options.alreadyClearedToolCallIds), policy, options, new Map());
+    return { strategy: legacy === "time" ? "time" : legacy !== "none" ? "legacy-count" : "none", pressureThreshold, currentUsageTokens: usage, targetUsageTokens, requiredTokensToFree: Math.max(0, usage - targetUsageTokens), eligibleToolResultCount };
+  }
+  if (usage >= pressureThreshold && eligibleToolResultCount > policy.keepRecentResults) {
+    return { strategy: "pressure", pressureThreshold, currentUsageTokens: usage, targetUsageTokens, requiredTokensToFree: Math.max(0, usage - targetUsageTokens), eligibleToolResultCount };
+  }
+  if (policy.timeBasedMicrocompactEnabled) {
+    const timeRecords = eligibleToolResultRecords(messages, policy, options.protectedToolCallIds, options.alreadyClearedToolCallIds);
+    const timePolicy: NormalizedPolicy = {
+      ...policy,
+      microcompactTriggerToolCount: Number.MAX_SAFE_INTEGER,
+      microcompactTriggerTokens: Number.MAX_SAFE_INTEGER,
+    };
+    if (microcompactTrigger(timeRecords, timePolicy, options, new Map()) === "time") {
+      return { strategy: "time", pressureThreshold, currentUsageTokens: usage, targetUsageTokens, requiredTokensToFree: 0, eligibleToolResultCount };
+    }
+  }
+  return { strategy: "none", pressureThreshold, currentUsageTokens: usage, targetUsageTokens, requiredTokensToFree: Math.max(0, usage - targetUsageTokens), eligibleToolResultCount };
+}
+
+/** Applies only the microcompact pass using a previously evaluated strategy. */
+export function applyMicrocompactPass(
+  messages: readonly ChatMessage[],
+  options: ApplyMicrocompactOptions,
+): ToolResultBudgetResult {
+  const policy = normalizePolicy(options.policy);
+  if (options.evaluation.strategy === "none" || !policy.enabled) {
+    return unchangedResult(messages, policy, options.protectedToolCallIds ?? new Set<string>());
+  }
+  const eligibleTokens = eligibleToolResultRecords(messages, policy, options.protectedToolCallIds, options.alreadyClearedToolCallIds)
+    .reduce((sum, record) => sum + record.tokens, 0);
+  const triggerTokens = options.evaluation.strategy === "pressure"
+    ? Math.max(0, eligibleTokens - options.evaluation.requiredTokensToFree)
+    : options.evaluation.strategy === "legacy-count" ? policy.microcompactTriggerTokens : Number.MAX_SAFE_INTEGER;
+  const result = applyToolResultBudget(messages, {
+    ...options,
+    policy: {
+      ...policy,
+      maxResultChars: Number.MAX_SAFE_INTEGER,
+      perToolResultChars: {},
+      microcompactTriggerMode: "legacy-count",
+      microcompactTriggerToolCount: options.evaluation.strategy === "legacy-count" ? policy.microcompactTriggerToolCount : Number.MAX_SAFE_INTEGER,
+      microcompactTriggerTokens: triggerTokens,
+      timeBasedMicrocompactEnabled: options.evaluation.strategy === "time",
+    },
+  });
+  return {
+    ...result,
+    report: {
+      ...result.report,
+      microcompactStrategy: options.evaluation.strategy,
+      pressureThreshold: options.evaluation.pressureThreshold,
+      pressureTargetTokens: options.evaluation.targetUsageTokens,
+      pressureUsageTokens: options.evaluation.currentUsageTokens,
+      requiredTokensToFree: options.evaluation.requiredTokensToFree,
+      eligibleToolResultCount: options.evaluation.eligibleToolResultCount,
+    },
+  };
+}
+
 async function enforceAggregateBudget(
   messages: readonly ChatMessage[],
   state: ToolResultBudgetState,
@@ -468,12 +615,40 @@ function normalizePolicy(policy: ToolResultBudgetPolicy | undefined): Normalized
     ...(policy?.perToolResultChars === undefined ? {} : { perToolResultChars: policy.perToolResultChars }),
     microcompactTriggerToolCount: positive(policy?.microcompactTriggerToolCount, 10),
     microcompactTriggerTokens: positive(policy?.microcompactTriggerTokens, 20_000),
+    microcompactTriggerMode: policy?.microcompactTriggerMode ?? "legacy-count",
+    microcompactTriggerRatio: ratio(policy?.microcompactTriggerRatio, 0.8),
+    microcompactTargetHysteresisTokens: nonNegative(policy?.microcompactTargetHysteresisTokens, 8_000),
     keepRecentResults: nonNegative(policy?.keepRecentResults, 5),
     timeBasedMicrocompactEnabled: policy?.timeBasedMicrocompactEnabled === true,
     timeBasedGapMs: positive(policy?.timeBasedGapMs, 60 * 60_000),
     maxToolResultsPerMessageChars: positive(policy?.maxToolResultsPerMessageChars, DEFAULT_MAX_TOOL_RESULTS_PER_MESSAGE_CHARS),
     compactableTools: policy?.compactableTools ?? DEFAULT_COMPACTABLE_TOOLS,
   };
+}
+
+function eligibleToolResultRecords(
+  messages: readonly ChatMessage[],
+  policy: NormalizedPolicy,
+  protectedToolCallIds: ReadonlySet<string> = new Set<string>(),
+  alreadyClearedToolCallIds: ReadonlySet<string> = new Set<string>(),
+): ToolResultRecord[] {
+  const toolNames = toolNamesByCallId(messages);
+  return messages.flatMap((message, messageIndex): ToolResultRecord[] => {
+    if (message.role !== "tool") return [];
+    const toolName = toolNames.get(message.toolCallId);
+    const record: ToolResultRecord = {
+      messageIndex,
+      toolCallId: message.toolCallId,
+      ...(toolName === undefined ? {} : { toolName }),
+      content: message.content,
+      tokens: estimateToolResultTokens(message.content),
+      compactable: toolName !== undefined && policy.compactableTools.includes(toolName),
+      protected: protectedToolCallIds.has(message.toolCallId),
+      alreadyCleared: alreadyClearedToolCallIds.has(message.toolCallId) || message.content === DEFAULT_MICROCOMPACT_MESSAGE,
+      alreadyReplaced: message.content.startsWith("<persisted-tool-result"),
+    };
+    return record.compactable && !record.protected && !record.alreadyCleared && !record.alreadyReplaced ? [record] : [];
+  });
 }
 
 function resultLimit(toolName: string | undefined, policy: NormalizedPolicy): number | undefined {
@@ -542,6 +717,10 @@ function nonNegative(value: number | undefined, fallback: number): number {
   return value !== undefined && Number.isFinite(value) && value >= 0 ? Math.floor(value) : fallback;
 }
 
+function ratio(value: number | undefined, fallback: number): number {
+  return value !== undefined && Number.isFinite(value) && value > 0 && value <= 1 ? value : fallback;
+}
+
 function unchangedResult(messages: readonly ChatMessage[], policy: NormalizedPolicy, protectedIds: ReadonlySet<string>): ToolResultBudgetResult {
   return {
     messages,
@@ -563,6 +742,7 @@ function unchangedResult(messages: readonly ChatMessage[], policy: NormalizedPol
       microcompactTrigger: "none",
       timeBasedMicrocompactEnabled: policy.timeBasedMicrocompactEnabled,
       timeBasedGapMs: policy.timeBasedGapMs,
+      eligibleToolResultCount: 0,
     },
     newlyPersistedReplacements: [],
   };
