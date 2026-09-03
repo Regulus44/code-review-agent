@@ -794,6 +794,53 @@ describe("AgentHost", () => {
     expect(requests[0]?.messages.filter((message) => message.role === "tool").every((message) => message.content !== "[Old tool result content cleared]")).toBe(true);
   });
 
+  it("replays microcompact receipts across Runtime restart without duplicate clearing", async () => {
+    const store = new InMemoryEventStore();
+    const requests: ModelRequest[] = [];
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        requests.push(request);
+        yield { type: "text_delta", text: "replayed" };
+        yield { type: "done" };
+      },
+    };
+    const options = {
+      store,
+      model,
+      compactionEnabled: false,
+      contextPolicy: { contextWindowTokens: 100, maxOutputTokens: 0, autoCompactBufferTokens: 10 },
+      toolResultBudget: { keepRecentResults: 2, retainRecentResultsRatio: 0.8, microcompactTargetHysteresisTokens: 900 },
+    } as const;
+    const session = await new AgentHost(options).createSession("D:/microcompact-replay-fixture");
+    for (let index = 0; index < 6; index += 1) {
+      const toolCallId = `replay-call-${index}`;
+      await store.append({ sessionId: session.id, type: "assistant/message", payload: { content: "", toolCalls: [{ id: toolCallId, name: "read_file", arguments: "{}" }] } });
+      await store.append({ sessionId: session.id, type: "tool/result", payload: { toolCallId, status: "completed", result: { content: `replay-${index}-${"x".repeat(800)}` } } });
+    }
+    const firstHost = new AgentHost(options);
+    const firstTurn = await firstHost.sendMessage(session.id, "compact once");
+    await firstHost.waitForTurn(firstTurn);
+    const firstEvents = await firstHost.events(session.id);
+    const firstReceipts = firstEvents.filter((event) => event.type === "context/microcompacted");
+    expect(firstReceipts).toHaveLength(1);
+    const firstToolViews = requests[0]?.messages.filter((message) => message.role === "tool").map((message) => message.content) ?? [];
+
+    const restartedRequests: ModelRequest[] = [];
+    const restartedHost = new AgentHost({ ...options, model: {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        restartedRequests.push(request);
+        yield { type: "text_delta", text: "replayed again" };
+        yield { type: "done" };
+      },
+    } });
+    const replayTurn = await restartedHost.sendMessage(session.id, "replay compacted view");
+    await restartedHost.waitForTurn(replayTurn);
+    const replayEvents = await restartedHost.events(session.id);
+    expect(replayEvents.filter((event) => event.type === "context/microcompacted")).toHaveLength(1);
+    const replayToolViews = restartedRequests[0]?.messages.filter((message) => message.role === "tool").slice(-6).map((message) => message.content) ?? [];
+    expect(replayToolViews).toEqual(firstToolViews);
+  });
+
   it("enforces the message-level aggregate budget for parallel fresh results", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "cra-runtime-message-budget-"));
     try {

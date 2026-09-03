@@ -2515,6 +2515,23 @@ export class AgentHost {
     const alreadyClearedToolCallIds = new Set<string>();
     const reportedBudgetToolCallIds = new Set<string>();
     const reportedMicrocompactToolCallIds = new Set<string>();
+    // Microcompact is a model-view decision recorded as a receipt rather than
+    // a transcript mutation. Hydrate prior receipts so replay/restart rebuilds
+    // the same cleared view and does not append duplicate receipts.
+    for (const event of await this.options.store.list(sessionId)) {
+      if (event.type !== "context/microcompacted") continue;
+      const payload = event.payload;
+      const ids = new Set<string>();
+      for (const key of ["clearedToolCallIds", "newlyClearedToolCallIds"] as const) {
+        const values = payload[key];
+        if (!Array.isArray(values)) continue;
+        for (const value of values) if (typeof value === "string" && value.length > 0) ids.add(value);
+      }
+      for (const toolCallId of ids) {
+        alreadyClearedToolCallIds.add(toolCallId);
+        reportedMicrocompactToolCallIds.add(toolCallId);
+      }
+    }
     const replacementState = createToolResultBudgetState(messages);
     const recoveryGuard = new ContextRecoveryGuard(
       this.contextRecovery?.maxReactiveAttempts ?? 1,
