@@ -39,3 +39,12 @@
 - 验证：待 Runtime 接线后执行 storage/context/runtime 定向测试与全 workspace 检查。
 - 风险：projection 对未知/不完整 payload fail closed，不会把原始工具输出带入 API/Web；旧事件继续兼容。
 - 回滚：回滚 `a4f1e71`，EventStore 仍保留新增事件，旧 projection 忽略未知类型。
+
+### Commit `f824e68`
+
+- 变更文件：`packages/runtime/src/index.ts`。
+- 内容：Runtime 在 microcompact candidate 产生清理 ID 后先构造、校验并追加 checkpoint；只有 checkpoint 成功才替换 model view、追加 budget receipt 和 `context/microcompacted`。失败追加 bounded failure event 并保留原 view。
+- 事件顺序：`context/microcompact_checkpoint` → `context/tool_results_budgeted` → `context/microcompacted`；失败路径为 `context/microcompact_checkpoint_failed`，无 cleared marker。
+- 验证：`pnpm typecheck`；`pnpm --filter @coding-agent/context test`（93/93）；`pnpm --filter @coding-agent/runtime test -- --run src/index.test.ts`（74/74）。
+- 风险：checkpoint ID 由 turn/step/cleared IDs 派生；deterministic builder 只读取 bounded metadata。EventStore 同时故障时 failure receipt 可能无法落盘，但仍不会改变 model view。
+- 回滚：回滚 `f824e68` 可恢复 Slice B 的直接 replacement 逻辑；新增事件保留且旧 Runtime 可忽略。
