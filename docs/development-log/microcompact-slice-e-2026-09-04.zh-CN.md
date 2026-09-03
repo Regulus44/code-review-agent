@@ -96,3 +96,18 @@
 - 验证：`pnpm --filter @coding-agent/context test -- --run src/microcompact-slice-e-fixture.test.ts`
   3/3 通过；`pnpm typecheck` 通过。
 - 回滚：删除 fixture/test 和新增评测入口即可；Slice E diagnostics contract/实现仍可独立保留或回滚。
+
+### Commit `c2ed073` — 评测索引入口
+
+- 文件：`docs/evaluation/README.zh-CN.md`，仅新增 Slice E 评测收尾文档入口；同文件中其他未提交评测链接保持原状，未纳入本提交。
+- 验证：Slice E 定向测试、workspace `pnpm test`（17 个 workspace 项目）、`pnpm typecheck` 和
+  `git diff --check` 均通过。
+- 回滚：移除该索引行即可，不影响 fixture、diagnostics contract 或 replay 实现。
+
+## 最终收尾验证
+
+- `pnpm --filter @coding-agent/context test -- --run src/microcompact-slice-e-fixture.test.ts`：3/3。
+- `pnpm --filter @coding-agent/storage test -- --run src/index.test.ts`：34/34。
+- `pnpm --filter @coding-agent/runtime test -- --run src/index.test.ts`：81/81。
+- `pnpm --filter @coding-agent/web test -- --run src/client/store.test.ts src/presentation/context-presenter.test.ts`：20/20。
+- `pnpm test`、`pnpm typecheck`、`git diff --check`：通过。
