@@ -117,6 +117,24 @@ M13 的 `step/started` payload 可以携带 `contextBudget`、`contextWarning`�
 
 M13 的 compact 事件（`context/compacted`、`context/microcompacted`、`context/session_memory_compacted`、`context/summary_compacted`、`context/compact_boundary` 及对应失败事件）可携带 `preCompactTokens`、`postCompactTokens` 和 `tokensSaved`。microcompact 通常只提供 `tokensSaved`；这些字段只表示 model-visible view 的 bounded 计数，不替代完整 transcript。recovery 事件可投影为最多 16 项 `{ status, attempt, errorClass?, transitionReason?, providerStatus?, lastSequence }`，用于诊断和回放，不允许客户端直接驱动恢复。
 
+Microcompact Slice C 追加 `context/microcompact_checkpoint` 与
+`context/microcompact_checkpoint_failed`。成功事件 payload 为受限
+`MicrocompactCheckpoint` metadata：`version`、`checkpointId`、`sourceSequenceStart`/
+`sourceSequenceEnd`、最多 256 个 `coveredToolCallIds`、`primaryRequest`、文件/发现/测试/
+待办数组、`nextStep`、`generatedBy`、`algorithmVersion`、`maxChars`，可附带本次
+`preCompactTokens`、`postCompactTokens`、`pressureThreshold`、`targetTokens` 和 `coverage`。
+失败事件只保存 `{ stage: "extract" | "validate" | "persist", errorCode,
+preservedModelView: true }`。字段均为 bounded metadata，不得包含完整工具输出、provider body、
+凭据、父 workspace 路径或跨 tenant 内容；文件路径必须是 workspace-relative 且拒绝 `..`。
+
+当一次 microcompact 确实产生 cleared IDs 时，事件顺序固定为
+`context/microcompact_checkpoint` → `context/tool_results_budgeted` →
+`context/microcompacted`。checkpoint 生成、校验或持久化失败时只追加
+`context/microcompact_checkpoint_failed`，保留完整 model view，不追加 cleared marker 或
+`context/microcompacted`。Runtime 重启和 replay 依据已持久化 checkpoint/replacement receipt
+重建相同 view；相同 turn/step/fingerprint 不得重复追加 checkpoint。Storage projection 只暴露
+最近一份 checkpoint/failure 的 bounded metadata。
+
 M13 事件和 projection 不得保存完整 prompt、transcript、工具原文、provider response body、credential、header 或 secret。旧事件缺少 diagnostics 时，客户端可以使用明确标记为 estimate 的兼容 ContextMeter；不能把本地估算冒充 provider usage。
 
 M14 当前只暴露 `ContextCollapseCapability` 元数据，不追加 `context/collapse_*` 事件。capability 包含 version、enabled、`deferred/unavailable` status、bounded reason，以及 read-time projection、background collapse、overflow drain、snip 四项布尔 feature；不包含 prompt、transcript、工具结果、provider body、凭据或 workspace 内容。`deferred` 表示 Claude Code 集成点已识别但本地快照核心仍为 stub，`unavailable` 表示 host 没有暴露 capability。完整 collapse 事件只有在独立 ADR 接受算法和 replay contract 后才允许新增。
