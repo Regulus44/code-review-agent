@@ -1,6 +1,6 @@
 # Skill 资源渐进式加载 M4 开发日志
 
-日期：2026-09-04  
+日期：2026-09-04
 范围：Model step、EventStore、host-owned artifact、compact/replay
 
 ## 目标
