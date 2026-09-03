@@ -56,3 +56,11 @@
 - 验证：context checkpoint 测试 2/2；storage index 测试 33/33；runtime index 定向测试 74/74（完整运行将在最终门禁重复）。
 - 风险：失败保留 view 的集成注入测试未纳入本提交，原因是现有 Runtime fixture 在极小 maxChars 下可能未进入 microcompact candidate；helper validator 与 Runtime catch 路径仍覆盖该语义，最终门禁需关注。
 - 回滚：回滚 `6af5cec` 只移除新增测试，不影响运行时行为。
+
+### Commit `9ffdcbd`
+
+- 变更文件：`docs/event-contract.md`。
+- 内容：补充 checkpoint/checkpoint_failed payload 边界、成功/失败事件顺序、无 cleared marker 失败不变量、replay 与 bounded projection 约束。
+- 验证：文档变更通过 `git diff --check`；代码门禁沿用上一节命令并在最终交付重复。
+- 风险：契约要求旧 Runtime 忽略新增事件；若下游 presenter 未消费新 projection，仍可按旧 diagnostics 工作。
+- 回滚：回滚 `9ffdcbd` 仅恢复文档，已落盘事件保持追加兼容。
