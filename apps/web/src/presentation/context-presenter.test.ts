@@ -35,6 +35,7 @@ describe("presentContextMeter", () => {
       level: "auto_compact",
       lastStep: 2,
       lastRequestId: "request_fixture",
+      lastToolResultBudget: { enabled: true, changed: true, trigger: "tokens", messageBudgetChars: 200_000, messageBudgetMessagesOverBudget: 0, messageBudgetReplacedToolCallIds: [], boundedCount: 0, clearedCount: 2, tokensSaved: 1_300, microcompactTrigger: "tokens", microcompact: { strategy: "pressure", pressureThreshold: 9_000, targetTokens: 8_000, preCompactTokens: 9_200, postCompactTokens: 7_900, checkpoint: { status: "persisted", checkpointId: "mc_fixture" }, coverage: { sourceSequenceStart: 4, sourceSequenceEnd: 12, coveredResultCount: 4, clearedResultCount: 2, toolCallIds: ["call_1", "call_2"] } }, timeBasedMicrocompactEnabled: false, timeBasedGapMs: 3_600_000, lastSequence: 8 },
       lastCompaction: { status: "completed", kind: "summary", preCompactTokens: 12_000, postCompactTokens: 8_000, tokensSaved: 4_000, sequence: 8 },
       recoveryChain: [{ status: "succeeded", attempt: 1, transitionReason: "reactive_compact_retry", lastSequence: 9 }],
       updatedAt: "2026-08-24T00:00:00.000Z",
@@ -43,6 +44,7 @@ describe("presentContextMeter", () => {
     expect(view).toMatchObject({ status: "auto_compact", usedTokens: 9_500, maxTokens: 10_000, ratio: 0.95, source: "provider", confidence: "exact", percentLeft: 0 });
     expect(view.detail).toContain("Token 来源：provider（exact）");
     expect(view.detail).toContain("节省 4000 tokens");
+    expect(view.detail).toContain("Microcompact：pressure，9200→7900 tokens；checkpoint persisted；覆盖 4 个结果，清理 2 个");
     expect(view.detail).toContain("恢复链：1 个事件");
   });
 

@@ -95,6 +95,49 @@ describe("SessionStore", () => {
     expect(JSON.stringify(store.getSnapshot())).not.toContain("memory body");
   });
 
+  it("replays Slice E checkpoint and bounded microcompact diagnostics", () => {
+    const store = new SessionStore();
+    store.open(session());
+    store.apply(event(1, "context/microcompact_checkpoint", {
+      version: 1,
+      checkpointId: "mc_web",
+      sourceSequenceStart: 3,
+      sourceSequenceEnd: 9,
+      coveredToolCallIds: ["call_1"],
+      generatedBy: "deterministic",
+      algorithmVersion: "pressure-v2.m1",
+      primaryRequest: "fix parser",
+      filesRead: ["src/parser.ts"],
+      filesChanged: [],
+      verifiedFindings: ["bounded fact"],
+      testsRun: ["pnpm test"],
+      pendingWork: [],
+      nextStep: "review",
+      maxChars: 8_192,
+    }));
+    store.apply(event(2, "context/tool_results_budgeted", {
+      enabled: true,
+      changed: true,
+      trigger: "none",
+      boundedCount: 0,
+      clearedCount: 1,
+      tokensSaved: 100,
+      microcompactTrigger: "tokens",
+      microcompact: {
+        strategy: "pressure",
+        pressureThreshold: 8_000,
+        targetTokens: 7_200,
+        preCompactTokens: 8_400,
+        postCompactTokens: 7_100,
+        checkpoint: { status: "persisted", checkpointId: "mc_web" },
+        coverage: { sourceSequenceStart: 3, sourceSequenceEnd: 9, coveredResultCount: 1, clearedResultCount: 1, toolCallIds: ["call_1"] },
+      },
+    }));
+    const snapshot = store.getSnapshot();
+    expect(snapshot.session?.contextMicrocompactCheckpoint).toMatchObject({ checkpointId: "mc_web", filesRead: ["src/parser.ts"] });
+    expect(snapshot.session?.contextDiagnostics?.lastToolResultBudget?.microcompact).toMatchObject({ strategy: "pressure", preCompactTokens: 8_400, postCompactTokens: 7_100, checkpoint: { status: "persisted", checkpointId: "mc_web" }, coverage: { clearedResultCount: 1 } });
+  });
+
   it("updates whole-log stats on a live tail without recounting older-page events", () => {
     const store = new SessionStore();
     const initialStats = reduceSessionStats(createSessionStatsProjection("2026-08-23T00:00:00.000Z"), event(1, "user/message", { content: "older" }));

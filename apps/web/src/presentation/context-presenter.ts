@@ -39,7 +39,11 @@ function presentDurableContextMeter(diagnostics: ContextDiagnosticsProjection): 
       ? ` 上次压缩失败${compact.error === undefined ? "" : `：${compact.error}`}。`
       : ` 上次压缩${compact.kind === undefined ? "" : `（${compact.kind}）`}${compact.tokensSaved === undefined ? "" : `，节省 ${compact.tokensSaved} tokens`}。`;
   const recoveryDetail = recovery === 0 ? "" : ` 恢复链：${recovery} 个事件。`;
-  const detail = `Token 来源：${diagnostics.tokenSource}（${diagnostics.tokenConfidence}）；剩余 ${diagnostics.percentLeft}%。阈值（警告/错误/自动压缩/阻断）：${diagnostics.warningThreshold}/${diagnostics.errorThreshold}/${diagnostics.autoCompactThreshold}/${diagnostics.blockingThreshold}.${compactDetail}${recoveryDetail}`;
+  const microcompact = diagnostics.lastToolResultBudget?.microcompact;
+  const microcompactDetail = microcompact === undefined
+    ? ""
+    : ` Microcompact：${microcompact.strategy}，${microcompact.preCompactTokens}→${microcompact.postCompactTokens} tokens；checkpoint ${microcompact.checkpoint.status}；覆盖 ${microcompact.coverage.coveredResultCount} 个结果，清理 ${microcompact.coverage.clearedResultCount} 个。`;
+  const detail = `Token 来源：${diagnostics.tokenSource}（${diagnostics.tokenConfidence}）；剩余 ${diagnostics.percentLeft}%。阈值（警告/错误/自动压缩/阻断）：${diagnostics.warningThreshold}/${diagnostics.errorThreshold}/${diagnostics.autoCompactThreshold}/${diagnostics.blockingThreshold}.${compactDetail}${microcompactDetail}${recoveryDetail}`;
   return {
     status: diagnostics.level,
     label: maxTokens > 0 ? `上下文 · ${diagnostics.tokenUsage}/${maxTokens}` : `上下文 · ${diagnostics.tokenUsage} tokens`,

@@ -337,6 +337,37 @@ describe("InMemoryEventStore", () => {
     expect((await store.project(sessionId))?.contextDiagnostics).toMatchObject({ lastMicrocompactCheckpointFailure: { stage: "persist", errorCode: "STORE_UNAVAILABLE", preservedModelView: true } });
   });
 
+  it("replays bounded Slice E microcompact diagnostics without tool output", async () => {
+    const store = new InMemoryEventStore();
+    const sessionId = await store.createSession("D:/microcompact-slice-e");
+    const toolCallIds = Array.from({ length: 80 }, (_, index) => "call_" + index);
+    await store.append({ sessionId, type: "context/tool_results_budgeted", payload: {
+      enabled: true,
+      changed: true,
+      trigger: "none",
+      boundedCount: 0,
+      clearedCount: 4,
+      tokensSaved: 400,
+      microcompactTrigger: "tokens",
+      microcompact: {
+        strategy: "pressure",
+        pressureThreshold: 8_000,
+        targetTokens: 7_200,
+        preCompactTokens: 8_400,
+        postCompactTokens: 7_100,
+        checkpoint: { status: "persisted", checkpointId: "mc_slice_e" },
+        coverage: { sourceSequenceStart: 3, sourceSequenceEnd: 18, coveredResultCount: 80, clearedResultCount: 4, toolCallIds },
+      },
+      completeToolOutput: "must not be projected",
+    } });
+    const projection = await store.project(sessionId);
+    const diagnostics = projection?.contextDiagnostics?.lastToolResultBudget?.microcompact;
+    expect(diagnostics).toMatchObject({ strategy: "pressure", pressureThreshold: 8_000, targetTokens: 7_200, preCompactTokens: 8_400, postCompactTokens: 7_100, checkpoint: { status: "persisted", checkpointId: "mc_slice_e" }, coverage: { coveredResultCount: 80, clearedResultCount: 4, sourceSequenceStart: 3, sourceSequenceEnd: 18 } });
+    expect(diagnostics?.coverage.toolCallIds).toHaveLength(64);
+    expect(JSON.stringify(projection)).not.toContain("must not be projected");
+    expect(JSON.stringify(projection)).not.toContain("call_79");
+  });
+
   it("persists events, projections, commands, and schema across reopen", async () => {
     const directory = mkdtempSync(join(tmpdir(), "coding-agent-"));
     const databasePath = join(directory, "agent.sqlite");

@@ -6,7 +6,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { brand, type AttachmentReceipt, type ChatModel, type InteractionId, type ModelRequest, type ModelStreamPart, type PermissionId, type ToolDefinition } from "@coding-agent/contracts";
 import { InMemoryEventStore, SqliteEventStore } from "@coding-agent/storage";
-import { ContextRecoveryGuard } from "@coding-agent/context";
+import { ContextRecoveryGuard, InMemorySkillResourceArtifactStore } from "@coding-agent/context";
 import { SkillRegistry } from "@coding-agent/skills";
 import { createBuiltinTools, DefaultPermissionPolicy, ToolRegistry, ToolRuntime } from "@coding-agent/tools";
 import { GitWorktreeManager } from "@coding-agent/workspace";
@@ -85,6 +85,51 @@ describe("AgentHost", () => {
     const toolMessage = requests[1]?.messages.find((message) => message.role === "tool");
     expect(toolMessage?.content).toContain("<skill_resource skill=\"review\" path=\"references/checklist.md\">");
     expect(toolMessage?.content).toContain("checklist item");
+  });
+
+  it("replays Skill resource bodies from host artifacts and fails closed when missing", async () => {
+    const store = new InMemoryEventStore();
+    const artifacts = new InMemorySkillResourceArtifactStore();
+    const skills = new SkillRegistry();
+    skills.registerProvider({
+      name: "fixture",
+      list: async () => [{ name: "review", description: "review", source: "local", provider: "fixture", trust: "local", invocation: { modelInvocable: true, userInvocable: true }, rank: 1, locator: "review", resourceBase: { kind: "opaque", description: "fixture" } }],
+      get: async (candidate) => ({ ...candidate, content: "instructions" }),
+      readResource: async (_candidate, request) => ({ ok: true, resource: { path: request.path, content: "immutable checklist", sizeBytes: 19, mediaType: "text/plain" } }),
+    });
+    const requests: ModelRequest[] = [];
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        requests.push(request);
+        if (request.messages.some((message) => message.role === "tool")) yield { type: "text_delta", text: "done" };
+        else {
+          yield { type: "tool_call_start", index: 0, id: "call_skill_resource_replay", name: "read_skill_resource" };
+          yield { type: "tool_call_delta", index: 0, arguments: JSON.stringify({ skill: "review", path: "references/checklist.md" }) };
+          yield { type: "tool_call_end", index: 0 };
+        }
+        yield { type: "done" };
+      },
+    };
+    const options = { store, model, skills, skillResourceToolEnabled: true, skillResourceArtifactReplay: true, skillResourceArtifactStore: artifacts, compactionEnabled: false } as const;
+    const host = new AgentHost(options);
+    const session = await host.createSession("D:/skill-resource-replay");
+    const first = await host.sendMessage(session.id, "read it");
+    await host.waitForTurn(first);
+    const resultEvent = (await host.events(session.id)).find((event) => event.type === "tool/result" && event.payload["toolCallId"] === "call_skill_resource_replay");
+    expect(JSON.stringify(resultEvent?.payload)).not.toContain("immutable checklist");
+    const replayRequests: ModelRequest[] = [];
+    const replayHost = new AgentHost({ ...options, model: { async *stream(request: ModelRequest) { replayRequests.push(request); yield { type: "text_delta", text: "replayed" }; yield { type: "done" }; } } });
+    const replayTurn = await replayHost.sendMessage(session.id, "continue");
+    await replayHost.waitForTurn(replayTurn);
+    expect(replayRequests[0]?.messages.some((message) => message.role === "tool" && message.content.includes("immutable checklist"))).toBe(true);
+    const artifactId = ((resultEvent?.payload["result"] as { output: { artifact: { artifactId: string } } }).output.artifact.artifactId);
+    const missing = new InMemorySkillResourceArtifactStore();
+    const missingRequests: ModelRequest[] = [];
+    const missingHost = new AgentHost({ ...options, skillResourceArtifactStore: missing, model: { async *stream(request: ModelRequest) { missingRequests.push(request); yield { type: "text_delta", text: "missing" }; yield { type: "done" }; } } });
+    const missingTurn = await missingHost.sendMessage(session.id, "continue without snapshot");
+    await missingHost.waitForTurn(missingTurn);
+    expect(missingRequests[0]?.messages.some((message) => message.role === "tool" && message.content.includes('status="unavailable"'))).toBe(true);
+    expect(artifactId).toMatch(/^artifact_skill_resource_/u);
   });
 
   it("keeps the legacy maxSteps option non-enforcing", () => {
@@ -843,7 +888,18 @@ describe("AgentHost", () => {
     expect(events[compactIndex]?.payload).toMatchObject({ checkpointId: expect.any(String), preCompactTokens: expect.any(Number), postCompactTokens: expect.any(Number), coverage: expect.any(Array) });
     expect(events[compactIndex]?.payload["reductionFingerprint"]).toMatch(/^turn_[^:]+:1:ctxreq_[0-9a-f]{16}$/u);
     const step = events.find((event) => event.type === "step/started" && (event.payload["toolResultBudget"] as { readonly clearedCount?: unknown } | undefined)?.clearedCount === 4);
-    expect(step?.payload["toolResultBudget"]).toMatchObject({ trigger: "count", clearedCount: 4, tokensSaved: expect.any(Number) });
+    expect(step?.payload["toolResultBudget"]).toMatchObject({
+      trigger: "count",
+      clearedCount: 4,
+      tokensSaved: expect.any(Number),
+      microcompact: {
+        strategy: "legacy-count",
+        preCompactTokens: expect.any(Number),
+        postCompactTokens: expect.any(Number),
+        checkpoint: { status: "persisted", checkpointId: expect.any(String) },
+        coverage: { coveredResultCount: expect.any(Number), clearedResultCount: 4, toolCallIds: expect.any(Array) },
+      },
+    });
     const durable = events.filter((event) => event.type === "tool/result");
     expect(durable).toHaveLength(6);
     expect(JSON.stringify(durable)).toContain("durable-0-");
@@ -871,7 +927,17 @@ describe("AgentHost", () => {
     const events = await host.events(session.id);
     expect(events.some((event) => event.type === "context/microcompacted")).toBe(false);
     const step = events.find((event) => event.type === "step/started");
-    expect(step?.payload["toolResultBudget"]).toMatchObject({ microcompactStrategy: "none", eligibleToolResultCount: 6 });
+    expect(step?.payload["toolResultBudget"]).toMatchObject({
+      microcompactStrategy: "none",
+      eligibleToolResultCount: 6,
+      microcompact: {
+        strategy: "none",
+        checkpoint: { status: "not_needed" },
+        preCompactTokens: expect.any(Number),
+        postCompactTokens: expect.any(Number),
+        coverage: { coveredResultCount: 6, clearedResultCount: 0, toolCallIds: [] },
+      },
+    });
     expect(requests[0]?.messages.filter((message) => message.role === "tool").every((message) => message.content !== "[Old tool result content cleared]")).toBe(true);
   });
 
@@ -893,6 +959,8 @@ describe("AgentHost", () => {
     const events = await host.events(session.id);
     expect(events.some((event) => event.type === "context/microcompact_checkpoint_failed")).toBe(true);
     expect(events.some((event) => event.type === "context/microcompacted")).toBe(false);
+    const step = events.find((event) => event.type === "step/started");
+    expect(step?.payload["toolResultBudget"]).toMatchObject({ microcompact: { strategy: "legacy-count", checkpoint: { status: "failed", errorCode: "CHECKPOINT_FAILED" }, preCompactTokens: expect.any(Number), postCompactTokens: expect.any(Number), coverage: { clearedResultCount: 0 } } });
     expect(requests[0]?.messages.filter((message) => message.role === "tool").every((message) => message.content.includes("persist-result-"))).toBe(true);
   });
 

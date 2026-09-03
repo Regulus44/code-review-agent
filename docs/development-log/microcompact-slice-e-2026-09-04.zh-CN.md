@@ -60,3 +60,25 @@
   `context/microcompacted`/checkpoint 事件历史。
 
 本次实现提交 hash 在 Git 提交后由后续测试/日志提交补录。
+
+### Commit `9461433` — Diagnostics/replay 实现
+
+- 文件：`packages/contracts/src/index.ts`、`packages/runtime/src/index.ts`、`packages/storage/src/index.ts`、
+  `apps/web/src/client/store.ts`。
+- 落地上一节所述 contract、Runtime event/step payload、Storage reducer 与 Web live/replay fold；该 commit
+  没有混入并行 Skill resource artifact、用户 README 或现有评测文档改动。
+- 验证：`pnpm typecheck` 通过。
+
+### Tests/presenter（本次）
+
+- 文件：`packages/runtime/src/index.test.ts`、`packages/storage/src/index.test.ts`、
+  `apps/web/src/client/store.test.ts`、`apps/web/src/presentation/context-presenter.ts`、
+  `apps/web/src/presentation/context-presenter.test.ts`。
+- Runtime 覆盖低压 `not_needed`、成功 checkpoint `persisted`、checkpoint persist 失败 `failed` 的 step payload；
+  Storage 验证 tool output 不进入 projection、coverage 最多 64 IDs；Web 验证 checkpoint/replay fold 和
+  presenter 使用持久化 metadata 显示 status/usage/count，不读取或推断工具正文。
+- 验证：Storage 34/34、Web 20/20、Runtime 80/80 定向测试通过。
+- 回滚：移除 tests/presenter 与 nested diagnostics rendering；Web 会回退已有 context meter，不影响
+  Runtime 的 model view 或 event replay。
+
+本次测试提交 hash 在 Git 提交后由后续 fixture/日志提交补录。
