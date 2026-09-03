@@ -176,9 +176,11 @@ LSP 只读工具必须遵守以下不变量：
 
 未选中的 shell 不进入 `ToolRegistry.list()`、`ToolRuntime.listTools()`、模型 schema 或工具 Prompt。直接查找未注册 shell 时，`ToolRegistry` 抛出 `ToolNotFoundError`，稳定错误码为 `TOOL_NOT_FOUND`；AgentHost 的模型工具调用边界会将该错误记录为失败的 `tool/result`。系统不会把 Bash 文本转换为 PowerShell，也不会把 PowerShell 文本转换为 Bash 或 `cmd.exe`；Windows 应用别名的存在不代表 WSL `/bin/bash` 可用。
 
-## SkillTool（S2）
+## SkillTool（M3）
 
-SkillTool 通过 `ToolRuntime` 执行，Skill catalog 仅暴露有界摘要与 digest；调用时重新读取并校验正文。`remote`/`unknown` 来源或未知 frontmatter 属性必须走 `interaction/requested` 审批，`allowedTools` 只能缩小宿主 allowlist。正文只作为当前调用结果返回，持久化 `tool/result`、`skill/invocation` 和 `skill/result` 仅保留 bounded metadata。用户 `/name` 入口使用同一工具管线并支持幂等、取消和重放。
+SkillTool 通过 `ToolRuntime` 执行，Skill catalog 仅暴露有界摘要与 digest；调用时重新读取并校验正文。默认使用 context 包导出的 v2 canonical renderer，模型可见结果统一为 `<skill_content name="...">`、`<skill_resources>` 和 `<skill_instructions>` 三段：资源提示明确调用 `read_skill_resource`、路径必须是 Skill-relative path、资源按需读取且不预加载目录。renderer 只输出逻辑 Skill 名称，不暴露 provider 的绝对目录；名称属性经过 XML 属性转义。`remote`/`unknown` 来源或未知 frontmatter 属性必须走 `interaction/requested` 审批，且 remote 或 `disableShellExpansion` 内容不展开 `$ARGUMENTS`。正文只作为当前调用结果返回，持久化 `tool/result`、`skill/invocation` 和 `skill/result` 仅保留 bounded metadata。用户 `/name` 入口和模型 SkillTool 复用同一 canonical renderer 与 ToolRuntime 管线。
+
+`AgentHostOptions.skillRendererVersion` 和 `createSkillTool(..., { rendererVersion })` 提供显式 `v1` 回滚选择；省略时固定选择 v2。v1 保留旧 `<skill name="..." source="...">...</skill>` 形状，便于兼容已有调用方；该开关不改变资源工具的路径、权限或事件边界。
 
 ## 调度与禁用
 
