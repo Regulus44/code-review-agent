@@ -101,6 +101,7 @@ export class ToolRuntime {
   private readonly activeExclusive = new Map<SessionId, Promise<unknown>>();
   private readonly sessionPermissionPresets = new Map<SessionId, PermissionPreset>();
   private readonly deferredTenantIds = new Map<ToolCallId, string | undefined>();
+  private readonly deferredCommitLocks = new Map<ToolCallId, Promise<void>>();
 
   constructor(private readonly options: ToolRuntimeOptions) {
     this.policy = options.policy ?? new DefaultPermissionPolicy();
@@ -468,6 +469,15 @@ export class ToolRuntime {
     if (output.result === undefined || output.status === "awaiting_permission" || output.status === "awaiting_interaction") {
       throw new Error("TOOL_RESULT_COMMIT_INVALID: a deferred tool result must be settled");
     }
+    const inFlight = this.deferredCommitLocks.get(output.toolCallId);
+    if (inFlight !== undefined) {
+      await inFlight;
+      return;
+    }
+    let release!: () => void;
+    const lock = new Promise<void>((resolve) => { release = resolve; });
+    this.deferredCommitLocks.set(output.toolCallId, lock);
+    try {
     const prior = (await this.options.store.list(input.sessionId)).some((event) => event.type === "tool/result" && event.payload["toolCallId"] === output.toolCallId);
     if (prior) {
       this.deferredTenantIds.delete(output.toolCallId);
@@ -491,6 +501,10 @@ export class ToolRuntime {
         type: "diff/preview",
         payload: { toolCallId: output.toolCallId, diff: output.result.diff },
       });
+    }
+    } finally {
+      release();
+      this.deferredCommitLocks.delete(output.toolCallId);
     }
   }
 
