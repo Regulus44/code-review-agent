@@ -48,3 +48,11 @@
 - 验证：`pnpm typecheck`；`pnpm --filter @coding-agent/context test`（93/93）；`pnpm --filter @coding-agent/runtime test -- --run src/index.test.ts`（74/74）。
 - 风险：checkpoint ID 由 turn/step/cleared IDs 派生；deterministic builder 只读取 bounded metadata。EventStore 同时故障时 failure receipt 可能无法落盘，但仍不会改变 model view。
 - 回滚：回滚 `f824e68` 可恢复 Slice B 的直接 replacement 逻辑；新增事件保留且旧 Runtime 可忽略。
+
+### Commit `6af5cec`
+
+- 变更文件：`packages/context/src/microcompact-checkpoint.test.ts`、`packages/storage/src/index.test.ts`、`packages/runtime/src/index.test.ts`。
+- 内容：覆盖 checkpoint 元数据提取与超长 schema 拒绝、绝对路径/工具正文脱敏、Storage 成功/失败 projection，以及 Runtime 成功事件顺序和 payload。
+- 验证：context checkpoint 测试 2/2；storage index 测试 33/33；runtime index 定向测试 74/74（完整运行将在最终门禁重复）。
+- 风险：失败保留 view 的集成注入测试未纳入本提交，原因是现有 Runtime fixture 在极小 maxChars 下可能未进入 microcompact candidate；helper validator 与 Runtime catch 路径仍覆盖该语义，最终门禁需关注。
+- 回滚：回滚 `6af5cec` 只移除新增测试，不影响运行时行为。
