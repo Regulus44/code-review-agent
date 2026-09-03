@@ -18,7 +18,9 @@ import {
   type UserInteractionInput,
   type UserInteractionRequest,
 } from "@coding-agent/contracts";
+import { buildSkillResourceModelView, skillResourceArtifactId, type SkillResourceArtifactReceipt, type SkillResourceArtifactStore } from "@coding-agent/context";
 import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { ToolRegistry } from "./registry.js";
 import { assertValidInput } from "./schema.js";
 import { DefaultPermissionPolicy, type PermissionPolicy, type PermissionPreset } from "./permissions.js";
@@ -34,6 +36,9 @@ export interface ToolRuntimeOptions {
   readonly terminalManager?: TerminalManager;
   /** Optional per-session override used by the Web work-mode selector. */
   readonly sessionPermissionPresets?: ReadonlyMap<SessionId, PermissionPreset>;
+  /** Enables immutable host-owned snapshots for Skill resource replay. */
+  readonly skillResourceArtifactReplay?: boolean;
+  readonly skillResourceArtifactStore?: SkillResourceArtifactStore;
 }
 
 export interface ExecuteToolInput {
@@ -95,6 +100,7 @@ export class ToolRuntime {
   private readonly interactionExpiryTimers = new Map<InteractionId, NodeJS.Timeout>();
   private readonly activeExclusive = new Map<SessionId, Promise<unknown>>();
   private readonly sessionPermissionPresets = new Map<SessionId, PermissionPreset>();
+  private readonly deferredTenantIds = new Map<ToolCallId, string | undefined>();
 
   constructor(private readonly options: ToolRuntimeOptions) {
     this.policy = options.policy ?? new DefaultPermissionPolicy();
@@ -229,6 +235,7 @@ export class ToolRuntime {
       return this.finishToolResult(input, { toolCallId, status: "denied", result });
     }
     const toolCallId = input.toolCallId ?? brand<string, "ToolCallId">(`tool_${randomUUID()}`);
+    if (input.deferResultEvents) this.deferredTenantIds.set(toolCallId, input.tenantId === undefined ? undefined : String(input.tenantId));
     const caller = input.caller ?? "agent";
     const policy = new DefaultPermissionPolicy({ preset: this.permissionPresetFor(input.sessionId) });
     const evaluation = policy.evaluate(definition);
@@ -455,15 +462,19 @@ export class ToolRuntime {
 
   /** Commits a scheduler-deferred tool result and its diff preview exactly once. */
   async commitDeferredResult(
-    input: Pick<ExecuteToolInput, "sessionId" | "turnId" | "commandId">,
+    input: Pick<ExecuteToolInput, "sessionId" | "turnId" | "commandId"> & { readonly tenantId?: TenantId | string },
     output: ExecuteToolOutput,
   ): Promise<void> {
     if (output.result === undefined || output.status === "awaiting_permission" || output.status === "awaiting_interaction") {
       throw new Error("TOOL_RESULT_COMMIT_INVALID: a deferred tool result must be settled");
     }
-    const durableResult = output.result && output.result.output && typeof output.result.output === "object" && (output.result.output as Record<string, unknown>).skill !== undefined
-      ? { ...output.result, output: (() => { const value = output.result!.output as Record<string, unknown>; const { content: _content, ...rest } = value; return { ...rest, ...(typeof _content === "string" ? { contentBytes: Buffer.byteLength(_content, "utf8") } : {}) }; })() }
-      : output.result;
+    const prior = (await this.options.store.list(input.sessionId)).some((event) => event.type === "tool/result" && event.payload["toolCallId"] === output.toolCallId);
+    if (prior) {
+      this.deferredTenantIds.delete(output.toolCallId);
+      return;
+    }
+    const tenantId = input.tenantId === undefined ? this.deferredTenantIds.get(output.toolCallId) : String(input.tenantId);
+    const durableResult = await this.durableResult(output.result, String(input.sessionId), tenantId);
     await this.options.store.append({
       sessionId: input.sessionId,
       ...(input.turnId === undefined ? {} : { turnId: input.turnId }),
@@ -471,6 +482,7 @@ export class ToolRuntime {
       type: "tool/result",
       payload: { toolCallId: output.toolCallId, status: output.status, result: durableResult },
     });
+    this.deferredTenantIds.delete(output.toolCallId);
     if (output.result.diff !== undefined) {
       await this.options.store.append({
         sessionId: input.sessionId,
@@ -480,6 +492,56 @@ export class ToolRuntime {
         payload: { toolCallId: output.toolCallId, diff: output.result.diff },
       });
     }
+  }
+
+  private async durableResult(result: ToolResult, sessionId: string, tenantId?: string): Promise<ToolResult> {
+    const resource = skillResourceOutput(result.output);
+    if (resource === undefined) return result;
+    const digest = stableDigest(resource.content);
+    const artifactId = skillResourceArtifactId(sessionId, resource.skill, resource.path, digest, resource.offset, resource.limit);
+    const receipt: SkillResourceArtifactReceipt = {
+      kind: "skill-resource",
+      artifactId,
+      skill: resource.skill,
+      path: resource.path,
+      ...(resource.offset === undefined ? {} : { offset: resource.offset }),
+      ...(resource.limit === undefined ? {} : { limit: resource.limit }),
+      sizeBytes: resource.sizeBytes,
+      digest,
+      ...(resource.truncated === undefined ? {} : { truncated: resource.truncated }),
+      ...(resource.mediaType === undefined ? {} : { mediaType: resource.mediaType }),
+      ...(resource.provider === undefined ? {} : { provider: resource.provider }),
+    };
+    let available = false;
+    if (this.options.skillResourceArtifactReplay === true && this.options.skillResourceArtifactStore !== undefined) {
+      try {
+        await this.options.skillResourceArtifactStore.write({ artifactId, sessionId, ...(tenantId === undefined ? {} : { tenantId }), skill: resource.skill, path: resource.path, content: resource.content, ...(resource.mediaType === undefined ? {} : { mediaType: resource.mediaType }), digest });
+        available = true;
+      } catch {
+        available = false;
+      }
+    }
+    const metadata = {
+      skill: resource.skill,
+      path: resource.path,
+      ...(resource.offset === undefined ? {} : { offset: resource.offset }),
+      ...(resource.limit === undefined ? {} : { limit: resource.limit }),
+      sizeBytes: resource.sizeBytes,
+      digest,
+      ...(resource.truncated === undefined ? {} : { truncated: resource.truncated }),
+      ...(resource.mediaType === undefined ? {} : { mediaType: resource.mediaType }),
+      ...(resource.provider === undefined ? {} : { provider: resource.provider }),
+      artifact: receipt,
+      artifactAvailable: available,
+    };
+    const modelView = available ? buildSkillResourceModelView(receipt, resource.content) : buildSkillResourceModelView(receipt);
+    return {
+      ...result,
+      output: metadata,
+      audit: metadata,
+      modelView,
+      ...(result.presentation === undefined ? {} : { presentation: { ...result.presentation, text: modelView, data: metadata } }),
+    };
   }
 
   private async finishToolResult(input: ExecuteToolInput, output: ExecuteToolOutput): Promise<ExecuteToolOutput> {
@@ -596,6 +658,39 @@ export class ToolRuntime {
     });
     this.resolvedInteractions.set(interaction.id, { interactionId: interaction.id, status });
   }
+}
+
+interface SkillResourceOutput {
+  readonly skill: string;
+  readonly path: string;
+  readonly content: string;
+  readonly sizeBytes: number;
+  readonly offset?: number;
+  readonly limit?: number;
+  readonly truncated?: boolean;
+  readonly mediaType?: string;
+  readonly provider?: string;
+}
+
+function skillResourceOutput(value: unknown): SkillResourceOutput | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const item = value as Record<string, unknown>;
+  if (typeof item.skill !== "string" || typeof item.path !== "string" || typeof item.content !== "string" || typeof item.sizeBytes !== "number") return undefined;
+  return {
+    skill: item.skill,
+    path: item.path,
+    content: item.content,
+    sizeBytes: Math.max(0, Math.floor(item.sizeBytes)),
+    ...(typeof item.offset === "number" ? { offset: Math.max(0, Math.floor(item.offset)) } : {}),
+    ...(typeof item.limit === "number" ? { limit: Math.max(1, Math.floor(item.limit)) } : {}),
+    ...(item.truncated === true ? { truncated: true } : {}),
+    ...(typeof item.mediaType === "string" ? { mediaType: item.mediaType } : {}),
+    ...(typeof item.provider === "string" ? { provider: item.provider } : {}),
+  };
+}
+
+function stableDigest(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function errorCodeOf(error: unknown): string | undefined {

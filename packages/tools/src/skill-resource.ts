@@ -1,5 +1,6 @@
 import type { JsonSchema, SkillDefinition, SkillLookupOptions, SkillResourceReadErrorCode, SkillResourceReadResult, ToolDefinition, ToolResult } from "@coding-agent/contracts";
 import { assessSkillPermission, isSkillName, type SkillRegistry, SkillRegistryError } from "@coding-agent/skills";
+import { createHash } from "node:crypto";
 
 const MAX_RESOURCE_LIMIT = 256 * 1024;
 const MAX_RESOURCE_PATH = 4 * 1024;
@@ -66,7 +67,7 @@ export function createSkillResourceTool(skills: SkillRegistry, options: SkillRes
       }
       try {
         const resource = await skills.readResource(rawName, { path: resourcePath, ...(offset === undefined ? {} : { offset }), ...(limit === undefined ? {} : { limit }) }, { ...lookup, signal: context.signal });
-        return resourceResult(rawName, resource);
+        return resourceResult(rawName, resource, offset, limit);
       } catch (error) {
         return registryFailure(error);
       }
@@ -80,12 +81,13 @@ export function createSkillResourceTool(skills: SkillRegistry, options: SkillRes
   };
 }
 
-function resourceResult(skill: string, resource: SkillResourceReadResult): ToolResult {
+function resourceResult(skill: string, resource: SkillResourceReadResult, offset?: number, limit?: number): ToolResult {
   const footer = resource.truncated === true ? "\n\n(Output capped. Use offset=... to continue.)" : "";
   const modelView = `<skill_resource skill=${JSON.stringify(skill)} path=${JSON.stringify(resource.path)}>\n${resource.content}${footer}\n</skill_resource>`;
+  const digest = createHash("sha256").update(resource.content).digest("hex");
   return {
     ok: true,
-    output: { skill, path: resource.path, content: resource.content, sizeBytes: resource.sizeBytes, ...(resource.truncated === true ? { truncated: true } : {}), ...(resource.mediaType === undefined ? {} : { mediaType: resource.mediaType }) },
+    output: { skill, path: resource.path, content: resource.content, sizeBytes: resource.sizeBytes, digest, ...(offset === undefined ? {} : { offset }), ...(limit === undefined ? {} : { limit }), ...(resource.truncated === true ? { truncated: true } : {}), ...(resource.mediaType === undefined ? {} : { mediaType: resource.mediaType }) },
     modelView,
     presentation: { kind: "tool", title: `Skill resource: ${skill}/${resource.path}`, text: modelView, data: { skill, path: resource.path, sizeBytes: resource.sizeBytes, ...(resource.truncated === true ? { truncated: true } : {}) } },
   };
