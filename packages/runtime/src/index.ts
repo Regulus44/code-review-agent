@@ -49,7 +49,7 @@ import type { SkillRegistry } from "@coding-agent/skills";
 import type { PluginRuntime, PluginInventorySnapshot } from "@coding-agent/plugin-runtime";
 import { EchoChatModel, modelFailureMetadata, sanitizeFailureMessage } from "@coding-agent/llm";
 import { compactMessages, DEFAULT_CONTEXT_BUDGET, type ContextBudget } from "@coding-agent/compaction";
-import { applyToolResultArtifactAggregateAsync, applyMicrocompactPass, assembleContext, buildMicrocompactCheckpoint, buildPostCompactMessages, buildProjectMemoryPrompt, buildToolResultModelView, calculateContextWarningState, classifyProviderContextError, compactWithSessionMemory, compactWithSummaryModel, ContextRecoveryGuard, countContextTokens, createSessionMemoryFileWriteGuard, createTokenCounter, createToolResultBudgetState, createToolResultStorage, ensureToolResultPairing, estimateContextTokens, evaluateMicrocompactPressure, extractContextAttachmentIds, fallbackModelContextCapability, fingerprintModelRequest, groupMessagesByApiRound, hydrateToolResultBudgetState, isReactiveContextError, normalizeMessagesForAPI, normalizeExtractionConfig, recallRelevantProjectMemory, renderSkillCatalog, resolveContextBudget, restoreModelViewFromTranscript, selectPostCompactAttachments, SessionMemoryExtractionScheduler, sessionMemoryStats, shouldCompactBeforeRequest, shouldExtractSessionMemory, shouldUseExactTokenCount, truncateProjectMemoryEntrypoint, validateMicrocompactCheckpoint, validateProjectMemoryTopic, type ApiRound, type ContextAssembly, type ContextAttachment, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type PostCompactAttachmentConfig, type PostCompactAttachmentProvider, type ProjectMemoryScope, type ProjectMemoryStore, type ProjectMemoryTopic, type SessionMemoryCompactConfig, type SessionMemoryExtractionConfig, type SessionMemoryExtractionState, type SessionMemoryExtractor, type SessionMemoryStore, type SkillContentRendererVersion, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport, type ToolResultBudgetState, type ToolResultStorage } from "@coding-agent/context";
+import { applyToolResultArtifactAggregateAsync, applyMicrocompactPass, assembleContext, buildMicrocompactCheckpoint, buildPostCompactMessages, buildProjectMemoryPrompt, buildSkillResourceModelView, buildToolResultModelView, calculateContextWarningState, classifyProviderContextError, compactWithSessionMemory, compactWithSummaryModel, ContextRecoveryGuard, countContextTokens, createSessionMemoryFileWriteGuard, createTokenCounter, createToolResultBudgetState, createToolResultStorage, ensureToolResultPairing, estimateContextTokens, evaluateMicrocompactPressure, extractContextAttachmentIds, fallbackModelContextCapability, fingerprintModelRequest, groupMessagesByApiRound, hydrateToolResultBudgetState, isReactiveContextError, normalizeMessagesForAPI, normalizeExtractionConfig, recallRelevantProjectMemory, renderSkillCatalog, resolveContextBudget, restoreModelViewFromTranscript, selectPostCompactAttachments, SessionMemoryExtractionScheduler, sessionMemoryStats, shouldCompactBeforeRequest, shouldExtractSessionMemory, shouldUseExactTokenCount, truncateProjectMemoryEntrypoint, validateMicrocompactCheckpoint, validateProjectMemoryTopic, type ApiRound, type ContextAssembly, type ContextAttachment, type ContextBudgetConfig, type MessageNormalizationReport, type ModelContextView, type PostCompactAttachmentConfig, type PostCompactAttachmentProvider, type ProjectMemoryScope, type ProjectMemoryStore, type ProjectMemoryTopic, type SessionMemoryCompactConfig, type SessionMemoryExtractionConfig, type SessionMemoryExtractionState, type SessionMemoryExtractor, type SessionMemoryStore, type SkillContentRendererVersion, type SkillResourceArtifactReceipt, type SkillResourceArtifactStore, type SummaryCompactConfig, type SummaryRequest, type SummaryResponse, type TokenCount, type ToolPairingReport, type ToolResultBudgetPolicy, type ToolResultBudgetReport, type ToolResultBudgetState, type ToolResultStorage } from "@coding-agent/context";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -94,6 +94,9 @@ export interface AgentHostOptions {
   readonly skillRendererVersion?: SkillContentRendererVersion;
   /** Enables the model-facing Skill-relative resource reader; disabled by default. */
   readonly skillResourceToolEnabled?: boolean;
+  /** Persists Skill resource bodies in host-owned immutable artifacts for replay. */
+  readonly skillResourceArtifactReplay?: boolean;
+  readonly skillResourceArtifactStore?: SkillResourceArtifactStore;
   readonly subagentRuntime?: SubagentRuntime;
   readonly compactionEnabled?: boolean;
   readonly contextBudget?: Partial<ContextBudget>;
@@ -286,6 +289,8 @@ export class AgentHost {
   private readonly messageValidationMode: "repair" | "strict";
   private readonly toolResultBudget: ToolResultBudgetPolicy | undefined;
   private readonly toolResultStorage: ToolResultStorage;
+  private readonly skillResourceArtifactReplay: boolean;
+  private readonly skillResourceArtifactStore: SkillResourceArtifactStore | undefined;
   private readonly sessionMemory: SessionMemoryStore | undefined;
   private readonly sessionMemoryConfigured: boolean;
   private readonly sessionMemoryEnabled: boolean;
@@ -328,6 +333,8 @@ export class AgentHost {
     this.toolResultStorage = options.toolResultStorage ?? createToolResultStorage({
       write: async ({ workspaceRoot, relativePath, content }) => writeToolResultArtifact(workspaceRoot, relativePath, content),
     });
+    this.skillResourceArtifactReplay = options.skillResourceArtifactReplay === true;
+    this.skillResourceArtifactStore = options.skillResourceArtifactStore;
     this.sessionMemoryConfigured = options.sessionMemory !== undefined;
     this.sessionMemoryEnabled = options.sessionMemoryEnabled !== false;
     this.sessionMemory = this.sessionMemoryEnabled ? options.sessionMemory : undefined;
@@ -368,7 +375,7 @@ export class AgentHost {
     if (options.skills !== undefined && options.skillToolEnabled === true && (options.capabilities === undefined || options.capabilities.isEnabled("skill")) && !registry.has("skill")) registry.register(createSkillTool(options.skills, { rendererVersion: options.skillRendererVersion ?? "v2" }));
     if (options.skills !== undefined && options.skillResourceToolEnabled === true && (options.capabilities === undefined || options.capabilities.isEnabled("skill")) && !registry.has("read_skill_resource")) registry.register(createSkillResourceTool(options.skills));
     this.plugins?.bind({ ...(this.skills === undefined ? {} : { skills: this.skills }), tools: registry, prompts: this.toolPromptRegistry });
-    this.toolRuntime = options.toolRuntime ?? new ToolRuntime({ store: options.store, registry, ...(this.terminalManager === undefined ? {} : { terminalManager: this.terminalManager }), ...(options.permissionPreset === undefined ? {} : { policy: new DefaultPermissionPolicy({ preset: options.permissionPreset }) }) });
+    this.toolRuntime = options.toolRuntime ?? new ToolRuntime({ store: options.store, registry, ...(this.terminalManager === undefined ? {} : { terminalManager: this.terminalManager }), ...(options.permissionPreset === undefined ? {} : { policy: new DefaultPermissionPolicy({ preset: options.permissionPreset }) }), skillResourceArtifactReplay: this.skillResourceArtifactReplay, ...(this.skillResourceArtifactStore === undefined ? {} : { skillResourceArtifactStore: this.skillResourceArtifactStore }) });
     this.ready = this.restoreQueuedTurns();
   }
 
@@ -2047,7 +2054,9 @@ export class AgentHost {
         if (typeof rawToolCallId !== "string") continue;
         const rawResult = event.payload["result"];
         const result = rawResult !== undefined ? rawResult as ToolResult : undefined;
-        messages.push({ role: "tool", toolCallId: rawToolCallId, messageId: event.eventId, content: modelToolResult({ toolCallId: brand<string, "ToolCallId">(rawToolCallId), status: event.payload["status"] === "completed" ? "completed" : event.payload["status"] === "cancelled" ? "cancelled" : event.payload["status"] === "denied" ? "denied" : "failed", ...(result === undefined ? {} : { result }) }) });
+        const status = event.payload["status"] === "completed" ? "completed" : event.payload["status"] === "cancelled" ? "cancelled" : event.payload["status"] === "denied" ? "denied" : "failed";
+        const content = await this.modelToolResultFromEvent(sessionId, status, rawToolCallId, result);
+        messages.push({ role: "tool", toolCallId: rawToolCallId, messageId: event.eventId, content });
       } else if (event.type === "context/tool_result_persisted") {
         const replacement = replacementFromPayload(event.payload);
         if (replacement !== undefined) replacements.set(replacement.toolCallId, replacement);
@@ -2076,6 +2085,22 @@ export class AgentHost {
     } catch {
       return false;
     }
+  }
+
+  private async modelToolResultFromEvent(sessionId: SessionId, status: ExecuteToolOutput["status"], toolCallId: string, result: ToolResult | undefined): Promise<string> {
+    const receipt = skillResourceReceipt(result?.output);
+    if (receipt !== undefined) {
+      if (this.skillResourceArtifactReplay && this.skillResourceArtifactStore !== undefined) {
+        try {
+          const stored = await this.skillResourceArtifactStore.read({ artifactId: receipt.artifactId, sessionId: String(sessionId) });
+          if (stored !== undefined && stored.digest === receipt.digest) return buildSkillResourceModelView(receipt, stored.content);
+        } catch {
+          // Replay fails closed below; never reread the current Skill directory.
+        }
+      }
+      return buildSkillResourceModelView(receipt);
+    }
+    return modelToolResult({ toolCallId: brand<string, "ToolCallId">(toolCallId), status, ...(result === undefined ? {} : { result }) });
   }
 
   private async recordSessionRestore(sessionId: SessionId, turnId: TurnId, messages: readonly ChatMessage[]): Promise<void> {
@@ -3819,6 +3844,28 @@ function modelToolResult(output: ExecuteToolOutput, preferCompleteString = false
   if (output.result === undefined) return JSON.stringify({ ok: false, error: { code: `TOOL_${output.status.toUpperCase()}`, message: `Tool ended with status ${output.status}` } });
   const view = preferCompleteString && typeof output.result.output === "string" ? output.result.output : output.result.modelView ?? output.result.output ?? output.result;
   return typeof view === "string" ? view : JSON.stringify(view);
+}
+
+function skillResourceReceipt(value: unknown): SkillResourceArtifactReceipt | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const output = value as Record<string, unknown>;
+  const artifact = output["artifact"];
+  if (typeof output["skill"] !== "string" || typeof output["path"] !== "string" || typeof output["digest"] !== "string" || typeof output["sizeBytes"] !== "number" || typeof artifact !== "object" || artifact === null) return undefined;
+  const receipt = artifact as Record<string, unknown>;
+  if (receipt["kind"] !== "skill-resource" || typeof receipt["artifactId"] !== "string") return undefined;
+  return {
+    kind: "skill-resource",
+    artifactId: receipt["artifactId"],
+    skill: output["skill"],
+    path: output["path"],
+    ...(typeof output["offset"] === "number" ? { offset: Math.max(0, Math.floor(output["offset"] as number)) } : {}),
+    ...(typeof output["limit"] === "number" ? { limit: Math.max(1, Math.floor(output["limit"] as number)) } : {}),
+    sizeBytes: Math.max(0, Math.floor(output["sizeBytes"] as number)),
+    digest: output["digest"],
+    ...(output["truncated"] === true ? { truncated: true } : {}),
+    ...(typeof output["mediaType"] === "string" ? { mediaType: output["mediaType"] } : {}),
+    ...(typeof output["provider"] === "string" ? { provider: output["provider"] } : {}),
+  };
 }
 
 async function writeToolResultArtifact(workspaceRoot: string, relativePath: string, content: string): Promise<"created" | "exists"> {
