@@ -67,6 +67,14 @@ summary/legacy fallback 与连续失败保护，以及 DSH Agent Loop 的 step-l
 - 扩展 receipt 断言，验证 `reductionFingerprint`；新增 ContextRecoveryGuard 混合模块连续失败打开
   circuit breaker 的测试。
 
+### Commit `afba6c1` — 测试编译修复（并行工作树混入说明）
+
+- Slice D 相关文件仅修复 `packages/context/src/summary-compact.test.ts` 的可变数组类型，消除
+  `pnpm typecheck` 的 `readonly ... push` 错误。
+- 该提交创建时工作树中并行 Skill 任务的 staged 内容一并进入 commit（`packages/context/src/index.ts`、
+  `skill-catalog*`、`packages/tools/*`、`pnpm-lock.yaml`）；这些文件不属于 Slice D，已在本日志中明确标注，
+  便于主线程后续按并行任务归档或拆分。
+
 ## 验证
 
 - `pnpm --filter @coding-agent/context test -- --run src/summary-compact.test.ts`（7/7）

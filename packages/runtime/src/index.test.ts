@@ -15,6 +15,38 @@ import { AgentHost } from "./index.js";
 const execFileAsync = promisify(execFile);
 
 describe("AgentHost", () => {
+  it("injects canonical Skill content into the next model step and advertises the resource reader", async () => {
+    const store = new InMemoryEventStore();
+    const skills = new SkillRegistry();
+    skills.register({ name: "review", description: "review", content: "Check $ARGUMENTS", source: "local", trust: "local", resourceBase: { kind: "opaque", description: "fixture" } });
+    const requests: ModelRequest[] = [];
+    const model: ChatModel = {
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
+        requests.push(request);
+        if (request.messages.some((message) => message.role === "tool")) yield { type: "text_delta", text: "skill consumed" };
+        else {
+          yield { type: "tool_call_start", index: 0, id: "call_skill", name: "skill" };
+          yield { type: "tool_call_delta", index: 0, arguments: JSON.stringify({ skill: "review", args: "the diff" }) };
+          yield { type: "tool_call_end", index: 0 };
+        }
+        yield { type: "done" };
+      },
+    };
+    const host = new AgentHost({ store, model, skills, skillToolEnabled: true, skillResourceToolEnabled: true });
+    const session = await host.createSession("D:/skill-renderer-runtime");
+    const turn = await host.sendMessage(session.id, "review the change");
+    await host.waitForTurn(turn);
+    const system = requests[0]?.messages.find((message) => message.role === "system");
+    expect(system?.content).toContain("/review: review");
+    expect(system?.content).toContain("read_skill_resource");
+    const toolMessage = requests[1]?.messages.find((message) => message.role === "tool");
+    const toolOutput = JSON.parse(toolMessage?.content ?? "{}") as { content?: string };
+    expect(toolOutput.content).toContain('<skill_content name="review">');
+    expect(toolOutput.content).toContain("<skill_resources>");
+    expect(toolOutput.content).toContain("Check the diff");
+    expect(toolOutput.content).toContain("<skill_instructions>");
+  });
+
   it("keeps Skill resource tool disabled by default and registers it only when enabled", () => {
     const skills = new SkillRegistry();
     skills.register({ name: "demo", description: "demo", content: "body", source: "local", trust: "local", resourceBase: { kind: "opaque", description: "fixture" } });
