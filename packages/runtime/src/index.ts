@@ -2518,6 +2518,7 @@ export class AgentHost {
     const alreadyClearedToolCallIds = new Set<string>();
     const reportedBudgetToolCallIds = new Set<string>();
     const reportedMicrocompactToolCallIds = new Set<string>();
+    let latestMicrocompactCheckpoint: Awaited<ReturnType<typeof buildMicrocompactCheckpoint>> | undefined;
     // Microcompact is a model-view decision recorded as a receipt rather than
     // a transcript mutation. Hydrate prior receipts so replay/restart rebuilds
     // the same cleared view and does not append duplicate receipts.
@@ -2581,6 +2582,8 @@ export class AgentHost {
         },
       };
       if (microcompactEvaluation.strategy !== "none") {
+        const modelViewFingerprint = fingerprintModelRequest({ messages: beforeView.messages, tools: beforeView.tools });
+        const reductionFingerprint = `${turnId}:${step}:${modelViewFingerprint}`;
         const microcompact = applyMicrocompactPass(beforeView.messages, {
           policy: this.toolResultBudgetWithLegacyFallback(),
           protectedToolCallIds,
@@ -2603,12 +2606,16 @@ export class AgentHost {
             microcompact.report,
             beforeUsage,
             candidateCount.value,
+            reductionFingerprint,
           );
           if (checkpoint === undefined) {
             // Checkpoint failure is non-destructive: preserve the complete view
             // and let proactive/full compaction handle pressure in this step.
             beforeUsage = tokenCount.value;
+            recoveryGuard.recordCompactionFailure("microcompact_checkpoint");
           } else {
+          latestMicrocompactCheckpoint = checkpoint;
+          recoveryGuard.recordCompactionSuccess("microcompact_checkpoint");
           beforeView = { messages: microcompact.messages, ...(prepared.view.tools === undefined ? {} : { tools: prepared.view.tools }) };
           prepared = {
             ...prepared,
@@ -2624,6 +2631,7 @@ export class AgentHost {
             targetTokens: microcompactEvaluation.targetUsageTokens,
             coverage: checkpoint.coveredToolCallIds,
             strategy: microcompactEvaluation.strategy,
+            reductionFingerprint,
           });
           estimate = tokenCounter.estimate(beforeView);
           tokenCount = await countContextTokens(tokenCounter, beforeView, {
@@ -2646,7 +2654,13 @@ export class AgentHost {
           attemptedModules: ["proactive_compact"],
           transitionReason: "proactive_compact",
         });
-        const compacted = await this.compactTurnContext(sessionId, turnId, messages, budgetSnapshot, beforeUsage, beforeState, controller.signal, primaryModel);
+        // Full compaction must consume the post-microcompact model view. This
+        // prevents summary/session-memory reducers from rereading cleared
+        // tool output from the raw transcript.
+        if (latestMicrocompactCheckpoint !== undefined) {
+          messages.splice(0, messages.length, ...beforeView.messages);
+        }
+        const compacted = await this.compactTurnContext(sessionId, turnId, messages, budgetSnapshot, beforeUsage, beforeState, controller.signal, primaryModel, latestMicrocompactCheckpoint);
         if (compacted) {
           recoveryGuard.recordCompactionSuccess("proactive_compact");
           await this.appendContextRecoveryEvent(sessionId, turnId, "context/recovery_succeeded", {
@@ -2751,7 +2765,7 @@ export class AgentHost {
               attemptedModules: recoveryGuard.snapshot().attemptedModules,
               transitionReason: "reactive_compact_retry",
             });
-            const compacted = await this.compactTurnContext(sessionId, turnId, messages, budgetSnapshot, beforeUsage, beforeState, controller.signal, primaryModel);
+            const compacted = await this.compactTurnContext(sessionId, turnId, messages, budgetSnapshot, beforeUsage, beforeState, controller.signal, primaryModel, latestMicrocompactCheckpoint);
             if (compacted) {
               recoveryGuard.recordCompactionSuccess("reactive_compact");
               await this.appendContextRecoveryEvent(sessionId, turnId, "context/recovery_transition", {
@@ -2911,11 +2925,12 @@ export class AgentHost {
     report: ToolResultBudgetReport,
     preCompactTokens: number,
     postCompactTokens: number,
+    reductionFingerprint: string,
   ): Promise<Awaited<ReturnType<typeof buildMicrocompactCheckpoint>> | undefined> {
     const checkpointId = `mc_${turnId}_${step}_${report.newlyClearedToolCallIds.join("_")}`.slice(0, 128);
     try {
       const events = await this.options.store.list(sessionId);
-      const existing = events.find((event) => event.type === "context/microcompact_checkpoint" && event.payload["checkpointId"] === checkpointId);
+      const existing = events.find((event) => (event.type === "context/microcompact_checkpoint" || event.type === "context/microcompacted") && event.payload["reductionFingerprint"] === reductionFingerprint);
       const checkpointOptions = {
         events,
         messages,
@@ -2936,6 +2951,7 @@ export class AgentHost {
           pressureThreshold: report.pressureThreshold,
           targetTokens: report.pressureTargetTokens,
           coverage: checkpoint.coveredToolCallIds,
+          reductionFingerprint,
         },
       });
       return checkpoint;
@@ -2973,6 +2989,7 @@ export class AgentHost {
       readonly targetTokens?: number;
       readonly coverage: readonly string[];
       readonly strategy?: string;
+      readonly reductionFingerprint?: string;
     },
   ): Promise<void> {
     const newlyBoundedToolCallIds = report.boundedToolCallIds.filter((toolCallId) => !reportedToolCallIds.has(toolCallId));
@@ -3009,6 +3026,7 @@ export class AgentHost {
           ...(checkpoint.targetTokens === undefined ? {} : { targetTokens: checkpoint.targetTokens }),
           coverage: checkpoint.coverage,
           ...(checkpoint.strategy === undefined ? {} : { strategy: checkpoint.strategy }),
+          ...(checkpoint.reductionFingerprint === undefined ? {} : { reductionFingerprint: checkpoint.reductionFingerprint }),
         }),
       },
     });
@@ -3038,6 +3056,7 @@ export class AgentHost {
           ...(checkpoint.targetTokens === undefined ? {} : { targetTokens: checkpoint.targetTokens }),
           coverage: checkpoint.coverage,
           ...(checkpoint.strategy === undefined ? {} : { strategy: checkpoint.strategy }),
+          ...(checkpoint.reductionFingerprint === undefined ? {} : { reductionFingerprint: checkpoint.reductionFingerprint }),
         }),
       },
     });
@@ -3052,6 +3071,7 @@ export class AgentHost {
     warningState?: ContextWarningState,
     signal?: AbortSignal,
     turnModel?: ChatModel,
+    microcompactCheckpoint?: Awaited<ReturnType<typeof buildMicrocompactCheckpoint>>,
   ): Promise<boolean> {
     if (!this.compactionEnabled) return false;
     const projection = await this.options.store.project(sessionId);
@@ -3065,7 +3085,7 @@ export class AgentHost {
         await this.rebuildPostCompactView(sessionId, turnId, messages, preCompactMessages, "session_memory", preCompactTokens, projection, protectedToolCallIds);
         return true;
       }
-      const summaryResult = await this.compactWithSummaryModel(sessionId, turnId, messages, protectedToolCallIds, signal, turnModel);
+      const summaryResult = await this.compactWithSummaryModel(sessionId, turnId, messages, protectedToolCallIds, signal, turnModel, microcompactCheckpoint);
       if (summaryResult === true) {
         await this.rebuildPostCompactView(sessionId, turnId, messages, preCompactMessages, "summary", preCompactTokens, projection, protectedToolCallIds);
         return true;
@@ -3321,6 +3341,7 @@ export class AgentHost {
     protectedToolCallIds: ReadonlySet<string>,
     signal?: AbortSignal,
     turnModel?: ChatModel,
+    microcompactCheckpoint?: Awaited<ReturnType<typeof buildMicrocompactCheckpoint>>,
   ): Promise<boolean> {
     const projection = await this.options.store.project(sessionId);
     const tenantId = projection?.ownership?.tenantId;
@@ -3340,6 +3361,10 @@ export class AgentHost {
       runner: (request) => this.runSummaryModel(model, request),
       ...(this.summaryCompact === undefined ? {} : { config: this.summaryCompact }),
       protectedToolCallIds,
+      ...(microcompactCheckpoint === undefined ? {} : {
+        historicalContext: formatMicrocompactCheckpointContext(microcompactCheckpoint),
+        historicalToolCallIds: new Set(microcompactCheckpoint.coveredToolCallIds),
+      }),
       ...(signal === undefined ? {} : { signal }),
     });
     if (result.retries > 0) {
@@ -3957,6 +3982,19 @@ function publicToolResultBudget(
       ...(policy.maxToolResultsPerMessageChars === undefined ? {} : { maxToolResultsPerMessageChars: policy.maxToolResultsPerMessageChars }),
     },
   };
+}
+
+function formatMicrocompactCheckpointContext(checkpoint: Awaited<ReturnType<typeof buildMicrocompactCheckpoint>>): string {
+  const bounded = {
+    primaryRequest: checkpoint.primaryRequest,
+    filesRead: checkpoint.filesRead,
+    filesChanged: checkpoint.filesChanged,
+    verifiedFindings: checkpoint.verifiedFindings,
+    testsRun: checkpoint.testsRun,
+    pendingWork: checkpoint.pendingWork,
+    nextStep: checkpoint.nextStep,
+  };
+  return JSON.stringify(bounded).slice(0, Math.min(checkpoint.maxChars, 8_192));
 }
 
 function mergeToolResultBudgetReports(
