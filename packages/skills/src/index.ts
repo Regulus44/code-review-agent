@@ -9,6 +9,9 @@ import type {
   SkillProviderControl,
   SkillProviderObservation,
   SkillRegistration,
+  SkillResourceReadResult,
+  SkillResourceReadErrorCode,
+  SkillResourceRequest,
   SkillScope,
   SkillSourceTrust,
   SkillSummary,
@@ -134,7 +137,7 @@ export class SkillRegistry {
       for (const [name, entry] of result.winners) winners.set(name, entry);
     }
     const skills = [...winners.values()]
-      .map(({ candidate }) => summaryOf(candidate))
+      .map(({ candidate }) => publicSummaryOf(candidate))
       .sort((left, right) => left.name.localeCompare(right.name));
     return {
       version: 1,
@@ -158,6 +161,35 @@ export class SkillRegistry {
     throwIfAborted(options.signal);
     if (definition === undefined) return undefined;
     return validateDefinition(definition, found.candidate);
+  }
+
+  /**
+   * Read an attached resource through the provider that won resolution for a
+   * Skill name. Providers without resource support fail with a stable error so
+   * callers can distinguish an unsupported capability from a missing file.
+   */
+  async readResource(name: string, request: SkillResourceRequest, options: SkillLookupOptions = {}): Promise<SkillResourceReadResult> {
+    if (!isSkillName(name)) throw new SkillRegistryError("SKILL_NAME_INVALID", `Invalid skill name: ${name}`);
+    validateResourceRequest(request);
+    throwIfAborted(options.signal);
+    const found = await this.resolve(name, options);
+    if (found === undefined) throw new SkillRegistryError("SKILL_RESOURCE_NOT_FOUND", `Skill not found: ${name}`);
+    const readResource = found.provider.readResource;
+    if (readResource === undefined) throw new SkillRegistryError("SKILL_RESOURCE_UNSUPPORTED", `Skill provider does not support resources: ${found.provider.name}`);
+    try {
+      const outcome = await readResource(found.candidate, request, options);
+      throwIfAborted(options.signal);
+      if (!outcome.ok) throw new SkillRegistryError(outcome.error.code, resourceErrorMessage(outcome.error.code));
+      const result = outcome.resource;
+      if (result.path !== request.path || !Number.isFinite(result.sizeBytes) || result.sizeBytes < 0) {
+        throw new SkillRegistryError("SKILL_RESOURCE_FAILED", "Skill provider returned an invalid resource result");
+      }
+      return result;
+    } catch (error) {
+      if (error instanceof SkillRegistryError) throw error;
+      if (isAbort(error, options.signal)) throw error;
+      throw new SkillRegistryError("SKILL_RESOURCE_FAILED", "Skill resource read failed");
+    }
   }
 
   private async resolve(name: string, options: SkillLookupOptions): Promise<IndexedCandidate | undefined> {
@@ -244,6 +276,42 @@ function compareCandidate(left: IndexedCandidate, right: IndexedCandidate): numb
 function summaryOf(candidate: SkillSummary & Partial<Pick<SkillCandidate, "rank" | "locator" | "path" | "metadata">>): SkillSummary {
   const { rank: _rank, locator: _locator, path: _path, metadata: _metadata, ...summary } = candidate;
   return summary;
+}
+
+function publicSummaryOf(candidate: SkillSummary & Partial<Pick<SkillCandidate, "rank" | "locator" | "path" | "metadata">>): SkillSummary {
+  const summary = summaryOf(candidate);
+  return summary.resourceBase === undefined ? summary : { ...summary, resourceBase: publicResourceBase(summary.resourceBase) };
+}
+
+function publicResourceBase(resourceBase: NonNullable<SkillSummary["resourceBase"]>): NonNullable<SkillSummary["resourceBase"]> {
+  // Absolute directory paths are provider-owned handles and must not cross
+  // the catalog/SSE boundary. The loaded definition retains the full base for
+  // model-facing resource reads.
+  if (resourceBase.kind === "directory") return { kind: "opaque", description: "Skill resource directory" };
+  return resourceBase;
+}
+
+function validateResourceRequest(request: SkillResourceRequest): void {
+  if (typeof request.path !== "string" || request.path.trim() === "" || request.path.includes("\0") || request.path.startsWith("/") || request.path.startsWith("\\") || /^[A-Za-z]:[\\/]/u.test(request.path)) {
+    throw new SkillRegistryError("SKILL_RESOURCE_INVALID_PATH", "Skill resource path must be relative");
+  }
+  const segments = request.path.replaceAll("\\", "/").split("/");
+  if (segments.some((segment) => segment === ".." || segment === "" || segment === ".")) {
+    throw new SkillRegistryError("SKILL_RESOURCE_INVALID_PATH", "Skill resource path contains invalid segments");
+  }
+  for (const value of [request.offset, request.limit]) {
+    if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) throw new SkillRegistryError("SKILL_RESOURCE_INVALID_PATH", "Skill resource bounds must be non-negative integers");
+  }
+}
+
+function resourceErrorMessage(code: SkillResourceReadErrorCode): string {
+  switch (code) {
+    case "SKILL_RESOURCE_UNSUPPORTED": return "Skill resource reading is unsupported";
+    case "SKILL_RESOURCE_INVALID_PATH": return "Skill resource path is invalid";
+    case "SKILL_RESOURCE_NOT_FOUND": return "Skill resource was not found";
+    case "SKILL_RESOURCE_TOO_LARGE": return "Skill resource exceeds the read limit";
+    case "SKILL_RESOURCE_FAILED": return "Skill resource read failed";
+  }
 }
 function candidateOf(definition: SkillDefinition): SkillCandidate {
   return { ...summaryOf(definition), rank: RUNTIME_RANK, locator: definition.name, ...(definition.path === undefined ? {} : { path: definition.path }), ...(definition.metadata === undefined ? {} : { metadata: definition.metadata }) };

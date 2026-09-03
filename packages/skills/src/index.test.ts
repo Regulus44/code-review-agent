@@ -49,4 +49,53 @@ describe("SkillRegistry", () => {
     registry.invalidate("filesystem", "project");
     expect(events).toEqual([{ version: 1, revision: 1, reason: "provider-invalidated", provider: "filesystem", scope: "project" }]);
   });
+
+  it("forwards resource reads to the winning provider and preserves scope precedence", async () => {
+    const registry = new SkillRegistry();
+    const global: SkillProvider = {
+      name: "global",
+      list: async () => [candidate("same", "global", 1)],
+      get: async (entry) => ({ ...entry, content: "global" }),
+      readResource: async (_entry, request) => ({ ok: true, resource: { path: request.path, content: "global resource", sizeBytes: 15 } }),
+    };
+    const scoped: SkillProvider = {
+      name: "scoped",
+      list: async () => [candidate("same", "scoped", 1)],
+      get: async (entry) => ({ ...entry, content: "scoped" }),
+      readResource: async (_entry, request) => ({ ok: true, resource: { path: request.path, content: "scoped resource", sizeBytes: 15 } }),
+    };
+    registry.registerProvider(global);
+    registry.registerProvider(scoped, "project");
+    await expect(registry.readResource("same", { path: "references/guide.md" }, { scope: "project" })).resolves.toMatchObject({ content: "scoped resource" });
+  });
+
+  it("returns stable failures when resource support is unavailable or the path is invalid", async () => {
+    const registry = new SkillRegistry();
+    registry.registerProvider({ name: "plain", list: async () => [candidate("plain", "plain", 1)], get: async (entry) => ({ ...entry, content: "body" }) });
+    await expect(registry.readResource("plain", { path: "references/guide.md" })).rejects.toMatchObject({ code: "SKILL_RESOURCE_UNSUPPORTED" });
+    await expect(registry.readResource("plain", { path: "../secret" })).rejects.toMatchObject({ code: "SKILL_RESOURCE_INVALID_PATH" });
+  });
+
+  it("maps provider resource failures without exposing provider error details", async () => {
+    const registry = new SkillRegistry();
+    registry.registerProvider({
+      name: "bounded",
+      list: async () => [candidate("bounded", "bounded", 1)],
+      get: async (entry) => ({ ...entry, content: "body" }),
+      readResource: async () => ({ ok: false, error: { code: "SKILL_RESOURCE_TOO_LARGE" } }),
+    });
+    await expect(registry.readResource("bounded", { path: "references/large.md" })).rejects.toMatchObject({ code: "SKILL_RESOURCE_TOO_LARGE", message: "Skill resource exceeds the read limit" });
+  });
+
+  it("does not expose a directory resource base in the public catalog", async () => {
+    const registry = new SkillRegistry();
+    registry.registerProvider({
+      name: "filesystem",
+      list: async () => [{ ...candidate("safe", "filesystem", 1), resourceBase: { kind: "directory", path: "C:/private/skills/safe" } }],
+      get: async (entry) => ({ ...entry, content: "body" }),
+    });
+    const snapshot = await registry.snapshot();
+    expect(snapshot.skills[0]?.resourceBase).toEqual({ kind: "opaque", description: "Skill resource directory" });
+    expect(JSON.stringify(snapshot)).not.toContain("C:/private/skills/safe");
+  });
 });

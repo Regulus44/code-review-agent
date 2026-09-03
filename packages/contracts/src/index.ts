@@ -1388,6 +1388,40 @@ export type SkillResourceBase =
   | { readonly kind: "url"; readonly url: string }
   | { readonly kind: "opaque"; readonly description: string };
 
+/**
+ * Provider-neutral request for an attached Skill resource. The path is
+ * relative to the winning Skill's resource base; providers remain responsible
+ * for resolving and authorizing it.
+ */
+export interface SkillResourceRequest {
+  readonly path: string;
+  /** Optional byte offset for bounded/chunked reads. */
+  readonly offset?: number;
+  /** Optional maximum number of bytes to return. */
+  readonly limit?: number;
+}
+
+/** Model-visible result returned by a Skill provider resource read. */
+export interface SkillResourceReadResult {
+  readonly path: string;
+  readonly content: string;
+  readonly sizeBytes: number;
+  readonly truncated?: boolean;
+  readonly mediaType?: string;
+}
+
+export type SkillResourceReadErrorCode =
+  | "SKILL_RESOURCE_UNSUPPORTED"
+  | "SKILL_RESOURCE_INVALID_PATH"
+  | "SKILL_RESOURCE_NOT_FOUND"
+  | "SKILL_RESOURCE_TOO_LARGE"
+  | "SKILL_RESOURCE_FAILED";
+
+/** Provider failures are deliberately code-only so host paths/errors stay private. */
+export type SkillResourceReadOutcome =
+  | { readonly ok: true; readonly resource: SkillResourceReadResult }
+  | { readonly ok: false; readonly error: { readonly code: SkillResourceReadErrorCode } };
+
 /** Metadata safe to place in a future bounded model catalog. It contains no body or absolute path. */
 export interface SkillSummary {
   readonly name: string;
@@ -1445,6 +1479,8 @@ export interface SkillProvider {
   readonly name: string;
   readonly list: (options: SkillLookupOptions) => Promise<readonly SkillCandidate[] | SkillProviderObservation>;
   readonly get: (candidate: SkillCandidate, options: SkillLookupOptions) => Promise<SkillDefinition | undefined>;
+  /** Optional provider-owned read of a path relative to a Skill resource base. */
+  readonly readResource?: (candidate: SkillCandidate, request: SkillResourceRequest, options: SkillLookupOptions) => Promise<SkillResourceReadOutcome>;
   /** Optional lifecycle hook for filesystem watchers or remote refresh loops. */
   readonly start?: (control: SkillProviderControl) => void;
 }

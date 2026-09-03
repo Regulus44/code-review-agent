@@ -121,7 +121,7 @@ export class McpSkillProvider implements SkillProvider {
     const cached = this.definitions.get(locator.uri);
     if (cached !== undefined && cached.expiresAt > Date.now()) return cached.definition;
     try {
-      const result = await this.readResource(locator.uri, options.signal);
+      const result = await this.readMcpResource(locator.uri, options.signal);
       const parsed = parseSkillMarkdown(result, this.options.maxDescriptionBytes);
       if (parsed === undefined || !isSkillName(candidate.name)) return undefined;
       const definition: SkillDefinition = {
@@ -167,7 +167,7 @@ export class McpSkillProvider implements SkillProvider {
         if (options.signal?.aborted) throw options.signal.reason ?? new DOMException("Skill lookup aborted", "AbortError");
         if (!this.isAllowed(resource.uri) || !resource.uri.startsWith("skill://")) continue;
         try {
-          const text = await this.readResource(resource.uri, options.signal);
+          const text = await this.readMcpResource(resource.uri, options.signal);
           const parsed = parseSkillMarkdown(text, this.options.maxDescriptionBytes);
           if (parsed === undefined) { complete = false; continue; }
           const name = remoteSkillName(this.options.serverName, resource.uri, parsed.name);
@@ -215,7 +215,7 @@ export class McpSkillProvider implements SkillProvider {
     return { candidates: [...this.lastGood], complete: false };
   }
 
-  private async readResource(uri: string, signal?: AbortSignal): Promise<string> {
+  private async readMcpResource(uri: string, signal?: AbortSignal): Promise<string> {
     if (!this.isAllowed(uri) || !uri.startsWith("skill://")) throw new Error("MCP resource URI is not allowed");
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new DOMException("MCP Skill resource timeout", "TimeoutError")), this.options.timeoutMs);

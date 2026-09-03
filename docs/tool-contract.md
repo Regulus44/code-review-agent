@@ -38,6 +38,8 @@ type ToolDefinition = {
 
 Skill 在 S0 只建立独立的 provider/registry contract，不暴露模型侧 Tool。Skill 的摘要（name、description、invocation、source trust）可用于未来 catalog；正文只能由 registry 按需读取。`allowedTools` 是正向收缩列表，未知 frontmatter 属性和 remote/unknown source 默认进入 `ask`，不能提升宿主 permission preset；provider failure/incomplete 仅返回 bounded metadata。Skill registry 的 cwd、scope 和 AbortSignal 必须由调用方传入，不能从全局隐式推断。
 
+Skill Resource M0 在 provider contract 增加可选 `readResource(candidate, request, options)`，registry 必须沿用名称、scope 和 rank 得到的 winning candidate 后转发读取。旧 provider 未实现该入口时返回 `SKILL_RESOURCE_UNSUPPORTED`；非法绝对路径、空段、`.`/`..` 和非法 byte window 在 registry 边界拒绝。directory `resourceBase.path`、candidate locator/path 和 provider 异常文本属于内部信息，公共 Skill catalog 只能输出脱敏的资源能力描述。M0 尚未注册 `read_skill_resource`，也不定义资源正文的 EventStore/compact/replay 语义。
+
 MCP 工具使用 `mcp__<server>__<tool>` 的稳定 namespace；原始 MCP 名称只用于 wire call，不从 public name 反解析。`source` 只用于 API/Web 展示，执行仍由本地 ToolRuntime 负责。
 
 ## 统一执行流程

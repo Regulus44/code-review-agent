@@ -427,3 +427,13 @@ S5 仅接入宿主显式允许的 MCP server 资源。`@coding-agent/skills-mcp`
 provider 对 resource catalog/body 使用 bounded TTL cache；MCP `notifications/resources/list_changed` 和重连会通过 manager seam 触发失效。资源读取继续追加已有 `mcp/resource` bounded audit，SkillTool 继续追加 `skill/*` bounded metadata；远程正文、绝对地址、凭据和错误文本不进入事件、catalog 或 Web DTO。搜索能力仍为 deferred，不以 stub 宣称已实现。
 
 参考 Claude Code `src/skills/mcpSkills.ts`、`mcpSkillBuilders.ts`、`SkillTool.executeRemoteSkill()` 的 feature gate、skill URI 筛选、cache/invalidation 和远程内容不展开行为；参考 DSH `packages/skill/skill/src/index.ts` 的 `resourceBase` URL/opaque 边界。两者仅作行为参考，本项目仍以 MCP manager、SkillRegistry、ToolRuntime、permission/workspace/tenant contract 为事实来源。回滚方式是删除 provider 注册或关闭 `mcpSkills.enabled`；本地 Skill 和 MCP tools/resources 不受影响。
+
+## ADR-036：Skill 附属资源由胜出 provider 解析，公共 catalog 只暴露脱敏能力
+
+状态：accepted（2026-09-03，Skill Resource M0）
+
+Skill 附属资源沿用现有 scope/rank 决议。调用方先以 Skill 名称解析 winning candidate，再由该 candidate 所属 provider 的可选 `readResource(candidate, request, options)` 读取相对资源；registry 不从 catalog 摘要、`path` 或 `resourceBase.path` 重新拼接宿主路径。旧 provider 可以只实现 `list()`/`get()`，Skill 正文继续可用；资源读取稳定返回 `SKILL_RESOURCE_UNSUPPORTED`。无 Skill/资源、非法相对路径和 provider 失败分别使用 bounded registry error，不透传 provider 异常文本。
+
+`SkillCandidate.locator`、`path` 和 directory `resourceBase.path` 属于 provider-owned 内部身份。`SkillDefinition` 可以在进程内保留完整资源基址供后续受控读取，`SkillCatalogSnapshot` 对 directory base 只投影为 opaque “Skill resource directory”，不得进入 API、SSE 或事件。M0 不新增模型工具、filesystem 资源读取、watcher、脚本执行或资源正文持久化；这些能力必须继续经过 ToolRuntime、permission、workspace、tenant、事件和回放设计。
+
+该决策借鉴 DSH `SkillResourceBase` 与 candidate/provider 调用顺序并按本项目 contracts 改写；Claude Code 的 `skillRoot` 仅作行为参考。本次没有复制上游源码。回滚时移除 `SkillProvider.readResource` 和 `SkillRegistry.readResource`，旧 `get()` 与 catalog 行为仍保持可用。
