@@ -15,6 +15,19 @@ import { AgentHost } from "./index.js";
 const execFileAsync = promisify(execFile);
 
 describe("AgentHost", () => {
+  it("invalidates the Skill catalog only for project Skill roots and SKILL.md", async () => {
+    const skills = new SkillRegistry();
+    const host = new AgentHost({ store: new InMemoryEventStore(), skills });
+    const events: Array<{ readonly type: string; readonly payload: Readonly<Record<string, unknown>> }> = [];
+    const notify = (host as unknown as { notifySkillWorkspaceMutation: (context: unknown, paths: readonly string[]) => Promise<void> }).notifySkillWorkspaceMutation.bind(host);
+    const context = { sessionId: brand<string, "SessionId">("ses-skill-watch"), workspaceRoot: "D:/workspace", appendEvent: async (type: string, payload: Readonly<Record<string, unknown>>) => { events.push({ type, payload }); } };
+    await notify(context, ["src/index.ts", ".claude/skills/review/references/checklist.md"]);
+    expect(events).toHaveLength(0);
+    await notify(context, ["src/index.ts", ".claude/skills/review/SKILL.md", ".claude/skills/new-skill"]);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.payload).toMatchObject({ reason: "workspace-mutation", pathCount: 2, paths: [".claude/skills/new-skill", ".claude/skills/review/SKILL.md"] });
+  });
+
   it("injects canonical Skill content into the next model step and advertises the resource reader", async () => {
     const store = new InMemoryEventStore();
     const skills = new SkillRegistry();

@@ -387,17 +387,18 @@ export class AgentHost {
       const relative = path.relative(root, absolute).replaceAll("\\", "/");
       return relative === "" || relative.startsWith("..") || path.isAbsolute(relative) ? "" : relative.slice(0, 512);
     }).filter(Boolean))].sort().slice(0, 32);
-    if (bounded.length === 0) return;
+    const catalogPaths = bounded.filter(isSkillCatalogPath);
+    if (catalogPaths.length === 0) return;
     const now = Date.now();
     for (const [seenKey, seenAt] of this.skillInvalidationSeen) {
       if (now - seenAt >= 30_000) this.skillInvalidationSeen.delete(seenKey);
     }
-    const key = `${String(context.sessionId)}:${root}:${bounded.join("|")}`;
+    const key = `${String(context.sessionId)}:${root}:${catalogPaths.join("|")}`;
     const previous = this.skillInvalidationSeen.get(key);
     if (previous !== undefined && now - previous < 250) return;
     this.skillInvalidationSeen.set(key, now);
     const revision = this.skills.invalidate("filesystem");
-    await context.appendEvent("skills/change", { version: 1, revision, reason: "workspace-mutation", pathCount: bounded.length, paths: bounded });
+    await context.appendEvent("skills/change", { version: 1, revision, reason: "workspace-mutation", pathCount: catalogPaths.length, paths: catalogPaths });
   }
 
   /** Replaces the model used for turns that have not started yet. */
@@ -4298,6 +4299,16 @@ function shouldIgnoreProjectMemory(query: string): boolean {
 
 function boundedError(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).replace(/[\r\n]+/gu, " ").slice(0, 160);
+}
+
+/** Workspace mutations only invalidate catalog files, never Skill package resources. */
+function isSkillCatalogPath(value: string): boolean {
+  const normalized = value.replaceAll("\\", "/");
+  const segments = normalized.split("/");
+  if (segments.length < 2 || segments[0] !== ".claude" || segments[1] !== "skills") return false;
+  if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) return false;
+  if (segments.length === 2) return true;
+  return segments.length === 3 || (segments.length === 4 && segments[3] === "SKILL.md");
 }
 
 function replayJobCommand(jobId: string, result: unknown): ToolResult {
