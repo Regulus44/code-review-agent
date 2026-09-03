@@ -73,6 +73,7 @@ export {
 } from "./attachments.js";
 export { buildPostCompactMessages } from "./post-compact.js";
 export { restoreModelViewFromTranscript } from "./transcript-replay.js";
+export { buildMicrocompactCheckpoint, validateMicrocompactCheckpoint, DEFAULT_MICROCOMPACT_CHECKPOINT_MAX_CHARS, MICROCOMPACT_CHECKPOINT_ALGORITHM } from "./microcompact-checkpoint.js";
 export {
   buildProjectMemoryPrompt,
   buildProjectMemoryRecallCandidates,
@@ -149,6 +150,7 @@ export type {
   MicrocompactStrategy,
   ApplyMicrocompactOptions,
 } from "./tool-result-budget.js";
+export type { BuildMicrocompactCheckpointOptions, MicrocompactCheckpoint } from "./microcompact-checkpoint.js";
 export type {
   ToolResultStorage,
   ToolResultStorageConfig,

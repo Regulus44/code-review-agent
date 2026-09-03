@@ -41,6 +41,7 @@ export interface ToolResultBudgetPolicy {
   readonly keepRecentResults?: number;
   /** Fraction of the pressure threshold allocated to the newest token tail. */
   readonly retainRecentResultsRatio?: number;
+  readonly microcompactCheckpointMaxChars?: number;
   /** Enables Claude Code-style age-based microcompact. Defaults to false. */
   readonly timeBasedMicrocompactEnabled?: boolean;
   /** Age of the oldest eligible result that activates time-based microcompact. */
@@ -146,6 +147,7 @@ interface NormalizedPolicy {
   readonly microcompactTargetHysteresisTokens: number;
   readonly keepRecentResults: number;
   readonly retainRecentResultsRatio: number;
+  readonly microcompactCheckpointMaxChars: number;
   readonly timeBasedMicrocompactEnabled: boolean;
   readonly timeBasedGapMs: number;
   readonly maxToolResultsPerMessageChars: number;
@@ -644,6 +646,7 @@ function withoutMicrocompact(policy: NormalizedPolicy): ToolResultBudgetPolicy {
     microcompactTriggerTokens: Number.MAX_SAFE_INTEGER,
     keepRecentResults: Number.MAX_SAFE_INTEGER,
     retainRecentResultsRatio: policy.retainRecentResultsRatio,
+    microcompactCheckpointMaxChars: policy.microcompactCheckpointMaxChars,
     timeBasedMicrocompactEnabled: false,
     timeBasedGapMs: policy.timeBasedGapMs,
     maxToolResultsPerMessageChars: policy.maxToolResultsPerMessageChars,
@@ -663,6 +666,7 @@ function normalizePolicy(policy: ToolResultBudgetPolicy | undefined): Normalized
     microcompactTargetHysteresisTokens: nonNegative(policy?.microcompactTargetHysteresisTokens, 8_000),
     keepRecentResults: nonNegative(policy?.keepRecentResults, 5),
     retainRecentResultsRatio: ratio(policy?.retainRecentResultsRatio, 0.16),
+    microcompactCheckpointMaxChars: positive(policy?.microcompactCheckpointMaxChars, 8_192),
     timeBasedMicrocompactEnabled: policy?.timeBasedMicrocompactEnabled === true,
     timeBasedGapMs: positive(policy?.timeBasedGapMs, 60 * 60_000),
     maxToolResultsPerMessageChars: positive(policy?.maxToolResultsPerMessageChars, DEFAULT_MAX_TOOL_RESULTS_PER_MESSAGE_CHARS),

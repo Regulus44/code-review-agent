@@ -58,6 +58,8 @@ export type AgentEventType =
   | "context/tool_pairing_repaired"
   | "context/tool_results_budgeted"
   | "context/tool_result_persisted"
+  | "context/microcompact_checkpoint"
+  | "context/microcompact_checkpoint_failed"
   | "context/microcompacted"
   | "context/session_memory_compacted"
   | "context/session_memory_compaction_failed"
@@ -127,7 +129,7 @@ export const AGENT_EVENT_TYPES: readonly AgentEventType[] = [
   "subagent/descriptor", "subagent/start", "subagent/end", "subagent/inbox", "subagent/settlement",
   "goal/created", "goal/updated", "goal/ended", "plan/updated", "todo/updated",
   "context/compacted", "context/compaction_failed", "context/messages_normalized", "context/tool_pairing_repaired",
-  "context/tool_results_budgeted", "context/tool_result_persisted", "context/microcompacted", "context/session_memory_compacted",
+  "context/tool_results_budgeted", "context/tool_result_persisted", "context/microcompact_checkpoint", "context/microcompact_checkpoint_failed", "context/microcompacted", "context/session_memory_compacted",
   "context/session_memory_compaction_failed", "context/session_memory_extraction_started",
   "context/session_memory_extraction_completed", "context/session_memory_extraction_failed",
   "context/session_memory_extraction_cancelled", "context/project_memory_loaded", "context/project_memory_recalled",
@@ -650,6 +652,7 @@ export interface SessionProjection extends SessionSummary {
   readonly contextSessionMemory?: ContextSessionMemoryProjection;
   readonly contextProjectMemory?: ContextProjectMemoryProjection;
   readonly contextDiagnostics?: ContextDiagnosticsProjection;
+  readonly contextMicrocompactCheckpoint?: ContextMicrocompactCheckpointProjection;
   readonly contextRecovery?: ContextRecoveryProjection;
   readonly contextTranscript?: ContextTranscriptSegment;
   readonly contextRestore?: ContextSessionRestoreProjection;
@@ -791,6 +794,32 @@ export interface ContextToolResultBudgetProjection {
   readonly lastSequence: number;
 }
 
+export interface ContextMicrocompactCheckpointProjection {
+  readonly version: 1;
+  readonly checkpointId: string;
+  readonly sourceSequenceStart: number;
+  readonly sourceSequenceEnd: number;
+  readonly coveredToolCallIds: readonly string[];
+  readonly generatedBy: "deterministic" | "summary-model";
+  readonly algorithmVersion: "pressure-v2.m1";
+  readonly primaryRequest: string;
+  readonly filesRead: readonly string[];
+  readonly filesChanged: readonly string[];
+  readonly verifiedFindings: readonly string[];
+  readonly testsRun: readonly string[];
+  readonly pendingWork: readonly string[];
+  readonly nextStep: string;
+  readonly maxChars: number;
+  readonly sourceSequence: number;
+}
+
+export interface ContextMicrocompactCheckpointFailureProjection {
+  readonly stage: "extract" | "validate" | "persist";
+  readonly errorCode: string;
+  readonly preservedModelView: true;
+  readonly sourceSequence: number;
+}
+
 export interface ContextDiagnosticRecovery {
   readonly status: "started" | "transition" | "succeeded" | "failed" | "circuit_open";
   readonly attempt: number;
@@ -818,6 +847,8 @@ export interface ContextDiagnosticsProjection {
   readonly lastRequestId?: string;
   readonly breakdown?: Readonly<Record<string, number>>;
   readonly lastToolResultBudget?: ContextToolResultBudgetProjection;
+  readonly lastMicrocompactCheckpoint?: ContextMicrocompactCheckpointProjection;
+  readonly lastMicrocompactCheckpointFailure?: ContextMicrocompactCheckpointFailureProjection;
   readonly lastCompaction?: {
     readonly status: "completed" | "failed";
     readonly kind?: "legacy" | "session_memory" | "summary" | "micro";
