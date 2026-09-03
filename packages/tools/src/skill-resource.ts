@@ -45,7 +45,7 @@ export function createSkillResourceTool(skills: SkillRegistry, options: SkillRes
       }
       if (offset !== undefined && (!Number.isSafeInteger(offset) || offset < 0)) return failure("SKILL_RESOURCE_INVALID_PATH", "Resource offset must be a non-negative integer.");
       if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_RESOURCE_LIMIT)) return failure("SKILL_RESOURCE_INVALID_PATH", "Resource limit is outside the supported bounds.");
-      const lookup: SkillLookupOptions = { cwd: context.workspaceRoot };
+      const lookup: SkillLookupOptions = { cwd: context.workspaceRoot, ...(context.tenantId === undefined ? {} : { tenantId: context.tenantId }) };
       let definition: SkillDefinition | undefined;
       try {
         definition = await skills.get(rawName, { ...lookup, signal: context.signal });

@@ -426,6 +426,7 @@ export class ToolRuntime {
         const result = await definition.execute(request.input, {
           sessionId: request.sessionId,
           ...(request.turnId === undefined ? {} : { turnId: request.turnId }),
+          ...(request.tenantId === undefined ? {} : { tenantId: request.tenantId as TenantId }),
           toolCallId,
           workspaceRoot: request.workspaceRoot,
           permissionPreset: this.permissionPresetFor(request.sessionId),

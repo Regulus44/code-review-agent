@@ -98,4 +98,19 @@ describe("SkillRegistry", () => {
     expect(snapshot.skills[0]?.resourceBase).toEqual({ kind: "opaque", description: "Skill resource directory" });
     expect(JSON.stringify(snapshot)).not.toContain("C:/private/skills/safe");
   });
+
+  it("hides tenant-owned providers outside their host-derived tenant scope", async () => {
+    const registry = new SkillRegistry();
+    registry.registerProvider({
+      name: "tenant-a",
+      tenantId: "tenant-a",
+      list: async () => [candidate("tenant-only", "tenant-a", 1)],
+      get: async (entry) => ({ ...entry, content: "tenant a body" }),
+      readResource: async (_entry, request) => ({ ok: true, resource: { path: request.path, content: "tenant a resource", sizeBytes: 17 } }),
+    });
+    expect((await registry.list({ tenantId: "tenant-a" })).map((item) => item.name)).toEqual(["tenant-only"]);
+    expect(await registry.list({ tenantId: "tenant-b" })).toEqual([]);
+    await expect(registry.readResource("tenant-only", { path: "references/private.md" }, { tenantId: "tenant-b" })).rejects.toMatchObject({ code: "SKILL_RESOURCE_NOT_FOUND" });
+    await expect(registry.readResource("tenant-only", { path: "references/private.md" })).rejects.toMatchObject({ code: "SKILL_RESOURCE_NOT_FOUND" });
+  });
 });

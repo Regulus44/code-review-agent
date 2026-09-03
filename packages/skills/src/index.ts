@@ -213,6 +213,7 @@ export class SkillRegistry {
     }
     let complete = true;
     for (const { provider, order } of layer.providers.values()) {
+      if (!providerVisibleForTenant(provider, options.tenantId)) continue;
       try {
         const raw = await provider.list(options);
         throwIfAborted(options.signal);
@@ -321,6 +322,12 @@ function runtimeProvider(definition: SkillDefinition): SkillProvider {
 }
 function validateProvider(provider: SkillProvider): void {
   if (provider.name.trim() === "") throw new SkillRegistryError("SKILL_PROVIDER_INVALID", "Skill provider name is required");
+  if (provider.tenantId !== undefined && String(provider.tenantId).trim() === "") throw new SkillRegistryError("SKILL_PROVIDER_INVALID", "Skill provider tenant scope is invalid");
+}
+
+function providerVisibleForTenant(provider: SkillProvider, tenantId: string | undefined): boolean {
+  if (provider.tenantId === undefined) return true;
+  return tenantId !== undefined && String(provider.tenantId) === String(tenantId);
 }
 function validateCandidate(candidate: SkillCandidate, provider: string): void {
   if (!isSkillName(candidate.name)) throw new SkillRegistryError("SKILL_NAME_INVALID", `Invalid skill name: ${candidate.name}`);

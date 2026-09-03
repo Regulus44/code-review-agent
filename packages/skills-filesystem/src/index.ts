@@ -19,6 +19,8 @@ export interface SkillFilesystemLimits {
 }
 export interface SkillFilesystemProviderOptions {
   readonly roots: readonly SkillFilesystemRoot[];
+  /** Optional tenant owner. Tenant-owned roots are hidden from other tenants. */
+  readonly tenantId?: string;
   readonly limits?: SkillFilesystemLimits;
   readonly watch?: boolean;
   readonly sourceName?: string;
@@ -35,6 +37,7 @@ type Entry = { readonly candidate: SkillCandidate; readonly filePath: string; re
 /** Read-only local SKILL.md provider. Discovery is bounded; bodies are loaded only by get(). */
 export class FileSystemSkillProvider implements SkillProvider {
   readonly name: string;
+  readonly tenantId?: string;
   private readonly limits: Required<SkillFilesystemLimits>;
   private readonly roots: readonly SkillFilesystemRoot[];
   private readonly lastGoodByContext = new Map<string, Map<string, Entry>>();
@@ -51,6 +54,7 @@ export class FileSystemSkillProvider implements SkillProvider {
 
   constructor(options: SkillFilesystemProviderOptions) {
     this.name = options.sourceName ?? "filesystem";
+    if (options.tenantId !== undefined) this.tenantId = options.tenantId;
     this.limits = { ...DEFAULT_LIMITS, ...(options.limits ?? {}) };
     this.roots = options.roots.map((root) => ({ ...root, path: path.resolve(root.path) }));
     this.watchEnabled = options.watch === true;

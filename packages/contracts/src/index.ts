@@ -1147,6 +1147,8 @@ export interface ToolResult {
 export interface ToolContext {
   readonly sessionId: SessionId;
   readonly turnId?: TurnId;
+  /** Host-derived tenant scope; tools must not accept a caller-supplied override. */
+  readonly tenantId?: TenantId;
   readonly toolCallId: ToolCallId;
   readonly workspaceRoot: string;
   /** Active session permission preset, used by workspace-scoped execution guards. */
@@ -1518,6 +1520,8 @@ export type SkillRegistration = Omit<SkillDefinition, "provider" | "invocation" 
 /** Cwd and cancellation are passed through without making provider state durable. */
 export interface SkillLookupOptions {
   readonly cwd?: string;
+  /** Optional host-derived tenant scope used to filter tenant-owned providers. */
+  readonly tenantId?: TenantId | string;
   /** Optional workspace-relative paths used for conditional `paths` activation. */
   readonly paths?: readonly string[];
   readonly signal?: AbortSignal;
@@ -1537,6 +1541,8 @@ export interface SkillProviderControl {
 
 export interface SkillProvider {
   readonly name: string;
+  /** Optional owner scope. Providers with an owner are hidden from other tenants. */
+  readonly tenantId?: TenantId | string;
   readonly list: (options: SkillLookupOptions) => Promise<readonly SkillCandidate[] | SkillProviderObservation>;
   readonly get: (candidate: SkillCandidate, options: SkillLookupOptions) => Promise<SkillDefinition | undefined>;
   /** Optional provider-owned read of a path relative to a Skill resource base. */

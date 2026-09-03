@@ -66,6 +66,7 @@ interface ParsedSkill {
  */
 export class McpSkillProvider implements SkillProvider {
   readonly name: string;
+  readonly tenantId?: string;
   private readonly options: ProviderOptions;
   private control: SkillProviderControl | undefined;
   private unsubscribeResources: (() => void) | undefined;
@@ -89,6 +90,7 @@ export class McpSkillProvider implements SkillProvider {
       rank: boundedPositive(options.rank, 125, -1_000_000, 1_000_000),
     };
     this.name = `mcp:${options.serverName}`;
+    if (options.tenantId !== undefined) this.tenantId = options.tenantId;
   }
 
   start(control: SkillProviderControl): void {
