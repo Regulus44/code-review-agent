@@ -465,3 +465,32 @@ tenant contract 重新实现，没有复制上游代码。
 
 回滚时将 `microcompactTriggerMode` 设为 `legacy-count` 或 `disabled`；新增 checkpoint 和
 failure 事件保留为可忽略扩展，旧 model view、原始 tool/result 与 replacement receipt 不删除。
+
+## ADR-038：Slice D Microcompact 与全量 compact 的收束和恢复联动
+
+状态：accepted（2026-09-03，Microcompact Slice D）
+
+Slice D 将 Pressure-V2 microcompact 视为请求前 reduction，而不是终态压缩。每次成功
+microcompact 后必须对新的 model-visible view 重新计数：低于 `autoCompactThreshold` 时继续
+当前 step；仍高于阈值时在同一 step 进入既有 Session Memory → summary → legacy 全量 compact
+阶梯。全量 compact 成功后重新组装并计数，失败保留当前 view，并由同一
+`ContextRecoveryGuard` 记录连续失败；达到 circuit-breaker 上限后停止继续自动 compact，
+但不改变 turn 的最终状态分类。
+
+summary compact 可以接收来自最近 microcompact checkpoint 的 bounded historical context。
+该上下文只作为历史背景注入 summary request，避免 summary agent 再从已被替换的工具结果中
+重复读取同一证据；不保存完整工具输出、prompt 或 provider body，也不新增第二套 transcript。
+
+Runtime 以 `turnId + step + modelViewFingerprint` 作为 reduction 幂等键。相同键已存在成功
+checkpoint/receipt 时复用既有 model view，不重复生成 checkpoint、`context/tool_results_budgeted`
+或 `context/microcompacted`。失败事件仍可重试，但不在失败时改变 model view。该键仅用于当前
+EventStore session 范围，跨 turn 不共享。
+
+本 ADR 只复用已有事件和 recovery contract，不新增公共事件类型；新增的 summary historical
+context 与 reduction fingerprint 作为 bounded 内部参数和诊断字段，旧 Runtime 可忽略。参考
+Claude Code `src/query.ts` 的 microcompact → autoCompact 顺序及 compact failure circuit
+breaker，参考 DSH Agent Loop 的 step-local retry/replay 边界；本项目按既有 EventStore、
+Session Memory、summary 和 boundary helper 重新实现。
+
+回滚时关闭 `compactionEnabled` 或将 microcompact trigger 设为 `legacy-count`/`disabled`，
+即可恢复 Slice C 的单步行为；已写 receipt、checkpoint 和 recovery 事件继续作为兼容历史保留。

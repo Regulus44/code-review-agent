@@ -135,6 +135,15 @@ preservedModelView: true }`。字段均为 bounded metadata，不得包含完整
 重建相同 view；相同 turn/step/fingerprint 不得重复追加 checkpoint。Storage projection 只暴露
 最近一份 checkpoint/failure 的 bounded metadata。
 
+Slice D 约束 reduction 收束：成功 `context/microcompacted` 后 Runtime 必须重新计算
+model-visible token usage；若仍超过 `autoCompactThreshold`，同一 step 按既有
+Session Memory → summary → legacy 顺序尝试全量 compact。summary 可消费 checkpoint 的
+bounded historical context，但该字段不包含完整工具输出、provider request 或 secret。
+相同 `turnId + step + modelViewFingerprint` 的成功 reduction 只产生一组 checkpoint/budget/
+microcompact receipt；重复执行复用既有事件结果。连续 checkpoint、summary 或全量 compact
+失败统一计入 ContextRecoveryGuard circuit breaker，失败路径保留当前 model view，且不得
+改变主 turn 的终态分类。
+
 M13 事件和 projection 不得保存完整 prompt、transcript、工具原文、provider response body、credential、header 或 secret。旧事件缺少 diagnostics 时，客户端可以使用明确标记为 estimate 的兼容 ContextMeter；不能把本地估算冒充 provider usage。
 
 M14 当前只暴露 `ContextCollapseCapability` 元数据，不追加 `context/collapse_*` 事件。capability 包含 version、enabled、`deferred/unavailable` status、bounded reason，以及 read-time projection、background collapse、overflow drain、snip 四项布尔 feature；不包含 prompt、transcript、工具结果、provider body、凭据或 workspace 内容。`deferred` 表示 Claude Code 集成点已识别但本地快照核心仍为 stub，`unavailable` 表示 host 没有暴露 capability。完整 collapse 事件只有在独立 ADR 接受算法和 replay contract 后才允许新增。
