@@ -1,3 +1,4 @@
+import { watch as fsWatch, type FSWatcher } from "node:fs";
 import { lstat, open, readdir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -13,6 +14,8 @@ export interface SkillFilesystemLimits {
   readonly maxDepth?: number;
   readonly maxSkills?: number;
   readonly maxDescriptionBytes?: number;
+  /** Upper bound for directories registered with the best-effort watcher. */
+  readonly maxWatchDirectories?: number;
 }
 export interface SkillFilesystemProviderOptions {
   readonly roots: readonly SkillFilesystemRoot[];
@@ -21,7 +24,7 @@ export interface SkillFilesystemProviderOptions {
   readonly sourceName?: string;
 }
 
-const DEFAULT_LIMITS: Required<SkillFilesystemLimits> = { maxFileBytes: 256 * 1024, maxResourceBytes: 256 * 1024, maxResourcePathBytes: 4 * 1024, maxDepth: 6, maxSkills: 256, maxDescriptionBytes: 2048 };
+const DEFAULT_LIMITS: Required<SkillFilesystemLimits> = { maxFileBytes: 256 * 1024, maxResourceBytes: 256 * 1024, maxResourcePathBytes: 4 * 1024, maxDepth: 6, maxSkills: 256, maxDescriptionBytes: 2048, maxWatchDirectories: 512 };
 const DEFAULT_RANK: Record<SkillFilesystemRootKind, number> = { project: 100, custom: 150, user: 200, bundled: 300 };
 const FRONTMATTER_KEYS = new Set(["name", "description", "when_to_use", "whenToUse", "model_invocable", "modelInvocable", "disable-model-invocation", "user_invocable", "userInvocable", "user-invocable", "allowed-tools", "allowedTools", "context", "version", "agent", "paths"]);
 
@@ -35,6 +38,13 @@ export class FileSystemSkillProvider implements SkillProvider {
   private readonly limits: Required<SkillFilesystemLimits>;
   private readonly roots: readonly SkillFilesystemRoot[];
   private readonly lastGoodByContext = new Map<string, Map<string, Entry>>();
+  private readonly watchEnabled: boolean;
+  private readonly watchers = new Map<string, FSWatcher>();
+  private readonly watchRoles = new Map<string, "tree" | "skill">();
+  private watchSyncPromise: Promise<void> | undefined;
+  private watchRetryTimer: ReturnType<typeof setTimeout> | undefined;
+  private watchDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+  private watchIncomplete = false;
   private refreshPromise: Promise<SkillProviderObservation> | undefined;
   private control: SkillProviderControl | undefined;
 
@@ -42,7 +52,7 @@ export class FileSystemSkillProvider implements SkillProvider {
     this.name = options.sourceName ?? "filesystem";
     this.limits = { ...DEFAULT_LIMITS, ...(options.limits ?? {}) };
     this.roots = options.roots.map((root) => ({ ...root, path: path.resolve(root.path) }));
-    // Watchers are intentionally opt-in. A portable refresh remains the source of truth.
+    this.watchEnabled = options.watch === true;
   }
 
   /** Explicitly rescan roots; callers may use this at turn boundaries. */
@@ -126,7 +136,119 @@ export class FileSystemSkillProvider implements SkillProvider {
     }
   }
 
-  start(control: SkillProviderControl): void { this.control = control; }
+  start(control: SkillProviderControl): void {
+    this.control = control;
+    if (!this.watchEnabled) return;
+    control.signal.addEventListener("abort", () => this.disposeWatchers(), { once: true });
+    void this.syncWatchers();
+  }
+
+  /** Explicitly close best-effort watchers; registry unregister also closes them via the control signal. */
+  dispose(): void { this.disposeWatchers(); }
+
+  private disposeWatchers(): void {
+    if (this.watchDebounceTimer !== undefined) clearTimeout(this.watchDebounceTimer);
+    if (this.watchRetryTimer !== undefined) clearTimeout(this.watchRetryTimer);
+    this.watchDebounceTimer = undefined;
+    this.watchRetryTimer = undefined;
+    for (const watcher of this.watchers.values()) watcher.close();
+    this.watchers.clear();
+    this.watchRoles.clear();
+  }
+
+  private async syncWatchers(): Promise<void> {
+    if (!this.watchEnabled || this.control?.signal.aborted) return;
+    if (this.watchSyncPromise !== undefined) return this.watchSyncPromise;
+    this.watchSyncPromise = (async () => {
+      const desired = new Map<string, "tree" | "skill">();
+      let complete = true;
+      for (const root of this.roots) complete = await this.collectWatchDirectories(root.path, 0, desired) && complete;
+      for (const [key, watcher] of this.watchers) {
+        if (desired.has(key)) continue;
+        watcher.close();
+        this.watchers.delete(key);
+      }
+      this.watchRoles.clear();
+      for (const [key, role] of desired) {
+        this.watchRoles.set(key, role);
+        if (!this.watchers.has(key) && !this.attachWatcher(key)) complete = false;
+      }
+      this.watchIncomplete = !complete;
+      if (!complete) this.scheduleWatchRetry();
+    })().finally(() => { this.watchSyncPromise = undefined; });
+    return this.watchSyncPromise;
+  }
+
+  private async collectWatchDirectories(directory: string, depth: number, out: Map<string, "tree" | "skill">): Promise<boolean> {
+    if (out.size >= this.limits.maxWatchDirectories) return false;
+    try {
+      const info = await lstat(directory);
+      if (!info.isDirectory() || info.isSymbolicLink()) return false;
+      const canonical = await realpath(directory);
+      if (!samePath(canonical, directory)) return false;
+      const items = await readdir(directory, { withFileTypes: true });
+      const hasSkillFile = items.some((item) => item.name === "SKILL.md" && item.isFile());
+      const key = pathKey(canonical);
+      out.set(key, hasSkillFile ? "skill" : "tree");
+      if (hasSkillFile || depth >= this.limits.maxDepth) return true;
+      let complete = true;
+      for (const item of items) {
+        if (!item.isDirectory() || item.isSymbolicLink() || item.name === ".git" || item.name === "node_modules") continue;
+        if (out.size >= this.limits.maxWatchDirectories) { complete = false; break; }
+        complete = await this.collectWatchDirectories(path.join(canonical, item.name), depth + 1, out) && complete;
+      }
+      return complete;
+    } catch {
+      return false;
+    }
+  }
+
+  private attachWatcher(directory: string): boolean {
+    try {
+      const watcher = fsWatch(directory, { persistent: false }, (eventType, filename) => this.handleWatchEvent(directory, eventType, filename));
+      watcher.on("error", () => this.handleWatchError(directory));
+      this.watchers.set(directory, watcher);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private handleWatchEvent(directory: string, eventType: string, filename: string | Buffer | null): void {
+    if (this.control?.signal.aborted) return;
+    const name = filename === null ? "" : filename.toString();
+    const role = this.watchRoles.get(pathKey(directory));
+    if (name === "SKILL.md" || (role !== "skill" && eventType === "rename")) this.scheduleCatalogInvalidation();
+  }
+
+  private handleWatchError(directory: string): void {
+    const key = pathKey(directory);
+    this.watchers.get(key)?.close();
+    this.watchers.delete(key);
+    this.watchIncomplete = true;
+    this.scheduleCatalogInvalidation();
+    this.scheduleWatchRetry();
+  }
+
+  private scheduleCatalogInvalidation(): void {
+    if (this.watchDebounceTimer !== undefined) clearTimeout(this.watchDebounceTimer);
+    this.watchDebounceTimer = setTimeout(() => {
+      this.watchDebounceTimer = undefined;
+      if (this.control?.signal.aborted) return;
+      void this.syncWatchers();
+      this.control?.invalidate();
+    }, 250);
+    this.watchDebounceTimer.unref?.();
+  }
+
+  private scheduleWatchRetry(): void {
+    if (this.watchRetryTimer !== undefined || this.control?.signal.aborted) return;
+    this.watchRetryTimer = setTimeout(() => {
+      this.watchRetryTimer = undefined;
+      void this.syncWatchers();
+    }, 1_000);
+    this.watchRetryTimer.unref?.();
+  }
 
   private async scan(options: SkillLookupOptions, force: boolean): Promise<SkillProviderObservation> {
     const contextKey = this.contextKey(options);
@@ -146,7 +268,8 @@ export class FileSystemSkillProvider implements SkillProvider {
     if (complete) this.lastGoodByContext.set(contextKey, next);
     if (force) this.control?.invalidate();
     const entries = [...(complete ? next : previous ?? new Map<string, Entry>()).values()].slice(0, this.limits.maxSkills);
-    return { candidates: entries.filter((entry) => isConditionallyActive(entry.candidate, options.paths)).map((entry) => entry.candidate), complete };
+    if (this.watchEnabled) await this.syncWatchers();
+    return { candidates: entries.filter((entry) => isConditionallyActive(entry.candidate, options.paths)).map((entry) => entry.candidate), complete: complete && !this.watchIncomplete };
   }
 
   private async scanRoot(root: SkillFilesystemRoot, options: SkillLookupOptions, out: Map<string, Entry>, offset: number): Promise<{ complete: boolean; count: number }> {
@@ -218,6 +341,7 @@ export function createFileSystemSkillProvider(options: SkillFilesystemProviderOp
 
 function isWithin(root: string, target: string): boolean { const relative = path.relative(root, target); return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative)); }
 function samePath(left: string, right: string): boolean { return process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right; }
+function pathKey(value: string): string { return process.platform === "win32" ? value.toLowerCase() : value; }
 
 function parseFileSkillLocator(value: unknown): FileSkillLocator | undefined {
   if (typeof value !== "object" || value === null) return undefined;

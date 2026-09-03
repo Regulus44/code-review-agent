@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +9,7 @@ async function skill(root: string, name: string, body = "hello"): Promise<void> 
   const dir = path.join(root, name); await mkdir(dir, { recursive: true });
   await writeFile(path.join(dir, "SKILL.md"), `---\nname: ${name}\ndescription: ${name} description\nwhen_to_use: use ${name}\nallowed-tools: read_file, list_files\n---\n${body}\n`, "utf8");
 }
+async function waitForWatch(): Promise<void> { await new Promise((resolve) => setTimeout(resolve, 450)); }
 
 describe("FileSystemSkillProvider", () => {
   it("discovers bounded local skills and loads body on demand", async () => {
@@ -134,5 +135,42 @@ describe("FileSystemSkillProvider", () => {
     expect(listed.candidates).toHaveLength(1);
     expect(await provider.readResource!(listed.candidates[0]!, { path: "references/note.txt", limit: 4 })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_INVALID_PATH" } });
     expect(await provider.readResource!(listed.candidates[0]!, { path: "x.txt", limit: 5 })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_TOO_LARGE" } });
+  });
+
+  it("invalidates once for debounced SKILL.md changes while ignoring deep resource changes", async () => {
+    const root = await fixture(); await skill(root, "watched");
+    const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }], watch: true });
+    const invalidations = vi.fn(); const controller = new AbortController();
+    provider.start({ signal: controller.signal, invalidate: invalidations });
+    await provider.list(); await waitForWatch();
+    await writeFile(path.join(root, "watched", "references.txt"), "resource", "utf8");
+    await waitForWatch(); expect(invalidations).not.toHaveBeenCalled();
+    await writeFile(path.join(root, "watched", "SKILL.md"), "\nupdated\n", "utf8");
+    await writeFile(path.join(root, "watched", "SKILL.md"), "\nupdated-again\n", "utf8");
+    await waitForWatch(); expect(invalidations).toHaveBeenCalledTimes(1);
+    controller.abort(); provider.dispose();
+  });
+
+  it("refreshes watcher coverage after a new skill directory appears and disposes cleanly", async () => {
+    const root = await fixture(); await skill(root, "first");
+    const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }], watch: true });
+    const invalidations = vi.fn(); const controller = new AbortController();
+    provider.start({ signal: controller.signal, invalidate: invalidations });
+    await provider.list(); await waitForWatch();
+    await skill(root, "second"); await waitForWatch();
+    expect(invalidations).toHaveBeenCalledTimes(1);
+    await provider.list(); await waitForWatch();
+    provider.dispose(); const count = invalidations.mock.calls.length;
+    await skill(root, "third"); await waitForWatch();
+    expect(invalidations).toHaveBeenCalledTimes(count);
+    controller.abort();
+  });
+
+  it("reports incomplete observation when watcher directory bounds are exceeded", async () => {
+    const root = await fixture(); await skill(root, "bounded-watch");
+    const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }], watch: true, limits: { maxWatchDirectories: 1 } });
+    const result = await provider.list();
+    expect(result.complete).toBe(false);
+    provider.dispose();
   });
 });
