@@ -52,7 +52,7 @@ import { applyToolResultArtifactAggregateAsync, applyMicrocompactPass, assembleC
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, createSkillTool, DefaultPermissionPolicy, FileObservationPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModePolicySnapshot, type CodeModeSandbox, type ExecuteToolOutput, type JobSummary, type LspServerConfig, type PermissionPreset } from "@coding-agent/tools";
+import { BUILTIN_TOOL_PROMPT_SPECS, createBuiltinTools, createSubagentTools, createSkillTool, createSkillResourceTool, DefaultPermissionPolicy, FileObservationPolicy, JobManager, TerminalManager, ToolPromptRegistry, ToolRegistry, ToolRuntime, type CapabilityRegistry, type CodeModePolicySnapshot, type CodeModeSandbox, type ExecuteToolOutput, type JobSummary, type LspServerConfig, type PermissionPreset } from "@coding-agent/tools";
 import type { SubagentRuntime } from "@coding-agent/subagent";
 import { GitWorktreeManager, WorkspaceResolver } from "@coding-agent/workspace";
 import { buildAgentSystemPromptSections } from "./system-prompt.js";
@@ -89,6 +89,8 @@ export interface AgentHostOptions {
   readonly plugins?: PluginRuntime;
   /** Enables model-facing SkillTool; user invocation remains available through executeTool. */
   readonly skillToolEnabled?: boolean;
+  /** Enables the model-facing Skill-relative resource reader; disabled by default. */
+  readonly skillResourceToolEnabled?: boolean;
   readonly subagentRuntime?: SubagentRuntime;
   readonly compactionEnabled?: boolean;
   readonly contextBudget?: Partial<ContextBudget>;
@@ -361,6 +363,7 @@ export class AgentHost {
     }
     if (options.subagentRuntime !== undefined) registry.registerMany(createSubagentTools({ runtime: options.subagentRuntime }).filter((tool) => !registry.has(tool.name)));
     if (options.skills !== undefined && options.skillToolEnabled === true && (options.capabilities === undefined || options.capabilities.isEnabled("skill")) && !registry.has("skill")) registry.register(createSkillTool(options.skills));
+    if (options.skills !== undefined && options.skillResourceToolEnabled === true && (options.capabilities === undefined || options.capabilities.isEnabled("skill")) && !registry.has("read_skill_resource")) registry.register(createSkillResourceTool(options.skills));
     this.plugins?.bind({ ...(this.skills === undefined ? {} : { skills: this.skills }), tools: registry, prompts: this.toolPromptRegistry });
     this.toolRuntime = options.toolRuntime ?? new ToolRuntime({ store: options.store, registry, ...(this.terminalManager === undefined ? {} : { terminalManager: this.terminalManager }), ...(options.permissionPreset === undefined ? {} : { policy: new DefaultPermissionPolicy({ preset: options.permissionPreset }) }) });
     this.ready = this.restoreQueuedTurns();
@@ -2586,6 +2589,26 @@ export class AgentHost {
           evaluation: microcompactEvaluation,
         });
         if (microcompact.report.newlyClearedToolCallIds.length > 0) {
+          const candidateView: ModelContextView = { messages: microcompact.messages, ...(prepared.view.tools === undefined ? {} : { tools: prepared.view.tools }) };
+          const candidateEstimate = tokenCounter.estimate(candidateView);
+          const candidateCount = await countContextTokens(tokenCounter, candidateView, {
+            preferExact: shouldUseExactTokenCount(candidateEstimate, budgetSnapshot, this.contextPolicyWithLegacyFallback()),
+            signal: controller.signal,
+          });
+          const checkpoint = await this.persistMicrocompactCheckpoint(
+            sessionId,
+            turnId,
+            step,
+            beforeView.messages,
+            microcompact.report,
+            beforeUsage,
+            candidateCount.value,
+          );
+          if (checkpoint === undefined) {
+            // Checkpoint failure is non-destructive: preserve the complete view
+            // and let proactive/full compaction handle pressure in this step.
+            beforeUsage = tokenCount.value;
+          } else {
           beforeView = { messages: microcompact.messages, ...(prepared.view.tools === undefined ? {} : { tools: prepared.view.tools }) };
           prepared = {
             ...prepared,
@@ -2593,13 +2616,22 @@ export class AgentHost {
             rounds: groupMessagesByApiRound(microcompact.messages),
             toolResultBudget: mergeToolResultBudgetReports(prepared.toolResultBudget, microcompact.report),
           };
-          await this.appendToolResultBudgetEvents(sessionId, turnId, prepared.toolResultBudget, this.toolResultBudgetWithLegacyFallback(), reportedBudgetToolCallIds, reportedMicrocompactToolCallIds, alreadyClearedToolCallIds);
+          await this.appendToolResultBudgetEvents(sessionId, turnId, prepared.toolResultBudget, this.toolResultBudgetWithLegacyFallback(), reportedBudgetToolCallIds, reportedMicrocompactToolCallIds, alreadyClearedToolCallIds, {
+            checkpointId: checkpoint.checkpointId,
+            preCompactTokens: beforeUsage,
+            postCompactTokens: candidateCount.value,
+            pressureThreshold: microcompactEvaluation.pressureThreshold,
+            targetTokens: microcompactEvaluation.targetUsageTokens,
+            coverage: checkpoint.coveredToolCallIds,
+            strategy: microcompactEvaluation.strategy,
+          });
           estimate = tokenCounter.estimate(beforeView);
           tokenCount = await countContextTokens(tokenCounter, beforeView, {
             preferExact: shouldUseExactTokenCount(estimate, budgetSnapshot, this.contextPolicyWithLegacyFallback()),
             signal: controller.signal,
           });
           beforeUsage = tokenCount.value;
+          }
         }
       }
       const beforeState = calculateContextWarningState(beforeUsage, budgetSnapshot, this.contextPolicyWithLegacyFallback());
@@ -2871,6 +2903,60 @@ export class AgentHost {
     }
   }
 
+  private async persistMicrocompactCheckpoint(
+    sessionId: SessionId,
+    turnId: TurnId,
+    step: number,
+    messages: readonly ChatMessage[],
+    report: ToolResultBudgetReport,
+    preCompactTokens: number,
+    postCompactTokens: number,
+  ): Promise<Awaited<ReturnType<typeof buildMicrocompactCheckpoint>> | undefined> {
+    const checkpointId = `mc_${turnId}_${step}_${report.newlyClearedToolCallIds.join("_")}`.slice(0, 128);
+    try {
+      const events = await this.options.store.list(sessionId);
+      const existing = events.find((event) => event.type === "context/microcompact_checkpoint" && event.payload["checkpointId"] === checkpointId);
+      const checkpointOptions = {
+        events,
+        messages,
+        checkpointId,
+        ...(this.toolResultBudgetWithLegacyFallback().microcompactCheckpointMaxChars === undefined ? {} : { maxChars: this.toolResultBudgetWithLegacyFallback().microcompactCheckpointMaxChars }),
+      };
+      if (existing !== undefined) return buildMicrocompactCheckpoint(checkpointOptions);
+      const checkpoint = buildMicrocompactCheckpoint(checkpointOptions);
+      validateMicrocompactCheckpoint(checkpoint);
+      await this.options.store.append({
+        sessionId,
+        turnId,
+        type: "context/microcompact_checkpoint",
+        payload: {
+          ...checkpoint,
+          preCompactTokens,
+          postCompactTokens,
+          pressureThreshold: report.pressureThreshold,
+          targetTokens: report.pressureTargetTokens,
+          coverage: checkpoint.coveredToolCallIds,
+        },
+      });
+      return checkpoint;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "CHECKPOINT_FAILED";
+      const stage = message.startsWith("CHECKPOINT_") ? "validate" : "persist";
+      try {
+        await this.options.store.append({
+          sessionId,
+          turnId,
+          type: "context/microcompact_checkpoint_failed",
+          payload: { stage, errorCode: message.slice(0, 96), preservedModelView: true },
+        });
+      } catch {
+        // EventStore outage must not turn a non-destructive checkpoint failure
+        // into a model-view mutation or a turn failure.
+      }
+      return undefined;
+    }
+  }
+
   private async appendToolResultBudgetEvents(
     sessionId: SessionId,
     turnId: TurnId,
@@ -2879,6 +2965,15 @@ export class AgentHost {
     reportedToolCallIds: Set<string>,
     reportedMicrocompactToolCallIds: Set<string>,
     alreadyClearedToolCallIds: Set<string>,
+    checkpoint?: {
+      readonly checkpointId: string;
+      readonly preCompactTokens: number;
+      readonly postCompactTokens: number;
+      readonly pressureThreshold?: number;
+      readonly targetTokens?: number;
+      readonly coverage: readonly string[];
+      readonly strategy?: string;
+    },
   ): Promise<void> {
     const newlyBoundedToolCallIds = report.boundedToolCallIds.filter((toolCallId) => !reportedToolCallIds.has(toolCallId));
     const newlyMessageBudgetReplacedToolCallIds = report.messageBudgetReplacedToolCallIds.filter((toolCallId) => !reportedToolCallIds.has(toolCallId));
@@ -2906,6 +3001,15 @@ export class AgentHost {
         microcompactTrigger: report.microcompactTrigger,
         timeBasedMicrocompactEnabled: report.timeBasedMicrocompactEnabled,
         timeBasedGapMs: report.timeBasedGapMs,
+        ...(checkpoint === undefined ? {} : {
+          checkpointId: checkpoint.checkpointId,
+          preCompactTokens: checkpoint.preCompactTokens,
+          postCompactTokens: checkpoint.postCompactTokens,
+          ...(checkpoint.pressureThreshold === undefined ? {} : { pressureThreshold: checkpoint.pressureThreshold }),
+          ...(checkpoint.targetTokens === undefined ? {} : { targetTokens: checkpoint.targetTokens }),
+          coverage: checkpoint.coverage,
+          ...(checkpoint.strategy === undefined ? {} : { strategy: checkpoint.strategy }),
+        }),
       },
     });
     if (newlyClearedToolCallIds.length === 0) return;
@@ -2926,6 +3030,15 @@ export class AgentHost {
         microcompactTrigger: report.microcompactTrigger,
         timeBasedMicrocompactEnabled: report.timeBasedMicrocompactEnabled,
         timeBasedGapMs: report.timeBasedGapMs,
+        ...(checkpoint === undefined ? {} : {
+          checkpointId: checkpoint.checkpointId,
+          preCompactTokens: checkpoint.preCompactTokens,
+          postCompactTokens: checkpoint.postCompactTokens,
+          ...(checkpoint.pressureThreshold === undefined ? {} : { pressureThreshold: checkpoint.pressureThreshold }),
+          ...(checkpoint.targetTokens === undefined ? {} : { targetTokens: checkpoint.targetTokens }),
+          coverage: checkpoint.coverage,
+          ...(checkpoint.strategy === undefined ? {} : { strategy: checkpoint.strategy }),
+        }),
       },
     });
   }
