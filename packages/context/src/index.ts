@@ -24,6 +24,7 @@ export {
   DEFAULT_MICROCOMPACT_MESSAGE,
 } from "./tool-result-budget.js";
 export {
+  buildSkillResourceModelView,
   buildToolResultModelView,
   containsNonTextContent,
   createToolResultStorage,
@@ -33,6 +34,8 @@ export {
   DEFAULT_TOOL_RESULT_PERSIST_THRESHOLD_CHARS,
   DEFAULT_TOOL_RESULT_PREVIEW_BYTES,
   TOOL_RESULT_ARTIFACTS_ROOT,
+  InMemorySkillResourceArtifactStore,
+  skillResourceArtifactId,
 } from "./tool-result-storage.js";
 export { adjustIndexToPreserveAPIInvariants, calculateMessagesToKeepIndex, compactWithSessionMemory, DEFAULT_SESSION_MEMORY_COMPACT_CONFIG } from "./session-memory-compact.js";
 export {
@@ -152,6 +155,8 @@ export type {
 } from "./tool-result-budget.js";
 export type { BuildMicrocompactCheckpointOptions, MicrocompactCheckpoint } from "./microcompact-checkpoint.js";
 export type {
+  SkillResourceArtifactReceipt,
+  SkillResourceArtifactStore,
   ToolResultStorage,
   ToolResultStorageConfig,
   ToolResultStorageInput,

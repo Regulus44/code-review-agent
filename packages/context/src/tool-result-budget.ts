@@ -12,6 +12,7 @@ export const DEFAULT_COMPACTABLE_TOOLS: readonly string[] = [
   "glob",
   "web_search",
   "web_fetch",
+  "read_skill_resource",
   "edit_file",
   "write_file",
 ];

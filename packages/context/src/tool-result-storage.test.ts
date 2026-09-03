@@ -1,14 +1,29 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildSkillResourceModelView,
   buildToolResultModelView,
   createToolResultStorage,
   DEFAULT_TOOL_RESULT_MAX_TOKENS,
   DEFAULT_TOOL_RESULT_PERSIST_THRESHOLD_CHARS,
   DEFAULT_TOOL_RESULT_PREVIEW_BYTES,
   truncateUtf8,
+  InMemorySkillResourceArtifactStore,
+  skillResourceArtifactId,
 } from "./tool-result-storage.js";
 
 describe("tool-result-storage", () => {
+  it("keeps Skill resource snapshots in an immutable host-owned store", async () => {
+    const store = new InMemorySkillResourceArtifactStore();
+    const artifactId = skillResourceArtifactId("ses_1", "review", "references/checklist.md", "digest-1");
+    expect(await store.write({ artifactId, sessionId: "ses_1", skill: "review", path: "references/checklist.md", content: "alpha", digest: "digest-1" })).toBe("created");
+    expect(await store.write({ artifactId, sessionId: "ses_1", skill: "review", path: "references/checklist.md", content: "alpha", digest: "digest-1" })).toBe("exists");
+    expect(await store.read({ artifactId, sessionId: "ses_1" })).toEqual({ content: "alpha", digest: "digest-1" });
+    expect(await store.read({ artifactId, sessionId: "other" })).toBeUndefined();
+    const receipt = { kind: "skill-resource" as const, artifactId, skill: "review", path: "references/checklist.md", sizeBytes: 5, digest: "digest-1" };
+    expect(buildSkillResourceModelView(receipt, "alpha")).toContain('status="available"');
+    expect(buildSkillResourceModelView(receipt)).toContain('status="unavailable"');
+  });
+
   it("keeps results at or below the threshold in memory", async () => {
     const writes: string[] = [];
     const storage = createToolResultStorage({ write: async (input) => { writes.push(input.relativePath); return "created"; } });

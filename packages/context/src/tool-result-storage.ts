@@ -1,6 +1,85 @@
 import type { ArtifactRef, ToolResultReplacementRecord, ToolResultReplacementReason } from "@coding-agent/contracts";
 import { createHash } from "node:crypto";
 
+/**
+ * Host-owned immutable snapshot for a Skill resource. Implementations must
+ * keep the bytes outside the user workspace and enforce session/tenant ACLs
+ * on reads. The EventStore stores only the receipt returned by this adapter.
+ */
+export interface SkillResourceArtifactStore {
+  write(input: {
+    readonly artifactId: string;
+    readonly sessionId: string;
+    readonly tenantId?: string;
+    readonly skill: string;
+    readonly path: string;
+    readonly content: string;
+    readonly mediaType?: string;
+    readonly digest: string;
+  }): Promise<"created" | "exists">;
+  read(input: {
+    readonly artifactId: string;
+    readonly sessionId: string;
+    readonly tenantId?: string;
+  }): Promise<{ readonly content: string; readonly digest: string } | undefined>;
+}
+
+/** Small host-owned implementation useful for local hosts and replay tests. */
+export class InMemorySkillResourceArtifactStore implements SkillResourceArtifactStore {
+  private readonly records = new Map<string, { readonly sessionId: string; readonly tenantId?: string; readonly content: string; readonly digest: string }>();
+
+  async write(input: Parameters<SkillResourceArtifactStore["write"]>[0]): Promise<"created" | "exists"> {
+    const previous = this.records.get(input.artifactId);
+    if (previous !== undefined) {
+      if (previous.digest !== input.digest || previous.sessionId !== input.sessionId || previous.tenantId !== input.tenantId) throw new Error("SKILL_RESOURCE_ARTIFACT_CONFLICT");
+      return "exists";
+    }
+    this.records.set(input.artifactId, { sessionId: input.sessionId, ...(input.tenantId === undefined ? {} : { tenantId: input.tenantId }), content: input.content, digest: input.digest });
+    return "created";
+  }
+
+  async read(input: Parameters<SkillResourceArtifactStore["read"]>[0]): Promise<{ readonly content: string; readonly digest: string } | undefined> {
+    const record = this.records.get(input.artifactId);
+    if (record === undefined || record.sessionId !== input.sessionId || record.tenantId !== input.tenantId) return undefined;
+    return { content: record.content, digest: record.digest };
+  }
+}
+
+export interface SkillResourceArtifactReceipt {
+  readonly kind: "skill-resource";
+  readonly artifactId: string;
+  readonly skill: string;
+  readonly path: string;
+  readonly offset?: number;
+  readonly limit?: number;
+  readonly sizeBytes: number;
+  readonly digest: string;
+  readonly truncated?: boolean;
+  readonly mediaType?: string;
+  readonly provider?: string;
+}
+
+export function skillResourceArtifactId(sessionId: string, skill: string, resourcePath: string, digest: string, offset?: number, limit?: number): string {
+  const key = [sessionId, skill, resourcePath, digest, offset ?? "", limit ?? ""].join("\u0000");
+  return `artifact_skill_resource_${createHash("sha256").update(key).digest("hex").slice(0, 32)}`;
+}
+
+export function buildSkillResourceModelView(receipt: SkillResourceArtifactReceipt, content?: string): string {
+  const status = content === undefined ? "unavailable" : "available";
+  const attributes = [
+    `skill=${JSON.stringify(receipt.skill)}`,
+    `path=${JSON.stringify(receipt.path)}`,
+    `status=${JSON.stringify(status)}`,
+    `digest=${JSON.stringify(receipt.digest)}`,
+    ...(receipt.offset === undefined ? [] : [`offset=${receipt.offset}`]),
+    ...(receipt.limit === undefined ? [] : [`limit=${receipt.limit}`]),
+  ].join(" ");
+  const recovery = content === undefined
+    ? "Resource snapshot is unavailable; do not reread the current workspace file as historical content."
+    : receipt.truncated === true ? "(Output capped. Use offset=... to continue.)" : "";
+  return `<skill_resource ${attributes}>\n${content ?? recovery}\n</skill_resource>`;
+}
+
 export const DEFAULT_TOOL_RESULT_PERSIST_THRESHOLD_CHARS = 50_000;
 export const DEFAULT_TOOL_RESULT_MAX_TOKENS = 100_000;
 export const DEFAULT_TOOL_RESULT_PREVIEW_BYTES = 2_000;
