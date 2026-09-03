@@ -22,11 +22,11 @@
 
 ## 变更记录
 
-### 首个契约提交（本次）
+### Commit `980c22d` — 首个契约提交
 
 - 更新 `docs/event-contract.md`，固定 `toolResultBudget.microcompact` 的 bounded 字段、状态枚举、coverage
   上限和旧事件兼容语义。
-- 该提交是后续代码修改的前置契约 checkpoint；实际 commit hash 由 Git 历史和最终交付记录确认。
+- 该提交是后续代码修改的前置契约 checkpoint，先于 Runtime/Storage/Web 实现。
 
 ## 验证
 
@@ -59,8 +59,6 @@
 - 回滚：停止写入 `microcompact` 对象即可兼容旧客户端；删除本提交新增 parser/fold 不影响已有
   `context/microcompacted`/checkpoint 事件历史。
 
-本次实现提交 hash 在 Git 提交后由后续测试/日志提交补录。
-
 ### Commit `9461433` — Diagnostics/replay 实现
 
 - 文件：`packages/contracts/src/index.ts`、`packages/runtime/src/index.ts`、`packages/storage/src/index.ts`、
@@ -81,15 +79,13 @@
 - 回滚：移除 tests/presenter 与 nested diagnostics rendering；Web 会回退已有 context meter，不影响
   Runtime 的 model view 或 event replay。
 
-本次测试提交 hash 在 Git 提交后由后续 fixture/日志提交补录。
-
 ### Commit `c771803` — Replay tests and Web presenter
 
 - 新增 Storage/Web/Runtime 合同测试与 `context-presenter` bounded diagnostics 展示；验证结果为
   Storage 34/34、Web 20/20、Runtime 80/80。
 - Presenter 只显示 projection 中的 strategy、usage、checkpoint status 和覆盖计数，不读取工具正文。
 
-### Commit `（本次 fixture 提交）` — 等价长检索评测证据
+### Commit `60e6d40` — 等价长检索评测证据
 
 - 文件：`packages/context/src/microcompact-slice-e-fixture.ts`、对应 Vitest、
   `docs/evaluation/microcompact-slice-e-2026-09-04.zh-CN.md`，并在 `docs/status.zh-CN.md` 与评测 README
@@ -100,5 +96,3 @@
 - 验证：`pnpm --filter @coding-agent/context test -- --run src/microcompact-slice-e-fixture.test.ts`
   3/3 通过；`pnpm typecheck` 通过。
 - 回滚：删除 fixture/test 和新增评测入口即可；Slice E diagnostics contract/实现仍可独立保留或回滚。
-
-本次 fixture/文档提交 hash 在 Git 提交后由最终交付记录确认。

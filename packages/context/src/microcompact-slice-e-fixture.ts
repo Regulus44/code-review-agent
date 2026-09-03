@@ -39,7 +39,7 @@ export function microcompactSliceELongRetrievalMessages(): readonly ChatMessage[
   for (let index = 0; index < MICROCOMPACT_SLICE_E_LONG_RETRIEVAL_FIXTURE.resultCount; index += 1) {
     const toolCallId = `slice-e-read-${index}`;
     messages.push({ role: "assistant", content: "", toolCalls: [{ id: toolCallId, name: MICROCOMPACT_SLICE_E_LONG_RETRIEVAL_FIXTURE.toolName, arguments: "{}" }] });
-    messages.push({ role: "tool", toolCallId, toolName: MICROCOMPACT_SLICE_E_LONG_RETRIEVAL_FIXTURE.toolName, content: `fixture source evidence ${index}: ${"x".repeat(MICROCOMPACT_SLICE_E_LONG_RETRIEVAL_FIXTURE.resultChars)}` });
+    messages.push({ role: "tool", toolCallId, content: `fixture source evidence ${index}: ${"x".repeat(MICROCOMPACT_SLICE_E_LONG_RETRIEVAL_FIXTURE.resultChars)}` });
   }
   return messages;
 }
