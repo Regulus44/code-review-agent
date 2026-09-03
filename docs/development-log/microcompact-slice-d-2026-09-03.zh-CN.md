@@ -77,16 +77,11 @@ summary/legacy fallback 与连续失败保护，以及 DSH Agent Loop 的 step-l
 
 ### Commit `e055608` — 开发日志落盘（并行工作树混入说明）
 
-- 新增本开发日志文件；该提交同时带入当时已 staged 的并行 Skill renderer 变更
+- 新增本开发日志并补充 Runtime reduction recovery 测试的执行记录。
+- 该提交同时带入当时已 staged 的并行 Skill renderer 变更
   （`packages/runtime/src/index.ts`、`packages/runtime/src/index.test.ts`）。这些 runtime/test hunk
   不属于 Slice D，主线程应按并行 Skill 任务归档；Slice D 的日志正文与核心实现仍可按上方独立
   commit 追溯。
-
-### Commit `e055608` — Runtime 测试/日志收尾（并行工作树混入说明）
-
-- Slice D 相关内容：补充 Runtime reduction recovery 测试与本日志的执行记录。
-- 该提交同时包含并行 Skill renderer 的 `packages/runtime/src/index.ts` 与
-  `packages/runtime/src/index.test.ts` 改动；这些内容不属于 Slice D，已保留并单独标注。
 
 ### Commit `85b6e1e` — 测试类型修复
 
