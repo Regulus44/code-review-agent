@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { brand, type AttachmentReceipt, type ChatModel, type InteractionId, type ModelRequest, type ModelStreamPart, type PermissionId, type ToolDefinition } from "@coding-agent/contracts";
 import { InMemoryEventStore, SqliteEventStore } from "@coding-agent/storage";
 import { ContextRecoveryGuard } from "@coding-agent/context";
+import { SkillRegistry } from "@coding-agent/skills";
 import { createBuiltinTools, DefaultPermissionPolicy, ToolRegistry, ToolRuntime } from "@coding-agent/tools";
 import { GitWorktreeManager } from "@coding-agent/workspace";
 import { AgentHost } from "./index.js";
@@ -14,6 +15,15 @@ import { AgentHost } from "./index.js";
 const execFileAsync = promisify(execFile);
 
 describe("AgentHost", () => {
+  it("keeps Skill resource tool disabled by default and registers it only when enabled", () => {
+    const skills = new SkillRegistry();
+    skills.register({ name: "demo", description: "demo", content: "body", source: "local", trust: "local", resourceBase: { kind: "opaque", description: "fixture" } });
+    const disabled = new AgentHost({ store: new InMemoryEventStore(), skills, skillToolEnabled: true });
+    expect(disabled.listTools().some((tool) => tool.name === "read_skill_resource")).toBe(false);
+    const enabled = new AgentHost({ store: new InMemoryEventStore(), skills, skillToolEnabled: true, skillResourceToolEnabled: true });
+    expect(enabled.listTools().some((tool) => tool.name === "read_skill_resource")).toBe(true);
+  });
+
   it("keeps the legacy maxSteps option non-enforcing", () => {
     expect(() => new AgentHost({ store: new InMemoryEventStore() })).not.toThrow();
     expect(() => new AgentHost({ store: new InMemoryEventStore(), maxSteps: 512 })).not.toThrow();
