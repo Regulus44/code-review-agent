@@ -78,4 +78,11 @@
 
 - 当前能力、限制和优先级以本页为准。
 - 架构和安全不变量以 [架构决策](architecture-decisions.md)、[事件契约](event-contract.md)、[工具契约](tool-contract.md) 和 [协议边界](protocol-boundaries.md) 为准。
-- 历史 Phase 计划和开发日志位于 [archive](archive/)，只用于追溯，不代表当前开发顺序。
+- 历史 Phase 计划和开发日志位于 [archive](archive/)，用于追溯；当前开发顺序以本页为准。
+
+## Microcompact Slice E（2026-09-04）
+
+Pressure-V2 microcompact 已完成 Slice E 诊断与评测收尾：`step/started.payload.toolResultBudget.microcompact`
+提供 bounded strategy、pressure threshold、pre/post usage、checkpoint status 与 coverage；Storage、API/SSE
+和 Web replay 统一投影并保留 checkpoint/failure metadata，不展示完整工具输出，也不由客户端推断 compact
+成功。等价长检索 fixture 与验证矩阵见 [Slice E 评测收尾](evaluation/microcompact-slice-e-2026-09-04.zh-CN.md)。

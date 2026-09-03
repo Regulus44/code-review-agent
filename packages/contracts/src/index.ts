@@ -1466,6 +1466,8 @@ export interface SkillResourceReadResult {
   readonly sizeBytes: number;
   readonly truncated?: boolean;
   readonly mediaType?: string;
+  /** Provider identity is bounded metadata; providers must never expose host paths. */
+  readonly provider?: string;
 }
 
 export type SkillResourceReadErrorCode =

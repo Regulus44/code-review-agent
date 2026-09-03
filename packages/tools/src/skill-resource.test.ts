@@ -38,6 +38,7 @@ describe("Skill resource tool", () => {
     expect(result.modelView).toContain('<skill_resource skill="review" path="references/checklist.md">');
     expect(result.modelView).not.toContain("D:/");
     expect((result.output as { content: string }).content).toBe("alpha\nbeta");
+    expect(result.output).toMatchObject({ provider: "fixture" });
   });
 
   it("rejects unknown, non-model-invocable, unsupported, and unsafe resources", async () => {

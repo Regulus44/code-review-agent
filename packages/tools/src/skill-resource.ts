@@ -87,7 +87,7 @@ function resourceResult(skill: string, resource: SkillResourceReadResult, offset
   const digest = createHash("sha256").update(resource.content).digest("hex");
   return {
     ok: true,
-    output: { skill, path: resource.path, content: resource.content, sizeBytes: resource.sizeBytes, digest, ...(offset === undefined ? {} : { offset }), ...(limit === undefined ? {} : { limit }), ...(resource.truncated === true ? { truncated: true } : {}), ...(resource.mediaType === undefined ? {} : { mediaType: resource.mediaType }) },
+    output: { skill, path: resource.path, content: resource.content, sizeBytes: resource.sizeBytes, digest, ...(offset === undefined ? {} : { offset }), ...(limit === undefined ? {} : { limit }), ...(resource.truncated === true ? { truncated: true } : {}), ...(resource.mediaType === undefined ? {} : { mediaType: resource.mediaType }), ...(resource.provider === undefined ? {} : { provider: resource.provider }) },
     modelView,
     presentation: { kind: "tool", title: `Skill resource: ${skill}/${resource.path}`, text: modelView, data: { skill, path: resource.path, sizeBytes: resource.sizeBytes, ...(resource.truncated === true ? { truncated: true } : {}) } },
   };

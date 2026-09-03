@@ -184,7 +184,7 @@ export class SkillRegistry {
       if (result.path !== request.path || !Number.isFinite(result.sizeBytes) || result.sizeBytes < 0) {
         throw new SkillRegistryError("SKILL_RESOURCE_FAILED", "Skill provider returned an invalid resource result");
       }
-      return result;
+      return { ...result, ...(result.provider === undefined ? { provider: found.provider.name } : {}) };
     } catch (error) {
       if (error instanceof SkillRegistryError) throw error;
       if (isAbort(error, options.signal)) throw error;
