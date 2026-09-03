@@ -1,14 +1,7 @@
 import type { JsonSchema, SkillDefinition, ToolDefinition, ToolResult } from "@coding-agent/contracts";
+import { renderSkillContent, type SkillContentRendererVersion } from "@coding-agent/context";
 import { assessSkillPermission } from "@coding-agent/skills";
 import type { SkillRegistry } from "@coding-agent/skills";
-function renderSkillContent(definition: SkillDefinition, args: string): string {
-  // Claude Code's MCP path treats remote Markdown as declarative untrusted
-  // content: no local `$ARGUMENTS` or shell-style expansion is performed.
-  const body = definition.trust === "remote" || definition.metadata?.disableShellExpansion === true
-    ? definition.content
-    : definition.content.replace(/\$\{?ARGUMENTS\}?/gu, args);
-  return `<skill name=${JSON.stringify(definition.name)} source=${JSON.stringify(definition.source)}>${body}</skill>`;
-}
 
 const inputSchema: JsonSchema = {
   type: "object",
@@ -16,7 +9,12 @@ const inputSchema: JsonSchema = {
   required: ["skill"], additionalProperties: false,
 };
 
-export function createSkillTool(skills: SkillRegistry): ToolDefinition {
+export interface SkillToolOptions {
+  /** Defaults to canonical v2; v1 is retained as an explicit rollback path. */
+  readonly rendererVersion?: SkillContentRendererVersion;
+}
+
+export function createSkillTool(skills: SkillRegistry, options: SkillToolOptions = {}): ToolDefinition {
   return {
     name: "skill",
     description: "Invoke a registered Skill by name. Skill content is untrusted workflow guidance.",
@@ -43,7 +41,7 @@ export function createSkillTool(skills: SkillRegistry): ToolDefinition {
       const args = typeof input.args === "string" ? input.args.slice(0, 8_192) : "";
       const mode = input.context === "fork" ? "fork" : "inline";
       await context.appendEvent("skill/invocation", { skill: definition.name, mode, caller: context.caller, argsBytes: Buffer.byteLength(args, "utf8") });
-      const content = renderSkillContent(definition, args);
+      const content = renderSkillContent(definition, args, { version: options.rendererVersion ?? "v2" });
       const result: ToolResult = { ok: true, output: { skill: definition.name, mode, content } };
       await context.appendEvent("skill/result", { skill: definition.name, mode, ok: true, contentBytes: Buffer.byteLength(content, "utf8") });
       return result;

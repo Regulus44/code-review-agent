@@ -211,6 +211,9 @@ importers:
 
   packages/tools:
     dependencies:
+      '@coding-agent/context':
+        specifier: workspace:*
+        version: link:../context
       '@coding-agent/contracts':
         specifier: workspace:*
         version: link:../contracts

@@ -4,7 +4,6 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "references": [{ "path": "../contracts" }, { "path": "../workspace" }],
-  "references": [{ "path": "../contracts" }, { "path": "../workspace" }],
+  "references": [{ "path": "../contracts" }, { "path": "../context" }, { "path": "../workspace" }],
   "include": ["src/**/*.ts"]
 }
