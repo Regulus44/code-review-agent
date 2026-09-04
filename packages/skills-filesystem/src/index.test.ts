@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { FileSystemSkillProvider } from "./index.js";
+import { defaultSkillFilesystemRoots, FileSystemSkillProvider } from "./index.js";
 
 async function fixture(): Promise<string> { return mkdtemp(path.join(os.tmpdir(), "skills-s1-")); }
 async function skill(root: string, name: string, body = "hello"): Promise<void> {
@@ -12,6 +13,12 @@ async function skill(root: string, name: string, body = "hello"): Promise<void> 
 async function waitForWatch(): Promise<void> { await new Promise((resolve) => setTimeout(resolve, 450)); }
 
 describe("FileSystemSkillProvider", () => {
+  it("includes the host Codex system Skill root when it exists", () => {
+    const expected = path.join(os.homedir(), ".codex", "skills", ".system");
+    const roots = defaultSkillFilesystemRoots({ cwd: "D:/fixture-workspace" });
+    if (existsSync(expected)) expect(roots).toContainEqual({ kind: "bundled", path: expected });
+  });
+
   it("discovers bounded local skills and loads body on demand", async () => {
     const root = await fixture(); await skill(root, "review-code", "# body");
     const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }] });

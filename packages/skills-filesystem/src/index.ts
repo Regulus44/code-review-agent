@@ -1,4 +1,4 @@
-import { constants as fsConstants, watch as fsWatch, type FSWatcher } from "node:fs";
+import { constants as fsConstants, existsSync, watch as fsWatch, type FSWatcher } from "node:fs";
 import { lstat, open, readdir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -362,11 +362,13 @@ export class FileSystemSkillProvider implements SkillProvider {
 
 export function defaultSkillFilesystemRoots(options: { readonly cwd?: string; readonly bundledPath?: string; readonly userPath?: string; readonly customPaths?: readonly string[] } = {}): readonly SkillFilesystemRoot[] {
   const cwd = path.resolve(options.cwd ?? process.cwd());
+  const systemPath = path.join(os.homedir(), ".codex", "skills", ".system");
+  const bundledPaths = [...new Set([options.bundledPath, existsSync(systemPath) ? systemPath : undefined].filter((item): item is string => item !== undefined))];
   return [
     { kind: "project", path: path.join(cwd, ".claude", "skills") },
     { kind: "user", path: options.userPath ?? path.join(os.homedir(), ".claude", "skills") },
     ...(options.customPaths ?? []).map((item) => ({ kind: "custom" as const, path: item })),
-    ...(options.bundledPath === undefined ? [] : [{ kind: "bundled" as const, path: options.bundledPath }]),
+    ...bundledPaths.map((item) => ({ kind: "bundled" as const, path: item })),
   ];
 }
 
