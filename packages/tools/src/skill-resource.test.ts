@@ -32,6 +32,8 @@ function registry(readResource?: SkillProvider["readResource"]): SkillRegistry {
 describe("Skill resource tool", () => {
   it("exposes a bounded Skill-relative schema and model-safe result", async () => {
     const tool = createSkillResourceTool(registry(async (_candidate, request) => ({ ok: true, resource: { path: request.path, content: "alpha\nbeta", sizeBytes: 10, truncated: true, mediaType: "text/plain" } })));
+    expect(tool.riskLevel).toBe("read");
+    expect(tool.approvalMode).toBe("auto");
     expect(tool.inputSchema).toMatchObject({ required: ["skill", "path"], additionalProperties: false });
     const result = await tool.execute({ skill: "/review", path: "references/checklist.md", offset: 0, limit: 32 }, context());
     expect(result.ok).toBe(true);
@@ -63,5 +65,37 @@ describe("Skill resource tool", () => {
     const controller = new AbortController(); controller.abort();
     const cancelled = await createSkillResourceTool(registry(async () => ({ ok: true, resource: { path: "x", content: "", sizeBytes: 0 } }))).execute({ skill: "review", path: "x" }, context({ signal: controller.signal }));
     expect(cancelled).toMatchObject({ ok: false, error: { code: "TOOL_CANCELLED" } });
+  });
+
+  it("asks for unknown Skill metadata without expanding filesystem authority", async () => {
+    const skills = new SkillRegistry();
+    skills.registerProvider({
+      name: "unknown-metadata",
+      list: async () => [{ name: "unknown", description: "unknown", source: "local", provider: "unknown-metadata", trust: "local", invocation: { modelInvocable: true, userInvocable: true }, rank: 1, locator: "unknown", metadata: { unknownProperties: ["shell"] } }],
+      get: async (candidate) => ({ ...candidate, content: "instructions", metadata: { unknownProperties: ["shell"] } }),
+      readResource: async (_candidate, request) => ({ ok: true, resource: { path: request.path, content: "safe", sizeBytes: 4 } }),
+    });
+    let prompts = 0;
+    const result = await createSkillResourceTool(skills).execute({ skill: "unknown", path: "references/guide.md" }, context({
+      requestUserInput: async () => { prompts += 1; return { interactionId: brand<string, "InteractionId">("unknown-approval"), status: "answered", answer: "allow" }; },
+    }));
+    expect(prompts).toBe(1);
+    expect(result).toMatchObject({ ok: true });
+  });
+
+  it("passes only the host-derived tenant scope to Skill lookup", async () => {
+    const skills = new SkillRegistry();
+    skills.registerProvider({
+      name: "tenant-a",
+      tenantId: "tenant-a",
+      list: async () => [{ name: "private", description: "private", source: "local", provider: "tenant-a", trust: "local", invocation: { modelInvocable: true, userInvocable: true }, rank: 1, locator: "private" }],
+      get: async (candidate) => ({ ...candidate, content: "tenant-a instructions" }),
+      readResource: async (_candidate, request) => ({ ok: true, resource: { path: request.path, content: "tenant-a resource", sizeBytes: 17 } }),
+    });
+    const tool = createSkillResourceTool(skills);
+    const tenantB = await tool.execute({ skill: "private", path: "references/private.md" }, context({ tenantId: brand<string, "TenantId">("tenant-b") }));
+    expect(tenantB).toMatchObject({ ok: false, error: { code: "SKILL_RESOURCE_NOT_FOUND" } });
+    const tenantA = await tool.execute({ skill: "private", path: "references/private.md" }, context({ tenantId: brand<string, "TenantId">("tenant-a") }));
+    expect(tenantA).toMatchObject({ ok: true, output: { content: "tenant-a resource" } });
   });
 });
