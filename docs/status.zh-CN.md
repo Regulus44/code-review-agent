@@ -94,3 +94,7 @@ Pressure-V2 microcompact 已完成 Slice E 诊断与评测收尾：`step/started
 ## Skill 资源包 M5（2026-09-04）
 
 filesystem Skill provider 已支持默认关闭的 bounded `fs.watch`：`SKILL.md` 和 Skill 目录变化经 debounce 推进 registry invalidation，`references/`、`scripts/`、`assets/` 等深层资源变化不刷新 catalog；watcher 失败保留 last-good 并标记下一次 observation incomplete，支持 retry、dispose 和 `maxWatchDirectories` 限制。workspace mutation 事件仅覆盖 `.claude/skills` catalog 路径。详情见 [M5 开发日志](development-log/skill-resource-m5-2026-09-04.zh-CN.md)。
+
+## Skill 资源包 M6（2026-09-04）
+
+filesystem Skill provider 已完成资源读取的 containment、symlink、special-file、TOCTOU、bytes/offset/line budget 和稳定错误码检查；`read_skill_resource` 与 SkillTool 按 host-derived tenant scope 解析 tenant-owned provider，Skill trust/unknown metadata 只收缩能力或触发审批。资源正文仍只作为实时 model view 或 host-owned artifact 存在，`scripts/` 不执行。详情见 [M6 开发日志](development-log/skill-resource-m6-2026-09-04.zh-CN.md)。生产级 workspace allowlist、跨进程 artifact/资源 ACL 和远程 provider 认证仍属于后续平台化工作。
