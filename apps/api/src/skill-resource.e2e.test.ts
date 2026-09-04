@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Server } from "node:http";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6,6 +7,9 @@ import { brand } from "@coding-agent/contracts";
 import { SkillRegistry } from "@coding-agent/skills";
 import { FileSystemSkillProvider } from "@coding-agent/skills-filesystem";
 import { createSkillResourceTool, createSkillTool } from "@coding-agent/tools";
+import { InMemoryEventStore } from "@coding-agent/storage";
+import { AgentHost } from "@coding-agent/runtime";
+import { createApiServer } from "./server.js";
 
 function context(workspaceRoot: string, overrides: Partial<Parameters<ReturnType<typeof createSkillResourceTool>["execute"]>[1]> = {}): Parameters<ReturnType<typeof createSkillResourceTool>["execute"]>[1] {
   return {
@@ -56,6 +60,47 @@ describe("M7 Skill resource tool acceptance", () => {
       expect(String((script.output as { content: string }).content)).not.toContain("D:/");
       expect(readCalls).toBe(2);
     } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("projects resource events through API JSON/SSE without正文 or absolute provider paths", async () => {
+    const { root } = await fixture();
+    let server: Server | undefined;
+    try {
+      const store = new InMemoryEventStore();
+      const skills = new SkillRegistry();
+      const host = new AgentHost({ store, skills, skillResourceToolEnabled: true, skillToolEnabled: true });
+      server = createApiServer({ store, host });
+      await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("M7 API fixture did not bind");
+      const base = `http://127.0.0.1:${address.port}`;
+      const created = await fetch(`${base}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceRoot: root }) });
+      const session = await created.json() as { id: string };
+      await store.append({ sessionId: brand<string, "SessionId">(session.id), type: "tool/result", payload: { toolCallId: "m7-resource-api", status: "completed", result: { ok: true, output: { skill: "review", path: "references/checklist.md", sizeBytes: 21, digest: "digest-m7", artifact: { kind: "skill-resource", artifactId: "artifact_m7", skill: "review", path: "references/checklist.md", sizeBytes: 21, digest: "digest-m7", artifactAvailable: false } } } } });
+      const eventsResponse = await fetch(`${base}/v1/sessions/${session.id}/events?format=json`);
+      const events = await eventsResponse.json() as Array<{ type: string; payload: Record<string, unknown> }>;
+      const result = events.find((event) => event.type === "tool/result");
+      expect(result).toBeDefined();
+      expect(JSON.stringify(result)).not.toContain("line-1");
+      expect(JSON.stringify(result)).not.toContain(root);
+      expect(result?.payload).toMatchObject({ result: { output: { skill: "review", path: "references/checklist.md", digest: expect.any(String) } } });
+      const sse = await fetch(`${base}/v1/sessions/${session.id}/events?after_sequence=0`);
+      const reader = sse.body?.getReader();
+      if (reader === undefined) throw new Error("M7 SSE fixture did not expose a body");
+      let text = "";
+      for (let attempt = 0; attempt < 20 && !text.includes("event: tool/result"); attempt += 1) {
+        const chunk = await reader.read();
+        text += new TextDecoder().decode(chunk.value);
+        if (chunk.done) break;
+      }
+      await reader.cancel();
+      expect(text).toContain("event: tool/result");
+      expect(text).not.toContain("line-1");
+      expect(text).not.toContain(root);
+    } finally {
+      if (server !== undefined) await new Promise<void>((resolve, reject) => server!.close((error) => error ? reject(error) : resolve()));
       await rm(root, { recursive: true, force: true });
     }
   });
