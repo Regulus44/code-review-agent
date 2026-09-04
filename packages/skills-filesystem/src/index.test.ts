@@ -129,6 +129,16 @@ describe("FileSystemSkillProvider", () => {
     expect(await provider.readResource!(candidate, { path: "assets/large.txt", limit: 2 })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_NOT_FOUND" } });
   });
 
+  it("enforces tenant scope at the provider boundary", async () => {
+    const root = await fixture(); await skill(root, "tenant-private");
+    const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }], tenantId: "tenant-a" });
+    expect((await provider.list()).candidates).toHaveLength(0);
+    expect((await provider.list({ tenantId: "tenant-b" })).candidates).toHaveLength(0);
+    const candidate = (await provider.list({ tenantId: "tenant-a" })).candidates[0]!;
+    expect(await provider.readResource!(candidate, { path: "SKILL.md" }, { tenantId: "tenant-b" })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_NOT_FOUND" } });
+    expect((await provider.readResource!(candidate, { path: "SKILL.md" }, { tenantId: "tenant-a" })).ok).toBe(true);
+  });
+
   it("enforces independent offset and line budgets", async () => {
     const root = await fixture(); await skill(root, "line-bounded");
     const dir = path.join(root, "line-bounded"); await mkdir(path.join(dir, "references"), { recursive: true });

@@ -73,12 +73,14 @@ export class FileSystemSkillProvider implements SkillProvider {
   async refresh(options: SkillLookupOptions = {}): Promise<SkillProviderObservation> { return this.scan(options, true); }
 
   async list(options: SkillLookupOptions = {}): Promise<SkillProviderObservation> {
+    if (!this.visibleToTenant(options.tenantId)) return { candidates: [], complete: true };
     if (this.refreshPromise !== undefined) return this.refreshPromise;
     this.refreshPromise = this.scan(options, false).finally(() => { this.refreshPromise = undefined; });
     return this.refreshPromise;
   }
 
   async get(candidate: SkillCandidate, options: SkillLookupOptions = {}): Promise<SkillDefinition | undefined> {
+    if (!this.visibleToTenant(options.tenantId)) return undefined;
     const entries = this.lastGoodByContext.get(this.contextKey(options));
     const entry = [...(entries?.values() ?? [])].find((item) => item.candidate.locator === candidate.locator);
     if (entry === undefined) return undefined;
@@ -101,6 +103,7 @@ export class FileSystemSkillProvider implements SkillProvider {
 
   async readResource(candidate: SkillCandidate, request: SkillResourceRequest, options: SkillLookupOptions = {}): Promise<SkillResourceReadOutcome> {
     if (options.signal?.aborted) throw options.signal.reason ?? new DOMException("aborted", "AbortError");
+    if (!this.visibleToTenant(options.tenantId)) return { ok: false, error: { code: "SKILL_RESOURCE_NOT_FOUND" } };
     if (candidate.provider !== this.name) return { ok: false, error: { code: "SKILL_RESOURCE_FAILED" } };
     const locator = parseFileSkillLocator(candidate.locator);
     if (locator === undefined || !samePath(locator.skillFilePath, candidate.path ?? locator.skillFilePath)) return { ok: false, error: { code: "SKILL_RESOURCE_FAILED" } };
@@ -350,6 +353,10 @@ export class FileSystemSkillProvider implements SkillProvider {
 
   private contextKey(options: SkillLookupOptions): string {
     return JSON.stringify({ cwd: options.cwd === undefined ? undefined : path.resolve(options.cwd), roots: this.roots.map((root) => ({ kind: root.kind, path: root.path, rank: root.rank ?? DEFAULT_RANK[root.kind] })), limits: this.limits });
+  }
+
+  private visibleToTenant(tenantId: string | undefined): boolean {
+    return this.tenantId === undefined || tenantId !== undefined && this.tenantId === tenantId;
   }
 }
 
