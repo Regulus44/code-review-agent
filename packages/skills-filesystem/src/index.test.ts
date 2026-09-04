@@ -193,6 +193,19 @@ describe("FileSystemSkillProvider", () => {
     controller.abort(); provider.dispose();
   });
 
+  it("refreshes catalog metadata on the next lookup after a watched SKILL.md change", async () => {
+    const root = await fixture(); await skill(root, "catalog-watch");
+    const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }], watch: true });
+    const controller = new AbortController(); provider.start({ signal: controller.signal, invalidate: () => undefined });
+    const before = await provider.list(); expect(before.candidates[0]?.description).toBe("catalog-watch description");
+    await waitForWatch();
+    await writeFile(path.join(root, "catalog-watch", "SKILL.md"), "---\nname: catalog-watch\ndescription: refreshed description\n---\nbody\n", "utf8");
+    await waitForWatch();
+    const after = await provider.list();
+    expect(after.candidates[0]?.description).toBe("refreshed description");
+    controller.abort(); provider.dispose();
+  });
+
   it("refreshes watcher coverage after a new skill directory appears and disposes cleanly", async () => {
     const root = await fixture(); await skill(root, "first");
     const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }], watch: true });
