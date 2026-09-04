@@ -28,7 +28,6 @@ describe("project and host Skill loading", () => {
     expect((await provider.readResource!(directCandidate!, { path: "references/plugin-json-spec.md", limit: 320 })).ok).toBe(true);
 
     const requests: ModelRequest[] = [];
-    let finalText = "";
     const model: ChatModel = {
       async *stream(request: ModelRequest): AsyncIterable<ModelStreamPart> {
         requests.push(request);
@@ -49,8 +48,7 @@ describe("project and host Skill loading", () => {
           yield { type: "tool_call_end", index: 0 };
         } else {
           expect(toolMessages[2]?.content).toContain("validate_plugin");
-          finalText = "plugin-creator resources loaded";
-          yield { type: "text_delta", text: finalText };
+          yield { type: "text_delta", text: "plugin-creator resources loaded" };
         }
         yield { type: "done" };
       },
@@ -62,7 +60,7 @@ describe("project and host Skill loading", () => {
     await host.waitForTurn(turn);
 
     expect(requests).toHaveLength(4);
-    expect(finalText).toBe("plugin-creator resources loaded");
+    expect(requests[3]?.messages.some((message) => message.role === "tool" && message.content.includes("validate_plugin"))).toBe(true);
   });
 });
 
