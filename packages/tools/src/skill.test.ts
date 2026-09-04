@@ -53,4 +53,30 @@ describe("SkillTool", () => {
     expect(result.ok).toBe(true);
     expect((result.output as { content: string }).content).toBe('<skill name="legacy" source="local">Hello world</skill>');
   });
+
+  it("uses the host-derived tenant scope when invoking tenant-owned Skills", async () => {
+    const registry = new SkillRegistry();
+    registry.registerProvider({
+      name: "tenant-a",
+      tenantId: "tenant-a",
+      list: async () => [{ name: "private", description: "private", source: "local", provider: "tenant-a", trust: "local", invocation: { modelInvocable: true, userInvocable: true }, rank: 1, locator: "private" }],
+      get: async (candidate) => ({ ...candidate, content: "tenant-a body" }),
+    });
+    const tool = createSkillTool(registry);
+    const base = {
+      sessionId: brand<string, "SessionId">("s-tenant"),
+      toolCallId: brand<string, "ToolCallId">("t-tenant"),
+      workspaceRoot: ".",
+      permissionPreset: "read-only" as const,
+      caller: "user" as const,
+      signal: new AbortController().signal,
+      reportProgress: async () => undefined,
+      appendEvent: async () => undefined,
+      requestUserInput: async () => ({ interactionId: brand<string, "InteractionId">("i-tenant"), status: "answered" as const, answer: "allow" }),
+    };
+    const hidden = await tool.execute({ skill: "private" }, { ...base, tenantId: brand<string, "TenantId">("tenant-b") });
+    expect(hidden).toMatchObject({ ok: false, error: { code: "SKILL_NOT_FOUND" } });
+    const visible = await tool.execute({ skill: "private" }, { ...base, tenantId: brand<string, "TenantId">("tenant-a") });
+    expect(visible).toMatchObject({ ok: true, output: { skill: "private" } });
+  });
 });

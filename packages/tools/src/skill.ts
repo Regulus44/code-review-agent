@@ -28,7 +28,11 @@ export function createSkillTool(skills: SkillRegistry, options: SkillToolOptions
       const input = raw as { skill?: unknown; args?: unknown; context?: unknown };
       const name = typeof input.skill === "string" ? input.skill.replace(/^\//u, "") : "";
       if (name.length === 0) return { ok: false, error: { code: "SKILL_NAME_REQUIRED", message: "skill is required" } };
-      const definition = await skills.get(name, { cwd: context.workspaceRoot, signal: context.signal });
+      const definition = await skills.get(name, {
+        cwd: context.workspaceRoot,
+        ...(context.tenantId === undefined ? {} : { tenantId: context.tenantId }),
+        signal: context.signal,
+      });
       if (definition === undefined) return { ok: false, error: { code: "SKILL_NOT_FOUND", message: `Skill not found: ${name}` } };
       if (!definition.invocation.modelInvocable && context.caller === "agent") return { ok: false, error: { code: "SKILL_MODEL_INVOCATION_DENIED", message: "Skill is user-invocable only" } };
       const metadata = definition.metadata ?? {};
