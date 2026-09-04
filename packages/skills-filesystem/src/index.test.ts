@@ -103,13 +103,16 @@ describe("FileSystemSkillProvider", () => {
     await writeFile(path.join(outside, "secret.txt"), "secret", "utf8");
     const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }] });
     const candidate = (await provider.list()).candidates[0]!;
+    const symlinkProvider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }], allowResourceSymlinks: true });
+    const symlinkCandidateBeforeMutation = (await symlinkProvider.list()).candidates[0]!;
     await symlink(path.join(dir, "references"), path.join(dir, "link-in"), "junction");
     await symlink(path.join(outside), path.join(dir, "link-out"), "junction");
     expect((await provider.readResource!(candidate, { path: "references/ok.txt" })).ok).toBe(true);
-    expect((await provider.readResource!(candidate, { path: "link-in/ok.txt" })).ok).toBe(true);
+    expect(await provider.readResource!(candidate, { path: "link-in/ok.txt" })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_FAILED" } });
     expect(await provider.readResource!(candidate, { path: "link-out/secret.txt" })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_INVALID_PATH" } });
     expect(await provider.readResource!(candidate, { path: "references/binary.bin" })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_FAILED" } });
     expect(await provider.readResource!(candidate, { path: "references" })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_NOT_FOUND" } });
+    expect((await symlinkProvider.readResource!(symlinkCandidateBeforeMutation, { path: "link-in/ok.txt" })).ok).toBe(true);
   });
 
   it("enforces bounded reads and cancellation without exposing filesystem errors", async () => {
@@ -124,6 +127,20 @@ describe("FileSystemSkillProvider", () => {
     await expect(provider.readResource!(candidate, { path: "assets/large.txt" }, { signal: controller.signal })).rejects.toBeDefined();
     await rm(path.join(dir, "assets", "large.txt"));
     expect(await provider.readResource!(candidate, { path: "assets/large.txt", limit: 2 })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_NOT_FOUND" } });
+  });
+
+  it("enforces independent offset and line budgets", async () => {
+    const root = await fixture(); await skill(root, "line-bounded");
+    const dir = path.join(root, "line-bounded"); await mkdir(path.join(dir, "references"), { recursive: true });
+    await writeFile(path.join(dir, "references", "many.txt"), "a\nb\nc\n", "utf8");
+    const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }], limits: { maxResourceLines: 2, maxResourceOffsetBytes: 2 } });
+    const candidate = (await provider.list()).candidates[0]!;
+    expect(await provider.readResource!(candidate, { path: "references/many.txt", offset: -1 })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_INVALID_PATH" } });
+    expect(await provider.readResource!(candidate, { path: "references/many.txt", offset: 1.5 })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_INVALID_PATH" } });
+    expect(await provider.readResource!(candidate, { path: "references/many.txt", limit: -1 })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_INVALID_PATH" } });
+    expect(await provider.readResource!(candidate, { path: "references/many.txt", limit: 1.5 })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_INVALID_PATH" } });
+    expect(await provider.readResource!(candidate, { path: "references/many.txt" })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_TOO_LARGE" } });
+    expect(await provider.readResource!(candidate, { path: "references/many.txt", offset: 3, limit: 1 })).toEqual({ ok: false, error: { code: "SKILL_RESOURCE_TOO_LARGE" } });
   });
 
   it("keeps SKILL.md and resource budgets independent", async () => {

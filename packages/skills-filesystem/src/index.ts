@@ -1,4 +1,4 @@
-import { watch as fsWatch, type FSWatcher } from "node:fs";
+import { constants as fsConstants, watch as fsWatch, type FSWatcher } from "node:fs";
 import { lstat, open, readdir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -11,6 +11,10 @@ export interface SkillFilesystemLimits {
   readonly maxFileBytes?: number;
   readonly maxResourceBytes?: number;
   readonly maxResourcePathBytes?: number;
+  /** Maximum byte offset accepted for one resource window. */
+  readonly maxResourceOffsetBytes?: number;
+  /** Maximum UTF-8 text lines returned by one resource window. */
+  readonly maxResourceLines?: number;
   readonly maxDepth?: number;
   readonly maxSkills?: number;
   readonly maxDescriptionBytes?: number;
@@ -24,9 +28,11 @@ export interface SkillFilesystemProviderOptions {
   readonly limits?: SkillFilesystemLimits;
   readonly watch?: boolean;
   readonly sourceName?: string;
+  /** Disabled by default. When enabled, a symlink target must remain in the Skill directory. */
+  readonly allowResourceSymlinks?: boolean;
 }
 
-const DEFAULT_LIMITS: Required<SkillFilesystemLimits> = { maxFileBytes: 256 * 1024, maxResourceBytes: 256 * 1024, maxResourcePathBytes: 4 * 1024, maxDepth: 6, maxSkills: 256, maxDescriptionBytes: 2048, maxWatchDirectories: 512 };
+const DEFAULT_LIMITS: Required<SkillFilesystemLimits> = { maxFileBytes: 256 * 1024, maxResourceBytes: 256 * 1024, maxResourcePathBytes: 4 * 1024, maxResourceOffsetBytes: 64 * 1024 * 1024, maxResourceLines: 2_000, maxDepth: 6, maxSkills: 256, maxDescriptionBytes: 2048, maxWatchDirectories: 512 };
 const DEFAULT_RANK: Record<SkillFilesystemRootKind, number> = { project: 100, custom: 150, user: 200, bundled: 300 };
 const FRONTMATTER_KEYS = new Set(["name", "description", "when_to_use", "whenToUse", "model_invocable", "modelInvocable", "disable-model-invocation", "user_invocable", "userInvocable", "user-invocable", "allowed-tools", "allowedTools", "context", "version", "agent", "paths"]);
 
@@ -42,6 +48,7 @@ export class FileSystemSkillProvider implements SkillProvider {
   private readonly roots: readonly SkillFilesystemRoot[];
   private readonly lastGoodByContext = new Map<string, Map<string, Entry>>();
   private readonly watchEnabled: boolean;
+  private readonly allowResourceSymlinks: boolean;
   private readonly watchTargets = new Map<string, SkillFilesystemRoot>();
   private readonly watchers = new Map<string, FSWatcher>();
   private readonly watchRoles = new Map<string, "tree" | "skill">();
@@ -58,6 +65,7 @@ export class FileSystemSkillProvider implements SkillProvider {
     this.limits = { ...DEFAULT_LIMITS, ...(options.limits ?? {}) };
     this.roots = options.roots.map((root) => ({ ...root, path: path.resolve(root.path) }));
     this.watchEnabled = options.watch === true;
+    this.allowResourceSymlinks = options.allowResourceSymlinks === true;
     for (const root of this.roots) this.watchTargets.set(pathKey(root.path), root);
   }
 
@@ -98,9 +106,12 @@ export class FileSystemSkillProvider implements SkillProvider {
     if (locator === undefined || !samePath(locator.skillFilePath, candidate.path ?? locator.skillFilePath)) return { ok: false, error: { code: "SKILL_RESOURCE_FAILED" } };
     const invalid = validateResourcePath(request.path, this.limits.maxResourcePathBytes);
     if (invalid) return { ok: false, error: { code: "SKILL_RESOURCE_INVALID_PATH" } };
+    if (request.offset !== undefined && (!Number.isSafeInteger(request.offset) || request.offset < 0)) return { ok: false, error: { code: "SKILL_RESOURCE_INVALID_PATH" } };
+    if (request.limit !== undefined && (!Number.isSafeInteger(request.limit) || request.limit < 0)) return { ok: false, error: { code: "SKILL_RESOURCE_INVALID_PATH" } };
     const maxBytes = this.limits.maxResourceBytes;
     if (request.limit !== undefined && request.limit > maxBytes) return { ok: false, error: { code: "SKILL_RESOURCE_TOO_LARGE" } };
     const offset = request.offset ?? 0;
+    if (offset > this.limits.maxResourceOffsetBytes) return { ok: false, error: { code: "SKILL_RESOURCE_TOO_LARGE" } };
     const requestedLimit = request.limit ?? maxBytes;
     try {
       const skillDirectoryInfo = await lstat(locator.skillDirectory);
@@ -110,17 +121,25 @@ export class FileSystemSkillProvider implements SkillProvider {
       const target = path.resolve(canonicalDirectory, ...request.path.replaceAll("\\", "/").split("/"));
       if (!isWithin(canonicalDirectory, target)) return { ok: false, error: { code: "SKILL_RESOURCE_INVALID_PATH" } };
       const info = await lstat(target);
-      if (!info.isFile() && !info.isSymbolicLink()) return { ok: false, error: { code: info.isDirectory() ? "SKILL_RESOURCE_NOT_FOUND" : "SKILL_RESOURCE_FAILED" } };
+      if (info.isSymbolicLink() && !this.allowResourceSymlinks) return { ok: false, error: { code: "SKILL_RESOURCE_FAILED" } };
+      if (!info.isFile() && !(this.allowResourceSymlinks && info.isSymbolicLink())) return { ok: false, error: { code: info.isDirectory() ? "SKILL_RESOURCE_NOT_FOUND" : "SKILL_RESOURCE_FAILED" } };
       const canonicalTarget = await realpath(target);
       if (!isWithin(canonicalDirectory, canonicalTarget)) return { ok: false, error: { code: "SKILL_RESOURCE_INVALID_PATH" } };
+      if (!this.allowResourceSymlinks && !samePath(canonicalTarget, target)) return { ok: false, error: { code: "SKILL_RESOURCE_FAILED" } };
       const canonicalInfo = await lstat(canonicalTarget);
       if (!canonicalInfo.isFile() || canonicalInfo.isSymbolicLink()) return { ok: false, error: { code: canonicalInfo.isDirectory() ? "SKILL_RESOURCE_NOT_FOUND" : "SKILL_RESOURCE_FAILED" } };
       const sizeBytes = canonicalInfo.size;
       if (sizeBytes > maxBytes && request.limit === undefined) return { ok: false, error: { code: "SKILL_RESOURCE_TOO_LARGE" } };
       const length = Math.min(requestedLimit, Math.max(0, sizeBytes - offset));
-      const handle = await open(canonicalTarget, "r");
+      const handle = await open(canonicalTarget, readOnlyNoFollowFlags());
       let bytes: Buffer;
       try {
+        const opened = await handle.stat();
+        const current = await lstat(canonicalTarget);
+        const currentCanonical = await realpath(canonicalTarget);
+        if (!opened.isFile() || !current.isFile() || current.isSymbolicLink() || opened.dev !== current.dev || opened.ino !== current.ino || !samePath(currentCanonical, canonicalTarget) || !isWithin(canonicalDirectory, currentCanonical)) {
+          return { ok: false, error: { code: "SKILL_RESOURCE_FAILED" } };
+        }
         bytes = Buffer.alloc(length);
         if (length > 0) {
           const result = await handle.read(bytes, 0, length, offset);
@@ -133,6 +152,7 @@ export class FileSystemSkillProvider implements SkillProvider {
       if (bytes.includes(0)) return { ok: false, error: { code: "SKILL_RESOURCE_FAILED" } };
       let content: string;
       try { content = new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { return { ok: false, error: { code: "SKILL_RESOURCE_FAILED" } }; }
+      if (lineCount(content) > this.limits.maxResourceLines) return { ok: false, error: { code: "SKILL_RESOURCE_TOO_LARGE" } };
       const truncated = offset + bytes.byteLength < sizeBytes;
       return { ok: true, resource: { path: request.path, content, sizeBytes, ...(truncated ? { truncated: true } : {}), mediaType: mediaTypeForPath(request.path) } };
     } catch (error) {
@@ -349,6 +369,17 @@ export function createFileSystemSkillProvider(options: SkillFilesystemProviderOp
 function isWithin(root: string, target: string): boolean { const relative = path.relative(root, target); return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative)); }
 function samePath(left: string, right: string): boolean { return process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right; }
 function pathKey(value: string): string { return process.platform === "win32" ? value.toLowerCase() : value; }
+
+function readOnlyNoFollowFlags(): number | string {
+  // O_NOFOLLOW blocks a final symlink on POSIX. The post-open stat/realpath
+  // checks below provide the equivalent fail-closed gate on platforms that do
+  // not expose the flag (notably Windows).
+  return fsConstants.O_RDONLY | (typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0);
+}
+
+function lineCount(value: string): number {
+  return value.length === 0 ? 0 : value.split(/\r?\n/u).length;
+}
 
 function parseFileSkillLocator(value: unknown): FileSkillLocator | undefined {
   if (typeof value !== "object" || value === null) return undefined;
