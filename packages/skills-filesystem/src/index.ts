@@ -6,7 +6,7 @@ import type { SkillCandidate, SkillDefinition, SkillLookupOptions, SkillProvider
 import { isSkillName } from "@coding-agent/skills";
 
 export type SkillFilesystemRootKind = "project" | "user" | "custom" | "bundled";
-export interface SkillFilesystemRoot { readonly kind: SkillFilesystemRootKind; readonly path: string; readonly rank?: number; }
+export interface SkillFilesystemRoot { readonly kind: SkillFilesystemRootKind; readonly path: string; readonly rank?: number; readonly optional?: boolean; }
 export interface SkillFilesystemLimits {
   readonly maxFileBytes?: number;
   readonly maxResourceBytes?: number;
@@ -191,7 +191,7 @@ export class FileSystemSkillProvider implements SkillProvider {
     this.watchSyncPromise = (async () => {
       const desired = new Map<string, "tree" | "skill">();
       let complete = true;
-      for (const root of this.watchTargets.values()) complete = await this.collectWatchDirectories(root.path, 0, desired) && complete;
+      for (const root of this.watchTargets.values()) complete = await this.collectWatchDirectories(root.path, 0, desired, root.optional === true) && complete;
       for (const [key, watcher] of this.watchers) {
         if (desired.has(key)) continue;
         watcher.close();
@@ -208,7 +208,7 @@ export class FileSystemSkillProvider implements SkillProvider {
     return this.watchSyncPromise;
   }
 
-  private async collectWatchDirectories(directory: string, depth: number, out: Map<string, "tree" | "skill">): Promise<boolean> {
+  private async collectWatchDirectories(directory: string, depth: number, out: Map<string, "tree" | "skill">, optional = false): Promise<boolean> {
     if (out.size >= this.limits.maxWatchDirectories) return false;
     try {
       const info = await lstat(directory);
@@ -228,7 +228,7 @@ export class FileSystemSkillProvider implements SkillProvider {
       }
       return complete;
     } catch {
-      return false;
+      return optional;
     }
   }
 
@@ -309,7 +309,10 @@ export class FileSystemSkillProvider implements SkillProvider {
       if (!info.isDirectory() || info.isSymbolicLink()) return { complete: false, count: 0 };
       rootPath = await realpath(root.path);
       if (!samePath(rootPath, root.path)) return { complete: false, count: 0 };
-    } catch { return { complete: false, count: 0 }; }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT" && root.optional === true) return { complete: true, count: 0 };
+      return { complete: false, count: 0 };
+    }
     const found = new Set<string>();
     let complete = true;
     const walk = async (dir: string, depth: number, inherited: readonly string[] = []): Promise<void> => {
@@ -352,7 +355,7 @@ export class FileSystemSkillProvider implements SkillProvider {
   }
 
   private contextKey(options: SkillLookupOptions): string {
-    return JSON.stringify({ cwd: options.cwd === undefined ? undefined : path.resolve(options.cwd), roots: this.roots.map((root) => ({ kind: root.kind, path: root.path, rank: root.rank ?? DEFAULT_RANK[root.kind] })), limits: this.limits });
+    return JSON.stringify({ cwd: options.cwd === undefined ? undefined : path.resolve(options.cwd), roots: this.roots.map((root) => ({ kind: root.kind, path: root.path, rank: root.rank ?? DEFAULT_RANK[root.kind], optional: root.optional === true })), limits: this.limits });
   }
 
   private visibleToTenant(tenantId: string | undefined): boolean {
@@ -363,12 +366,12 @@ export class FileSystemSkillProvider implements SkillProvider {
 export function defaultSkillFilesystemRoots(options: { readonly cwd?: string; readonly bundledPath?: string; readonly userPath?: string; readonly customPaths?: readonly string[] } = {}): readonly SkillFilesystemRoot[] {
   const cwd = path.resolve(options.cwd ?? process.cwd());
   const systemPath = path.join(os.homedir(), ".codex", "skills", ".system");
-  const bundledPaths = [...new Set([options.bundledPath, existsSync(systemPath) ? systemPath : undefined].filter((item): item is string => item !== undefined))];
   return [
-    { kind: "project", path: path.join(cwd, ".claude", "skills") },
-    { kind: "user", path: options.userPath ?? path.join(os.homedir(), ".claude", "skills") },
+    { kind: "project", path: path.join(cwd, ".claude", "skills"), optional: true },
+    { kind: "user", path: options.userPath ?? path.join(os.homedir(), ".claude", "skills"), optional: true },
     ...(options.customPaths ?? []).map((item) => ({ kind: "custom" as const, path: item })),
-    ...bundledPaths.map((item) => ({ kind: "bundled" as const, path: item })),
+    ...(options.bundledPath === undefined ? [] : [{ kind: "bundled" as const, path: options.bundledPath }]),
+    ...(existsSync(systemPath) && systemPath !== options.bundledPath ? [{ kind: "bundled" as const, path: systemPath, optional: true }] : []),
   ];
 }
 

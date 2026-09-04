@@ -16,7 +16,7 @@ describe("FileSystemSkillProvider", () => {
   it("includes the host Codex system Skill root when it exists", () => {
     const expected = path.join(os.homedir(), ".codex", "skills", ".system");
     const roots = defaultSkillFilesystemRoots({ cwd: "D:/fixture-workspace" });
-    if (existsSync(expected)) expect(roots).toContainEqual({ kind: "bundled", path: expected });
+    if (existsSync(expected)) expect(roots.some((root) => root.kind === "bundled" && root.path === expected)).toBe(true);
   });
 
   it("discovers bounded local skills and loads body on demand", async () => {
