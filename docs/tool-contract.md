@@ -50,6 +50,8 @@ M6 收紧 `read_skill_resource` 的安全边界：工具风险固定为 `read`�
 
 M7 验收 fixture 验证上述 tool contract 在真实多 step 链路中保持不变：资源只在模型显式调用后进入下一步骤，旧 result 不随文件更新改写，API/SSE 继续投影 metadata-only 结果。
 
+当前 API Host 默认把存在的 `~/.codex/skills/.system` 作为 bundled Skill root 加入扫描；项目 workspace 的 `.claude/skills` 具有更高优先级，因此同名项目 Skill 会覆盖 bundled Skill。仓库内的 `plugin-creator` 是项目级测试 Skill，仍通过相同的 registry/provider、权限、workspace 和资源读取管线加载。
+
 MCP 工具使用 `mcp__<server>__<tool>` 的稳定 namespace；原始 MCP 名称只用于 wire call，不从 public name 反解析。`source` 只用于 API/Web 展示，执行仍由本地 ToolRuntime 负责。
 
 ## 统一执行流程

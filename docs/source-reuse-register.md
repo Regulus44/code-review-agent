@@ -780,3 +780,15 @@ ID:
 本项目路径：`packages/skills-mcp/src/index.ts`、`packages/contracts/src/index.ts`。
 
 范围：远程资源以 opaque `resourceBase` 表达，不向 catalog 暴露凭据、绝对路径或可直接执行的 URL；MCP 服务器/tenant 访问继续由 `McpConnectionManager` 负责。
+
+### HOST-SKILL-001
+
+来源位置：`C:/Users/12294/.codex/skills/.system/plugin-creator`
+
+复用方式：user-requested fixture copy
+
+许可证/来源证据：源目录未发现独立许可证文件；本次按用户要求复制为项目级测试 Skill，不将其内容暴露为本项目公共 API，也不宣称上游许可证兼容性。
+
+本项目路径：`.claude/skills/plugin-creator/`
+
+范围：用于验证项目级 Skill 发现、`SKILL.md` 加载、`references/`/`scripts/`/`assets/` 资源包结构和真实 Agent 多 step 调用链；`scripts/` 在本项目中仅按普通文本读取，不自动执行。
