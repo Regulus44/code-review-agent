@@ -46,6 +46,8 @@ M4 为 `read_skill_resource` 增加可选的 `skillResourceArtifactReplay`。实
 
 M5 为本地 filesystem Skill provider 增加默认关闭的 best-effort watcher。开启 `SkillFilesystemProviderOptions.watch` 后，provider 在配置 root 与受限深度的非 Skill 目录注册 `fs.watch`，在发现 Skill 目录后只监听其直属 `SKILL.md`；目录新增/删除、`SKILL.md` 新增/修改/删除触发 250ms debounce 的 provider invalidation，`references/`、`scripts/`、`assets/` 等深层资源变化不会重建 catalog。watcher 受 `maxWatchDirectories` 数量、`maxDepth`、dispose/AbortSignal 和 1 秒重试约束；监听失败保留 last-good candidate，并让下一次 observation 标记 `complete=false`，恢复后再清除该状态。workspace 工具写入只有 `.claude/skills` 根、Skill 目录或 `SKILL.md` 才追加 `skills/change`，资源正文不会进入该事件。
 
+M6 收紧 `read_skill_resource` 的安全边界：工具风险固定为 `read`、审批固定为 `auto`，Skill 的 `allowedTools`、未知 frontmatter 和 source trust 只能收缩能力或触发既有交互，不能升级为通用文件读取、shell 或脚本执行。filesystem provider 先校验 Skill-relative path，再执行 canonical realpath containment、regular-file、UTF-8、单文件/单窗口 bytes、offset 与 line budget；默认拒绝资源 symlink，显式 `allowResourceSymlinks` 时仍要求目标位于 Skill 目录内。POSIX 使用 `O_NOFOLLOW`，其它平台在打开后复核 file identity 和 realpath 以抵抗 TOCTOU；错误只返回稳定 code，不暴露绝对路径、底层异常或跨租户信息。ToolRuntime 从宿主 Session ownership 注入 tenant scope，SkillTool 与 `read_skill_resource` 均按该 scope 解析 tenant-owned provider；`scripts/` 仅可作为普通文本读取，M6 不执行脚本。`workspace-full-access` 与 `danger-full-access` 也不能跳过 Skill root containment。
+
 MCP 工具使用 `mcp__<server>__<tool>` 的稳定 namespace；原始 MCP 名称只用于 wire call，不从 public name 反解析。`source` 只用于 API/Web 展示，执行仍由本地 ToolRuntime 负责。
 
 ## 统一执行流程
