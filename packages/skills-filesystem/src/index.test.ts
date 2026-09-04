@@ -84,6 +84,21 @@ describe("FileSystemSkillProvider", () => {
     expect(result).toEqual({ ok: true, resource: { path: "references/checklist.md", content: "alpha\n", sizeBytes: Buffer.byteLength("alpha\nβeta\ngamma"), truncated: true, mediaType: "text/markdown; charset=utf-8" } });
   });
 
+  it("returns the latest resource bytes without mutating a previously returned result", async () => {
+    const root = await fixture(); await skill(root, "mutable");
+    const dir = path.join(root, "mutable"); await mkdir(path.join(dir, "references"), { recursive: true });
+    const resourcePath = path.join(dir, "references", "checklist.md");
+    await writeFile(resourcePath, "old checklist\n", "utf8");
+    const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }] });
+    const candidate = (await provider.list()).candidates[0]!;
+    const first = await provider.readResource!(candidate, { path: "references/checklist.md" });
+    expect(first).toMatchObject({ ok: true, resource: { content: "old checklist\n" } });
+    await writeFile(resourcePath, "new checklist\n", "utf8");
+    const second = await provider.readResource!(candidate, { path: "references/checklist.md" });
+    expect(second).toMatchObject({ ok: true, resource: { content: "new checklist\n" } });
+    expect(first).toMatchObject({ ok: true, resource: { content: "old checklist\n" } });
+  });
+
   it("rejects traversal, absolute, empty, NUL and overlong resource paths", async () => {
     const root = await fixture(); await skill(root, "safe");
     const provider = new FileSystemSkillProvider({ roots: [{ kind: "project", path: root }] });
