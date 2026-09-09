@@ -10,6 +10,7 @@ import { ToolDisabledError, ToolNotFoundError, ToolRegistry } from "./registry.j
 import { ToolRuntime } from "./runtime.js";
 import { DefaultPermissionPolicy } from "./permissions.js";
 import { assertValidInput, SchemaValidationError } from "./schema.js";
+import { InMemorySkillResourceArtifactStore } from "@coding-agent/context";
 
 class MemoryStore implements EventStore {
   readonly events: AgentEvent[] = [];
@@ -24,6 +25,23 @@ class MemoryStore implements EventStore {
 }
 
 describe("ToolRuntime", () => {
+  it("redacts Skill resource bodies from durable events and commits deferred results once", async () => {
+    const store = new MemoryStore();
+    const registry = new ToolRegistry();
+    registry.register({ name: "read_skill_resource", description: "fixture", inputSchema: { type: "object" }, executionMode: "parallel", riskLevel: "read", approvalMode: "auto", interruptBehavior: "cancel", execute: async () => ({ ok: true, output: { skill: "review", path: "references/checklist.md", content: "secret body", sizeBytes: 11, offset: 0, limit: 64 }, modelView: "<skill_resource>secret body</skill_resource>" }) });
+    const artifacts = new InMemorySkillResourceArtifactStore();
+    const runtime = new ToolRuntime({ store, registry, skillResourceArtifactReplay: true, skillResourceArtifactStore: artifacts });
+    const sessionId = brand<string, "SessionId">("ses_skill_replay");
+    const output = await runtime.execute({ sessionId, workspaceRoot: ".", name: "read_skill_resource", input: {}, toolCallId: brand<string, "ToolCallId">("call_skill"), deferResultEvents: true });
+    await runtime.commitDeferredResult({ sessionId }, output);
+    await runtime.commitDeferredResult({ sessionId }, output);
+    const resultEvent = store.events.find((event) => event.type === "tool/result");
+    expect(store.events.filter((event) => event.type === "tool/result")).toHaveLength(1);
+    expect(JSON.stringify(resultEvent?.payload)).not.toContain("secret body");
+    expect(resultEvent?.payload.result).toMatchObject({ output: { skill: "review", path: "references/checklist.md", artifact: { kind: "skill-resource" }, digest: expect.any(String) } });
+    expect(await artifacts.read({ artifactId: (resultEvent?.payload.result as { output: { artifact: { artifactId: string } } }).output.artifact.artifactId, sessionId: String(sessionId) })).toMatchObject({ content: "secret body" });
+  });
+
   it("validates schemas and rejects extra fields", () => {
     expect(() => assertValidInput({ type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false }, { path: "a", extra: true })).toThrow(SchemaValidationError);
   });

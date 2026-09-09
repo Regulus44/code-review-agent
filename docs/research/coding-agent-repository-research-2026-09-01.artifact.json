@@ -1,0 +1,202 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "Coding Agent 仓库技术调研",
+    "description": "基于 2026-09-02 工作树源码、契约、测试与状态文档的技术审计快照；仓库名称 code-review-agent 仅为历史命名。",
+    "generatedAt": "2026-09-02T09:36:00Z",
+    "tables": [
+      {
+        "id": "capability-map",
+        "title": "核心能力的实现与默认可用性",
+        "subtitle": "“部分接线”表示接口、实现和测试已存在，能力启用依赖显式开关、adapter 或产品入口；默认 API Host 的实际装配单独列出。",
+        "dataset": "capability_map",
+        "sourceId": "capability_map_audit",
+        "defaultSort": { "field": "domain", "direction": "asc" },
+        "columns": [
+          { "field": "domain", "label": "领域", "type": "text" },
+          { "field": "default_state", "label": "默认状态", "type": "text" },
+          { "field": "implementation", "label": "实现逻辑", "type": "text" },
+          { "field": "boundary", "label": "当前边界", "type": "text" }
+        ]
+      }
+    ],
+    "charts": [
+      {
+        "id": "availability-chart",
+        "title": "审计领域按默认可用性分布",
+        "subtitle": "11 个审计领域；“默认已启用”表示默认 SQLite API Host 的主路径，计数不表示质量或业务成熟度评分。",
+        "type": "bar",
+        "dataset": "availability_counts",
+        "sourceId": "repository_audit",
+        "valueFormat": "number",
+        "encodings": {
+          "x": { "field": "status", "type": "nominal", "label": "默认状态" },
+          "y": { "field": "domain_count", "type": "quantitative", "label": "领域数" },
+          "tooltip": [
+            { "field": "meaning", "type": "nominal", "label": "含义" },
+            { "field": "domain_count", "type": "quantitative", "label": "领域数", "format": "number" }
+          ]
+        }
+      }
+    ],
+    "sources": [
+      { "id": "repository_audit", "label": "仓库实现与状态审计", "path": "docs/status.zh-CN.md" },
+      { "id": "capability_map_audit", "label": "能力矩阵的审计分类", "path": "docs/status.zh-CN.md" },
+      { "id": "runtime_source", "label": "AgentHost 与 Agent Loop", "path": "packages/runtime/src/index.ts" },
+      { "id": "context_source", "label": "上下文与记忆模块", "path": "packages/context/src" },
+      { "id": "tool_source", "label": "统一工具运行时", "path": "packages/tools/src/runtime.ts" },
+      { "id": "storage_source", "label": "SQLite EventStore", "path": "packages/storage/src/index.ts" },
+      { "id": "mcp_source", "label": "MCP Client", "path": "packages/mcp-client/src" },
+      { "id": "subagent_source", "label": "内部子智能体", "path": "packages/subagent/src/runtime.ts" },
+      { "id": "skills_source", "label": "Skill registry、filesystem、plugin 与 MCP provider", "path": "packages/skills/src" },
+      { "id": "memory_skill_doc", "label": "Memory 与 Skill 实施审计", "path": "docs/reference/memory-skill-cc-dsh-research-and-implementation.zh-CN.md" },
+      { "id": "evaluation_results", "label": "Easy/Medium 评测结果摘要", "path": "docs/evaluation/results-summary.zh-CN.md" },
+      { "id": "api_web_source", "label": "API 与 Web 工作台", "path": "apps/api/src/server.ts" },
+      { "id": "governance_source", "label": "架构决策与工具契约", "path": "docs/architecture-decisions.md" }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# Coding Agent 仓库技术调研"
+      },
+      {
+        "id": "technical-summary",
+        "type": "markdown",
+        "body": "## 技术结论\n\n**当前仓库已经具备一个可运行、可恢复的本地 Web Coding Agent 核心。**它的主干是 TypeScript/Node.js + Node 内置 SQLite + 原生 HTTP/SSE + 原生 Web Shell；以 append-only 事件为事实源，把 Session、Turn、工具、审批和内部子任务串成可回放的执行系统。仓库名 `code-review-agent` 保留早期历史，当前产品定位是通用 Coding Agent。\n\n**执行闭环是当前系统的核心优势。**每个 Agent step 都经历统一上下文组装、token 诊断、模型流、并行/互斥工具调度、权限暂停、结果落盘和下一轮请求；工具、MCP 与子 Agent 都回到同一 EventStore 和 ToolRuntime 边界。\n\n**本轮关键修正是 Memory 与 Skill 的默认接线。**默认 SQLite API Host 已装配 bounded Session/Project Memory 文件 adapter、本地受限 Session extractor 和 filesystem Skill provider；Project Memory 会在 turn 组装时做 manifest/词法召回，Session Memory 会按 token/tool/natural-break 门控后台提取。Skill 的 registry、`SKILL.md` loader、catalog、SkillTool、插件 bundle 和 gated MCP provider 已实现，模型侧 SkillTool/catalog 通过 `skillToolEnabled=true` 开启，插件/MCP 继续使用显式开关。Context Collapse、A2A、浏览器认证和生产级隔离列入后续演进。"
+      },
+      {
+        "id": "project-intro",
+        "type": "markdown",
+        "body": "## 项目简介（四点）\n\n- **上下文与记忆管理。**面向跨文件、长链路任务，按 system、workspace、历史、Memory 与 Skill 组装 model view，以 token 预算和压缩阶梯保持上下文稳定。\n- **工具编排与执行闭环。**统一调度文件、检索、命令、终端、Git、MCP、Subagent，贯通校验、权限、执行、结果和事件，支持并行、取消与超时。\n- **事件驱动协作运行时。**SQLite append-only EventStore 串联 Session、Turn、Task，结合 FIFO、SSE replay、子任务和重启恢复支撑连续协作。\n- **Easy/Medium 评测结果。**Easy-45 方向的 `pilot-01` 早期 12 条试点记录 12/12 `resolved`，严格复核 2 条完整 `resolved`；Medium-11 的 Django-15814 目标复现及 72+754 项测试通过，另有 timeout/failed 样本。\n\n结果明细见 [评测结果摘要](../evaluation/results-summary.zh-CN.md)。"
+      },
+      {
+        "id": "capability-heading",
+        "type": "markdown",
+        "body": "## 实现全景\n\n默认 SQLite API Host 已启用本次 11 个审计领域中的 8 个核心领域；Skill/Plugin 与生产化处于部分接线阶段，Context Collapse 进入后续演进。归类依据是默认 API Host 的实际接线与公共入口。"
+      },
+      {
+        "id": "availability-chart-block",
+        "type": "chart",
+        "chartId": "availability-chart"
+      },
+      {
+        "id": "capability-table",
+        "type": "table",
+        "tableId": "capability-map"
+      },
+      {
+        "id": "stack",
+        "type": "markdown",
+        "body": "## 技术栈与分层\n\n- **语言与构建：**Node.js >= 22.19、TypeScript 5.8、ESM、pnpm workspace、严格 TypeScript（`noUncheckedIndexedAccess`、`exactOptionalPropertyTypes` 等）。测试使用 Vitest；浏览器入口由 esbuild 输出 IIFE bundle。\n- **服务端：**Node 原生 `http`，REST 命令接口与 SSE 事件流；前端采用静态 `index.html` 与 TypeScript projection/presenter 模块。\n- **持久化：**`node:sqlite` 的 `DatabaseSync`；SQLite schema v7 存储 events、projection、idempotent commands、MCP config、model route、credential metadata 和 principal metadata。\n- **LLM：**统一 `ChatModel` 流接口；内置 Echo 开发回退、OpenAI-compatible（当前 DeepSeek 配置）与 Anthropic Messages adapter，均将文本、工具调用增量、usage、错误归一为 provider-neutral stream part。\n- **前端：**DSH 风格三栏工作台，Web 只消费 contracts/API projection。\n- **部署：**Docker 以非 root 用户运行、只读 root filesystem、tmpfs、`no-new-privileges` 和 `cap_drop: ALL`；workspace 命令的统一 OS/container 沙箱列入后续安全建设。"
+      },
+      {
+        "id": "agent-loop",
+        "type": "markdown",
+        "body": "## Agent Loop：流式、队列化、事件优先\n\n单一 Session 同时只运行一个 Turn，后续用户消息进入持久化 FIFO 队列；`turn/queued`、`queue/changed`、`turn/started` 先后写入事件。运行中的 Turn 支持 `AbortController` 取消和 steer 消息，重启后可从 queued 或 pending approval/interaction 恢复。\n\n```text\nuser/message → turn/queued → per-session drain\n  → canonical ContextAssembly → normalize + tool-pairing + tool-result budget\n  → token preflight / optional compaction → step/started\n  → provider stream (assistant/chunk, usage, tool-call deltas)\n  → assistant/message\n  → scheduler (parallel rolling pool / exclusive barrier)\n  → ToolRuntime → tool/result → 下一 step；无 tool call 时 turn/ended\n```\n\n模型工具调用的 JSON 在流式阶段按 index 聚合，完整 assistant message 才落盘。工具调用按声明顺序提交结果：`parallel` 工具使用有上限的 rolling pool，`exclusive` 工具形成屏障，默认最多 10 个并发、Host 硬上限 512。取消时会等待已启动调用结算，并为未派发的调用写入结构化 cancelled 结果。\n\n当前 Loop 以 token budget、取消、重复工具提醒和后续 quota 共同控制长任务运行。"
+      },
+      {
+        "id": "context",
+        "type": "markdown",
+        "body": "## Token 计数、上下文组装与压缩\n\n**组装。**`ContextAssembly` 将分层 system prompt、按名称排序的可见 tool schema、事件回放出的消息和 attachment 合成为唯一 model view，并计算稳定 fingerprint。静态 prompt 约束身份、安全、验证与沟通；动态部分注入 workspace、policy-filtered 工具、权限模式、恢复标记、Project Memory prompt/attachments，以及在 SkillTool 开启时的 bounded Skill catalog。外部文件、MCP、tool output、Memory topic 与 attachment 统一包成 untrusted context，不可覆盖系统约束。\n\n**计数。**每个 step 先用 provider-neutral estimate：普通文本约按 4 chars/token，结构化 JSON/工具 schema 约按 2 chars/token，并单独拆分 system、message、tool schema、tool arguments 与 results。仅当 model capability 声明可精确计数且预估已临近 warning/predictive boundary 时，才调用 `countTokens`；失败保留 estimate（或显式 stale usage），绝不返回虚假的 0。当前内置 DeepSeek 与 Anthropic capability 都声明 `supportsExactCount: false`，所以默认路径是估算而非服务端 tokenizer。\n\n**请求前 gate。**历史先做 API round 分组、message normalize、tool pairing；默认 repair 会合并同一 response 的 streaming assistant 消息，修复空 tool id，移除 duplicate/orphan result，并给缺失 result 注入有界 synthetic error。严格模式则拒绝不合法请求。修复只改变 model view，审计 transcript 不被改写。\n\n**压缩阶梯。**先对超大单个 tool result 落 `.agent-artifacts/tool-results`，阈值默认 50,000 字符或 100,000 估算 tokens，模型只看到 2,000-byte 脱敏预览和相对 artifact path；再执行单条、单消息 aggregate（默认 200,000 chars）、count/token/time microcompact，且 pending permission/interaction 的 tool pair 受保护。超过预算时优先 Session Memory compact → 无工具 summary model（默认保留约 8k recent tokens、summary 最大 8,192 chars、prompt-too-long 最多 3 次按 API round 裁头重试）→ deterministic legacy compact。每次 compact 后建立 durable boundary 与 transcript segment，重启时锚点不可靠则回退完整 transcript，而不猜切点。"
+      },
+      {
+        "id": "recovery-observability",
+        "type": "markdown",
+        "body": "## 失败回退、日志与诊断\n\n**模型回退。**OpenAI-compatible 和 Anthropic adapter 对网络、401/403、413、429、529、5xx、idle timeout、stream closed 与 partial output 统一分类；普通 agent request 最多两次 transport retry，summary request 最多一次。若配置了 `fallbackModels`，切换条件限定为：请求尚未产生 text/tool delta、错误属于可回退传输类、仍有候选模型。这样可以避免重复副作用或混合半段回答。默认 API Host 保持 fallback model 空配置，回退链由 Host 按需提供。\n\n**上下文恢复。**prompt-too-long 或 media-too-large 且响应保持空白时，per-turn guard 先执行 compact 再重试；默认最多一次 reactive retry，连续三次 compaction failure 打开 circuit breaker。每次状态迁移都记录 request fingerprint、错误分类、尝试次数和 transition reason。\n\n**工具恢复。**统一 ToolRuntime 有 schema validation、15 分钟审批/交互 TTL、默认 120 秒工具超时、取消传播、exclusive serialization、输出预算和结构化 remedy。Patch、编辑、后台 job、terminal、LSP 都有自己的 stale/conflict/timeout/crash 语义；编辑要求先 read observation，写入前再验 hash。\n\n**可观测性。**每步 `step/started` 写 token count、warning threshold、ContextAssembly fingerprint、validation/pairing report 与 tool-result budget；Turn 有 trace id，runtime 暴露 counters、`/v1/diagnostics` 与 `/v1/metrics`。Web 将事件投影为 Conversation、Trajectory、Tool Tree、Context meter、Usage、Permission、Job、MCP、Task 等视图，并对常见 secret-shaped key 做前端 bounded/redacted presentation。structured logs、OpenTelemetry、告警和完整 public/audit projection 分离列入后续运维建设。"
+      },
+      {
+        "id": "tools-search",
+        "type": "markdown",
+        "body": "## 工具调用、代码检索与 workspace 安全\n\nToolRuntime 贯彻 `discover → schema validate → tenant/workspace/policy → approval → execute → progress → structured result → presentation → event append`。内置工具覆盖 bounded read/glob/grep、stale-safe edit、unified patch preview/apply/rollback、recoverable delete、Git 只读、allowlisted argv、bash/pwsh、persistent terminal、durable background jobs、plan/todo/goal、session query、可选 image/LSP/Code Mode，以及内部子 Agent tools。\n\n路径通过 `WorkspaceResolver` 执行 lexical traversal 与 realpath symlink-escape 防护；`workspace-full-access` 下的 command guard 还会拒绝外部路径、nested shell、inline Node/Python、动态执行、环境枚举和可疑环境路径。命令输出和 terminal/job buffer 各有 512 KiB 上限，后台完整日志溢写到 workspace 相对 artifact。\n\n**检索采用 workspace 内 bounded scan。**`glob` 递归扫描（跳过 `.git`、`node_modules`、`.agent-trash`、`.agent-artifacts`）；`grep` 在 workspace 内以 JS 正则/字面搜索 UTF-8 文件，单文件最多 1 MiB、最多 500 matches，可返回上下文。可选 LSP 提供只读 diagnostics/definition/references，启动配置化 JSON-RPC 子进程并有超时、取消、crash/restart 事件。semantic/vector/AST/ripgrep index 与跨仓库检索列入后续评估。"
+      },
+      {
+        "id": "memory-multiagent-skills",
+        "type": "markdown",
+        "body": "## 记忆、MCP、Multi-Agent 与 Skill\n\n**Session Memory。**默认 SQLite API Host 会创建 `FileSessionMemoryStore` 和受限 `createDefaultSessionMemoryExtractor`；裸 `AgentHost`、自定义 host 或关闭开关时仍需显式注入。提取由每 session 串行 scheduler 在后台执行：首次约 10k tokens、后续增长约 5k tokens，并满足 3 次 tool call 或 natural assistant break；extractor 权限限定为 host-owned memory file 读写，workspace 与命令执行能力保持关闭。文件使用 frontmatter/etag、大小限制、symlink/path 校验和 atomic rename；EventStore/SSE/projection 保存 bounded started/completed/failed/cancelled metadata，进程重启可通过保存后的幂等 receipt 恢复。已有 Session Memory 也会优先参与 compact。\n\n**Project Memory。**默认 Host 装配 `FileProjectMemoryStore`，按 workspace/tenant 派生 `scopeKey` 隔离目录。`MEMORY.md` bounded 为 200 行/25 KB，topic 使用 frontmatter、四类 taxonomy 和 references；每轮组装时做 manifest 交集、deterministic lexical recall，最多注入 5 个 topic，按 turn `alreadySurfaced` 去重，并通过 path/symbol/flag validator 标记 stale。扫描失败保留 last-good headers；不完整且无 last-good 时采用 fail-closed 策略。正文通过当前 model view 注入，EventStore/SSE/projection 保存 bounded metadata；当前 Memory user-facing 写入 API 列入后续计划，默认 validator 由宿主显式提供。\n\n**Skill。**`@coding-agent/skills` 提供 global/scope chain、rank shadow、cwd/AbortSignal、incomplete observation 和 `skills/change` 生命周期；filesystem provider 从 project/user/custom/bundled roots 发现受限 `SKILL.md`，做 realpath/symlink/gitignore/size/depth/数量校验，catalog 只暴露 bounded summary/digest，正文在 SkillTool 调用时按需读取并重新校验。`SkillTool` 和用户 `/name` ingress 走统一 ToolRuntime、审批、取消和脱敏事件；文件变更触发 `skills/change`。本地 bundle plugin provider 与 gated MCP `skill://` provider 已实现，plugin/MCP 继续使用显式开关；默认 API Host 注册 filesystem provider，模型 catalog/SkillTool 通过 `skillToolEnabled=true` 开启。当前重点包括 `userInvocable` 用户侧约束、`allowed-tools` 实际收缩 ToolRuntime、真实 fork 子 Session 和准确的 `modelToolExposed` capability 投影。\n\n**MCP。**MCP Client 支持 stdio、SSE 与 Streamable HTTP，分页 discovery tools/resources/prompts、generation swap、list-changed debounce、allowlist/per-tool policy、tenant scope、指数重连和 credential reference。MCP tool 被翻译成 `mcp__server__tool` 后进入同一 ToolRuntime，审批、timeout、取消、输出预算和事件审计保持统一。resource/prompt response 仅有界并标记为 untrusted；凭据 material 在 transport 创建时临时合并，event/config public view 保存 metadata。\n\n**Multi-Agent。**默认 API Host 实例化 `SubagentRuntime` 并注册 in-process provider。父 Task 与 child Session 分离，descriptor 固化 workspace、permission、model、delegation depth、tool/MCP allowlist；支持 foreground/background one-shot，以及 FIFO inbox、report、interrupt、cold resume 的 continuable child。父或祖先才有 authority，child report 只给 direct parent，父模型默认读 bounded report/artifact 而非子 transcript。in-process child 使用 fresh AgentHost、共享 EventStore；child registry 的默认工具集合为空，跨进程 provider、外部 A2A 和独立隔离 worktree provider列入后续演进。"
+      },
+      {
+        "id": "event-api-web",
+        "type": "markdown",
+        "body": "## EventStore、API/Web 回放与产品边界\n\nSQLite 每个 Session 的 event sequence 单调递增，`appendSync()` 在同一 `BEGIN IMMEDIATE` transaction 内追加 event、更新 session summary 和 projection；命令通过 `(sessionId, commandId)` claim 实现幂等。进程启动会重建 projection、把异常 running Turn 标记为 interrupted、恢复 queued Turn、pending permission/interaction 和处于 running/queued 的 Session Memory extraction。SSE 以 `after_sequence` 或 `Last-Event-ID` replay，历史还支持有界 page；API 也有 child descendant 的 scoped event stream。\n\nWeb 通过 Session snapshot、SSE 与 event reducer 恢复状态，页面刷新后可重建 conversation/tool/trajectory/queue/context diagnostics，并能读取 bounded Memory inspector 与 Skill catalog。API 还支持 JWT/principal、tenant-owned session、credential metadata、provider/model route、artifact re-check 与 SQLite backup/restore；浏览器登录/refresh/logout/认证 SSE、RBAC/资源 ACL、完整 quota、CORS/trusted-origin 和 audit/public redaction 列入生产化建设。\n\n产品定位为通用 Coding Agent，仓库名称 `code-review-agent` 保留早期历史；当前 Git 交付闭环主要覆盖 status/diff/log/show 与 worktree。"
+      },
+      {
+        "id": "method-limits",
+        "type": "markdown",
+        "body": "## 调研方法、验证与限制\n\n本报告审阅了 monorepo package dependency、契约、Runtime/Tool/Context/Storage/MCP/Subagent/API/Web 源码、Memory/Skill 实施文档、架构决策和状态文档，并把“默认 Host 已接线”“按开关接线”“deferred”分开陈述。重点复核了 `apps/api/src/server.ts` 的默认 adapter 装配、`packages/runtime/src/index.ts` 的 context/Skill/Memory 路径，以及对应单元、契约、恢复和 Web presenter 测试。\n\n验证结果：`pnpm typecheck`、`pnpm test` 和 `git diff --check` 通过。上述结果覆盖当前 checkout 的类型与测试契约；真实 provider、长时运行、多租户攻击面、浏览器登录和生产部署仍需专项验证。HTML 报告打包已完成，当前环境缺少 Chromium headless executable，因此浏览器部分采用 structural-only 验证。\n\n按仓库治理要求，本次工作聚焦研究 artifact、HTML 报告、状态页和 README 的产品定位与 Memory/Skill 现状；Event/Tool/Task/Permission/Workspace contract 保持稳定，参考边界来自项目已接受的 DSH 骨架与 Claude Code 行为参考登记。"
+      },
+      {
+        "id": "next-steps",
+        "type": "markdown",
+        "body": "## 推荐的下一步\n\n1. **先收紧 Skill 的安全与语义闭环。**将 `CapabilityRegistry.authorizeSkillInvocation()` 接入 SkillTool 主路径，严格执行 `userInvocable`，让 `allowed-tools` 真正缩小 ToolRuntime 可见集合，实现 `context: \"fork\"` 的真实子 Session，并修正 `modelToolExposed` capability 投影。\n2. **提升 Memory 的质量与可操作性。**保留默认 bounded 文件 adapter，同时增加可替换的 model-backed Session extractor、受权限保护的 Memory writer API、默认 Project Memory validator，以及 canonical Git/worktree scope。\n3. **收敛远程安全闭环和日常交付。**完成 Web auth + authenticated SSE、workspace allowlist/symlink/OS isolation、artifact ACL、public/audit projection redaction，以及 branch → diff → test → commit 的结构化交付流程。\n4. **以验收场景决定平台扩展。**跨进程 Subagent、A2A、semantic code index、Context Collapse、marketplace 和远程插件生态都应在具体验收、权限、恢复、审计与 e2e 契约成立后再启用。"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-09-02T09:36:00Z",
+    "status": "ready",
+    "datasets": {
+      "availability_counts": [
+        { "status": "默认已启用", "domain_count": 8, "meaning": "Agent Loop、EventStore、Context、Tool、检索、MCP、内部 Multi-Agent、默认 API Host Memory" },
+        { "status": "部分接线", "domain_count": 2, "meaning": "Skill / Plugin runtime、生产化与安全闭环" },
+        { "status": "Deferred", "domain_count": 1, "meaning": "Context Collapse" }
+      ],
+      "capability_map": [
+        { "domain": "Agent Loop", "default_state": "已启用", "implementation": "per-session FIFO、流式 step、tool scheduler、cancel/steer", "boundary": "无全局 maxSteps 限制" },
+        { "domain": "EventStore / Replay", "default_state": "已启用", "implementation": "SQLite append-only event + projection + SSE replay + command idempotency", "boundary": "公共/审计投影脱敏仍需收敛" },
+        { "domain": "Token / Context", "default_state": "已启用", "implementation": "canonical assembly、estimate-first、pairing、budget、summary/legacy compact", "boundary": "内置 adapter 未提供 exact token count" },
+        { "domain": "Tool Runtime", "default_state": "已启用", "implementation": "schema、policy、approval、timeout、cancel、structured result、audit", "boundary": "远程 OS/container execution isolation 未统一" },
+        { "domain": "代码检索", "default_state": "已启用", "implementation": "bounded glob/grep；可选只读 LSP", "boundary": "无 semantic/vector/AST/ripgrep index" },
+        { "domain": "MCP", "default_state": "已启用", "implementation": "stdio/SSE/HTTP、discovery、generation swap、reconnect、ToolRuntime bridge", "boundary": "外部内容始终不可信；复合身份待完善" },
+        { "domain": "内部 Multi-Agent", "default_state": "已启用", "implementation": "Task/child Session、descriptor scope、one-shot/continuable、cold resume", "boundary": "in-process 为主；无跨进程/A2A" },
+        { "domain": "Session / Project Memory", "default_state": "已启用", "implementation": "默认 API Host 文件 adapter、后台 extractor、MEMORY.md manifest/lexical recall、stale/last-good、bounded attachments", "boundary": "自定义 AgentHost 需显式注入；Memory writer API 和默认 validator 未闭环" },
+        { "domain": "Skill / Plugin runtime", "default_state": "部分接线", "implementation": "registry、filesystem SKILL.md loader、catalog/digest、SkillTool、/name、plugin bundle、gated MCP provider", "boundary": "SkillTool/catalog 需 skillToolEnabled=true；allowed-tools、userInvocable、fork 语义仍需收紧" },
+        { "domain": "Context Collapse", "default_state": "Deferred", "implementation": "capability projection stub", "boundary": "无后台 collapse/overflow drain/snip" },
+        { "domain": "生产化 / 安全", "default_state": "部分接线", "implementation": "JWT/principal metadata、credential route、backup/restore、Web workspace、diagnostics", "boundary": "Web auth/SSE、ACL/RBAC、OS isolation、quota 和 public/audit redaction 未完成" }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "repository_audit",
+      "path": "docs/status.zh-CN.md",
+      "label": "仓库实现与状态审计",
+      "query": {
+        "engine": "reviewed-report-snapshot",
+        "sql": "SELECT status, domain_count, meaning FROM availability_counts ORDER BY status;",
+        "description": "Reads the static, reviewed availability classification used only for this report chart.",
+        "tables_used": ["availability_counts"],
+        "filters": ["Audit snapshot of the repository on 2026-09-02"],
+        "metric_definitions": {
+          "domain_count": "Count of the report's eleven capability domains grouped by their observed default availability or wiring state; it is not a quality score."
+        }
+      }
+    },
+    {
+      "id": "capability_map_audit",
+      "path": "docs/status.zh-CN.md",
+      "label": "能力矩阵的审计分类",
+      "query": {
+        "engine": "reviewed-report-snapshot",
+        "sql": "SELECT domain, default_state, implementation, boundary FROM capability_map ORDER BY domain;",
+        "description": "Reads the static, reviewed capability matrix assembled from the repository source audit.",
+        "tables_used": ["capability_map"],
+        "filters": ["Audit snapshot of the repository on 2026-09-02"]
+      }
+    },
+    { "id": "runtime_source", "path": "packages/runtime/src/index.ts", "label": "AgentHost 与 Agent Loop" },
+    { "id": "context_source", "path": "packages/context/src", "label": "上下文与记忆模块" },
+    { "id": "tool_source", "path": "packages/tools/src/runtime.ts", "label": "统一工具运行时" },
+    { "id": "storage_source", "path": "packages/storage/src/index.ts", "label": "SQLite EventStore" },
+    { "id": "mcp_source", "path": "packages/mcp-client/src", "label": "MCP Client" },
+    { "id": "subagent_source", "path": "packages/subagent/src/runtime.ts", "label": "内部子智能体" },
+    { "id": "skills_source", "path": "packages/skills/src", "label": "Skill registry、filesystem、plugin 与 MCP provider" },
+    { "id": "memory_skill_doc", "path": "docs/reference/memory-skill-cc-dsh-research-and-implementation.zh-CN.md", "label": "Memory 与 Skill 实施审计" },
+    { "id": "evaluation_results", "path": "docs/evaluation/results-summary.zh-CN.md", "label": "Easy/Medium 评测结果摘要" },
+    { "id": "api_web_source", "path": "apps/api/src/server.ts", "label": "API 与 Web 工作台" },
+    { "id": "governance_source", "path": "docs/architecture-decisions.md", "label": "架构决策与工具契约" }
+  ]
+}

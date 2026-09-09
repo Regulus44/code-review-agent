@@ -10,5 +10,6 @@ Use the following pages as the current source of truth:
 - [Source reuse register](source-reuse-register.md) — upstream references and licensing.
 - [Evaluation](evaluation/README.zh-CN.md) — current Web Agent evaluation flow.
 - [Reference](reference/README.zh-CN.md) — DSH, Claude Code, provider, context, and execution research.
+- [Coding Agent repository technical research](research/coding-agent-repository-research-2026-09-01.html) — current audit of the stack, Agent Loop, context, tools, Memory, Skills, MCP, Multi-Agent, recovery, and diagnostics.
 
 Evaluation guidance remains in the Chinese documents at the repository root of `docs/`. Historical phase plans and development logs are under [`archive/`](archive/).

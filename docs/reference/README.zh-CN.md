@@ -12,3 +12,4 @@
 - `memory-skill-cc-dsh-research-and-implementation.zh-CN.md`：Claude Code / DSH / 本仓库 Memory 与 Skill 对照、模块改造点和分阶段实施方案；
 - `provider-model-routing-research.zh-CN.md`：Provider / model routing 研究；
 - `dsh-windows-tool-execution-environment-research.zh-CN.md`：Windows 工具执行环境研究。
+- `skill-resource-progressive-loading-research-and-implementation.zh-CN.md`：Skill 目录资源包、`scripts/` / `references/` 按需读取、Claude Code / DSH 对照与分模块实施方案。

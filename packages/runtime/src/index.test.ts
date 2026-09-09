@@ -2254,6 +2254,7 @@ describe("AgentHost", () => {
     const session = await host.createSession("D:/m3-fail-closed");
     const turn = await host.sendMessage(session.id, "review deploy");
     await host.waitForTurn(turn);
+    expect((await host.events(session.id)).find((event) => event.type === "turn/ended" && event.turnId === turn)?.payload["status"]).toBe("completed");
     expect((await host.getSession(session.id))?.contextProjectMemory).toMatchObject({ status: "incomplete", usingLastGood: false });
     expect((await host.events(session.id)).some((event) => event.type === "context/project_memory_recalled")).toBe(false);
   });

@@ -5,7 +5,8 @@
 Coding Agent is a TypeScript/Node.js coding agent. It drives a streaming
 agent loop over a permission-scoped workspace, persists sessions and tool
 activity as an append-only event log, and exposes a web workspace for interactive
-coding and review tasks.
+coding tasks. The repository was originally named `code-review-agent`; the
+current product focuses on general coding workflows.
 
 Start with:
 
@@ -28,6 +29,11 @@ Start with:
   scoped replay, and explicit tool/MCP/permission scopes.
 - Context compaction, tool-result artifacts, session/project memory, recovery,
   worktrees, basic LSP, and a DSH-style three-panel web workspace.
+- The default SQLite API host wires bounded file-backed Session/Project Memory;
+  Session Memory uses a restricted fallback extractor and Project Memory performs
+  workspace/tenant-scoped `MEMORY.md` manifest and lexical recall with stale checks.
+  The Skill registry, `SKILL.md` loader, catalog, SkillTool, local plugin bundle,
+  and gated MCP Skill provider are implemented; model-facing SkillTool remains opt-in.
 - Partial productization: JWT/principals, tenant sessions, credentials metadata,
   provider/model routing, SQLite backup/restore, and diagnostics.
 
@@ -36,8 +42,8 @@ Start with:
 See [docs/status.zh-CN.md](docs/status.zh-CN.md) for the maintained status. The
 most important gaps are end-to-end browser authentication, remote workspace
 root allowlisting, uniform OS/container execution isolation, public projection
-redaction and artifact ACLs, a first-class Code Review findings model, and a
-structured Git branch/commit/PR delivery loop. RBAC, fine-grained quotas,
+redaction and artifact ACLs, and a structured Git branch/commit/PR delivery loop.
+RBAC, fine-grained quotas,
 cross-process Subagents, A2A, and a full plugin runtime are not yet complete.
 
 ## Architecture

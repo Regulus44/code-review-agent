@@ -51,14 +51,18 @@ function contentBlocksFor(message: Exclude<ChatMessage, { readonly role: "system
   const blocks: AnthropicContentBlock[] = [];
   if (message.content.length > 0) blocks.push({ type: "text", text: message.content });
   for (const call of message.toolCalls ?? []) {
-    let input: unknown;
+    // Tool calls are persisted before execution. If a model emits malformed
+    // arguments, the runtime records a synthetic MALFORMED_TOOL_ARGUMENTS
+    // result and gives the model another turn. Anthropic still requires the
+    // historical tool_use block to contain an object, so use an empty object
+    // as the wire-level placeholder instead of terminating the whole turn.
+    // The original arguments remain in the event log and the tool result.
+    let input: Record<string, unknown> = {};
     try {
-      input = call.arguments.trim() === "" ? {} : JSON.parse(call.arguments) as unknown;
+      const parsed: unknown = call.arguments.trim() === "" ? {} : JSON.parse(call.arguments) as unknown;
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) input = parsed as Record<string, unknown>;
     } catch {
-      throw new AnthropicMessagesError("ANTHROPIC_TOOL_ARGUMENTS_INVALID", `Tool ${call.name} has invalid JSON arguments`);
-    }
-    if (typeof input !== "object" || input === null || Array.isArray(input)) {
-      throw new AnthropicMessagesError("ANTHROPIC_TOOL_ARGUMENTS_INVALID", `Tool ${call.name} arguments must be a JSON object`);
+      // Keep the protocol-valid empty-object placeholder.
     }
     blocks.push({ type: "tool_use", id: call.id, name: call.name, input: input as Record<string, unknown> });
   }

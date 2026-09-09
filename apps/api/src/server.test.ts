@@ -274,6 +274,7 @@ describe("Phase 2 API", () => {
       expect(output.events.length).toBeGreaterThan(4);
       expect(output.events.some((event) => event.type === "user/message")).toBe(true);
       expect(output.events.some((event) => event.type === "assistant/message")).toBe(true);
+      expect(output.events.find((event) => event.type === "subagent/settlement")?.payload).toMatchObject({ taskId: seeded.completed.taskId, childSessionId: seeded.completed.childSessionId, status: "completed", stopReason: "completed" });
 
       const descriptor = output.events.find((event) => event.type === "subagent/descriptor")?.payload["descriptor"] as { workspaceRoot?: string; permissionPreset?: string; toolAllowlist?: string[]; mcpAllowlist?: string[] } | undefined;
       expect(descriptor).toMatchObject({ workspaceRoot: childCompletedRoot, permissionPreset: "read-only", toolAllowlist: ["read_file"], mcpAllowlist: [] });
@@ -350,6 +351,14 @@ describe("Phase 2 API", () => {
       const afterCancel = await (await fetch(`${url}/v1/sessions/${parent.id}/subagents?scope=children`)).json() as { agents: { task: { id: string; status: string }; live: boolean }[] };
       const cancelledEntry = afterCancel.agents.find((entry) => entry.task.id === seeded.cancellable.taskId);
       expect(cancelledEntry).toMatchObject({ task: { status: "cancelled" }, live: false });
+      const cancelledOutput = await (await fetch(`${url}/v1/sessions/${parent.id}/tasks/${seeded.cancellable.taskId}/output`)).json() as { task: { status: string }; report?: { status: string; stopReason?: string } };
+      expect(cancelledOutput).toMatchObject({ task: { status: "cancelled" }, report: { status: "cancelled", stopReason: "aborted" } });
+      const childCancelledEvents = await (await fetch(`${url}/v1/sessions/${seeded.cancellable.childSessionId}/events?format=json`)).json() as { sequence: number; type: string; payload: Record<string, unknown> }[];
+      const settlement = childCancelledEvents.find((event) => event.type === "subagent/settlement");
+      expect(settlement?.payload).toMatchObject({ taskId: seeded.cancellable.taskId, childSessionId: seeded.cancellable.childSessionId, status: "cancelled", stopReason: "aborted" });
+      expect(childCancelledEvents.find((event) => event.type === "subagent/end")?.payload).toMatchObject({ taskId: seeded.cancellable.taskId, status: "cancelled", stopReason: "aborted" });
+      const replayedSettlement = await (await fetch(`${url}/v1/sessions/${seeded.cancellable.childSessionId}/events?format=json&after_sequence=${Math.max(0, (settlement?.sequence ?? 1) - 1)}`)).json() as { sequence: number; type: string; payload: Record<string, unknown> }[];
+      expect(replayedSettlement.find((event) => event.sequence === settlement?.sequence)?.payload).toEqual(settlement?.payload);
     } finally {
       await new Promise<void>((resolve, reject) => fixtureServer.close((error) => error ? reject(error) : resolve()));
       rmSync(root, { recursive: true, force: true });

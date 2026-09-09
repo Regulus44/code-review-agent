@@ -407,6 +407,97 @@ describe("InMemoryEventStore", () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
+  it("keeps the R6 fixed turn, pending permission, and context receipt fields equal across live, replay, and reopen", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "coding-agent-r6-replay-"));
+    const databasePath = join(directory, "agent.sqlite");
+    const replayInitial = (projection: NonNullable<Awaited<ReturnType<SqliteEventStore["project"]>>>) => {
+      const { contextCompaction: _contextCompaction, toolResultReplacements: _toolResultReplacements, ...withoutReplayFields } = projection;
+      return {
+        ...withoutReplayFields,
+        status: "idle" as const,
+        lastSequence: 0,
+        messages: [],
+        turns: [],
+        interactions: [],
+        toolCalls: [],
+        permissions: [],
+      };
+    };
+    try {
+      const first = new SqliteEventStore({ databasePath });
+      const normalSession = await first.createSession("D:/r6-normal");
+      const normalTurn = brand<string, "TurnId">("turn_r6_normal");
+      await first.append({ sessionId: normalSession, turnId: normalTurn, type: "user/message", payload: { content: "read the file" } });
+      await first.append({ sessionId: normalSession, turnId: normalTurn, type: "turn/started", payload: {} });
+      await first.append({ sessionId: normalSession, turnId: normalTurn, type: "tool/call", payload: { toolCallId: "tool_r6_normal", name: "read_file" } });
+      await first.append({ sessionId: normalSession, turnId: normalTurn, type: "tool/result", payload: { toolCallId: "tool_r6_normal", status: "completed", result: { ok: true } } });
+      await first.append({ sessionId: normalSession, turnId: normalTurn, type: "turn/ended", payload: { status: "completed" } });
+
+      const pendingSession = await first.createSession("D:/r6-pending");
+      const pendingTurn = brand<string, "TurnId">("turn_r6_pending");
+      await first.append({ sessionId: pendingSession, turnId: pendingTurn, type: "turn/started", payload: {} });
+      await first.append({ sessionId: pendingSession, turnId: pendingTurn, type: "tool/call", payload: { toolCallId: "tool_r6_pending", name: "write_file" } });
+      await first.append({ sessionId: pendingSession, turnId: pendingTurn, type: "permission/requested", payload: { permissionId: "permission_r6_pending", toolCallId: "tool_r6_pending", toolName: "write_file", riskLevel: "write", reason: "approval", expiresAt: "2026-09-05T01:00:00.000Z" } });
+
+      const contextSession = await first.createSession("D:/r6-context");
+      const contextTurn = brand<string, "TurnId">("turn_r6_context");
+      await first.append({ sessionId: contextSession, turnId: contextTurn, type: "turn/started", payload: {} });
+      await first.append({ sessionId: contextSession, turnId: contextTurn, type: "tool/call", payload: { toolCallId: "tool_r6_context", name: "read_file" } });
+      await first.append({ sessionId: contextSession, turnId: contextTurn, type: "tool/result", payload: { toolCallId: "tool_r6_context", status: "completed", result: { ok: true } } });
+      await first.append({
+        sessionId: contextSession,
+        turnId: contextTurn,
+        type: "context/compact_boundary",
+        payload: {
+          boundary: { version: 1, id: "boundary_r6", kind: "summary", trigger: "auto", preCompactTokens: 900, sourceSequence: 4, createdAt: "2026-09-05T00:00:00.000Z" },
+          summary: "bounded summary",
+          originalMessageCount: 4,
+          compactedMessageCount: 2,
+          estimatedTokens: 120,
+          droppedMessages: 2,
+        },
+      });
+      await first.append({ sessionId: contextSession, turnId: contextTurn, type: "context/tool_result_persisted", payload: { toolCallId: "tool_r6_context", toolName: "read_file", relativePath: ".agent-artifacts/r6.txt", originalChars: 100, originalBytes: 100, originalTokens: 25, thresholdChars: 50, preview: "bounded", previewBytes: 7, reason: "max-chars", artifact: { id: "artifact_r6", kind: "file", label: "R6 tool output" } } });
+      await first.append({ sessionId: contextSession, turnId: contextTurn, type: "turn/ended", payload: { status: "completed" } });
+
+      const normalLive = (await first.project(normalSession))!;
+      const pendingLive = (await first.project(pendingSession))!;
+      const contextLive = (await first.project(contextSession))!;
+      const live = [normalLive, pendingLive, contextLive] as const;
+      const sessions = [normalSession, pendingSession, contextSession] as const;
+      const events = await Promise.all(sessions.map((sessionId) => first.list(sessionId)));
+      const replayed = live.map((projection, index) => replayProjection(replayInitial(projection), events[index]!));
+
+      const normalFields = (projection: typeof normalLive) => ({ sessionStatus: projection.status, turnStatus: projection.turns[0]?.status, toolStatus: projection.toolCalls[0]?.status, lastSequence: projection.lastSequence });
+      const pendingFields = (projection: typeof pendingLive) => ({ sessionStatus: projection.status, turnStatus: projection.turns[0]?.status, toolStatus: projection.toolCalls[0]?.status, permissionStatus: projection.permissions[0]?.status, lastSequence: projection.lastSequence });
+      const contextFields = (projection: typeof contextLive) => ({ sessionStatus: projection.status, turnStatus: projection.turns[0]?.status, toolStatus: projection.toolCalls[0]?.status, contextBoundary: projection.contextCompaction?.boundary?.id, replacementArtifact: projection.toolResultReplacements?.[0]?.artifact.id, lastSequence: projection.lastSequence });
+
+      expect(normalFields(normalLive)).toEqual({ sessionStatus: "idle", turnStatus: "completed", toolStatus: "completed", lastSequence: 6 });
+      expect(pendingFields(pendingLive)).toEqual({ sessionStatus: "running", turnStatus: "running", toolStatus: "awaiting_permission", permissionStatus: "pending", lastSequence: 4 });
+      expect(contextFields(contextLive)).toEqual({ sessionStatus: "idle", turnStatus: "completed", toolStatus: "completed", contextBoundary: "boundary_r6", replacementArtifact: "artifact_r6", lastSequence: 7 });
+      expect(normalFields(replayed[0]!)).toEqual(normalFields(normalLive));
+      expect(pendingFields(replayed[1]!)).toEqual(pendingFields(pendingLive));
+      expect(contextFields(replayed[2]!)).toEqual(contextFields(contextLive));
+      expect(events.every((sessionEvents) => sessionEvents.every((event, index) => event.sequence === index + 1))).toBe(true);
+      expect(events.flat().filter((event) => event.type === "tool/result").filter((result) => !events.flat().some((event) => event.type === "tool/call" && event.payload["toolCallId"] === result.payload["toolCallId"]))).toHaveLength(0);
+      // Keep the pending fixture available for live/replay comparison only; process restart
+      // correctly converts an in-flight session to interrupted state.
+      await first.append({ sessionId: pendingSession, type: "agent/status", payload: { status: "idle" } });
+      first.close();
+
+      const corrupted = new DatabaseSync(databasePath);
+      corrupted.prepare("UPDATE projections SET projection_json = ?").run(JSON.stringify({ broken: true }));
+      corrupted.close();
+
+      const second = new SqliteEventStore({ databasePath });
+      expect(normalFields((await second.project(normalSession))!)).toEqual(normalFields(normalLive));
+      expect(contextFields((await second.project(contextSession))!)).toEqual(contextFields(contextLive));
+      second.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  });
+
   it("replays durable tenant ownership across SQLite reopen", async () => {
     const directory = mkdtempSync(join(tmpdir(), "coding-agent-ownership-"));
     const databasePath = join(directory, "agent.sqlite");

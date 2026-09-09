@@ -6,6 +6,7 @@ import type {
   TodoItem,
   TodoStatus,
 } from "@coding-agent/contracts";
+import { existsSync } from "node:fs";
 import { readFile, writeFile, readdir, stat, mkdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
@@ -159,7 +160,7 @@ export class TerminalManager {
     const child = spawn(command, args, {
       cwd: cwdPath,
       ...hiddenProcessSpawnOptions(this.platform),
-      env: { ...process.env, ...(input.env ?? {}) },
+      env: { ...process.env, ...workspacePythonPathEnv(resolver.rootPath, input.env, this.platform) },
       stdio: ["pipe", "pipe", "pipe"],
     });
     const terminalId = `terminal_${randomUUID()}`;
@@ -605,9 +606,9 @@ async function executeShellCommand(kind: ShellKind, args: ShellToolInput, contex
   const label = args.description?.trim() || args.command;
   const env = SHELL_ENV_OVERRIDES[kind];
   if (args.run_in_background === true) {
-    return jobs.start({ sessionId: context.sessionId, workspaceRoot: context.workspaceRoot, cwd, executable: launch.executable, args: launch.args, command: args.command, env, workspaceGuarded: context.permissionPreset === "workspace-full-access", ...(args.maxAttempts === undefined ? {} : { retry: { maxAttempts: args.maxAttempts, ...(args.retryBackoffMs === undefined ? {} : { backoffMs: args.retryBackoffMs }) } }), ...(args.deadlineMs === undefined ? {} : { deadlineMs: args.deadlineMs }), signal: context.signal, appendEvent: async (type, payload) => context.appendEvent(type, payload) });
+    return jobs.start({ sessionId: context.sessionId, workspaceRoot: context.workspaceRoot, cwd, executable: launch.executable, args: launch.args, command: args.command, env: workspacePythonPathEnv(context.workspaceRoot, env, platform), workspaceGuarded: context.permissionPreset === "workspace-full-access", ...(args.maxAttempts === undefined ? {} : { retry: { maxAttempts: args.maxAttempts, ...(args.retryBackoffMs === undefined ? {} : { backoffMs: args.retryBackoffMs }) } }), ...(args.deadlineMs === undefined ? {} : { deadlineMs: args.deadlineMs }), signal: context.signal, appendEvent: async (type, payload) => context.appendEvent(type, payload) });
   }
-  return runShellForeground(kind, args.command, label, cwd, launch.executable, launch.args, args.timeoutMs ?? 120_000, context.signal, env, modelOutputChars);
+  return runShellForeground(kind, args.command, label, cwd, launch.executable, launch.args, args.timeoutMs ?? 120_000, context.signal, context.workspaceRoot, env, modelOutputChars);
 }
 
 async function guardCommand(context: ToolContext, input: { readonly workdir?: string; readonly executable?: string; readonly args?: readonly string[]; readonly shellCommand?: string; readonly env?: Readonly<Record<string, string>> }): Promise<ToolResult | undefined> {
@@ -622,9 +623,9 @@ function shellLaunch(kind: ShellKind, command: string, platform: NodeJS.Platform
   return { executable: resolvePwshPath(undefined, process.env, platform), args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", constrained] };
 }
 
-function runShellForeground(kind: ShellKind, command: string, label: string, cwd: string, executable: string, args: readonly string[], timeoutMs: number, signal: AbortSignal, env: Readonly<Record<string, string>>, modelOutputChars: number): Promise<ToolResult> {
+function runShellForeground(kind: ShellKind, command: string, label: string, cwd: string, executable: string, args: readonly string[], timeoutMs: number, signal: AbortSignal, workspaceRoot: string, env: Readonly<Record<string, string>>, modelOutputChars: number): Promise<ToolResult> {
   return new Promise((resolve) => {
-    const child = spawn(executable, [...args], { cwd, detached: false, shell: false, windowsHide: true, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...env } });
+    const child = spawn(executable, [...args], { cwd, detached: false, shell: false, windowsHide: true, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...workspacePythonPathEnv(workspaceRoot, env) } });
     let stdout = "";
     let stderr = "";
     let output = "";
@@ -864,7 +865,7 @@ async function runArgv(command: string, args: string[], cwd: string, signal: Abo
     if (!(await stat(cwd)).isDirectory()) return fail("WORKDIR_INVALID", `Working directory is not a directory: ${cwd}`);
   } catch { return fail("WORKDIR_INVALID", `Working directory does not exist: ${cwd}`); }
   return new Promise((resolve) => {
-    const child = spawn(command, args, { cwd, ...hiddenProcessSpawnOptions() });
+    const child = spawn(command, args, { cwd, ...hiddenProcessSpawnOptions(), env: { ...process.env, ...workspacePythonPathEnv(cwd) } });
     let output = "";
     let stdout = "";
     let stderr = "";
@@ -902,6 +903,23 @@ async function runArgv(command: string, args: string[], cwd: string, signal: Abo
 
 function terminateProcessTree(child: ChildProcessWithoutNullStreams | ReturnType<typeof spawn>): void { if (child.pid === undefined) { child.kill(); return; } if (process.platform === "win32") { const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, shell: false }); killer.unref(); try { child.kill(); } catch { /* taskkill remains the fallback for the process tree */ } } else { try { process.kill(-child.pid, "SIGTERM"); } catch { child.kill(); } } }
 function isAllowedExecutable(command: string): boolean { return /^[a-zA-Z0-9._-]+$/u.test(command) && ALLOWED_EXECUTABLES.has(command.toLowerCase()); }
+
+/** Ensure Python child processes import the active workspace before inherited checkouts. */
+export function workspacePythonPathEnv(
+  workspaceRoot: string,
+  overrides: Readonly<Record<string, string>> = {},
+  platform: NodeJS.Platform = process.platform,
+): Readonly<Record<string, string>> {
+  const root = path.resolve(workspaceRoot);
+  const delimiter = platform === "win32" ? ";" : ":";
+  const inherited = overrides["PYTHONPATH"] ?? process.env["PYTHONPATH"] ?? "";
+  const isPythonProject = ["pyproject.toml", "setup.py", "setup.cfg"].some((entry) => existsSync(path.join(root, entry)));
+  const sourceRoots = isPythonProject
+    ? ["src", "lib"].map((entry) => path.join(root, entry)).filter((entry) => existsSync(entry))
+    : [];
+  const entries = [...sourceRoots, root, ...inherited.split(delimiter).filter((entry) => entry.length > 0)];
+  return { ...overrides, PYTHONPATH: entries.join(delimiter) };
+}
 function isAllowedTerminalExecutable(command: string, platform: NodeJS.Platform): boolean {
   if (!/^[a-zA-Z0-9._-]+$/u.test(command)) return false;
   const normalized = command.toLowerCase();

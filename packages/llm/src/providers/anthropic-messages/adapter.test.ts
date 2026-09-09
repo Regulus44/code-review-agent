@@ -31,6 +31,40 @@ describe("AnthropicMessagesChatModel", () => {
     });
   });
 
+  it("keeps malformed historical tool arguments protocol-valid for recovery", () => {
+    const request = serializeAnthropicRequest({
+      messages: [
+        { role: "user", content: "Inspect the file." },
+        { role: "assistant", content: "", toolCalls: [{ id: "tool_bad", name: "read_file", arguments: '{"path":' }] },
+        { role: "tool", toolCallId: "tool_bad", content: '{"ok":false,"error":{"code":"MALFORMED_TOOL_ARGUMENTS"}}' },
+      ],
+      tools: [{ name: "read_file", description: "Read a file", parameters: { type: "object" } }],
+    }, "claude-fixture", 1234);
+
+    expect(request.messages[1]).toEqual({
+      role: "assistant",
+      content: [{ type: "tool_use", id: "tool_bad", name: "read_file", input: {} }],
+    });
+    expect(request.messages[2]).toEqual({
+      role: "user",
+      content: [{ type: "tool_result", tool_use_id: "tool_bad", content: '{"ok":false,"error":{"code":"MALFORMED_TOOL_ARGUMENTS"}}' }],
+    });
+  });
+
+  it("normalizes non-object historical tool arguments to an empty object", () => {
+    const request = serializeAnthropicRequest({
+      messages: [
+        { role: "user", content: "Continue." },
+        { role: "assistant", content: "", toolCalls: [{ id: "tool_scalar", name: "read_file", arguments: '"scalar"' }] },
+      ],
+    }, "claude-fixture", 1234);
+
+    expect(request.messages[1]).toEqual({
+      role: "assistant",
+      content: [{ type: "tool_use", id: "tool_scalar", name: "read_file", input: {} }],
+    });
+  });
+
   it("maps text, tool JSON deltas, usage, and message_stop in order", async () => {
     let init: RequestInit | undefined;
     const model = new AnthropicMessagesChatModel({

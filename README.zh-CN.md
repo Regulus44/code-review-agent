@@ -6,6 +6,14 @@ Coding Agent 是一个基于 TypeScript/Node.js 的 Coding Agent。它通过 Web
 工作台驱动流式 Agent Loop，在受权限控制的 workspace 中读取、修改、验证代码，
 并使用 append-only EventStore 持久化 Session、工具、权限和任务状态。
 
+仓库早期名称为 `code-review-agent`；当前产品定位是通用 Coding Agent。
+
+## 项目简介
+
+- **上下文与记忆管理。**面向跨文件、长链路任务，按 system、workspace、历史、Memory 与 Skill 组装 model view，以 token 预算和压缩阶梯保持上下文稳定。
+- **工具编排与执行闭环。**统一调度文件、检索、命令、终端、Git、MCP、Subagent，贯通校验、权限、执行、结果和事件，支持并行、取消与超时。
+- **事件驱动协作运行时。**SQLite append-only EventStore 串联 Session、Turn、Task，结合 FIFO、SSE replay、子任务和重启恢复支撑连续协作。
+
 当前文档入口：
 
 - [文档导航](docs/README.zh-CN.md)
@@ -52,6 +60,11 @@ Coding Agent 是一个基于 TypeScript/Node.js 的 Coding Agent。它通过 Web
 
 - tool-result artifact、microcompact、summary compact、session/project memory、context
   recovery 和 token diagnostics。
+- 默认 SQLite API Host 自动装配 bounded Session/Project Memory 文件 adapter；Session
+  Memory 以受限 fallback extractor 后台提取，Project Memory 按 workspace/tenant scope
+  做 `MEMORY.md` manifest/词法召回和 stale 检查。Skill registry、`SKILL.md` loader、
+  catalog、SkillTool、插件 bundle 和 gated MCP Skill provider 已实现，模型侧 SkillTool
+  需显式开启。
 - 基础 LSP（diagnostics、definition、references）以及图片读取能力。
 - DSH 风格三栏 Web 工作台：Conversation、Trajectory、Tool、Diff、Permission、Interaction、
   Task/Subagent、MCP、Settings 和 Produced Files。
@@ -62,12 +75,11 @@ Coding Agent 是一个基于 TypeScript/Node.js 的 Coding Agent。它通过 Web
 
 当前状态和风险详见 [docs/status.zh-CN.md](docs/status.zh-CN.md)。主要限制包括：
 
-- Web 端认证尚未完全贯通，Bearer/JWT、登录、refresh、logout 和认证 SSE 仍需收敛；
-- 远程 workspace root allowlist 和统一 OS/container 执行隔离仍需加强；
-- 公共 projection/SSE 与内部审计结果需要更严格的脱敏和 artifact ACL；
-- Code Review findings、baseline、inline comment、SARIF 导出尚未形成独立领域能力；
-- Git branch/commit/PR 结构化交付闭环尚未完成；
-- RBAC、细粒度 quota、跨进程 Subagent、A2A 和完整插件运行时暂未落地。
+- Web 端认证当前覆盖 Bearer/JWT；浏览器登录、refresh、logout 和认证 SSE 进入后续收敛；
+- 远程 workspace root allowlist 和统一 OS/container 执行隔离进入后续安全建设；
+- 公共 projection/SSE 与内部审计结果的分层、脱敏和 artifact ACL 进入后续收敛；
+- Git branch/commit/PR 结构化交付进入后续建设；
+- RBAC、细粒度 quota、跨进程 Subagent、A2A 和完整插件运行时列入平台化路线。
 
 ## 架构
 

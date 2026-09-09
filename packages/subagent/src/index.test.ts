@@ -75,6 +75,16 @@ describe("phase 5 subagent contracts", () => {
     expect((await runtime.taskOutput(parent, background.taskId))?.report?.summary).toBe("done: background");
   });
 
+  it("rejects tool or MCP scoped children when the provider cannot filter them", async () => {
+    const store = new InMemoryEventStore();
+    const parent = await store.createSession("D:/workspace", "read-only");
+    const runtime = new SubagentRuntime({ store, providers: [{ ...provider(), name: "unfiltered", capabilities: { oneShot: true, continuable: false, outputSchema: true, toolFilter: false } }] });
+    const toolScoped = await runtime.spawn({ parentSessionId: parent, prompt: "tool scope", provider: "unfiltered", workspaceRoot: "D:/workspace", permissionPreset: "read-only", toolAllowlist: ["read_file"] });
+    const mcpScoped = await runtime.spawn({ parentSessionId: parent, prompt: "MCP scope", provider: "unfiltered", workspaceRoot: "D:/workspace", permissionPreset: "read-only", mcpAllowlist: ["repo"] });
+    expect([toolScoped.status, mcpScoped.status]).toEqual(["rejected", "rejected"]);
+    expect((await store.list(parent)).filter((event) => event.type === "task/ended").map((event) => event.payload["terminalReason"])).toEqual(["SUBAGENT_CAPABILITY_UNSUPPORTED", "SUBAGENT_CAPABILITY_UNSUPPORTED"]);
+  });
+
   it("detects sequence gaps before rebuilding a child fixture", async () => {
     const { assertContiguousSequence } = await import("./projection.js");
     const session = brand<string, "SessionId">("child");

@@ -21,7 +21,11 @@
 
 设计参考、调研和实现说明集中在 [reference](reference/README.zh-CN.md)。它们不定义当前产品状态；状态以 [当前状态](status.zh-CN.md) 为准。
 
+- [Coding Agent 仓库技术调研（HTML）](research/coding-agent-repository-research-2026-09-01.html)：技术栈、Agent Loop、上下文/Token、工具、Memory、Skill、MCP、Multi-Agent、恢复与诊断的当前审计快照。
+
 Memory 与 Skill 的三方对照及实施路线见 [Memory 与 Skill：Claude Code / DSH 对照调研与分阶段实施方案](reference/memory-skill-cc-dsh-research-and-implementation.zh-CN.md)。
+
+Skill 目录作为资源包、`scripts/` / `references/` 按需读取的专项调研与实施方案见 [Skill 资源包与渐进式加载](reference/skill-resource-progressive-loading-research-and-implementation.zh-CN.md)。
 
 ## 决策记录
 
